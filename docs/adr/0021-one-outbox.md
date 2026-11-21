@@ -7,7 +7,9 @@ Seven mechanisms in Citadel each keep a list of "do this later" in a JSON blob i
 their own. Each has its own load, filter, send and write-back loop, and each makes its own choices about what a
 restart, a failed send and a dismissed minion mean. So a lost wake (a minion that never wakes) has seven places to
 hide, and no one screen shows what is waiting for whom: the minion list's "Waiting:" line covers only parked
-minions' chains and `wake_when_live`.
+minions (`runner.wakesOn`: chains, `wake_when_live`, runners back and timed wakes), and says nothing of a wait on a
+minion that isn't parked, a relay or an armed card. (`ci-armed` keeps one record per minion, and held mail and the
+loop guard span several key families; the table below has each.)
 
 This ADR moves the delivery-shaped ones into one `deliveries` table, run by one dispatcher, shown in one readout. It
 is built one mechanism per ship (the steps below). Nothing moves in a big bang, because one lost wake strands a
@@ -49,9 +51,11 @@ One table, `deliveries`, created in one transaction with its indexes. Its querie
 | `payload` | JSON, kind-specific: the text, note or brief, `light`, the card to post, the batched alerts |
 | `set_by` | who asked: `minion:<id>`, `taskmaster:<project>`, a person's login, or `server` |
 | `state` | `waiting`, `held`, `sending`, `sent`, `dropped`, `failed` |
-| `due` | ms epoch: when a timed row is due, or when a failed send is tried again. NULL for event rows |
-| `origin` | the old key and id a migrated row came from, unique. This makes a migration idempotent |
-| `attempts`, `last_error`, `reason` | retry count, the last throw, and why a row was dropped, held or failed |
+| `due` | ms epoch: when a timed row is due, when a retry is next tried, or when a closed target's row is dropped. NULL for an event row still waiting on its event |
+| `met_at` | ms epoch: when the row's condition first held. Once set, the row is only ever retried by `due`, never re-checked against its condition |
+| `dedupe_key` | the key a re-add replaces or merges into, unique among `waiting` and `held` rows: `wake_when_live` ticket + commit, `chain` ticket, `ci_armed` ticket, `alert` project. NULL where every add is its own row (`wake_at`, `relay`) |
+| `origin` | where a migrated row came from: the old key plus a hash of the whole old record, `since` and `at` included, unique. Old ids are reused once a list empties, so an id alone can't name a record |
+| `attempts`, `last_error`, `reason` | retry count, the last failure, and why a row was dropped, held or failed |
 | `created_at`, `updated_at` | ms epoch |
 
 Indexes: `(state, due)` for the timer, `(state, when_kind)` for event pokes, and `(to_kind, to_id, state)` for
@@ -65,22 +69,35 @@ and words (`wake_when_live`, `wake_at`, `relay_when_live`, `wake_when_runners_ba
 
 `src/outbox.ts`, one instance built in `server.ts`, holding these parts:
 
-- **Kinds register** `{ kind, ready(row, event), deliver(rows), merge?(row, incoming), onDismiss? }`. `ready` is the
-  condition. `deliver` receives every row of its kind that came due in one pass, so a relay's grouped note to the
-  sender's Taskmaster (today's `sent()`) still works.
+- **Kinds register** `{ kind, ready(row, event), deliver(rows), merge?(row, incoming), trim?(row, cleared) }`.
+  `ready` is the condition. `deliver` receives every row of its kind that came due in one pass, so a relay's grouped
+  note to the sender's Taskmaster (today's `sent()`) still works.
+- **`deliver` returns an outcome for each row:** `accepted` (the receiver has made it durable), `retry` with a reason,
+  or `drop` with a reason. A throw counts as `retry`. A normal return that delivered nothing is not `accepted`: an
+  alert with no Taskmaster to wake, or a `runner.send` that logs a refusal.
 - **Events poke it.** The places that call the seven loops today call `outbox.poke(event)` instead:
-  - `live(head)` and `merged` come from `liveOn` and `catchUp` (`server.ts` :415, :424).
+  - `merged` comes from `catchUp` (`server.ts` :415), and `live(head)` from `liveOn` (:424).
   - `runners(project, list)` comes from the ci-health poll (`src/ci-health.ts` :511).
-  - `ci(sha, ok)` comes from the GitHub watcher's `ciFinished`.
+  - `ci(ticket, pr, sha, ok)` comes from the GitHub watcher's `ciFinished`.
   - `closed(ticket)` and `reopened(ticket)` come from the runner.
   - `boot` fires once.
 
-  A poke reads only the `waiting` rows of the matching `when_kind`.
+  A condition poke reads the `waiting` rows of its `when_kind` with no `met_at`. `closed` and `reopened` read rows
+  by target, and chain rows by leader, whatever their `when_kind`: a leader dismissed unshipped holds its chains, and
+  a leader dismissed after shipping releases them. `live`, `merged` and `reopened` also recheck `held` chains.
+- **Reconcile, not only listen.** An event can be missed: the server was down, or the GitHub watcher marked a CI
+  result seen just before a crash (`src/github.ts` :475, :507-511). So on `boot`, and when a row is added, every
+  waiting event row is checked against the current state (the running head, the scheme's main, the runner list, the
+  stored CI results), as `LiveWaiters.check` does today. An add whose condition already holds delivers at once.
 - **One timer** is armed to the smallest `due` (capped at 2^31-1 ms, as `TimedWakes.arm()` is today) and re-armed on
   every add, send and cancel. `at` rows and retries ride it. The `every` loops that only checked lists (the alert
   wakes' 20 s tick) go away.
 - **Per-target order:** rows for one target are delivered in `id` order, one pass at a time, through the runner's
-  existing per-minion lane (`runner.onLane`), so a chain's brief and a wake for the same minion never cross.
+  existing per-minion lane (`runner.onLane`), so a chain's brief and a wake for the same minion never cross. Each kind
+  has one lane owner: `startChained` already takes the lane itself, so the outbox calls it from outside the lane,
+  never from inside (`src/lanes.ts` would deadlock).
+- **A closed target is never claimed.** Delivery re-reads the target's state when it claims a row, and skips a
+  dismissed one.
 - **The outbox never decides whether a turn runs.** It hands the message to the runner (`runner.send`, a Taskmaster
   message, or a card post), and later to seam 1's `queue.put`. Parked, cold, busy or at the usage limit are the
   runner's and the queue's states (#1343's supervisor, seam 1). The outbox does not read them.
@@ -89,26 +106,40 @@ and words (`wake_when_live`, `wake_at`, `relay_when_live`, `wake_when_runners_ba
 
 **What survives a restart:** every row in `waiting`, `held` or `sending`. They are in the database, not in memory.
 
-**The send order:** a row goes `waiting → sending` (committed), then deliver, then `sending → sent` (committed). On
-`boot`, rows still in `sending` are sent again with a line saying the server restarted mid-send, so this may repeat
-delivery #id (Cara, "Send again"). A due `at` row missed while the server was down is sent at boot, saying how
-late it is. `TimedWakes.arm()` does this today.
+**The send order:** a row goes `waiting → sending` (committed, with `met_at` set), then deliver, then
+`sending → sent` (committed) only on `accepted`. On `boot`, rows still in `sending` are sent again with a line
+saying the server restarted mid-send, so this may repeat delivery #id (Cara, "Send again"). A due `at` row missed
+while the server was down is sent at boot, saying how late it is. That wording is new: `TimedWakes.fire` today
+prints only the time it was set for.
+
+**Accepted means durable.** Until seam 1, a `runner.send` to an idle minion puts the message in `runner.queues`,
+which lives only in memory (`src/runner.ts` :1846-1855), until the turn starts and saves it (`saveTurn`). So until
+step 8, a minion-bound row is `accepted` only when the runner reports that the turn carrying it has started. A crash
+before then leaves the row in `sending`, and boot resends it. A chain is `accepted` only when its start sends the
+brief (today's `release()`). A start that ends without sending it puts the row back to `waiting`.
 
 Once seam 1's queue exists, `deliver` becomes `queue.put`. Both are in the same SQLite database, so `put` and
 `sending → sent` commit in one transaction, and the possible-repeat case disappears for every kind that goes
 through the queue.
 
-**What is retried:** a `deliver` that throws puts the row back in `waiting` with `due` set 1, 5, 30, 120 and 360
-minutes ahead, then marks it `failed`. Today a failed send is only logged, and the wake is gone.
+**What is retried:** a `retry` outcome puts the row back in `waiting` with `met_at` kept and `due` set 1, 5, 30, 120
+and 360 minutes ahead, then marks it `failed`. A row with `met_at` is retried by its `due` alone: an event during the
+backoff does not fire it early, and a condition that has since changed (head moved on) does not strand it. Today a
+failed send is only logged, and the wake is gone.
+
+**A closed target:** when a minion is dismissed, its waiting rows move to `held` with reason "target closed" and
+`due` 3 days ahead, so the deadline survives a restart. A reopen moves them back to `waiting` and reconciles them at
+once, so a condition met while closed delivers then. At `due`, the timer drops them. Relays are the exception: a
+relay to a dismissed minion still goes out, as held mail, as today (`leaveMail`, `server.ts` :605-614).
 
 **What is dropped, and who is told:**
 
 | Case | Today | With the outbox |
 |---|---|---|
-| Target minion dismissed | `wake_at` and `wake_when_live` dropped quietly; `ci-armed` never cleared | kept `waiting`; delivered on a reopen within 3 days (a due one says it came due while the minion was closed); after 3 days `dropped`, reason "minion dismissed" |
+| Target minion dismissed | `wake_when_live` dropped quietly; `wake_at` dropped when it comes due (a reopen before then keeps it); a chain whose target is closed is discarded; `ci-armed` not cleared, but consumed by the next CI result | `held` for 3 days, delivered on a reopen (a due one says it came due while the minion was closed); then `dropped`, reason "minion dismissed". A relay still goes out as held mail |
 | Chain leader dismissed unshipped | `held: true`, people told once | the same: state `held`, people told once |
 | Relay sender dismissed | still sent | still sent |
-| `ci_armed`: head moved, CI red, or a turn running | dropped | the same, with the reason kept |
+| `ci_armed`: PR head moved, CI red, or a turn running or queued | dropped | the same, with the reason kept |
 | Runner list unreadable | the minion is told to ask a person | the same |
 | All retries failed | (no retries) | `failed`; the setter's Taskmaster is woken, not given held mail, because a lost wake strands a minion |
 
@@ -121,15 +152,15 @@ Live counts from the settings table on 2026-11-20, about 19:35 PST.
 
 | # | Mechanism (A6's count) | Key | Condition | Retry today | Expiry / dismissed today | Live rows | Moves |
 |---|---|---|---|---|---|---|---|
-| 1a | `wake_when_live` (`src/wake.ts` LiveWaiters) | `wake-when-live` | commit live (`liveOn`), on main (`catchUp`), or any deploy | none: dropped before send, a throw is logged | dismissed: dropped quietly | 0 | as is; dismissed rule changes to 3 days |
-| 1b | start-after chains (`startChained`) | `chained-minions` | leader `live` or `merged` | at-least-once: kept until `release()` | leader dismissed unshipped: `held`, told once | 15 | as is, held rule kept; `deliver` sends the brief |
+| 1a | `wake_when_live` (`src/wake.ts` LiveWaiters) | `wake-when-live` | commit live (`liveOn`); merged counts as live only for a scheme whose code this server doesn't run; with no commit, the next deploy after `since` | none: dropped before send, a throw is logged | dismissed: dropped quietly | 0 | as is; dismissed rule changes to 3 days |
+| 1b | start-after chains (`startChained`) | `chained-minions` | leader `live` or `merged`, in its build branch for a feeder, or dismissed (shipped: go; unshipped: held) | kept until `release()`, restored on a caught send failure; a hard kill after `release()` can lose the brief | leader dismissed unshipped: `held`, told once | 15 | as is, held rule kept; `accepted` only when the brief is sent. Start now, Unpark and the held brief (`src/routes/tickets.ts` :250, :1141) read the table from the same step |
 | 1c | `relay_when_live` | `relay-when-live` | commit live | none: dropped before deliver | sender dismissed: still sent; grouped note to sender's TM | 1 (from closed Peek Auras #701) | as is |
 | 2 | `wake_at` (TimedWakes) | `timed-wakes` | time | missed wakes sent at boot by `arm()` | dismissed: dropped unsent; 20 per chat, 90 days | 34 (1 for a closed minion) | as is; dismissed rule changes to 3 days |
-| 3 | `wake_when_runners_back` (`src/ci-health.ts` `wakeParked`) | `wake-runners-back` | a runner of the label online, from the ci-health poll | none: dropped before send | unreadable list: told to ask a person | 0 | as is |
-| 4 | Alert wakes (`src/alert-wakes.ts`) | `alert-wakes` (`told`, `batches`) | batch 60 s after the last alert, at most 5 min after the first; quiet hours 2 to 9 AM Pacific | saved before the wake | none | (per scheme) | **with a change**: one `alert` row per scheme Taskmaster; `merge` folds new alerts into the waiting row and moves `due`; quiet hours set `due`. `told` (what was already said) stays in its own key: it is memory, not a delivery |
+| 3 | `wake_when_runners_back` (`src/ci-health.ts` `wakeParked`) | `wake-runners-back` | a runner online among the scheme's labels, from the ci-health poll | none: dropped before send | closed or missing target: removed; unreadable list: told to ask a person | 0 | as is, under the 3-day rule |
+| 4 | Alert wakes (`src/alert-wakes.ts`) | `alert-wakes` (`told`, `batches`) | batch 60 s after the last alert, at most 5 min after the first; quiet hours 2 to 9 AM Pacific | the batch is deleted before the wake and never retried; the wait restarts on fresh problems; cleared alerts are removed from a pending batch | none | (per scheme) | **with a change**: one `alert` row per scheme Taskmaster; `merge` folds new alerts into the waiting row and moves `due`; `trim` removes an alert that clears (`AlertWakes.clear`, `raise`) and drops an empty row; quiet hours set `due`. `told` stays in its own key, but it is written in the same transaction as the row, so a crash can't record an alert as told with no wake queued |
 | 5 | Deploy watch (`src/deploy-watch.ts`) | `deploy-watch` | +20 min, +1 h, +1 day after a deploy | own | own | about 161 deploys tracked | **stays out** (Cara, "Stay out") |
-| 6 | Held mail and the loop guard (`src/minion-relay.ts`) | `mail:<id>`, `cold:<id>`, `loop:*` | released after hold hours; a parked minion's mail waits | taken by `runner.takeQueue` | `releaseMail` never runs for a closed minion | 37 `mail:` (20 for closed minions), 18 `loop:` | **goes to seam 1's queue**, not here (Cara, "Queue, not outbox") |
-| 7 | `when_ci_passes` (`src/ci-armed.ts`) | `ci-armed:<id>` | CI green on the armed sha, head unchanged, no turn running | none | never cleared on dismissal (a `shortcut:` in the code) | 0 | as is; the dismissed rule now clears it after 3 days |
+| 6 | Held mail and the loop guard (`src/minion-relay.ts`) | `mail:<id>`, `cold:<id>`, `loop:*` | cold mail released after hold hours (a parked minion's waits); loop-held messages released by Continue | taken by `runner.takeQueue` | `releaseMail` never runs for a closed minion | 37 `mail:` (20 for closed minions), 18 `loop:` | **goes to seam 1's queue**, not here (Cara, "Queue, not outbox") |
+| 7 | `when_ci_passes` (`src/ci-armed.ts`) | `ci-armed:<id>`, one record per minion; a second arm on the same sha replaces its card or note part | CI green on the armed sha, PR head unchanged, no turn running or queued | none; a failed delivery can wake the minion with the failure | not cleared on dismissal (a `shortcut:` in the code), consumed by the next CI result | 0 | as is, `dedupe_key` per ticket; the 3-day rule clears it |
 
 Out of scope, and why:
 - `waiting:<id>`, `resume-owed:<id>` and `net-resumes` are the runner's own state for resuming turns (#1343, #1364,
@@ -156,7 +187,9 @@ Each step adds its kind, moves its tool's writes to the table, and on boot migra
 in one transaction: insert each row with `origin` set, then empty the old key. Saved waits are never dropped.
 
 Until a cleanup step removes it, each step also keeps a **dual read**: the dispatcher reads the old key on every
-boot and poke, and migrates anything it finds. If a deploy is rolled back, the old code reads only the old key, so
+boot and poke, and migrates anything it finds. Steps 1 to 3 share `LiveWaiters.check`: it keeps running for the
+kinds not moved yet, and each step takes only its own kind out of it. A kind's readers move in the same ship as its
+writer. If a deploy is rolled back, the old code reads only the old key, so
 waits made meanwhile sit in the table, and are delivered late, never lost, once the code rolls forward again.
 
 Each step moves saved data, so each ships high risk with a member's go. Each adds its kind to the restart-anywhere

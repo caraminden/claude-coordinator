@@ -90,6 +90,23 @@ test('in process: nothing is delivered before the commit is live, then once, and
   store.setSetting('relay-when-live', []);
 });
 
+test('addRelay asks again when a deploy went live while its check ran (late, not lost)', async () => {
+  const w = new LiveWaiters(store, repo, 'head-1', () => {});
+  const got: Relay[] = [];
+  w.deliver = (r) => got.push(r);
+  let calls = 0;
+  w.live = async () => {
+    // The first check runs against the old head and says no; the head moves before it returns.
+    if (++calls === 1) { w.head = 'head-2'; return false; }
+    return true;
+  };
+  const { queued } = await w.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number }, text: 'late', commit: 'abc' });
+  assert.equal(calls, 2);
+  assert.equal(queued, false);
+  assert.deepEqual(got.map((r) => r.text), ['late']);
+  assert.equal(w.relays().length, 0);
+});
+
 const tokens = new Auth(PASSWORD, SECRET);
 before(async () => {
   srv = await bootServer({ root });

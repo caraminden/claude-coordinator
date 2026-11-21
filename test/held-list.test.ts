@@ -11,7 +11,7 @@ import { Approvals } from '../src/approvals.ts';
 import { inboxItems } from '../src/inbox.ts';
 import { cleanMsgSettings, cleanNeverHold, coldToolText, heldToolText, MSG_BOUNDS, MSG_COLUMNS, MSG_DEFAULTS, msgEnv, msgFromEnv, msgSettings, NEVER_HOLD_KINDS, neverHold } from '../src/msg-settings.ts';
 import { Runner } from '../src/runner.ts';
-import { minionPairKey } from '../src/minion-relay.ts';
+import { loopKey, minionPairKey } from '../src/minion-relay.ts';
 import { NEVER_HOLD_KINDS as CLIENT_KINDS } from '../public/heldmsg.js';
 import { transcriptPath } from '../src/sessions.ts';
 import { stopTurns, testPins, until } from './helpers.ts';
@@ -102,6 +102,15 @@ test("a scheme's own loop count and window hold the next message; the chat's row
   assert.equal(runner.view(store.getTicket(minion.id)!).loop_hold, null);
   assert.equal(inboxItems(store, new Approvals(() => {}), minion.project_id, 'Cara').filter((i) => i.kind === 'loop').length, 0);
   assert.ok(tm.id);
+});
+
+test("a message the loop guard held doesn't reopen a minion dismissed since, when someone writes in another chat", () => {
+  const { minion } = scheme({});
+  store.setSetting(loopKey(minion.id), { sent: [NOW], held: [{ to: minion.id, author: 'Taskmaster', text: 'late word', from: minion.id, at: NOW }] });
+  store.updateTicket(minion.id, { status: 'closed' });
+  assert.equal(runner.continueLoops([minion.id], 'Cara'), 1);
+  assert.equal(store.getTicket(minion.id)!.status, 'closed', 'still dismissed');
+  assert.equal(runner.isRunning(minion.id), false);
 });
 
 test("two minions' held loop shows in both chats, so dismissing the receiver leaves it with the sender", () => {

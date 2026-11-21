@@ -589,7 +589,7 @@ export class ScheduledRuns {
       store.schedules.ran(s.id, { ticketId: id }, now);
       store.usage.used('schedule', s.name);
       runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
-      const message = runBrief(s, new Date(now).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }), runWindow(s, last?.number ?? null, minions));
+      const message = runBrief(s, pacific(now), runWindow(s, last?.number ?? null, minions));
       const opts = { brief: true, schedule: s.name };
       const send = () => runner.send(id, by, message, [], opts);
       // The minion exists either way; while the box is starved its brief waits (up to 10 minutes) as a parked row.

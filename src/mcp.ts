@@ -2391,7 +2391,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'wake_when_runners_back': {
       const r = await call('POST', `/api/tickets/${C().TICKET}/wake-runners`, { reason: args.reason });
-      return `Waiting for a runner labelled ${r.label} or ${r.label}-linux to be online: ${APP_NAME} looks every 5 minutes and sends you a message then. Set state parked and end your turn.`;
+      return `Waiting for a runner labelled ${(r.labels ?? [r.label]).join(', ').replace(/, ([^,]*)$/, ' or $1')} to be online: ${APP_NAME} looks every 5 minutes and sends you a message then. Set state parked and end your turn.`;
     }
     case 'list_artifacts': {
       const [artifacts, shared] = await Promise.all([call('GET', `/api/projects/${C().PROJECT}/artifacts?titles`), call('GET', `/api/projects/${C().PROJECT}/shared?titles`)]);

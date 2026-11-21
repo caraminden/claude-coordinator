@@ -434,12 +434,16 @@ export class LiveWaiters {
 
   /** Queue a relay; false (it was delivered at once) when its commit is live already. */
   async addRelay(r: Omit<Relay, 'id'>): Promise<{ queued: boolean; relay: Relay }> {
-    const all = this.relays();
-    const relay = { ...r, id: Math.max(0, ...all.map((o) => o.id)) + 1 };
-    if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since: this.head })) {
-      this.deliver(relay);
-      return { queued: false, relay };
-    }
+    const relay = { ...r, id: Math.max(0, ...this.relays().map((o) => o.id)) + 1 };
+    // Asked again if a deploy went live meanwhile, as add() does: its check has been and gone without this relay.
+    let since: number | string | undefined;
+    do {
+      since = this.head;
+      if (await this.live({ ticket: r.ticket, commit: r.commit, reason: '', since })) {
+        this.deliver(relay);
+        return { queued: false, relay };
+      }
+    } while (since !== this.head);
     // Read again: another relay may have been queued while git ran.
     const now = this.relays();
     relay.id = Math.max(relay.id, ...now.map((o) => o.id + 1));

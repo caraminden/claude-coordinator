@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describeCron, guessCategory, nextRun, parseCron, pinForOwner, runBrief, runMinion, Schedules, SCHEDULES_SCHEMA } from '../src/schedules.ts';
+import { describeCron, guessCategory, nextRun, parseCron, pinForOwner, runBrief, runMinion, ScheduledRuns, Schedules, SCHEDULES_SCHEMA } from '../src/schedules.ts';
 
 // Local wall-clock times, since schedules run in the server's time zone.
 const at = (y: number, mo: number, d: number, h = 0, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime();
@@ -238,4 +238,24 @@ test('opening a database from before schema 82 fills its schedules\' categories 
   store = new Store(file);
   assert.equal(store.schedules.get(row.id)!.category, '', 'a person\'s clear stays cleared after a restart');
   store.db.close();
+});
+
+test("a run's brief reads its start time in Pacific with the zone, whatever the server's clock", async () => {
+  const store = new Store(':memory:');
+  const p = store.createProject('One', null);
+  const sent: string[] = [];
+  const runs = new ScheduledRuns({
+    store,
+    newMinion: async (project, m, by) => {
+      const t = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'bypassPermissions', created_by: by });
+      return { id: t.id, number: t.number! };
+    },
+    runner: { emit: () => {}, send: (_id: number, _by: string, text: string) => sent.push(text), limitWait: () => null, netWait: () => null } as any,
+    broadcast: () => {},
+    by: 'Citadel',
+    dataDir: '/data',
+  });
+  const s = store.schedules.create({ project_id: p.id, name: 'Nightly', cron: '0 3 * * *', brief: 'Is main healthy?', type: 'chore', created_by: 'Cara' });
+  await runs.run(s, Date.UTC(2026, 10, 20, 11, 0)); // 03:00 PST
+  assert.match(sent[0], /Nov 20, 03:00 PST/);
 });

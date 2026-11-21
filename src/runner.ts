@@ -2133,7 +2133,7 @@ export class Runner {
       for (const m of loop.held) {
         if (pair) this.relays.copyToTaskmaster(m.to, m.author, m.text);
         // A minion dismissed since never reopens for another minion's message (#783): it waits as mail.
-        if (m.mail || (pair && this.store.getTicket(m.to)?.status === 'closed')) this.relays.mail(m.to, m.author, m.text, m.from);
+        if (m.mail || this.store.getTicket(m.to)?.status === 'closed') this.relays.mail(m.to, m.author, m.text, m.from);
         else if (pair) this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, false);
         else this.send(m.to, m.author, m.text, [], { from: m.from, hold: true, ...(m.asker !== undefined ? { asker: m.asker } : {}) }, ticket.kind !== 'coordinator' && m.to === ticketId);
       }

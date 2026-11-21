@@ -16,7 +16,7 @@ import { keyFiles } from '../release-key.ts';
 import { checkNeed } from '../needs.ts';
 import { armForCi, mergeCard, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
 import { addRunnerWaiter } from '../ci-health.ts';
-import { runnerLabel } from '../ci-runner.ts';
+import { runnerLabel, schemeLabels } from '../ci-runner.ts';
 import { CLAUDE_MODELS, pickReason } from '../../public/model-table.js';
 import { needsGo } from '../../public/shipping.js';
 import { offSkills } from '../skills.ts';
@@ -1565,7 +1565,7 @@ export const ticketRoutes: Route[] = [
       const body = await readJson(req);
       addRunnerWaiter(app.store, ticket.id, str(body.reason, 'Reason', 1000));
       app.runner.broadcastTicket(ticket.id); // a parked row moves to Waiting (#718)
-      return json(res, 201, { label });
+      return json(res, 201, { label, labels: schemeLabels(project!.name) });
     },
   },
   {

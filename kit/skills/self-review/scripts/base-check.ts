@@ -20,7 +20,7 @@
 // every parser, and with none matching, its exit status decides for the whole file.
 // Exit: 0 nothing passes on the base, 1 something does, 2 a usage or setup error. Never the full suite.
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, matchesGlob, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -193,6 +193,15 @@ function show(root: string, rev: string, path: string): string | null {
   return r.status === 0 ? r.stdout : null;
 }
 
+/** HEAD's bytes and file mode for one path, into the scratch tree (binary fixtures and executable helpers survive). */
+function copyFromHead(root: string, tree: string, path: string): void {
+  const r = spawnSync('git', ['show', `HEAD:${path}`], { cwd: root, maxBuffer: 1 << 30 });
+  if (r.status !== 0) throw new Error(`git show HEAD:${path}: ${String(r.stderr).trim()}`);
+  writeFileSync(join(tree, path), r.stdout);
+  const mode = spawnSync('git', ['ls-tree', '-z', 'HEAD', '--', path], { cwd: root, encoding: 'utf8' }).stdout.split(' ')[0];
+  if (mode === '100755') chmodSync(join(tree, path), 0o755);
+}
+
 function nearest(root: string, from: string, names: string[]): string | null {
   for (let d = dirname(from); ; d = dirname(d)) {
     if (names.some((n) => existsSync(join(root, d, n)))) return d;
@@ -260,9 +269,10 @@ for d in sys.argv[1:]:
             print('MOD', m, getattr(s, 'origin', None) or '-')
 `;
 
-function plan(root: string, base: string, changes: Change[], cmd: string | null): { entries: Entry[]; writes: Map<string, string> } {
+function plan(root: string, base: string, changes: Change[], cmd: string | null): { entries: Entry[]; writes: Map<string, string | null> } {
+  // A text value is the file's content (a spliced Rust file); null means HEAD's own bytes and mode.
   const entries: Entry[] = [];
-  const writes = new Map<string, string>();
+  const writes = new Map<string, string | null>();
   for (const c of changes) {
     const head = show(root, 'HEAD', c.path);
     if (head === null) continue;
@@ -289,7 +299,7 @@ function plan(root: string, base: string, changes: Change[], cmd: string | null)
       continue;
     }
     if (!isTestPath(c.path, pkgScript(root, c.path), pkgRel(root, c.path))) continue;
-    writes.set(c.path, head);
+    writes.set(c.path, null);
     const name = basename(c.path);
     const other = OTHER_TEST.find(([re]) => re.test(name));
     let runner: Runner | null = null;
@@ -325,8 +335,15 @@ export function cargoArgs(root: string, path: string, cases: string[] = []): str
   if (!m) return `${rel} is not under tests/ or src/ of ${pkg}`;
   // The changed cases as name filters, so only they run, not the whole lib or bin target.
   if (m[1] === 'main' || m[1].startsWith('bin/')) return ['-p', pkg, '--bins', ...(cases.length ? ['--', ...cases] : [])];
+  // A crate with no library has only binaries: its src/ modules belong to the bin target, and `--lib` would fail with "no library targets found".
+  if (!existsSync(join(root, dir, 'src', 'lib.rs'))) return ['-p', pkg, '--bins', ...(cases.length ? ['--', ...cases] : [])];
   const mod = m[1].split('/').filter((s) => s !== 'mod' && s !== 'lib').join('::');
   return ['-p', pkg, '--lib', '--', ...(cases.length ? cases : mod ? [`${mod}::`] : [])];
+}
+
+/** Cargo's "no library targets found" line, when that is why a run failed: it never ran a test. */
+export function cargoNoTarget(out: string): string | null {
+  return /no (?:library|bin|binary|test|example|bench) targets? (?:found|named)[^\n]*/i.exec(out)?.[0].trim() ?? null;
 }
 
 function main(argv: string[]): number {
@@ -363,12 +380,16 @@ function main(argv: string[]): number {
     return 2;
   }
   const base = git(root, 'merge-base', 'HEAD', ref).trim();
-  const changes: Change[] = git(root, 'diff', '--name-status', '-M', base, 'HEAD')
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => l.split('\t'))
-    .filter(([s]) => !s.startsWith('D'))
-    .map(([s, a, b]) => ({ status: s[0], path: b ?? a, old: a }));
+  // -z: a path with non-ASCII characters or a tab comes through as it is, not quoted.
+  const tok = git(root, 'diff', '--name-status', '-z', '-M', base, 'HEAD').split('\0');
+  const changes: Change[] = [];
+  for (let i = 0; i < tok.length && tok[i]; ) {
+    const s = tok[i++];
+    const two = s[0] === 'R' || s[0] === 'C';
+    const a = tok[i++];
+    const b = two ? tok[i++] : undefined;
+    if (s[0] !== 'D') changes.push({ status: s[0], path: b ?? a, old: a });
+  }
   const { entries, writes } = plan(root, base, changes, cmd);
   console.log(`base-check: base ${base.slice(0, 8)} (merge-base of HEAD and ${ref})`);
   if (git(root, 'status', '--porcelain', '--untracked-files=no').trim()) console.log('base-check: uncommitted changes are not checked: it reads HEAD; commit first');
@@ -387,7 +408,8 @@ function main(argv: string[]): number {
     git(root, 'worktree', 'add', '--detach', '-q', tree, base);
     for (const [p, text] of writes) {
       mkdirSync(dirname(join(tree, p)), { recursive: true });
-      writeFileSync(join(tree, p), text);
+      if (text !== null) writeFileSync(join(tree, p), text);
+      else copyFromHead(root, tree, p);
     }
     for (const e of entries) {
       if (!e.runner) {
@@ -477,8 +499,21 @@ function runOne(root: string, tree: string, e: Entry, cmd: string | null, limit:
   if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') return `${argv[0]} isn't installed here`;
   const timedOut = (r.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
   const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
+  // Cargo never ran it: no such target in the crate. That is not a red test.
+  if (e.runner === 'cargo' && r.status !== 0) {
+    const none = cargoNoTarget(out);
+    if (none) return `cargo ran no tests (${none}): run it on the base by hand`;
+  }
   const parsed = (e.runner !== 'cmd' && e.runner !== 'sh') || parseResults(out).length > 0;
   return { status: r.status, out, timedOut, parsed, shown: argv.map((a) => (a.startsWith(root) ? relative(root, a) || '.' : a)).join(' ') };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) process.exit(main(process.argv.slice(2)));
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  // A setup error (no merge-base, a failed git call) is exit 2 with one line: exit 1 means "findings".
+  try {
+    process.exit(main(process.argv.slice(2)));
+  } catch (e) {
+    console.error(`base-check: ${(e as Error).message.split('\n')[0]}`);
+    process.exit(2);
+  }
+}

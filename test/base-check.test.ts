@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { cargoArgs, casesOf, changedCases, isTestPath, judge, matches, nodeCommand, parseResults, pyLeaks, pyPath, spliceRust } from '../kit/skills/self-review/scripts/base-check.ts';
+import { cargoArgs, cargoNoTarget, casesOf, changedCases, isTestPath, judge, matches, nodeCommand, parseResults, pyLeaks, pyPath, spliceRust } from '../kit/skills/self-review/scripts/base-check.ts';
 import { git } from './git.ts';
 
 const SCRIPT = join(import.meta.dirname, '..', 'kit', 'skills', 'self-review', 'scripts', 'base-check.ts');
@@ -69,6 +69,7 @@ test('picks the runner\'s command and the cargo target', () => {
   const ws = join(root, 'cargo-ws');
   mkdirSync(join(ws, 'crates', 'core', 'src', 'parse'), { recursive: true });
   writeFileSync(join(ws, 'crates', 'core', 'Cargo.toml'), '[package]\nname = "peek-core"\nversion = "0.1.0"\n\n[dependencies]\nname = "x"\n');
+  writeFileSync(join(ws, 'crates', 'core', 'src', 'lib.rs'), '');
   assert.deepEqual(cargoArgs(ws, 'crates/core/tests/busy_cara.rs'), ['-p', 'peek-core', '--test', 'busy_cara']);
   assert.deepEqual(cargoArgs(ws, 'crates/core/src/parse/mod.rs'), ['-p', 'peek-core', '--lib', '--', 'parse::']);
   assert.deepEqual(cargoArgs(ws, 'crates/core/src/lib.rs'), ['-p', 'peek-core', '--lib', '--']);
@@ -77,6 +78,14 @@ test('picks the runner\'s command and the cargo target', () => {
   assert.deepEqual(cargoArgs(ws, 'crates/core/src/lib.rs', ['clamps', 'rounds']), ['-p', 'peek-core', '--lib', '--', 'clamps', 'rounds']);
   assert.deepEqual(cargoArgs(ws, 'crates/core/src/main.rs', ['clamps']), ['-p', 'peek-core', '--bins', '--', 'clamps']);
   assert.deepEqual(cargoArgs(ws, 'crates/core/tests/busy_cara.rs', ['x']), ['-p', 'peek-core', '--test', 'busy_cara'], 'an integration test file is its own target');
+  // A crate with no library (a binary-only app crate): its modules' tests run as the bin target, never `--lib`.
+  mkdirSync(join(ws, 'crates', 'app', 'src'), { recursive: true });
+  writeFileSync(join(ws, 'crates', 'app', 'Cargo.toml'), '[package]\nname = "peek-app"\nversion = "0.1.0"\n');
+  writeFileSync(join(ws, 'crates', 'app', 'src', 'main.rs'), 'fn main() {}\n');
+  assert.deepEqual(cargoArgs(ws, 'crates/app/src/auras.rs', ['pulses']), ['-p', 'peek-app', '--bins', '--', 'pulses']);
+  assert.deepEqual(cargoArgs(ws, 'crates/app/src/auras/mod.rs'), ['-p', 'peek-app', '--bins']);
+  assert.match(cargoNoTarget('error: no library targets found in package `peek-app`\n') ?? '', /^no library targets found/);
+  assert.equal(cargoNoTarget('error[E0425]: cannot find value\n'), null);
   assert.ok(isTestPath('crates/core/tests/common/mod.rs') && isTestPath('src/a.spec.ts') && !isTestPath('src/latest.ts'));
 });
 
@@ -198,4 +207,36 @@ test('(d) --cmd runs from the repo root through sh -c, so `cd test && …` works
   commit(pin);
   const r = spawnSync(process.execPath, [SCRIPT, '--cmd', 'cd test && node --test --test-reporter=tap {file}'], { cwd: pin, env, encoding: 'utf8' });
   assert.match(r.stdout, /^PASSES ON BASE +test\/math\.test\.ts › doubles three$/m, r.stdout + r.stderr);
+});
+
+test('a setup error exits 2 with one line, not a stack trace and the findings code', () => {
+  const dir = repo('nobase');
+  git(dir, 'switch', '-q', '--orphan', 'island');
+  writeFileSync(join(dir, 'x.txt'), 'x\n');
+  git(dir, 'add', '-A');
+  spawnSync('git', ['commit', '-qm', 'unrelated'], { cwd: dir, env });
+  const r = spawnSync(process.execPath, [SCRIPT, '--base', 'feature'], { cwd: dir, env, encoding: 'utf8' });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /^base-check: git merge-base/m);
+  assert.doesNotMatch(r.stderr, /\n\s+at /, 'no stack');
+});
+
+test('changed fixtures reach the base as the same bytes and mode, and a non-ASCII path keeps its name', () => {
+  const dir = repo('bytes');
+  const blob = Buffer.from([0xff, 0xfe, 0x00, 0x80, 0xc3, 0x28, 0x0a]);
+  writeFileSync(join(dir, 'test', 'tést.bin'), blob);
+  writeFileSync(join(dir, 'test', 'run.sh'), '#!/bin/sh\necho ok\n', { mode: 0o755 });
+  writeFileSync(join(dir, 'test', 'fixtures.test.ts'), `import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { test } from 'node:test';
+
+test('binary fixture is intact', () => assert.deepEqual([...readFileSync(new URL('./tést.bin', import.meta.url))], [255, 254, 0, 128, 195, 40, 10]));
+test('helper is executable', () => assert.equal(execFileSync(new URL('./run.sh', import.meta.url).pathname, { encoding: 'utf8' }), 'ok\\n'));
+`);
+  git(dir, 'add', '-A');
+  commit(dir);
+  const r = check(dir);
+  assert.match(r.stdout, /^PASSES ON BASE +test\/fixtures\.test\.ts › binary fixture is intact$/m, r.stdout + r.stderr);
+  assert.match(r.stdout, /^PASSES ON BASE +test\/fixtures\.test\.ts › helper is executable$/m, r.stdout + r.stderr);
 });

@@ -379,28 +379,35 @@ CHECK_WAIT=$((CHECK_LIMIT * (BUILDERS + EARLY_AHEAD) + ${LAND_QUEUE_SLACK:-300} 
 QUEUE_TYPICAL=300 # a landing's length until some have been timed here
 QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAME='' Q_HELD='' Q_LAST='' Q_SINCE=0 Q_SAID='' Q_LINE=() Q_ORDER=() Q_BY=''
 
-# "<pid> <start time>" of a live process, or nothing. The start time tells a reused pid apart.
+# "<pid> <start time>" of a live process, or nothing. The start time tells a reused pid apart. With a second
+# argument, into that variable instead: the line's loop runs it for every ticket each pass, and a $( ) is a fork, which
+# made a line of twelve cost most of a core (Citadel #1545).
 queue_proc() {
-  local stat
-  stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
-  stat=${stat##*) } # the command's name may hold spaces
-  # shellcheck disable=SC2086
-  set -- "$1" $stat
-  # A zombie (Z, or X while it is reaped) is dead, though its /proc entry stays until its parent waits on it.
-  case $2 in Z | X | x) return 0 ;; esac
-  echo "$1 ${21}"
+  local stat='' r='' into=${2:-}
+  IFS= read -r -d '' stat 2>/dev/null <"/proc/$1/stat"
+  if [ -n "$stat" ]; then
+    stat=${stat##*) } # the command's name may hold spaces
+    # shellcheck disable=SC2086
+    set -- "$1" $stat
+    # A zombie (Z, or X while it is reaped) is dead, though its /proc entry stays until its parent waits on it.
+    case $2 in Z | X | x) ;; *) r="$1 ${21}" ;; esac
+  fi
+  if [ -n "$into" ]; then printf -v "$into" %s "$r"; elif [ -n "$r" ]; then echo "$r"; fi
 }
 
-# The state letter of a process: T or t is stopped (a SIGSTOP), and so is a process in a frozen cgroup.
+# The state letter of a process: T or t is stopped (a SIGSTOP), and so is a process in a frozen cgroup. A second
+# argument: into that variable, as queue_proc.
 queue_state() {
-  local stat cg
-  stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
+  local stat='' cg='' x
+  IFS= read -r -d '' stat 2>/dev/null <"/proc/$1/stat"
   stat=${stat##*) }
   stat=${stat%% *}
   # A frozen cgroup (systemctl freeze, a paused container) leaves its processes in state S: its cgroup.events says it.
-  if [[ $stat != [Tt] ]] && cg=$(grep -m 1 '^0::' "/proc/$1/cgroup" 2>/dev/null) &&
-    grep -qx 'frozen 1' "${LAND_QUEUE_CGROUP:-/sys/fs/cgroup}${cg#0::}/cgroup.events" 2>/dev/null; then stat=T; fi
-  echo "$stat"
+  if [ -n "$stat" ] && [[ $stat != [Tt] ]]; then
+    while IFS= read -r x; do [[ $x != 0::* ]] || { cg=${x#0::}; break; }; done 2>/dev/null <"/proc/$1/cgroup"
+    [ -z "$cg" ] || while IFS= read -r x; do [ "$x" != 'frozen 1' ] || stat=T; done 2>/dev/null <"${LAND_QUEUE_CGROUP:-/sys/fs/cgroup}$cg/cgroup.events"
+  fi
+  if [ -n "${2:-}" ]; then printf -v "$2" %s "$stat"; elif [ -n "$stat" ]; then echo "$stat"; fi
 }
 
 queue_write() { # <file> <pid and start> <got> <label> <phase> <commit> <verdict> <base>: by a rename, so nobody reads half a ticket
@@ -433,7 +440,7 @@ queue_done() {
 
 # The tickets in line order (the header at "The line's order"), as Q_ORDER, and who set .order, as Q_ORDER_BY.
 queue_order() {
-  local t l i=0 old=0 seg keys=()
+  local t l i=0 old=0 seg k keys=() LC_ALL=C # C: the keys sort byte by byte
   local -A rank=()
   Q_ORDER=() Q_ORDER_BY=''
   [ ! -f "$Q_DIR/.order" ] || while read -r t; do
@@ -442,13 +449,19 @@ queue_order() {
   for t in "$Q_DIR"/[0-9]*; do
     t=${t##*/}
     [[ $t =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue # not a ticket half-written, or the glob itself
-    seg=$(printf '1%05d' "$old") # the waiters from before .order (no "order" line) ahead of it, in arrival order
+    printf -v seg '1%05d' "$old" # the waiters from before .order (no "order" line) ahead of it, in arrival order
     if [ "${l[1]:-0}" != 0 ]; then keys+=("0 $t")
     elif [ "${l[7]:-}" != order ]; then keys+=("${seg}3 $t") old=$((old + 1))
-    elif [ -n "${rank[$t]:-}" ]; then keys+=("${seg}1$(printf '%010d' "${rank[$t]}") $t")
+    elif [ -n "${rank[$t]:-}" ]; then printf -v k '%010d' "${rank[$t]}"; keys+=("${seg}1$k $t")
     else keys+=("${seg}2 $t"); fi
   done
-  [ ${#keys[@]} = 0 ] || mapfile -t Q_ORDER < <(printf '%s\n' "${keys[@]}" | LC_ALL=C sort | cut -d' ' -f2)
+  # Sorted in place, not by sort: a pipe is three processes a pass for every waiter (#1545), and the line is short.
+  for k in "${keys[@]}"; do
+    i=${#Q_ORDER[@]}
+    while [ "$i" -gt 0 ] && [[ ${Q_ORDER[i - 1]} > $k ]]; do Q_ORDER[i]=${Q_ORDER[i - 1]} i=$((i - 1)); done
+    Q_ORDER[i]=$k
+  done
+  Q_ORDER=("${Q_ORDER[@]#* }")
 }
 
 queue_ordinal() {
@@ -488,7 +501,7 @@ queue_join() {
 }
 
 queue_look() {
-  local q=$Q_DIR t l ahead=0 head="" headname="" headpid="" sig typical sum count line detail look
+  local q=$Q_DIR t l p st ahead=0 head="" headname="" headpid="" sig typical sum count line detail look
   Q_PRED='' Q_PREDNAME='' Q_LINE=()
   queue_order
   if [ "$Q_ORDER_BY" != "$Q_BY" ]; then
@@ -501,14 +514,15 @@ queue_look() {
     t=$q/$t
     mapfile -t l 2>/dev/null <"$t" || continue
     # Its process is gone (killed, or its turn was stopped): it leaves the line.
-    if [ -z "${l[0]:-}" ] || [ "$(queue_proc "${l[0]%% *}")" != "${l[0]}" ]; then
+    [ -z "${l[0]:-}" ] || queue_proc "${l[0]%% *}" p
+    if [ -z "${l[0]:-}" ] || [ "$p" != "${l[0]}" ]; then
       rm -f "$t"
       continue
     fi
     # A waiter that is stopped (a SIGSTOP, a frozen cgroup) holds no land lock, so it is passed over; it tries for the
     # lock like the head once it wakes. Those this one passed so are waiting on its lock, not ahead of it. A check it
     # was running keeps the check lock: CHECK_WAIT bounds that.
-    if [ "${l[1]:-0}" = 0 ] && { [ -n "$Q_HELD" ] || [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; }; then continue; fi
+    if [ "${l[1]:-0}" = 0 ] && { [ -n "$Q_HELD" ] || { queue_state "${l[0]%% *}" st; [[ $st == [Tt] ]]; }; }; then continue; fi
     ahead=$((ahead + 1))
     [ -n "$head" ] || { head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}" headpid=${l[0]%% *}; }
     # The last one seen is the one directly ahead. "skip": that one is red or in conflict where it sits, and
@@ -533,7 +547,7 @@ queue_look() {
     head="outside $Q_N" headname="a landing started from a branch whose land.sh is older than the line"
     for t in "$q"/[0-9]*; do
       [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
-      [ "${l[1]:-0}" != 0 ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]:-}" ] || continue
+      [ "${l[1]:-0}" != 0 ] && queue_proc "${l[0]%% *}" p && [ "$p" = "${l[0]:-}" ] || continue
       head="${l[*]}" headname="${l[2]:-?}, ${l[3]:-?}"
       break
     done
@@ -1400,7 +1414,7 @@ batch_add() { # <label> <commit> <verdict> <base> <pid and start>: the next in l
 }
 
 batch_look() {
-  local e t l label sha ver bas pid behind=''
+  local e t l label sha ver bas pid p st behind=''
   B_AT=1 B_N=0 B_LABEL=('') B_SHA=('') B_VER=('') B_BASE=('') B_PID=('') B_RED=''
   for e in "${Q_LINE[@]}"; do
     read -r label sha ver bas pid <<<"$e"
@@ -1413,8 +1427,8 @@ batch_look() {
     [ "$B_N" -lt "$CI_BATCH" ] || break
     [ -n "$behind" ] || { [ "$t" != "$Q_N" ] || behind=1; continue; } # the ones behind this one, in queue_look's order
     mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue
-    [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] && [ "${l[4]:-}" != skip ] || continue
-    if [ "${l[1]:-0}" = 0 ] && [[ $(queue_state "${l[0]%% *}") == [Tt] ]]; then continue; fi
+    [ -n "${l[0]:-}" ] && queue_proc "${l[0]%% *}" p && [ "$p" = "${l[0]}" ] && [ "${l[4]:-}" != skip ] || continue
+    if [ "${l[1]:-0}" = 0 ] && { queue_state "${l[0]%% *}" st; [[ $st == [Tt] ]]; }; then continue; fi
     [ -n "${l[5]:-}" ] && [ "${l[5]}" != old ] || break # older than batches, or fast mode's: the next batch
     batch_add "${l[2]:-?}" "${l[4]:--}" "${l[5]}" "${l[6]:--}" "${l[0]}"
   done

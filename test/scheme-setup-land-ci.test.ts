@@ -873,16 +873,17 @@ test('batches: a member whose branch got a commit while it waited says that comm
 });
 
 test("batches: a member whose commit the head lands while it is looking at the line is not checked against main (#770's in-line check) and leaves as landed", async () => {
-  // The window is narrow: after batch_landed's look at the loop's top and before the in-line conflict check, inside
-  // queue_look. A cat in front of the real one freezes the 2nd there, with the line it read (the 1st still alive) after
-  // the head has landed all three. The 2nd deletes a line the 3rd inserts beside: the 3rd rebases onto it cleanly, but
+  // The window is narrow: after batch_landed's look at the loop's top and before the in-line conflict check, once
+  // queue_look has read the line. A git in front of the real one freezes the 2nd at the first process it starts after
+  // that look (the in-line check's read of main; the look itself starts none, #1545), with the line it read (the 1st
+  // still alive), until the head has landed all three. The 2nd deletes a line the 3rd inserts beside: the 3rd rebases onto it cleanly, but
   // the 2nd's commit as it was before the rebase conflicts with main, which holds the 3rd's change too.
   const c = ciSetup(3, { stack: '1', batch: '3', check: gated });
   const bin = join(c.dir, 'bin');
-  const real = spawnSync('bash', ['-c', 'command -v cat'], { encoding: 'utf8' }).stdout.trim();
+  const real = spawnSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
   const hold = join(c.dir, 'hold');
   mkdirSync(hold);
-  writeFileSync(join(bin, 'cat'), `#!/bin/bash\n[ -n "$HOLD_DIR" ] && [ "$1" = "/proc/$HOLD_PID/stat" ] || exec ${real} "$@"\nout=$(${real} "$@")\nif [ -e "$HOLD_DIR/arm" ]; then rm "$HOLD_DIR/arm"; : >"$HOLD_DIR/at"; until [ -e "$HOLD_DIR/go" ]; do sleep 0.05; done; fi\nprintf '%s\\n' "$out"\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'git'), `#!/bin/bash\nif [ -n "$HOLD_DIR" ] && [ "$1 $2" = 'rev-parse refs/heads/main' ] && [ -e "$HOLD_DIR/arm" ]; then rm "$HOLD_DIR/arm"; : >"$HOLD_DIR/at"; until [ -e "$HOLD_DIR/go" ]; do sleep 0.05; done; fi\nexec ${real} "$@"\n`, { mode: 0o755 });
   try {
     // A base with lines to share, and the three branches redone on it: 1 deletes L6, 2 deletes L3, and 3 deletes L3
     // too, then inserts a line where it was. Found by trying every pair of small edits for the 3rd.
@@ -901,7 +902,7 @@ test("batches: a member whose commit the head lands while it is looking at the l
     edit(2, 'lines.txt: 3 again', 'L1', 'L2', 'NEW', ...without('L1', 'L2', 'L3'));
     const a = c.land(1);
     await until("landing 1's ticket", () => c.issued() === 1);
-    const b2 = c.land(2, { HOLD_DIR: hold, HOLD_PID: String(a.child.pid) });
+    const b2 = c.land(2, { HOLD_DIR: hold });
     await until("landing 2's ticket", () => c.issued() === 2);
     const d = c.land(3);
     await until("landing 3's ticket", () => c.issued() === 3);

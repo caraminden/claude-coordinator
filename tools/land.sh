@@ -964,7 +964,8 @@ ci_gate() {
     if [ -z "$ci_taken" ] && { [ "$ci_status" = in_progress ] || [ "$ci_status" = completed ]; }; then # a runner took it
       ci_taken=1 taken_at=$SECONDS
       land_mark cirun
-      [ "$ci_status" = completed ] || queue_phase "waiting for CI: running since $(date +%H:%M)"
+      # Not `[ = completed ] ||`: a stop that lands in the $(date) after a failed test would read as a refusal (exit 1).
+      if [ "$ci_status" != completed ]; then queue_phase "waiting for CI: running since $(date +%H:%M)"; fi
     fi
     [ "$ci_status" != completed ] || break
     waited=$((SECONDS - started))

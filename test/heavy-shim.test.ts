@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -77,4 +77,18 @@ test('on systemd, cargo runs in a scope of the heavy slice, and what it runs sta
   const [cargo, make] = out;
   assert.match(cargo[2], new RegExp(`/${heavySlice}/citadel-heavy-\\d+-\\d+\\.scope$`));
   assert.equal(make[2], cargo[2], 'make, run by cargo, needs no scope of its own');
+});
+
+test("another turn's shims further down PATH are passed over, not handed the command back and forth (#1470)", () => {
+  // A turn started from inside a turn (a dev copy, a test's fake claude) puts its pin/bin/heavy before the outer one's.
+  const outer = join(root, 'outer');
+  mkdirSync(join(outer, 'heavy'), { recursive: true });
+  // Each turn pins its own copy of the tools (pinTurnFiles), so the two shims are different files.
+  for (const t of ['heavy-unit', 'heavy-shim']) copyFileSync(join(tools, t), join(outer, t));
+  for (const c of HEAVY_SHIMS) symlinkSync('../heavy-shim', join(outer, 'heavy', c));
+  const env = scriptEnv({ PATH: `${join(bin, 'heavy')}:${bin}:${join(outer, 'heavy')}:${real}:${process.env.PATH}`, CITADEL_HEAVY_UNIT: '0' });
+  // The deadline means "it hung": before the fix the two shims exec each other forever.
+  const r = spawnSync('sh', ['-c', 'node hook.js && cargo build'], { env, encoding: 'utf8', timeout: 60_000 });
+  assert.equal(r.signal, null, 'the shims looped');
+  assert.deepEqual(lines(r.stdout).map((l) => l[0]), ['node', 'cargo']);
 });

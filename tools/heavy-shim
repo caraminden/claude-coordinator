@@ -14,6 +14,8 @@ for d in "${dirs[@]}"; do
   d=${d:-.} # an empty entry is the current folder, as the shell reads it
   [ -f "$d/$name" ] && [ -x "$d/$name" ] || continue
   [ "$d/$name" -ef "$0" ] && continue
+  # Another turn's shim (a turn started inside a turn pins its own copy) would hand it back here forever (#1470).
+  case $(readlink -f "$d/$name") in */heavy-shim) continue ;; esac
   real=$d/$name
   break
 done

@@ -420,3 +420,46 @@ test('indexing sorts message ids, never message text', async () => {
     assert.doesNotMatch(plan, /TEMP B-TREE/, `a statement that reads message text must not sort:\n${sql}`);
   }
 });
+
+test('a cut that lands inside an emoji never sends a lone surrogate to the embedder', async () => {
+  const { store, A, a1 } = world(join(root, 'emoji.db'));
+  // USER_MAX is 1000: 999 letters then an emoji put the cut between its two halves.
+  turn(store, a1.id, 'Cara', `${'a'.repeat(999)}😀 and more`, 'Fine.');
+  const sent: string[] = [];
+  const strict: Embed = async (texts) => {
+    sent.push(...texts);
+    return texts.map(fakeVec);
+  };
+  while ((await store.memory.index(A.id, strict, 'fake')) > 0);
+  assert.ok(sent.some((t) => t.includes('aaaa')), 'the turn was embedded');
+  for (const t of sent) assert.equal(t, t.toWellFormed(), 'no lone surrogate');
+  store.db.close();
+});
+
+test('a chunk the embedder refuses with a 4xx is skipped once and indexing moves on; a 5xx still stops the pass', async () => {
+  const { store, A, a1, a2 } = world(join(root, 'refused.db'));
+  turn(store, a1.id, 'Cara', 'POISON chunk about kiwis', 'Kiwis.');
+  turn(store, a2.id, 'Josh', 'A fine question about limes', 'Limes.');
+  const refusing: Embed = async (texts) => {
+    if (texts.some((t) => t.includes('POISON'))) throw Object.assign(new Error('embedding service answered 400'), { status: 400 });
+    return texts.map(fakeVec);
+  };
+  const logged: unknown[][] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => void logged.push(a);
+  try {
+    for (let i = 0; i < 6; i++) await store.memory.index(A.id, refusing, 'fake', 8);
+  } finally {
+    console.error = orig;
+  }
+  const texts = (store.db.prepare("SELECT text FROM memory_chunks WHERE source_kind = 'turn'").all() as { text: string }[]).map((r) => r.text);
+  assert.ok(texts.some((t) => t.includes('limes')), 'the chunk after it is indexed');
+  assert.ok(!texts.some((t) => t.includes('POISON')), 'the refused one is not');
+  assert.equal(logged.filter((a) => String(a[0]).includes('skipped')).length, 1, 'logged once');
+  const down: Embed = async () => {
+    throw Object.assign(new Error('embedding service answered 503'), { status: 503 });
+  };
+  turn(store, a1.id, 'Cara', 'Another question about pears', 'Pears.');
+  await assert.rejects(store.memory.index(A.id, down, 'fake', 8), /503/);
+  store.db.close();
+});

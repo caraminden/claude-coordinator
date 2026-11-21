@@ -74,7 +74,12 @@ const PER_REQUEST = 2;
 const SEARCH_PAGE = 256;
 /** Messages that aren't a person's or a relay's ask: CI and server notices are noise. */
 const NOT_ASKS = new Set(['GitHub', 'System']);
-const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+/** Cut at n UTF-16 units, backing off one when that lands between an emoji's two halves: a lone surrogate makes llama-server answer 400. */
+const cut = (s: string, n: number) => {
+  if (s.length <= n) return s;
+  const hi = s.charCodeAt(n - 1);
+  return `${s.slice(0, hi >= 0xd800 && hi <= 0xdbff ? n - 1 : n)}…`;
+};
 
 /** Qwen3-Embedding wants an instruction on the query side only (its model card: 1-5% better retrieval). */
 const QUERY_INSTRUCT = 'Instruct: Given a question about past work, decisions and conversations in a software team\'s chats with its AI agents, retrieve the passages that answer it\nQuery: ';
@@ -85,10 +90,11 @@ export function llamaEmbed(url: string, timeoutMs = 120_000): Embed {
     const res = await fetch(`${url}/v1/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: query ? texts.map((t) => QUERY_INSTRUCT + t) : texts }),
+      // toWellFormed: a title or note can hold a lone surrogate too, and the server refuses invalid JSON.
+      body: JSON.stringify({ input: (query ? texts.map((t) => QUERY_INSTRUCT + t) : texts).map((t) => t.toWellFormed()) }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) throw new Error(`embedding service answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) throw Object.assign(new Error(`embedding service answered ${res.status}: ${(await res.text()).slice(0, 200)}`), { status: res.status });
     const data = (await res.json()) as { data?: { index: number; embedding: number[] }[] };
     if (!Array.isArray(data.data) || data.data.length !== texts.length) throw new Error('embedding service sent the wrong number of vectors');
     return [...data.data].sort((a, b) => a.index - b.index).map((d) => unit(Float32Array.from(d.embedding)));
@@ -111,6 +117,8 @@ export class Memory {
   // Each minion's indexed title-and-note text, by ticket id: read once, so a pass reads just the tickets table, not
   // every ticket chunk with its 4 KB vector each minute (#613).
   private ticketTexts: Map<number, string> | null = null;
+  // Chunks the embedder refused with a 4xx, by `kind:id`: left out of every later pass of this process (one retry after a restart).
+  private skipped = new Set<string>();
 
   constructor(store: Store) {
     this.store = store;
@@ -124,8 +132,10 @@ export class Memory {
    */
   async index(projectId: number, embed: Embed, model: string, max = 32, now = Date.now()): Promise<number> {
     const turns = this.pendingTurns(projectId, max, now);
-    const todo = turns.chunks;
-    if (todo.length < max) todo.push(...this.pendingTickets(projectId).slice(0, max - todo.length));
+    const key = (p: Pending) => `${p.source_kind}:${p.source_id}`;
+    const todo = turns.chunks.filter((p) => !this.skipped.has(key(p)));
+    await this.loadTicketTexts();
+    if (todo.length < max) todo.push(...this.pendingTickets(projectId).filter((p) => !this.skipped.has(key(p))).slice(0, max - todo.length));
     if (todo.length < max) todo.push(...this.staleRows(projectId, model, max - todo.length));
     const put = this.db.prepare(`INSERT INTO memory_chunks (project_id, ticket_id, person_id, source_kind, source_id, ts, text, vec, model)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -134,8 +144,26 @@ export class Memory {
     // Two texts a request: 8 full chunks took ~85 s of a whole core (#525), too near llamaEmbed's 120 s timeout on a busy box.
     for (let i = 0; i < todo.length; i += PER_REQUEST) {
       const part = todo.slice(i, i + PER_REQUEST);
-      const vecs = await embed(part.map((p) => p.text));
+      // A 4xx names one bad chunk: retry its pair one by one, skip the refused, go on. A 5xx or a dead connection still throws.
+      let vecs: Float32Array[];
+      try {
+        vecs = await embed(part.map((p) => p.text));
+      } catch (err: any) {
+        if (!(err?.status >= 400 && err.status < 500)) throw err;
+        vecs = [];
+        for (const p of part) {
+          try {
+            vecs.push((await embed([p.text]))[0]);
+          } catch (e: any) {
+            if (!(e?.status >= 400 && e.status < 500)) throw e;
+            this.skipped.add(key(p));
+            console.error(`Semantic memory: skipped ${key(p)} (ticket ${p.ticket_id}), the embedder refused it:`, e.message);
+            vecs.push(null as any);
+          }
+        }
+      }
       part.forEach((p, j) => {
+        if (!vecs[j]) return;
         put.run(p.project_id, p.ticket_id, p.person_id, p.source_kind, p.source_id, p.ts, p.text, new Uint8Array(vecs[j].buffer), model);
         if (p.source_kind === 'ticket') this.ticketTexts?.set(p.source_id, p.text);
       });
@@ -219,11 +247,24 @@ export class Memory {
     };
   }
 
+  /** The first read of every indexed ticket text, in pages of 100 ids with a yield between, so a boot's first pass never holds the loop for it (#1448: 2.1 s). */
+  private async loadTicketTexts(): Promise<void> {
+    if (this.ticketTexts) return;
+    const texts = new Map<number, string>();
+    const page = this.db.prepare("SELECT source_id, text FROM memory_chunks WHERE source_kind = 'ticket' AND source_id > ? ORDER BY source_id LIMIT 100");
+    for (let after = 0; ; ) {
+      const rows = page.all(after) as { source_id: number; text: string }[];
+      for (const r of rows) texts.set(r.source_id, r.text);
+      if (rows.length < 100) break;
+      after = rows[rows.length - 1].source_id;
+      await new Promise((r) => setImmediate(r));
+    }
+    this.ticketTexts ??= texts;
+  }
+
   /** Minions (not the Taskmaster) whose title and note aren't indexed as they read now. */
   private pendingTickets(projectId: number): Pending[] {
-    const indexed = (this.ticketTexts ??= new Map(
-      (this.db.prepare("SELECT source_id, text FROM memory_chunks WHERE source_kind = 'ticket'").all() as { source_id: number; text: string }[]).map((r) => [r.source_id, r.text]),
-    ));
+    const indexed = this.ticketTexts ?? new Map<number, string>();
     const rows = this.db.prepare(`SELECT id, number, title, note, person_id, updated_at FROM tickets
       WHERE project_id = ? AND kind = 'ticket' ORDER BY id`).all(projectId) as { id: number; number: number; title: string; note: string | null; person_id: number | null; updated_at: number }[];
     return rows

@@ -1196,11 +1196,11 @@ export function start(who) {
   meEl.replaceChildren(me, h('button', { class: 'secondary', onclick: logout }, 'Sign out'));
   connectStream();
   loadPrs();
-  // The top bar's Releases, CI and Status chips (#968, #1423), beside its usage meter: the ones phones see.
+  // The top bar's CI, Status and Releases chips (#968, #1423), beside its usage meter: the ones phones see.
   const meters = document.querySelector('.topbar .meters');
-  if (!meters.querySelector('.releases-chip')) meters.append(releasesChip());
   if (!meters.querySelector('.ci-chip[data-kind="ci"]')) meters.append(ciChip());
   if (!meters.querySelector('.status-chip')) meters.append(statusChip());
+  if (!meters.querySelector('.releases-chip')) meters.append(releasesChip());
   const routed = route();
   showRail();
   initAppSwitch(me);

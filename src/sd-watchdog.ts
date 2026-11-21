@@ -100,6 +100,7 @@ export function stopEvent(mark: StopMark | null, newCode: boolean, fallbackAt: n
   const [cause, words]: [StopCause, string] = !mark ? ['unknown', 'no stop was noted: the box restarted, or the stop hook (watchdog.conf) is not installed']
     : mark.result === 'watchdog' ? ['watchdog', "systemd's watchdog stopped the hung server"]
     : mark.result === 'oom-kill' ? ['out-of-memory', 'killed for memory, by systemd-oomd or the kernel']
+    : mark.result === 'timeout' ? ['killed', 'stop timed out after 10 s, systemd killed it']
     : mark.status === 'KILL' ? ['killed', 'SIGKILL from outside Citadel: most likely systemd-oomd']
     : mark.result === 'success' || mark.status === 'TERM' ? (newCode ? ['deploy', 'stopped for a ship: new code started'] : ['by-hand', 'stopped and started on the same code: by hand, or a deploy with nothing new'])
     : ['crash', 'the server exited on its own'];

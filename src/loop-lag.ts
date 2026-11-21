@@ -32,7 +32,7 @@ function frameName(f: CallFrame): string {
  * the innermost frame and then up to three of this repo's own frames outward, as "70% leaf < caller < handler".
  * Empty when no sample falls in the window.
  */
-export function namedStacks(profiles: Profile[], from: number, to: number, top = 3): string {
+export function namedStacks(profiles: Profile[], from: number, to: number, top = 3, outer = false): string {
   const counts = new Map<string, number>();
   let total = 0;
   for (const profile of profiles) {
@@ -41,21 +41,37 @@ export function namedStacks(profiles: Profile[], from: number, to: number, top =
     for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
     let t = profile.startTime;
     for (let i = 0; i < profile.samples.length; i++) {
-      t += profile.timeDeltas[i];
+      const delta = profile.timeDeltas[i];
+      t += delta;
       if (t < from) continue;
       if (t > to) break;
       const leaf = byId.get(profile.samples[i]);
       if (!leaf || leaf.callFrame.functionName === '(idle)') continue;
-      const names = [frameName(leaf.callFrame)];
-      for (let id = parent.get(leaf.id); id !== undefined && names.length < 4; id = parent.get(id)) {
-        const f = byId.get(id)!.callFrame;
-        if (!f.url.startsWith(ROOT) || /\/node_modules\//.test(f.url)) continue;
-        const name = frameName(f);
-        if (names.at(-1) !== name) names.push(name);
+      // Weighted by the time since the last sample: a thread stuck in the kernel (disk wait) takes no samples, and the
+      // first one after it names the frame that waited, so the gap counts for that frame instead of vanishing.
+      const weight = Math.max(1, delta);
+      let key: string;
+      if (outer) {
+        // The outermost frame of this repo that is a named function: the job, route or timer that was running.
+        let name = frameName(leaf.callFrame);
+        for (let id = parent.get(leaf.id); id !== undefined; id = parent.get(id)) {
+          const f = byId.get(id)!.callFrame;
+          if (!f.url.startsWith(ROOT) || /\/node_modules\//.test(f.url) || (f.functionName === '' && f.lineNumber === 0)) continue;
+          name = frameName(f);
+        }
+        key = name;
+      } else {
+        const names = [frameName(leaf.callFrame)];
+        for (let id = parent.get(leaf.id); id !== undefined && names.length < 4; id = parent.get(id)) {
+          const f = byId.get(id)!.callFrame;
+          if (!f.url.startsWith(ROOT) || /\/node_modules\//.test(f.url)) continue;
+          const name = frameName(f);
+          if (names.at(-1) !== name) names.push(name);
+        }
+        key = names.join(' < ');
       }
-      const key = names.join(' < ');
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-      total++;
+      counts.set(key, (counts.get(key) ?? 0) + weight);
+      total += weight;
     }
   }
   return [...counts].sort((a, b) => b[1] - a[1]).slice(0, top).map(([key, n]) => `${Math.round((100 * n) / total)}% ${key}`).join('; ');
@@ -348,7 +364,8 @@ export function watchLoopLag(log: (text: string) => void = console.warn, every =
     const to = Number(now / 1000n);
     void Promise.all([sampler?.take() ?? [], held >= 2000 && files.length ? openersOf(files) : []]).then(([ps, who]) => {
       const ran = namedStacks(ps, from, to);
-      log(`${line}${ran ? ` Running: ${ran}` : ''}${disk}${who.length ? ` Also open on the database: ${who.join('; ')}.` : ''}`);
+      const inWork = namedStacks(ps, from, to, 3, true);
+      log(`${line}${inWork ? ` In: ${inWork}.` : ''}${ran ? ` Running: ${ran}` : ''}${disk}${who.length ? ` Also open on the database: ${who.join('; ')}.` : ''}`);
     });
   }, every).unref();
   return {

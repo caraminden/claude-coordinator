@@ -121,6 +121,11 @@ export function stallCauseOf(detail: string): string | null {
   return /Cause: ([a-zA-Z ]+?) \(/.exec(detail)?.[1] ?? null;
 }
 
+/** "…In: 80% handler (src/x.ts:4). Running: …" → "80% handler (src/x.ts:4)": the work that ran, outermost frame; null on older lines. */
+export function stallWorkOf(detail: string): string | null {
+  return /\bIn: (.*?)\. (?:Running:|Disk:|Also open)/.exec(detail)?.[1]?.split('; ')[0] ?? null;
+}
+
 /** "The event loop was held for 2.3 s: …" → 2.3; null when the line doesn't say. */
 export function stallSeconds(detail: string): number | null {
   const m = /held for ([\d.]+) ?(ms|s)\b/.exec(detail);
@@ -508,7 +513,7 @@ export class StatusPage {
       looks,
       canInvestigate: ciVisible,
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
-      stalls: { counts: days.map((d) => stallCount[d]), afterBoot: days.map((d) => stallBoot[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
+      stalls: { counts: days.map((d) => stallCount[d]), afterBoot: days.map((d) => stallBoot[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), work: stallWorkOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
       host: { series, cache: [...cacheHours.values()], latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,

@@ -74,7 +74,7 @@ test('namedStacks counts only the window, leaf first then the repo\'s own caller
   assert.equal(namedStacks([profile], 2000, 3000), '', 'no sample in the window');
   // A stall across the sampler's roll is read from both profiles, the roll's and the next.
   const next = { ...profile, startTime: 1050, samples: [4], timeDeltas: [5] };
-  assert.equal(namedStacks([profile, next], 1015, 1060), '60% all (node:sqlite) < listTickets (src/db.ts:1201) < handler (src/routes/projects.ts:411); 40% (garbage collector)'); // 1020-1050 and 1055
+  assert.equal(namedStacks([profile, next], 1015, 1060), '56% all (node:sqlite) < listTickets (src/db.ts:1201) < handler (src/routes/projects.ts:411); 44% (garbage collector)'); // weighted by time: 25 of 45
 });
 
 test('ioStalledUs reads the box\'s full I/O stall from PSI, and null without it (#622)', () => {
@@ -172,4 +172,14 @@ test('a hold of the main thread is sampled from /proc by a worker: the line name
   } finally {
     watch.stop();
   }
+});
+
+test('namedStacks weights by time, so a gap with no samples counts for the frame after it, and outer names the job', () => {
+  const cf = (functionName: string, lineNumber: number) => ({ functionName, url: new URL('../src/x.ts', import.meta.url).href, lineNumber });
+  const profile = {
+    nodes: [{ id: 1, callFrame: cf('', 0), children: [2] }, { id: 2, callFrame: cf('job', 4), children: [3, 4] }, { id: 3, callFrame: cf('fast', 9) }, { id: 4, callFrame: cf('slowRead', 19) }],
+    startTime: 0, samples: [3, 4], timeDeltas: [10_000, 90_000],
+  };
+  assert.equal(namedStacks([profile], 0, 100_000), '90% slowRead (src/x.ts:20) < job (src/x.ts:5) < (anonymous) (src/x.ts:1); 10% fast (src/x.ts:10) < job (src/x.ts:5) < (anonymous) (src/x.ts:1)');
+  assert.equal(namedStacks([profile], 0, 100_000, 3, true), '100% job (src/x.ts:5)');
 });

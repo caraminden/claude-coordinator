@@ -130,3 +130,11 @@ test('stopEvent names each cause from systemd\'s words; only a ship and a stop b
   assert.deepEqual(stopEvent(null, false, 9), { at: 9, cause: 'unknown', detail: 'unknown: no stop was noted: the box restarted, or the stop hook (watchdog.conf) is not installed' });
   assert.equal(stopEvent(m('oom-kill', 'killed', 'KILL'), false, 9).detail, 'out-of-memory: killed for memory, by systemd-oomd or the kernel (systemd: oom-kill, killed, KILL)');
 });
+
+test('a stop that systemd ended on its stop timeout says so, not "systemd-oomd"', () => {
+  const e = stopEvent({ at: 1, result: 'timeout', code: 'killed', status: 'KILL' }, false, 9);
+  assert.equal(e.cause, 'killed');
+  assert.match(e.detail, /stop timed out after 10 s, systemd killed it/);
+  assert.doesNotMatch(e.detail, /oomd/);
+  assert.match(stopEvent({ at: 1, result: 'signal', code: 'killed', status: 'KILL' }, false, 9).detail, /oomd/);
+});

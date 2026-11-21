@@ -25,14 +25,17 @@ const OTHER: Record<string, string> = {
   contextSizes: 'set again by the turn\'s next usage line',
   contextShown: 'a broadcast throttle',
   mainModels: 'the context window keeps its last turn\'s value until the next init event',
+  strayWaits: 'a poll on a turn wrapper nothing here follows; liveTurn finds the stray turn folder again after a restart (#1464)',
 };
+/** Named before the branch that adds them ships, so the two can ride one ship train in either order; that branch drops it here. */
+const IN_FLIGHT = new Set(['strayWaits']);
 
 test('every per-minion Map or Set in the runner is saved with its turn, rebuilt, or dropped on purpose', () => {
   const fields = [...src.matchAll(/^\s+(?:private |readonly )*(\w+) = new (?:Map|Set)<number\b/gm)].map((m) => m[1]);
   assert.ok(fields.length > 10, `found the fields (${fields.join(', ')})`);
   const unnamed = fields.filter((f) => !(f in SAVED) && !(f in OTHER));
   assert.deepEqual(unnamed, [], 'a per-minion Map or Set a restart would lose: add it to TurnState through saveTurn and restore it in recover(), or say here why it may go');
-  const stale = [...Object.keys(SAVED), ...Object.keys(OTHER)].filter((f) => !fields.includes(f));
+  const stale = [...Object.keys(SAVED), ...Object.keys(OTHER)].filter((f) => !fields.includes(f) && !IN_FLIGHT.has(f));
   assert.deepEqual(stale, [], 'names here no runner field has any more');
   const turnState = /interface TurnState \{([\s\S]*?)\n\}/.exec(src)![1];
   for (const [field, key] of Object.entries(SAVED)) assert.match(turnState, new RegExp(`^\\s+${key}\\?:`, 'm'), `TurnState has ${key} (for ${field})`);

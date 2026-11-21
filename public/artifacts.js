@@ -1,7 +1,6 @@
 // Artifacts and files: the shelf, the browser, and viewers for artifacts and linked or shared files.
 import { ago, api, baseName, fileExt, fileKind, fileUrl, fileHref, formatSize, h, icon, isCoordinator, isLocalPath, joinPath, loadPanelState, me, savePanelState, sharedHref, sharedUrl, shortPath, taskmasterName, threadHref, threadLabel, view } from './base.js';
 import { followChat, markdownDoc, reloadWhenIdle, routeSeq, scrollToBottom, sending, setSending } from './core.js';
-import { addBriefButtons } from './briefstart.js';
 import { attachBridge, openWithBridge } from './bridge-host.js';
 import { attachImage, loadDraft, saveDraft, sendableImage } from './composer.js';
 import { annotator, canvasBlob } from './annotate.js';
@@ -208,7 +207,7 @@ export function artifactViewer(a) {
     const bridge = { open: { artifact: a.id }, owner: threadName(a) };
     // The head reads the list's copy of the artifact, not this one.
     const onMissing = () => { a.missing = 1; const listed = view.artifacts.find((x) => x.id === a.id); if (listed) listed.missing = 1; comment.remove(); renderArtifactHead(); };
-    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, brief: { projectId: a.project_id, path: a.abs ?? a.path, name: a.name }, bridge, onMissing });
+    renderFileBody(body, { ...a, src: rawUrl(a), ticketId: a.ticket_id, bridge, onMissing });
     section.append(comment);
   }
   return section;
@@ -282,7 +281,7 @@ function openViewer(ticket, file, inPlace) {
     // A page's Send goes to the chat beside it.
     // After a send the viewer closes on the chat it went to (a page can opt out: send's keepOpen).
     const bridge = { ...viewerBridge(ticket, file), afterSend: () => { if (viewer?.file === file) leaveViewer(); } };
-    if (!showMedia(ticket, file)) renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, brief: { projectId: ticket.project_id, path: file.abs ?? file.display_path, name: file.name }, bridge, onMissing: (message) => { file.missing = message; renderViewerBar(); } });
+    if (!showMedia(ticket, file)) renderFileBody(viewer.stage, { ...file, src: `${fileUrl(ticket.id, file.path)}&v=${file.mtime}`, ticketId: ticket.id, bridge, onMissing: (message) => { file.missing = message; renderViewerBar(); } });
   }
   renderViewerBar();
 }
@@ -538,7 +537,7 @@ export function sharedViewer(file) {
   const comment = !file.missing && file.kind === 'html' && view.coordinator ? commentBox(view.coordinator, file.abs, file.name, body) : null;
   const bridge = sharedBridge(file);
   const onMissing = (message) => { file.missing = message; comment?.remove(); renderSharedHead(); };
-  if (!file.missing) renderFileBody(body, { ...file, onMissing, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge });
+  if (!file.missing) renderFileBody(body, { ...file, onMissing, src: `${sharedUrl(view.projectId, file.path)}&v=${file.mtime}`, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), bridge });
   return h('section', { class: 'artifacts-main' }, h('div', { class: 'ticket-head', id: 'shared-head' }), body, comment ?? '');
 }
 
@@ -599,10 +598,9 @@ function fillWindow(frame) {
 
 /**
  * Show a file in `body` by its kind. Markdown's relative image links load from next to it, its links
- * to files beside it open them (`hrefFor`), and its briefs get Start buttons (`brief` says where the
- * file is, see addBriefButtons).
+ * to files beside it open them (`hrefFor`).
  */
-function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, bridge, onMissing, urlFor = (p) => fileUrl(ticketId, p), hrefFor = (p) => fileHref(ticketId, p) }) {
+function renderFileBody(body, { kind, src, size, name, path, ticketId, bridge, onMissing, urlFor = (p) => fileUrl(ticketId, p), hrefFor = (p) => fileHref(ticketId, p) }) {
   // The full-screen viewer reuses its stage: a text answer for a file opened before the one showing is dropped.
   const load = (body.textLoad = {});
   if (kind === 'image') {
@@ -646,7 +644,6 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
       }
       const linkHref = (href) => hrefFor(joinPath(dir, href));
       const doc = kind === 'markdown' && markdownDoc(text, { imageUrl, linkHref });
-      if (doc && brief) addBriefButtons(doc, text, brief);
       // Plain text keeps its URLs clickable too (#440): linkify escapes everything else.
       const pre = h('pre', { class: 'artifact-text' });
       if (!doc) pre.innerHTML = linkify(shown);
@@ -659,8 +656,8 @@ function renderFileBody(body, { kind, src, size, name, path, ticketId, brief, br
 export function previewBody(file, src, onMissing) {
   const body = h('div', { class: 'artifact-body' });
   if (file.missing) body.append(h('p', { class: 'muted' }, 'This file no longer exists. Unpin it to take it off the list.'));
-  else if (file.id) renderFileBody(body, { ...file, src, ticketId: file.ticket_id, brief: { projectId: file.project_id, path: file.abs ?? file.path, name: file.name }, bridge: { open: { artifact: file.id }, owner: threadName(file) }, onMissing });
-  else renderFileBody(body, { ...file, src, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), brief: { projectId: view.projectId, path: file.abs ?? file.display_path, name: file.name }, bridge: sharedBridge(file), onMissing });
+  else if (file.id) renderFileBody(body, { ...file, src, ticketId: file.ticket_id, bridge: { open: { artifact: file.id }, owner: threadName(file) }, onMissing });
+  else renderFileBody(body, { ...file, src, urlFor: (p) => sharedUrl(view.projectId, p), hrefFor: (p) => sharedHref(view.projectId, p), bridge: sharedBridge(file), onMissing });
   return body;
 }
 

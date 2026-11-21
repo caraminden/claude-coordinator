@@ -16,8 +16,8 @@ const STAYS = `attachState autoCheckpoint closedAtFromNotes deleteSetting dropEa
 /** Areas not split out yet. A step that moves an area takes its names off; nothing is added here. */
 const NOT_MOVED_YET = `accountSpend addContraptionDeploy addContraptionError addEvent addFlakeEvents addFlakeFix addGithubSeen addHealthEvent
   addHostSample addMember addOpenrouterCall addRelease addStepTimes adoptOwnerless appDeploysSince appErrorsSince
-  appInstructionHistory appInstructions appTurnsSince artifactData backfillTurns briefStarts bugBriefs canSee
-  cardEventId chatTextEvents ciFiles claimBrief contraptionByKeyHash contraptionEnabled contraptionErrors
+  appInstructionHistory appInstructions appTurnsSince artifactData backfillTurns bugBriefs canSee
+  cardEventId chatTextEvents ciFiles contraptionByKeyHash contraptionEnabled contraptionErrors
   contraptionReleases contraptionSession contraptionSessions contraptionsFor contraptionTurnsSince contraptionUsers
   countReleases createContraption createProject createUser dailyCosts deleteCiFile deleteClaudeState
   deleteContraptionSession deleteCredential deleteProject deleteRepoCollaborator deleteSecret deleteTurnAudit deleteUser
@@ -37,7 +37,7 @@ const NOT_MOVED_YET = `accountSpend addContraptionDeploy addContraptionError add
   saveFates schemeTurnAudit seenAt seenItems seenTimes serverLoginOwner setAppInstructions setArtifactPinned
   setContraptionUser setEventData setListOrder setOpenrouterCallPath setPersonalInstructions setPersonNote
   setProjectHidden setProjectInstructions setProjectRepoDir setProjectSettings setProjectUpstream
-  setSeenItems setSharedPin setTicketPinned settleBrief setTurnVerdict sharedPins shipNotesSince shippedNotes
+  setSeenItems setSharedPin setTicketPinned setTurnVerdict sharedPins shipNotesSince shippedNotes
   shippedSince spendByPayer spendRows startContraptionTurn stepRatio sweepOpenrouterCalls sweepTurnAudit syncArtifacts
   ticketCost turnAudit turnMarks turnOutcomes turnStart updateContraption updateFlakeFix updateUser visibleProjects
   warmCardRows writeArtifactData`;

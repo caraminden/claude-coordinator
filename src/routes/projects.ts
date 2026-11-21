@@ -1276,11 +1276,7 @@ export const projectRoutes: Route[] = [
       // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
       const owner = body.build_owner === true;
       if (owner && !build && !given('build')) throw new HttpError(400, 'build_owner needs a build: pass build (the scheme\'s highest build number plus one for a new one)');
-      // Started from a brief in a file (#129): one minion per brief, so a second start is refused.
-      const brief = body.brief == null ? null : { path: str(body.brief.path, 'Brief path', 1000), heading: typeof body.brief.heading === 'string' ? body.brief.heading.trim().slice(0, 500) : '' };
-      if (brief && !store.claimBrief(project.id, brief.path, brief.heading, session.name)) throw new HttpError(409, 'That brief has been started already');
-      const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name)
-        .catch((err) => { if (brief) store.settleBrief(project.id, brief.path, brief.heading, null); throw err; });
+      const { id, notes } = await app.newMinion(project, { title, props, model, effort, build }, session.name);
       // Its first turn runs for whoever asked: the person, or the person of the Taskmaster's turn that made it.
       store.addPick(id, model, effort, pickBy, because);
       store.updateTicket(id, { picked_because: because, person_id: caller ? caller.person_id : session.uid ?? null, parent: parent?.number ?? null, ...(workflow ? { workflow } : {}), ...(plugins ? { plugin_dirs: plugins } : {}) });
@@ -1290,15 +1286,10 @@ export const projectRoutes: Route[] = [
       // And it is that turn's asker's ask (#255), so its messages back count as theirs.
       const asker = caller && store.turnAsker(caller.id);
       if (asker && asker !== caller!.person_id) store.setSetting(askerKey(id), asker);
-      if (brief) {
-        store.settleBrief(project.id, brief.path, brief.heading, id);
-        const coordinator = store.ownerCoordinator(store.getTicket(id)!);
-        if (coordinator) runner.emit(coordinator.id, 'note', { text: `${session.name} started #${store.getTicket(id)!.number} from ${brief.heading || 'the handoff'} in ${basename(brief.path)}` });
-      }
-      // The ideas ledger (#1150): a minion started from a handoff (Start, or a brief naming one) marks its idea started, a chained one too.
+      // The ideas ledger (#1150): a minion started from a handoff (a brief naming one) marks its idea started, a chained one too.
       try {
         const shared = projectSharedDir(app.dataDir, project.id);
-        const rel = brief?.path.startsWith(shared + sep) ? relative(shared, brief.path).split(sep).join('/') : handoffIn(message, shared);
+        const rel = handoffIn(message, shared);
         if (rel) store.ideas.linkHandoff(project.id, shared, rel, store.getTicket(id)!);
       } catch (e) { console.error(`ideas: linking #${id}: ${(e as Error).message}`); }
       // A split scheme's other Taskmasters read it in their next turn's digest (#919).
@@ -1322,22 +1313,15 @@ export const projectRoutes: Route[] = [
         notes.push(flagNote(repeat, tier));
         runner.emit(id, 'note', { text: `Third-fix flag: looks like ${repeat.map((m) => `#${m.number}`).join(', ')}, so its brief starts with "diagnose first"${tier ? ` and it runs on ${tier.to}` : ''}.` });
       }
-      // A brief an agent wrote (the Taskmaster's, or a handoff a person starts) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
-      // A person's Start already carries its brief's text, and naming the file must not let another section of it count.
-      if (caller || brief) {
-        const warning = briefWarning(brief ? message : `${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`);
+      // A brief an agent wrote (the Taskmaster's) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
+      if (caller) {
+        const warning = briefWarning(`${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`);
         if (warning) notes.push(warning);
       }
       // The Taskmaster's create_ticket checks for look-alikes before it creates (#488); startChecks covers the rest.
       void startChecks(app, project.id, id, session.name, caller, `${title}\n${message}`);
       return json(res, 201, { ...ticketView(app, id), notes });
     },
-  },
-
-  // Which briefs in a file (?path=, its absolute path) have been started, and as which minion (#129).
-  {
-    method: 'GET', path: '/api/projects/:project/briefs', who: ['person'],
-    handler: ({ res, url, app, project }) => json(res, 200, app.store.briefStarts(project.id, url.searchParams.get('path') ?? '')),
   },
 
   // The scheme's Claude Code memory notes, read and written in place (the Orders → Memory page); a PUT with index: true adds a note's line to MEMORY.md. Not /memory, which is search over chats.

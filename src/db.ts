@@ -2899,33 +2899,6 @@ export class Store {
     return { text, by, at };
   }
 
-  /** The briefs in one file that have been started as minions, with the number of each one's minion. */
-  briefStarts(projectId: number, path: string): { heading: string; number: number }[] {
-    return this.db
-      .prepare('SELECT b.heading, t.number FROM brief_starts b JOIN tickets t ON t.id = b.ticket_id WHERE b.project_id = ? AND b.path = ?')
-      .all(projectId, path) as { heading: string; number: number }[];
-  }
-
-  /**
-   * Claim a brief before its minion is made, so two taps can't start it twice: false if it was started
-   * already or is being started. A claim left by a start that never finished (a restart mid-way) lapses.
-   */
-  claimBrief(projectId: number, path: string, heading: string, by: string): boolean {
-    const now = Date.now();
-    this.db.prepare('DELETE FROM brief_starts WHERE ticket_id IS NULL AND started_at < ?').run(now - 5 * 60_000);
-    this.db.prepare('DELETE FROM brief_starts WHERE ticket_id IS NOT NULL AND ticket_id NOT IN (SELECT id FROM tickets)').run();
-    const r = this.db
-      .prepare('INSERT OR IGNORE INTO brief_starts (project_id, path, heading, ticket_id, started_by, started_at) VALUES (?, ?, ?, NULL, ?, ?)')
-      .run(projectId, path, heading, by, now);
-    return r.changes > 0;
-  }
-
-  /** Settle a claim: the minion it made (a ticket id), or null to drop it because the start failed. */
-  settleBrief(projectId: number, path: string, heading: string, ticketId: number | null) {
-    if (ticketId === null) this.db.prepare('DELETE FROM brief_starts WHERE project_id = ? AND path = ? AND heading = ? AND ticket_id IS NULL').run(projectId, path, heading);
-    else this.db.prepare('UPDATE brief_starts SET ticket_id = ? WHERE project_id = ? AND path = ? AND heading = ?').run(ticketId, projectId, path, heading);
-  }
-
   /** Whether `name` has ever written or acted anywhere (#1151's welcome): recap leaves 0 for "never", so that doesn't count. */
   hasActed(name: string): boolean {
     return !!this.db.prepare('SELECT 1 FROM last_actions WHERE name = ? AND at > 0 LIMIT 1').get(name);

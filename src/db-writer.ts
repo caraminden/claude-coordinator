@@ -19,7 +19,7 @@ export const WRITES = [
   'endContraptionTurn', 'putTurnAudit', 'setTurnVerdict', 'sweepTurnAudit', 'deleteTurnAudit', 'setProjectHidden', 'setListOrder', 'setSeenItems', 'deleteProject', 'setTicketDir', 'deleteTicket',
   'updateTicketQuietly', 'updateTicket', 'setLastActivity', 'setEventData', 'setArtifactPinned', 'deleteCiFile',
   'publishCiFile', 'recordApkPublish', 'setSharedPin', 'writeArtifactData', 'deleteClaudeState', 'setTicketPinned',
-  'settleBrief', 'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting', 'setSettings',
+  'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting', 'setSettings',
   'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'updateMachine', 'updateMachineJob', 'allowJobKind', 'setMachineProjects', 'deleteMachine', 'saveView',
   'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'savePushDevice', 'deletePushDevice', 'insertEvent', 'putFates',
   'touch', 'leaveTouched', 'noteDigest', 'addPick', 'addContraptionError', 'recordGrunts', 'addHostSample', 'addFlakeEvents', 'updateFlakeFix',
@@ -29,7 +29,7 @@ export const WRITES = [
 /** Writes that return a value: they run on the server's thread after the queue, and a write they make inside runs with them. */
 export const VALUE_WRITES = [
   'createProject', 'renameProject', 'createUser', 'addOpenrouterCall', 'createContraption', 'deleteContraptionSession',
-  'startContraptionTurn', 'createTicket', 'putCiFile', 'syncArtifacts', 'markSeen', 'setPersonNote', 'claimBrief', 'recap',
+  'startContraptionTurn', 'createTicket', 'putCiFile', 'syncArtifacts', 'markSeen', 'setPersonNote', 'recap',
   'rewriteClaudeEvents', 'recordTurn', 'backfillTurns', 'addRelease', 'addContraptionDeploy', 'createMachine', 'addMachineJob', 'deleteView', 'addFlakeFix',
   // CI numbers: the step-up check reads them back at once, so they never wait in the queue behind a stalled disk.
   'putCiNumbers', 'addCiNumberStep', 'pruneCiNumbers',

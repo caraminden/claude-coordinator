@@ -50,17 +50,6 @@ test('pinned, open-named and part-started files stay', () => {
   assert.ok(existsSync(join(shared, 'handoffs/pin.md')));
 });
 
-test('started-brief rows follow a moved file', () => {
-  const { dir, store, project, shared, file, minion } = setup();
-  file('a.md');
-  const t = minion('x', 'handoffs/a.md', 'closed');
-  store.claimBrief(project, join(shared, 'handoffs/a.md'), '', 'Cara');
-  store.settleBrief(project, join(shared, 'handoffs/a.md'), '', t.id);
-  tidyForClosed(store, dir, project, 'handoffs/a.md');
-  assert.deepEqual(store.briefStarts(project, join(shared, 'handoffs/shipped/a.md')).map((s) => s.number), [t.number]);
-  reconcileMoved(store, dir, project);
-});
-
 test('the sweep plans by closed and open minions and lists old unmatched files', () => {
   const { store, project, shared, file, minion } = setup();
   file('done.md'); file('live.md'); file('old.md'); file('new.md');

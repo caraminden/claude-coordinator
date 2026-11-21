@@ -48,7 +48,7 @@ repeat the file. The check below reads a handoff the message names.
 
 ## Writing a handoff
 
-A handoff is a brief kept in a file so a fresh minion, or a person's Start button, can begin from it.
+A handoff is a brief kept in a file so a fresh minion can begin from it.
 
 - In the shared folder's `handoffs/`, one file per minion, titled `# Handoff: <goal>`.
 - The eight parts as its sections, in the same order. Part 2 is the pick that started it: `**Pick

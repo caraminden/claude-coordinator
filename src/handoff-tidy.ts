@@ -33,9 +33,7 @@ export function whyKeep(store: Store, projectId: number, shared: string, rel: st
   try { src = readFileSync(join(shared, rel), 'utf8'); } catch { return 'unreadable'; }
   const headed = findBriefs(src, basename(rel)).filter((b: { heading: string }) => b.heading);
   if (headed.length > 1) {
-    const started = new Set(store.briefStarts(projectId, join(shared, rel)).map((s) => s.heading));
-    const left = headed.filter((b: { heading: string }) => !started.has(b.heading));
-    if (left.length) return `${left.length} of ${headed.length} briefs unstarted`;
+    return `${headed.length} of ${headed.length} briefs unstarted`;
   }
   return null;
 }

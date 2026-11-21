@@ -47,15 +47,22 @@ namespace Citadel.Desktop
         /// </summary>
         public static readonly TimeSpan Probation = TimeSpan.FromMinutes(10);
 
+        /// <summary>How long a new build has to say it started (Peek Auras' START_GRACE). A clean exit this soon proves nothing: it may have handed off to a copy already running.</summary>
+        public static readonly TimeSpan Grace = TimeSpan.FromSeconds(30);
+
         public static bool OnProbation(State s) { return s.Current != null && s.Probation == s.Current.Id; }
 
         /// <summary>The newest build known to work here: the current one, unless it is on probation.</summary>
         public static Build LastGood(State s) { return OnProbation(s) ? s.Previous : s.Current; }
 
-        /// <summary>What a build on probation has shown after running `ran`: exitCode is null while it still runs.</summary>
+        /// <summary>
+        /// What a build on probation has shown: `ran` is how long it ran (to its exit, when it exited), exitCode is null while
+        /// it still runs. Running is also the verdict for a clean exit inside Grace: it stays on probation, watched again next start.
+        /// </summary>
         public static Verdict Judge(TimeSpan ran, int? exitCode)
         {
-            if (exitCode == null) return ran >= Probation ? Verdict.Passed : Verdict.Running;
+            if (ran >= Probation) return Verdict.Passed;
+            if (exitCode == null || (exitCode == 0 && ran < Grace)) return Verdict.Running;
             return exitCode == 0 ? Verdict.Passed : Verdict.Crashed;
         }
 

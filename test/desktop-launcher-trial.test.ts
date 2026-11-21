@@ -29,7 +29,7 @@ test('the launcher\'s trial rules pass their tests', { skip, timeout: 240_000 },
     const fails = out.split('\n').filter((l) => l.startsWith('FAIL ') || /error CS\d+/.test(l));
     assert.deepEqual(fails, [], out.slice(-3000));
     assert.match(out, /^all passed$/m, out.slice(-3000));
-    assert.ok((out.match(/^ok /gm) ?? []).length >= 13, 'every test ran');
+    assert.ok((out.match(/^ok /gm) ?? []).length >= 15, 'every test ran');
     assert.equal(r.status, 0);
   } finally {
     rmSync(tmp, { recursive: true, force: true });

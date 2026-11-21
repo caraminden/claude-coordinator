@@ -60,6 +60,19 @@ static class TrialTests
             Is(Trial.Judge(TimeSpan.FromMinutes(1), 1), Verdict.Crashed, "exit 1 a minute in");
             Is(Trial.Judge(TimeSpan.FromMinutes(1), unchecked((int)0xC0000005)), Verdict.Crashed, "access violation a minute in");
         });
+        Test("a clean exit inside the start grace proves nothing (it may have handed off to a copy already running): still on probation", () =>
+        {
+            Is(Trial.Grace, TimeSpan.FromSeconds(30), "grace");
+            Is(Trial.Judge(TimeSpan.FromSeconds(2), 0), Verdict.Running, "exit 0 two seconds in");
+            Is(Trial.Judge(TimeSpan.FromSeconds(29), 0), Verdict.Running, "exit 0 just inside the grace");
+            Is(Trial.Judge(TimeSpan.FromSeconds(30), 0), Verdict.Passed, "exit 0 at the end of the grace");
+            Is(Trial.Judge(TimeSpan.FromSeconds(2), 1), Verdict.Crashed, "exit 1 two seconds in is still a crash");
+        });
+        Test("a build judged by when it exited: a non-zero exit after ten minutes of running isn't a probation crash", () =>
+        {
+            Is(Trial.Judge(TimeSpan.FromMinutes(10), 1), Verdict.Passed, "exit 1 at ten minutes");
+            Is(Trial.Judge(TimeSpan.FromMinutes(30), unchecked((int)0xC0000005)), Verdict.Passed, "crash half an hour in");
+        });
         Test("passing probation makes the build good: the next new build keeps it as the one to go back to", () =>
         {
             var s = Waiting();

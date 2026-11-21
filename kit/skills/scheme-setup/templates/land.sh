@@ -384,7 +384,7 @@ QUEUE_TICKET='' Q_DIR='' Q_N='' Q_ME='' Q_LABEL='' Q_AHEAD=0 Q_PRED='' Q_PREDNAM
 # made a line of twelve cost most of a core (Citadel #1545).
 queue_proc() {
   local stat='' r='' into=${2:-}
-  IFS= read -r -d '' stat 2>/dev/null <"/proc/$1/stat"
+  IFS= read -r -d '' stat 2>/dev/null <"/proc/$1/stat" || : # read -d '' ends at EOF with status 1, so never alone under set -e
   if [ -n "$stat" ]; then
     stat=${stat##*) } # the command's name may hold spaces
     # shellcheck disable=SC2086
@@ -399,13 +399,13 @@ queue_proc() {
 # argument: into that variable, as queue_proc.
 queue_state() {
   local stat='' cg='' x
-  IFS= read -r -d '' stat 2>/dev/null <"/proc/$1/stat"
+  IFS= read -r -d '' stat 2>/dev/null <"/proc/$1/stat" || :
   stat=${stat##*) }
   stat=${stat%% *}
   # A frozen cgroup (systemctl freeze, a paused container) leaves its processes in state S: its cgroup.events says it.
   if [ -n "$stat" ] && [[ $stat != [Tt] ]]; then
-    while IFS= read -r x; do [[ $x != 0::* ]] || { cg=${x#0::}; break; }; done 2>/dev/null <"/proc/$1/cgroup"
-    [ -z "$cg" ] || while IFS= read -r x; do [ "$x" != 'frozen 1' ] || stat=T; done 2>/dev/null <"${LAND_QUEUE_CGROUP:-/sys/fs/cgroup}$cg/cgroup.events"
+    while IFS= read -r x; do [[ $x != 0::* ]] || { cg=${x#0::}; break; }; done 2>/dev/null <"/proc/$1/cgroup" || :
+    [ -z "$cg" ] || while IFS= read -r x; do [ "$x" != 'frozen 1' ] || stat=T; done 2>/dev/null <"${LAND_QUEUE_CGROUP:-/sys/fs/cgroup}$cg/cgroup.events" || :
   fi
   if [ -n "${2:-}" ]; then printf -v "$2" %s "$stat"; elif [ -n "$stat" ]; then echo "$stat"; fi
 }

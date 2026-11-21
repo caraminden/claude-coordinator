@@ -82,8 +82,9 @@ test('a landing waiting in line rechecks each time main moves, and leaves the li
 const queueLib = join(import.meta.dirname, '..', 'tools', 'deploy-queue.sh');
 // `old`: a landing from a branch before #1002, whose queue_lock waits for every lower ticket and ignores .order.
 const before1002 = `queue_order() { QUEUE_RANK=() QUEUE_ORDER_BY=""; }; queue_write() { printf '%s\\n' "$2" "$3" "$4" "$5" >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"; }; `;
-function waiter(state: string, label: string, work: string, extra: Record<string, string> = {}, old = false) {
-  const child = spawn('bash', ['-c', `. "$0"; ${old ? before1002 : ''}queue_lock "$1" "$2" || exit 1; echo "$2" >>"$1/order"; eval "$3"; queue_done ok`, queueLib, state, label, work], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...extra } });
+// `pre`: shell run before the lib loads (a trace, a stub). queue_lock's own exit code passes through.
+function waiter(state: string, label: string, work: string, extra: Record<string, string> = {}, old = false, pre = '') {
+  const child = spawn('bash', ['-c', `${pre}. "$0"; ${old ? before1002 : ''}queue_lock "$1" "$2" || exit $?; echo "$2" >>"$1/order"; eval "$3"; queue_done ok`, queueLib, state, label, work], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', ...extra } });
   let stderr = '';
   child.stderr!.on('data', (d) => (stderr += d));
   const exit = new Promise<number | null>((ok) => child.on('close', ok));
@@ -466,15 +467,9 @@ test('the waiters take the lock in the order .order sets, a later one goes to th
 });
 
 // Waiters two or more back look every DEPLOY_QUEUE_NAP s, not every DEPLOY_QUEUE_POLL (#1545): twelve of them looking
-// every second, with a few processes per ticket each look, cost most of a core. $1: the lib's caller-side extras.
-function napper(state: string, label: string, pre = '', extra: Record<string, string> = {}) {
-  const child = spawn('bash', ['-c', `${pre}. "$0"; queue_lock "$1" "$2" || exit $?; echo "$2" >>"$1/order"; queue_done ok`, queueLib, state, label], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, DEPLOY_QUEUE_POLL: '0.05', DEPLOY_QUEUE_NAP: '4', ...extra } });
-  let stderr = '';
-  child.stderr!.on('data', (d) => (stderr += d));
-  const exit = new Promise<number | null>((ok) => child.on('close', ok));
-  return { child, exit, stderr: () => stderr };
-}
-test('a waiter further back naps between looks and starts no process but its nap, yet still acts on a reorder, a dead ticket and its wait check within a nap, and the next in line takes its turn at once (#1545)', { timeout: 60_000 }, async () => {
+// every second, with a few processes per ticket each look, cost most of a core.
+const napper = (state: string, label: string, pre = '', extra: Record<string, string> = {}) => waiter(state, label, '', { DEPLOY_QUEUE_NAP: '4', ...extra }, false, pre);
+test('a waiter further back naps between looks and runs no subshell in a look, yet still acts on a reorder, a dead ticket and its wait check within a nap, and the next in line takes its turn at once (#1545)', { timeout: 60_000 }, async () => {
   const state = queueState();
   const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
   const ws: ReturnType<typeof napper>[] = [];

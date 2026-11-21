@@ -51,7 +51,7 @@ export function emptyState(title, line, { mark = '✓', tone = 'ok' } = {}) {
 
 /**
  * A row of tabs (div.cui-tabs, role="tablist"). `items` is [key, label | Node] pairs; `onSelect(key)` runs on every click
- * (the picked tab's too) and on an arrow key. Returns { element, set(key), current }. `set` changes the picked tab without
+ * (the picked tab's too) and on an arrow key (then with { keyboard: true } as a second argument, so a page that redraws the row can focus the new one). Returns { element, set(key), current }. `set` changes the picked tab without
  * calling onSelect. The picked tab is the one with aria-selected="true", so a page that sets it itself stays in step.
  */
 export function tabs({ items, current, onSelect, label, className = '' }) {
@@ -81,8 +81,8 @@ export function tabs({ items, current, onSelect, label, className = '' }) {
     const i = buttons.findIndex((b) => b.dataset.key === now());
     const next = buttons[(i + d + buttons.length) % buttons.length];
     show(next.dataset.key);
-    onSelect?.(next.dataset.key);
     next.focus();
+    onSelect?.(next.dataset.key, { keyboard: true });
     e.preventDefault();
   });
   box.append(...buttons);

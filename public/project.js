@@ -128,7 +128,7 @@ function clickPanelTab(sidebar, name) {
 function showPanelTab(sidebar, name) {
   const orders = name === 'orders';
   sidebar.classList.toggle('show-orders', orders);
-  for (const t of sidebar.querySelectorAll(':scope > summary .panel-tab')) t.setAttribute('aria-selected', String(t.classList.contains('orders-tab') === orders));
+  for (const t of sidebar.querySelectorAll(':scope > summary .panel-tab')) { const on = t.classList.contains('orders-tab') === orders; t.setAttribute('aria-selected', String(on)); t.tabIndex = on ? 0 : -1; }
 }
 
 function renderCrumbs(main) {

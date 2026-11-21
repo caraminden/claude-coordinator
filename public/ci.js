@@ -293,7 +293,7 @@ export function ciPage(projectId, startTab = 'overview', all = false) {
     detail.replaceChildren(
       h('div', { class: 'ci-head' }, h('h3', {}, s.name), ext(`https://github.com/${s.view.slug}/actions`, `${s.view.slug} on GitHub`),
         h('span', { class: 'muted small' }, `read ${ago(s.view.at)}`)),
-      uiTabs({ items: tabs, current: tab, className: 'ci-tabs', onSelect: (k) => { tab = k; draw(); if (k === 'health') readTab(s.id); } }).element,
+      uiTabs({ items: tabs, current: tab, className: 'ci-tabs', onSelect: (k, how) => { tab = k; draw(); if (how?.keyboard) detail.querySelector('.ci-tabs [aria-selected="true"]')?.focus(); if (k === 'health') readTab(s.id); } }).element,
       ...(tab === 'overview' ? overview(s, data.pcs, Date.now(), {
         host: host,
         queueOpen, toggleQueue: (id) => { queueOpen.has(id) ? queueOpen.delete(id) : queueOpen.add(id); draw(); detail.querySelector(`.queue-toggle[data-group="${CSS.escape(id)}"]`)?.focus(); },

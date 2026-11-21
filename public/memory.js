@@ -222,7 +222,7 @@ export function memoryPage() {
     header();
     folderBar.hidden = folders.length < 2;
     folderBar.replaceChildren(tabs({ items: folders.map((x) => [x.id, x.reachable ? `${x.label} · ${live(x).length}` : x.label]), current: f.id, label: 'Memory folders',
-      className: 'memory-folders', onSelect: (id) => { pickedFolder = id; refresh(); } }).element);
+      className: 'memory-folders', onSelect: (id, how) => { pickedFolder = id; refresh(); if (how?.keyboard) folderBar.querySelector('[aria-selected="true"]')?.focus(); } }).element);
     for (const [id, el] of blocks) el.hidden = id !== f.id;
     const ns = f.reachable ? live(f) : [];
     if (filterBy !== 'all' && filterBy !== 'tidy' && !ns.some((n) => kindOf(n) === filterBy)) filterBy = 'all';

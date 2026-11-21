@@ -78,16 +78,16 @@ export const deliveryQueries = {
     );
   },
 
+  /** Whether a turn of `ticketId` started after event `eventId` was posted: its session's init comes after it (output alone could be the turn it queued behind). */
+  turnSince(this: Store, ticketId: number, eventId: number): boolean {
+    return !!this.db.prepare("SELECT 1 FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? AND json_extract(data, '$.subtype') = 'init' LIMIT 1").get(ticketId, eventId);
+  },
+
   /**
    * Move an old settings key's rows into the table and empty the key, in one transaction: all of them or none (ADR 0021,
    * "Steps"). A row keeps its old id when the table never used it, so an id a minion remembers still names its wake; an
    * `origin` already moved is skipped. Returns the rows added.
    */
-  /** Whether a turn of `ticketId` has run since event `eventId` was posted (any Claude output after it). */
-  turnSince(this: Store, ticketId: number, eventId: number): boolean {
-    return !!this.db.prepare("SELECT 1 FROM events WHERE ticket_id = ? AND kind = 'claude' AND id > ? LIMIT 1").get(ticketId, eventId);
-  },
-
   importDeliveries(this: Store, key: string, rows: NewDelivery[], now = Date.now()): Delivery[] {
     const ids: number[] = [];
     this.db.exec('BEGIN IMMEDIATE');

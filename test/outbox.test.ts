@@ -401,7 +401,7 @@ test('a wake handed to a busy minion is off the list, as cancel says', async () 
   assert.deepEqual(wakes.list(id), [], 'the list shows only what cancel can still stop');
 });
 
-test('a row left sending whose turn already ran is marked sent, not sent again, at boot', async () => {
+test('rows left sending or retried whose turn already ran are marked sent, not sent again, at boot', async () => {
   const id = minion();
   const now = { t: T0 };
   const first = fakeRunner();
@@ -410,6 +410,9 @@ test('a row left sending whose turn already ran is marked sent, not sent again, 
   const w = a.wakes.add(id, T0 + HOUR, 'already read', `minion:${id}`);
   const posted = store.addEvent(id, 'user_message', { author: 'Citadel', text: 'Wake you set' }).id;
   store.updateDelivery(w.id, { state: 'sending', event_id: posted, attempts: 1, due: T0 + HOUR + 5 * 60_000 }, undefined, T0 + HOUR);
+  const retried = a.wakes.add(id, T0 + HOUR, 'already read, then retried', `minion:${id}`);
+  const posted2 = store.addEvent(id, 'user_message', { author: 'Citadel', text: 'Wake you set' }).id;
+  store.updateDelivery(retried.id, { state: 'waiting', event_id: posted2, attempts: 2, due: T0 + HOUR + 6 * 60_000 }, undefined, T0 + HOUR);
   store.addEvent(id, 'claude', { type: 'system', subtype: 'init' });
   a.outbox.stop();
 
@@ -417,6 +420,28 @@ test('a row left sending whose turn already ran is marked sent, not sent again, 
   const second = fakeRunner();
   const b = server(second, now);
   await b.outbox.boot();
-  assert.deepEqual(second.sent, [], 'its turn ran: no repeat');
+  assert.deepEqual(second.sent, [], 'their turn ran: no repeat');
   assert.equal(store.getDelivery(w.id)!.state, 'sent');
+  assert.equal(store.getDelivery(retried.id)!.state, 'sent', 'a row the bug put back on the retry ladder too');
+});
+
+test('a row left sending behind a turn that was already running is sent again, marked, not taken as read', async () => {
+  const id = minion();
+  const now = { t: T0 };
+  const first = fakeRunner();
+  const a = server(first, now);
+  await a.outbox.boot();
+  const w = a.wakes.add(id, T0 + HOUR, 'queued behind a turn', `minion:${id}`);
+  store.addEvent(id, 'claude', { type: 'system', subtype: 'init' });
+  const posted = store.addEvent(id, 'user_message', { author: 'Citadel', text: 'Wake you set' }).id;
+  store.addEvent(id, 'claude', { type: 'assistant' }); // the running turn's output, after the post
+  store.updateDelivery(w.id, { state: 'sending', event_id: posted, attempts: 1, due: T0 + HOUR + 5 * 60_000 }, undefined, T0 + HOUR);
+  a.outbox.stop();
+
+  now.t = T0 + 2 * HOUR;
+  const second = fakeRunner();
+  const b = server(second, now);
+  await b.outbox.boot();
+  assert.equal(second.sent.length, 1);
+  assert.match(second.sent[0].text, /may repeat delivery/);
 });

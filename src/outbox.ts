@@ -268,14 +268,15 @@ export class Outbox {
       if (r.event_id != null && toKind === 'minion' && this.runner.holds(toId, r.event_id)) {
         this.store.updateDelivery(r.id, { due: now + RECHECK_MS }, ['sending'], now);
       } else if (r.event_id != null && toKind === 'minion' && this.store.turnSince(toId, r.event_id)) {
-        // Not queued any more and a turn ran after it was posted: that turn carried it (a restart, or a missed hook).
+        // Not queued any more and a turn started after it was posted: that turn carried it (a restart, or a missed hook).
         this.store.updateDelivery(r.id, { state: 'sent' }, ['sending'], now);
       } else if (left) {
         // A killed server left it: its turn may have started before the kill, so the copy sent now says it may repeat.
         if (this.store.updateDelivery(r.id, { state: 'waiting', due: now }, ['sending'], now)) repeats.add(r.id);
       } else this.retry(r, 'the runner dropped it before its turn started', now);
     }
-    let rows = dueRows('waiting');
+    // A retried row a turn has since carried (a hook that missed it, before the #1385 follow-up) is sent, not sent again.
+    let rows = dueRows('waiting').filter((r) => !(r.event_id != null && toKind === 'minion' && this.store.turnSince(toId, r.event_id) && this.store.updateDelivery(r.id, { state: 'sent' }, ['waiting'], now)));
     if (!rows.length) return;
     if (toKind === 'minion') {
       const t = this.store.getTicket(toId);

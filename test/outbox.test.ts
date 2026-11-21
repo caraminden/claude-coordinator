@@ -445,3 +445,19 @@ test('a row left sending behind a turn that was already running is sent again, m
   assert.equal(second.sent.length, 1);
   assert.match(second.sent[0].text, /may repeat delivery/);
 });
+
+test('a retried wake sent after a restart does not claim the server was down when it came due', async () => {
+  const id = minion();
+  const now = { t: T0 };
+  const a = server(fakeRunner(), now);
+  await a.outbox.boot();
+  const w = a.wakes.add(id, T0 + HOUR, 'retried', `minion:${id}`);
+  store.updateDelivery(w.id, { state: 'waiting', attempts: 3, due: T0 + 2 * HOUR }, undefined, T0 + HOUR);
+  a.outbox.stop();
+  now.t = T0 + 3 * HOUR;
+  const second = fakeRunner();
+  const b = server(second, now);
+  await b.outbox.boot();
+  assert.equal(second.sent.length, 1);
+  assert.doesNotMatch(second.sent[0].text, /server was down/);
+});

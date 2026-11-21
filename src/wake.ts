@@ -751,9 +751,10 @@ export class TimedWakes {
       deliver: (rows, ctx) =>
         rows.map((r) => {
           const at = Number(r.when_arg);
+          // A retry isn't late from downtime: the boot only says so for a wake never tried before it.
           const late =
             r.reason === 'target closed' ? ' (it came due while this minion was dismissed)'
-            : at < ctx.bootAt && ctx.now - at >= 60_000 ? ` (${span(ctx.now - at)} late: the server was down when it came due)`
+            : r.attempts === 0 && at < ctx.bootAt && ctx.now - at >= 60_000 ? ` (${span(ctx.now - at)} late: the server was down when it came due)`
             : '';
           return ctx.send(r, `Wake you set for ${pacificTime(at)}${late}: ${r.payload.note}`);
         }),

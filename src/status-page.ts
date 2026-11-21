@@ -11,7 +11,7 @@ import type { DiskUse, UnitState } from './app-services.ts';
 import { pacificDay, pacificStamp } from './pacific.ts';
 import { join } from 'node:path';
 import { pressure } from './pressure.ts';
-import { readLedger, cpuTable, cpuHours, CPU_GROUPS, type CpuWindow, type CpuHour } from './cpu-ledger.ts';
+import { readLedger, ledgerSteps, cpuTable, cpuHours, CPU_GROUPS, type CpuWindow, type CpuHour } from './cpu-ledger.ts';
 import { stopEvent, type StopMark } from './sd-watchdog.ts';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
@@ -404,7 +404,8 @@ export class StatusPage {
     }
     const series = [...hourly.entries()].map(([h, s]) => [h, Math.round((1 - s.mem_avail / s.mem_total) * 1000) / 10, Math.round((1 - s.disk_free / s.disk_total) * 1000) / 10, Math.round(s.load1 * 10) / 10, ...(psiMax.get(h) ?? [null, null])] as HostPoint);
     const latest = samples.at(-1) ?? null;
-    const cpuWindows = { hour: cpuTable(samples, now, 3_600_000), day: cpuTable(samples, now, 86_400_000), week: cpuTable(samples, now, 7 * 86_400_000) };
+    const cpuSteps = ledgerSteps(samples); // each row's JSON parsed once
+    const cpuWindows = { hour: cpuTable(cpuSteps, now, 3_600_000), day: cpuTable(cpuSteps, now, 86_400_000), week: cpuTable(cpuSteps, now, 7 * 86_400_000) };
     // CPU (#1273): load against the cores, today's peak, and whether it has sat high for CPU_WARN_MS.
     const cores = this.deps.cores ?? availableParallelism();
     const today = samples.filter((s) => dayOf(s.at) === days.at(-1));
@@ -469,7 +470,7 @@ export class StatusPage {
       canInvestigate: ciVisible,
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
       stalls: { counts: days.map((d) => stallCount[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
-      host: { series, latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(samples), groups: CPU_GROUPS } },
+      host: { series, latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
       // Every periodic job (#1311), for those who see Citadel's scheme.

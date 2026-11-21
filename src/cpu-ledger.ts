@@ -96,24 +96,8 @@ export async function readLedger(o: ReadOptions = {}): Promise<CpuLedger> {
   const boxes = dirs.filter((d) => /^citadel-claude-\d+\.service$/.test(d));
   const boxReads = await Promise.all(boxes.map((d) => readStat(join(citadel, d, 'cpu.stat'))));
   boxes.forEach((d, i) => { if (boxReads[i]) s[`container:${/\d+/.exec(d)![0]}`] = boxReads[i]!; });
-  const sum = (keys: (string | null)[], extra: ([number, number] | null)[] = []) => {
-    const out: [number, number] = [0, 0];
-    for (const k of keys) { const v = k ? s[k] : null; if (v) { out[0] += v[0]; out[1] += v[1]; } }
-    for (const v of extra) if (v) { out[0] += v[0]; out[1] += v[1]; }
-    return out;
-  };
-  const rest = (total: [number, number] | null, taken: [number, number]): [number, number] | null =>
-    total ? [Math.max(0, total[0] - taken[0]), Math.max(0, total[1] - taken[1])] : null;
-  const boxKeys = Object.keys(s).filter((k) => k.startsWith('container:'));
-  const citadelNamed = sum(['server', 'turns', 'taskmasters', 'builds', 'heavy', ...boxKeys]);
-  const citadelRest = rest(citadelTotal, citadelNamed);
-  const appRest = rest(appTotal, sum(['embed', 'godot']));
-  if (appRest) s.apps = appRest;
-  // The rest of this account: the manager's total less citadel.slice, app.slice and contraptions.slice (and the bit of citadel.slice nothing named).
-  const mgrRest = rest(mgrTotal, [(citadelTotal?.[0] ?? 0) + (appTotal?.[0] ?? 0) + (s.contraptions?.[0] ?? 0), (citadelTotal?.[1] ?? 0) + (appTotal?.[1] ?? 0) + (s.contraptions?.[1] ?? 0)]);
-  const mineRest = mgrRest && mine ? ([mgrRest[0] + (citadelRest?.[0] ?? 0) + Math.max(0, mine[0] - (mgrTotal?.[0] ?? 0)), mgrRest[1] + (citadelRest?.[1] ?? 0) + Math.max(0, mine[1] - (mgrTotal?.[1] ?? 0))] as [number, number]) : citadelRest;
-  if (mineRest) s.mine = mineRest;
-  if (hostUsers && mine) s.others = [Math.max(0, hostUsers[0] - mine[0]), Math.max(0, hostUsers[1] - mine[1])];
+  // Raw totals, not remainders: a remainder (a slice less its children) jumps when a child restarts, so steps() derives them from each step's deltas.
+  for (const [k, v] of [['t:citadel', citadelTotal], ['t:app', appTotal], ['t:mgr', mgrTotal], ['t:mine', mine], ['t:users', hostUsers]] as const) if (v) s[k] = v;
   return { v: 1, s, h: host };
 }
 
@@ -128,6 +112,24 @@ export function parseLedger(text: string | null | undefined): CpuLedger | null {
 
 /** One source's row for a window: average cores, the kernel share (0 to 1) and core-seconds. */
 export interface CpuRow { key: string; label: string; group: string; cores: number; kernel: number; coreSeconds: number }
+/** The remainders of a step's deltas: each slice's total less its named children, never below zero. */
+function withRemainders(d: Record<string, [number, number]>) {
+  const g = (k: string): [number, number] => d[k] ?? [0, 0];
+  const sum = (ks: string[]): [number, number] => ks.reduce<[number, number]>((a, k) => [a[0] + g(k)[0], a[1] + g(k)[1]], [0, 0]);
+  const less = (total: string, ks: string[]): [number, number] | null => (d[total] ? [Math.max(0, d[total][0] - sum(ks)[0]), Math.max(0, d[total][1] - sum(ks)[1])] : null);
+  const boxes = Object.keys(d).filter((k) => k.startsWith('container:'));
+  const out: Record<string, [number, number]> = {};
+  for (const [k, v] of Object.entries(d)) if (!k.startsWith('t:')) out[k] = v;
+  const apps = less('t:app', ['embed', 'godot']);
+  const citadelRest = less('t:citadel', ['server', 'turns', 'taskmasters', 'builds', 'heavy', ...boxes]);
+  const mgrRest = less('t:mgr', ['t:citadel', 't:app', 'contraptions']);
+  if (apps) out.apps = apps;
+  if (mgrRest && d['t:mine']) out.mine = [mgrRest[0] + (citadelRest?.[0] ?? 0) + Math.max(0, g('t:mine')[0] - g('t:mgr')[0]), mgrRest[1] + (citadelRest?.[1] ?? 0) + Math.max(0, g('t:mine')[1] - g('t:mgr')[1])];
+  else if (citadelRest) out.mine = citadelRest;
+  if (d['t:users'] && d['t:mine']) out.others = [Math.max(0, d['t:users'][0] - d['t:mine'][0]), Math.max(0, d['t:users'][1] - d['t:mine'][1])];
+  return out;
+}
+
 export interface CpuWindow {
   /** Seconds of readings the window covers. */
   seconds: number;
@@ -140,9 +142,11 @@ export interface CpuHour { at: number; seconds: number; groups: Record<string, n
 
 const delta = (a: number, b: number) => (b >= a ? b - a : b);
 
+export interface LedgerStep { at: number; sec: number; s: Record<string, [number, number]>; h: [number, number, number, number] | null }
+
 /** Differences between each consecutive pair of readings (a, b): b's time, the seconds between them, per-source [usage, system] µs and host ms. */
-function steps(rows: { at: number; cpu_ledger?: string | null }[]) {
-  const out: { at: number; sec: number; s: Record<string, [number, number]>; h: [number, number, number, number] | null }[] = [];
+export function ledgerSteps(rows: { at: number; cpu_ledger?: string | null }[]) {
+  const out: LedgerStep[] = [];
   let prev: { at: number; l: CpuLedger } | null = null;
   for (const r of rows) {
     const l = parseLedger(r.cpu_ledger);
@@ -155,7 +159,7 @@ function steps(rows: { at: number; cpu_ledger?: string | null }[]) {
         s[k] = p ? [delta(p[0], v[0]), delta(p[1], v[1])] : [v[0], v[1]];
       }
       const h = l.h && prev.l.h ? ([0, 1, 2, 3].map((i) => delta(prev!.l.h![i], l.h![i])) as [number, number, number, number]) : null;
-      out.push({ at: r.at, sec: (r.at - prev.at) / 1000, s, h });
+      out.push({ at: r.at, sec: (r.at - prev.at) / 1000, s: withRemainders(s), h });
     }
     prev = { at: r.at, l };
   }
@@ -163,9 +167,9 @@ function steps(rows: { at: number; cpu_ledger?: string | null }[]) {
 }
 
 /** The table for the last `windowMs` ending at `now`, from host_samples rows in time order. */
-export function cpuTable(rows: { at: number; cpu_ledger?: string | null }[], now: number, windowMs: number): CpuWindow {
+export function cpuTable(all: LedgerStep[], now: number, windowMs: number): CpuWindow {
   const from = now - windowMs;
-  const inWin = steps(rows).filter((st) => st.at > from && st.at <= now);
+  const inWin = all.filter((st) => st.at > from && st.at <= now);
   const seconds = inWin.reduce((t, st) => t + st.sec, 0);
   const use = new Map<string, [number, number]>();
   let host = [0, 0, 0, 0];
@@ -198,9 +202,9 @@ export function cpuTable(rows: { at: number; cpu_ledger?: string | null }[], now
 }
 
 /** Hourly core-seconds per chart group for the stacked chart, oldest first. */
-export function cpuHours(rows: { at: number; cpu_ledger?: string | null }[]): CpuHour[] {
+export function cpuHours(all: LedgerStep[]): CpuHour[] {
   const hours = new Map<number, CpuHour>();
-  for (const st of steps(rows)) {
+  for (const st of all) {
     const at = Math.floor(st.at / 3_600_000) * 3_600_000;
     const hr = hours.get(at) ?? { at, seconds: 0, groups: {} };
     hr.seconds += st.sec;

@@ -191,6 +191,14 @@ export class MinionQueue {
     if (this.get(id).msgs) this.edit(id, (r) => { delete r.msgs; });
   }
 
+  /** Take the queued and held messages `gone` picks out of the queue (a disabled person's, #1509): what went. */
+  dropWhere(id: number, gone: (m: QueuedMessage) => boolean): QueuedMessage[] {
+    const r = this.get(id);
+    const out = [...(r.msgs ?? []), ...(r.held ?? [])].filter(gone);
+    if (out.length) this.edit(id, (r) => { r.msgs = r.msgs?.filter((m) => !gone(m)); r.held = r.held?.filter((m) => !gone(m)); });
+    return out;
+  }
+
   /** Take back one queued message (its user_message event id): whether it was waiting. */
   remove(id: number, eventId: number): boolean {
     if (!this.get(id).msgs?.some((m) => m.id === eventId)) return false;

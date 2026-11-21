@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, before, test } from 'node:test';
-import { adminOwned, lendsMachine, mayReceive, messagePerson, messageScope, turnPlace, turnRefusal } from '../src/access.ts';
+import { adminOwned, lendsMachine, mayReceive, messagePerson, messageScope, turnPayer, turnPlace, turnRefusal } from '../src/access.ts';
 import { Auth, hashPassword } from '../src/auth.ts';
 import { askerKey, Store } from '../src/db.ts';
 import { APP_NAME } from '../src/appname.ts';
@@ -245,6 +245,38 @@ const stubStarts = (runner: Runner) => {
   (runner as any).startTurn = (_p: unknown, _t: unknown, batch: { text: string }[], person: number | null) => void started.push({ person, texts: batch.map((m) => m.text) });
   return started;
 };
+
+test('who pays: what woke the turn decides, held mail only when nothing else waits (#1509 turnPayer table)', () => {
+  const { store, cara, josh, olive, games } = world();
+  store.addMember(games.id, olive.id);
+  store.addMember(games.id, cara.id);
+  const made = store.createTicket({ project_id: games.id, title: 'T', permission_mode: 'default', created_by: 'Olive' });
+  store.updateTicket(made.id, { person_id: olive.id });
+  const hers = store.getTicket(made.id)!;
+  store.createTicket({ project_id: games.id, kind: 'coordinator', title: 'Coordinator', permission_mode: 'default', created_by: 'Taskmaster' });
+  const olivesTm = store.splitScheme(games.id, olive.id);
+  const project = store.getProject(games.id)!;
+  const personOf = messagePerson(store);
+  const wake = { author: APP_NAME }, fromJosh = { author: 'Josh' }, fromCara = { author: 'Cara' }, relay = { author: 'Held mail from #4 Work' };
+  // Josh is disabled only for the rows that say so.
+  const rows: [string, { msgs: { author: string }[]; held: { author: string }[] } | { author: string }[], number | null, { ticket?: typeof hers; resuming?: boolean; joshOff?: boolean }?][] = [
+    ['a wake with a person\'s held mail: the minion\'s person', { msgs: [wake], held: [fromJosh] }, olive.id],
+    ['a person\'s message with another\'s held mail: the sender', { msgs: [fromCara], held: [fromJosh] }, cara.id],
+    ['Deliver now, a person\'s held mail: that person', { msgs: [], held: [fromJosh] }, josh.id],
+    ['Deliver now, held mail from no person: the minion\'s person', { msgs: [], held: [relay] }, olive.id],
+    ['a wake with a disabled person\'s held mail: them, so it is refused', { msgs: [wake], held: [fromJosh] }, josh.id, { joshOff: true }],
+    ['Deliver now, a disabled person\'s held mail: them, refused', { msgs: [], held: [fromJosh] }, josh.id, { joshOff: true }],
+    ['a person\'s message with a disabled person\'s held mail: the disabled one, refused (the runner drops theirs first)', { msgs: [fromCara], held: [fromJosh] }, josh.id, { joshOff: true }],
+    ['a restart resume: the interrupted turn\'s person, held mail or not', { msgs: [wake], held: [fromJosh] }, olive.id, { resuming: true }],
+    ['a plain list is all what woke it: its first person', [wake, fromJosh], josh.id],
+    ['her own Taskmaster: a held ask from someone else still runs on theirs', { msgs: [wake], held: [fromJosh] }, josh.id, { ticket: olivesTm }],
+    ['her own Taskmaster: a wake and held mail from no person run on hers', { msgs: [wake], held: [relay] }, olive.id, { ticket: olivesTm }],
+  ];
+  for (const [what, waiting, want, opt = {}] of rows) {
+    store.updateUser(josh.id, { disabled_at: opt.joshOff ? Date.now() : null });
+    assert.equal(turnPayer(store, opt.ticket ?? hers, project, waiting, personOf, !!opt.resuming), want, what);
+  }
+});
 
 test("a disabled person's held mail is dropped with a line, and never decides or jams anyone else's turn (#1509 2C1)", async () => {
   const { store, runner, hers, josh, olive, games } = payerWorld('payer-held-disabled.db');

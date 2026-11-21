@@ -64,7 +64,7 @@ import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stag
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
 import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
-import { payerInScheme, turnPayer } from './access.ts';
+import { disabledAuthor, payerInScheme, turnPayer } from './access.ts';
 import { MinionQueue, migrateQueues, type OwedResume, type Steer } from './minion-queue.ts';
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
@@ -1796,7 +1796,7 @@ export class Runner {
     if (this.isRunning(ticketId)) return void (ours() && this.resumes.cancelLimitWait(ticketId));
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259). Nor beside a
     // turn still live by then (#1464): as above, that turn is resume enough.
-    const ran = this.lanes.run(ticketId, 'resume', () => this.liveTurn(ticketId) ?? this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.peekQueue(ticketId), true), () => {
+    const ran = this.lanes.run(ticketId, 'resume', () => this.liveTurn(ticketId) ?? this.afterRestore(ticketId, (ticket, project) => this.turnPerson(ticket, project, this.waiting(ticketId), true), () => {
       const ticket = this.store.getTicket(ticketId);
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project || ticket.status === 'closed') {
@@ -1809,7 +1809,8 @@ export class Runner {
       if (killLine && !this.killWait(ticketId)) return;
       // So does a limit resume: a stop or a person's message (which tries now) ended it meanwhile.
       if (token && !ours()) return;
-      const person = this.turnPerson(ticket, project, this.peekQueue(ticketId), true);
+      this.dropDisabled(ticketId);
+      const person = this.turnPerson(ticket, project, this.waiting(ticketId), true);
       if (this.refused(ticketId, person)) {
         // Nothing it would have carried is dropped: the queue and held mail wait for the next turn (#468 S03-6).
         // A kill wait ends here, as the turn that would have taken it.
@@ -1861,6 +1862,25 @@ export class Runner {
   /** What takeQueue would take, left where it is. */
   private peekQueue(ticketId: number): QueuedMessage[] {
     return this.queue.peek(ticketId);
+  }
+
+  /** The same, as what would wake the turn and the held mail riding along (turnPayer reads them apart, #1509). */
+  private waiting(ticketId: number): { msgs: QueuedMessage[]; held: QueuedMessage[] } {
+    return { msgs: this.queue.msgs(ticketId), held: this.queue.heldMail(ticketId) };
+  }
+
+  /**
+   * A disabled person's own messages, queued or held, go with a chat line saying so (#1509): kept, they would pick
+   * that person to pay for every later batch and refuse it, and no one else's login may run them (#1270 C3).
+   */
+  private dropDisabled(ticketId: number): number {
+    const gone = this.queue.dropWhere(ticketId, (m) => !!disabledAuthor(this.store, m));
+    for (const name of new Set(gone.map((m) => m.author))) {
+      const n = gone.filter((m) => m.author === name).length;
+      this.emit(ticketId, 'note', { text: `${name}'s login is disabled, so ${n === 1 ? 'their waiting message was' : `their ${n} waiting messages were`} dropped and Claude hasn't seen ${n === 1 ? 'it' : 'them'}.` });
+    }
+    if (gone.length) this.broadcastTicket(ticketId);
+    return gone.length;
   }
 
   /** Whether `person`'s Claude can't run a turn now (Runner.placeFor); the chat says why. Asked before the queue is taken. */
@@ -2172,10 +2192,13 @@ export class Runner {
    * Never a dismissed minion's, nor while its Claude can't run a turn (#468 S03-6). Returns how many messages went.
    */
   releaseMail(t: Ticket, p: Project, by = ''): number {
-    const mail = this.queue.heldMail(t.id);
+    let mail = this.queue.heldMail(t.id);
     // A dismissed minion isn't reopened by the cap: its mail waits for a person's message, or its dismissal's cleanup notes it.
     if (!mail.length || t.status === 'closed') { this.queue.warm(t.id); return 0; }
-    if (this.refused(t.id, this.turnPerson(t, p, mail))) return 0; // keeps the cold time, so the cap still fires
+    // A disabled person's held mail never runs, on their login or anyone else's (#1270 C3, #1509).
+    if (this.dropDisabled(t.id)) mail = this.queue.heldMail(t.id);
+    if (!mail.length) return 0;
+    if (this.refused(t.id, this.turnPerson(t, p, { msgs: [], held: mail }))) return 0; // keeps the cold time, so the cap still fires
     const hours = msgSettings(p).holdH;
     const text = by ? `${by} delivered the held mail, so it runs now.` : t.session_id ? `Held mail has waited ${hours} hours, so it runs now.` : 'Held mail runs now: the session is fresh, so waking it is cheap.';
     this.emit(t.id, 'note', { text });
@@ -2728,7 +2751,7 @@ export class Runner {
     // turn's save above all: a turn on another login restores from that save (#250). The queue keeps the messages.
     if (this.lanes.busy(ticketId)) return;
     // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
-    const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.peekQueue(ticketId));
+    const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.waiting(ticketId));
     // Nor beside a turn still live (#1464): the queue waits until it ends, then asks again.
     this.lanes.run(ticketId, 'turn', () => this.liveTurn(ticketId) ?? this.afterRestore(ticketId, person, () => {
       const ticket = this.store.getTicket(ticketId);
@@ -2760,10 +2783,10 @@ export class Runner {
       if (this.keepalivePending.delete(ticketId) && !this.queue.size(ticketId) && !this.netWait(ticketId) && !this.killWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
         return this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, []));
       }
-      // Everything queued while the last turn ran goes into one turn.
-      const waiting = this.peekQueue(ticketId);
-      if (!waiting.length) return;
-      const person = this.turnPerson(ticket, project, waiting);
+      // Everything queued while the last turn ran goes into one turn. Held mail alone wakes nothing, nor does a disabled person's message.
+      this.dropDisabled(ticketId);
+      if (!this.queue.size(ticketId)) return;
+      const person = this.turnPerson(ticket, project, this.waiting(ticketId));
       if (this.refused(ticketId, person)) {
         // What woke it is refused, as in send(); held mail stays for the next turn (#468 S03-6). Not kept as held mail:
         // a refused person's message would pick them to pay for every later batch, and refuse it too (#1378 review).
@@ -2792,8 +2815,8 @@ export class Runner {
   }
 
   /** Who a turn runs for (its GitHub login, and #177's Claude plan): src/access.ts turnPayer, the one rule (#1270). */
-  private turnPerson(ticket: Ticket, project: Project, batch: QueuedMessage[], resuming = false): number | null {
-    return turnPayer(this.store, ticket, project, batch, (author, from) => this.personOf?.(author, from) ?? null, resuming);
+  private turnPerson(ticket: Ticket, project: Project, waiting: QueuedMessage[] | { msgs: QueuedMessage[]; held: QueuedMessage[] }, resuming = false): number | null {
+    return turnPayer(this.store, ticket, project, waiting, (author, from) => this.personOf?.(author, from) ?? null, resuming);
   }
 
   /** Whether `ticket` is a split scheme's Overlord (#919, #921): the Taskmaster that is nobody's own, beside one per person. */

@@ -40,9 +40,13 @@ export function mayReceive(store: Store, who: Session, scope: number | 'admin' |
  * someone taken out of it (or deleted) no longer pays for its turns, its owner does (#211, #1270). A disabled person
  * is still picked, so their turn is refused (turnPlace) rather than moved onto someone else's plan. A message whose author
  * names no person but which carries an `asker` (a contraption's ask to the Taskmaster, sent under the contraption's label)
- * is that asker's, checked like a relay's (#1449).
+ * is that asker's, checked like a relay's (#1449). Held mail rides along after what woke the turn and never picks who pays
+ * for it: a wake from no person runs on the minion's last person, not on a held message's author (#1509). Only with
+ * nothing else waiting ("Deliver now") does held mail name the payer. A plain list is all what woke the turn.
  */
-export function turnPayer(store: Store, ticket: Ticket, project: Project, batch: { author: string; from?: number; asker?: number | null }[], personOf: (author: string, from?: number) => number | null, resuming = false): number | null {
+export function turnPayer(store: Store, ticket: Ticket, project: Project, waiting: PayerMsg[] | { msgs: PayerMsg[]; held: PayerMsg[] }, personOf: (author: string, from?: number) => number | null, resuming = false): number | null {
+  const { msgs, held } = Array.isArray(waiting) ? { msgs: waiting, held: [] } : waiting;
+  const batch = [...msgs, ...held];
   const inScheme = (p: number | null) => payerInScheme(store, project, p);
   // Whose ask a message is, and whether that was picked for it (a relay's or a contraption's asker) rather than written by them.
   const askOf = (m: { author: string; from?: number; asker?: number | null }) => {
@@ -52,7 +56,8 @@ export function turnPayer(store: Store, ticket: Ticket, project: Project, batch:
   };
   if (resuming && ticket.person_id != null) return inScheme(ticket.person_id);
   // A message from someone disabled after it queued is still theirs (personOf drops them): its turn is refused, not moved onto another login.
-  const disabled = batch.map((m) => (m.from ? undefined : store.findUser('name', m.author))).find((u) => u?.disabled_at);
+  // The runner drops such messages before it asks (Runner.dropDisabled, #1509); this still refuses a single message's check.
+  const disabled = batch.map((m) => disabledAuthor(store, m)).find((u) => u);
   if (disabled) return disabled.id;
   // A person's own Taskmaster runs for its person, but never on someone else's request: a turn another person starts
   // there (a card answer, R5, a plan verdict, a file comment, /backup) runs on their login. Relays and held mail name
@@ -61,12 +66,20 @@ export function turnPayer(store: Store, ticket: Ticket, project: Project, batch:
     const starter = batch.filter((m) => !m.from).map(askOf).find((a) => a);
     return inScheme(starter?.p ?? ticket.coordinator_of);
   }
-  for (const m of batch) {
+  for (const m of msgs.length ? msgs : held) {
     const a = askOf(m);
     if (a) return a.picked ? inScheme(a.p) : a.p;
   }
   const overlord = ticket.kind === 'coordinator' && ticket.coordinator_of == null && store.isSplit(ticket.project_id);
   return !overlord && ticket.person_id != null ? inScheme(ticket.person_id) : project.owner_id;
+}
+
+type PayerMsg = { author: string; from?: number; asker?: number | null };
+
+/** The person who wrote `m` themselves (not a relay), when their login is disabled (#1270 C3). */
+export function disabledAuthor(store: Store, m: PayerMsg): User | undefined {
+  const u = m.from ? undefined : store.findUser('name', m.author);
+  return u?.disabled_at ? u : undefined;
 }
 
 /** `person` while they may still be paid for in this scheme (a member, its owner, or an admin), else the scheme's owner (#211, #1270). */

@@ -171,6 +171,10 @@ queue_lock() {
   if [ -n "${QUEUE_KEEP:-}" ] && [ -e "$QUEUE_KEEP" ]; then
     n=${QUEUE_KEEP##*/}
     queue_write "$q/$n" "$me" 0 "$label" waiting
+    # First among the ranked too: Releases ranks only waiters, so a reorder while it held the lock left it out.
+    if [ -f "$q/.order" ]; then
+      { grep '^# ' "$q/.order" || true; echo "$n"; grep -vx -e "$n" -e '# .*' "$q/.order" || true; } >"$q/.order.tmp$$" 2>/dev/null && mv -f "$q/.order.tmp$$" "$q/.order"
+    fi
   else n=$(
     exec 8>"$q/.seq.lock"
     flock 8

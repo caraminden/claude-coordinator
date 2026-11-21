@@ -289,6 +289,9 @@ const ALWAYS_TESTS = ['access-matrix', 'prompt-budget', 'schema-compat', 'pipeli
  * the wake then keeps its plain text. The first match wins, most specific first.
  */
 export function classifyLandFailure(output: string): { kind: string; line: string } | null {
+  // After a retry in place (#1360), only the second attempt counts: the first one's flake labels are no proof now.
+  const again = output.lastIndexOf('not your change: keeping its place in line');
+  if (again >= 0) output = output.slice(again);
   const failedFiles = [...new Set([...output.matchAll(/✖ ([^ :]+\.test\.ts)(?::\d+)? › /gm)].map((m) => m[1]))];
   const k = (kind: string, line: string) => ({ kind, line });
   if (/(won't (rebase|merge( \S+)? in) onto?\b.*cleanly|^land: smoke: it conflicts with main|^CONFLICT \(|the (rebase onto|merging) .* failed \(see git's output)/m.test(output))

@@ -657,6 +657,21 @@ test('a ship refused because CI and perigee were both busy keeps its ticket, goe
   assert.equal(timings(shared).length, 1, 'one landing, one timing line');
 });
 
+test('a retry in place that then conflicts with main is refused, and its retro line says refused (#1360)', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'a.txt', 'mine\n');
+  const shared = join(r.dir, 'shared');
+  const p = procAt(r, { load: 999 });
+  let moved = false;
+  const res = await c.runAsync({ LAND_CI: '0', LAND_SMOKE: '0', ...p, LAND_QUIET_LIMIT: '1', LAND_QUIET_POLL: '0.2', COORDINATOR_SHARED_DIR: shared }, (s) => {
+    if (!moved && /not your change/.test(s)) { moved = true; r.commit(r.source, 'a.txt', 'theirs\n'); quietProc(p.LAND_QUIET_PROC); }
+  });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /back at the front after its retry in place.*rebase onto main failed/s);
+  assert.match(retries(shared)[0] ?? '', /· retry in place · ticket\/1-x · CI and perigee both busy for 0 min · refused$/);
+});
+
 test("a ship whose suite couldn't start because the heavy slot was taken goes again once, and lands (#1360)", async () => {
   const r = setup();
   const c = ci(r);

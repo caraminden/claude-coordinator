@@ -330,6 +330,18 @@ test("a front refused by the pipeline keeps its ticket and rides the next ship's
   l.done();
 });
 
+test('a front refused by the pipeline stays first in a Releases order set while it held the lock (#1360)', async () => {
+  const l = await line([{}, { env: { ...busy(), LAND_QUIET_LIMIT: '2' } }, {}, {}], shared);
+  const all = l.go();
+  await until('ship 2 waiting on a busy perigee', () => /waiting for CI or a quiet perigee/.test(l.out[1]));
+  writeFileSync(join(l.state, 'queue', '.order'), '# set by a test\n0000000004\n0000000003\n'); // Releases ranks only the waiters
+  const done = await all;
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[3].stderr, /ship train: ticket\/4-x takes the 2 ships waiting behind it \(ticket\/2-x ticket\/3-x\)/);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f4.txt: 4', 'f2.txt: 2', 'f3.txt: 3']);
+  l.done();
+});
+
 test('a retried ship whose train goes red is bisected like any rider, and refused for good (#1360)', async () => {
   const l = await line([{}, { change: ['red.txt', 'red\n'], env: busy() }, {}, {}], (d) => ({ FAKE_RED_PATH: 'red.txt', ...shared(d) }));
   const done = await l.go();

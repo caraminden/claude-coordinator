@@ -119,6 +119,7 @@ land_timing() (
 check=
 [ "${1:-}" != --check ] || { check=1; shift; }
 args=("$@") # for the rebased copy (the execs below)
+retried=${LAND_RETRIED:-} # why it was refused by the pipeline once already (retry_in_place below), in the copy that goes again
 mode=land build='' files=()
 case ${1:-} in
   '') ;;
@@ -319,7 +320,7 @@ if [ "$mode" = build ]; then
   ! git cat-file -e HEAD:build-claims.md 2>/dev/null || refuse "build-claims.md, the build's claims, is still on $branch and would ship to main: git rm it, commit, run tools/land.sh --into $build (a docs-only merge), then this again. Nothing landed"
 fi
 now_again=${LAND_RETRY_NOW:-}
-unset LAND_REBASED LAND_REDO LAND_BUILD LAND_RETRY_NOW
+unset LAND_REBASED LAND_REDO LAND_BUILD LAND_RETRY_NOW LAND_RETRIED
 if [ -n "$check" ]; then
   under=$(under_of)
   case $mode in
@@ -835,7 +836,6 @@ quiet() {
 # and takes this one on its train as the first rider; with no train (a pipeline change, CI down) this goes right after
 # it. Back at the front, it starts over from its rebase. Only a fully green run ships it, as ever (ADR 0006).
 # <why>: returns when it can't (a second time, or not a plain land), and the caller refuses as before.
-retried=${LAND_RETRIED:-}
 retry_in_place() {
   [ -z "$retried" ] || { say "refused by the pipeline again ($1), after its one retry in place ($retried), so it is refused this time"; return 0; }
   [ "$mode" = land ] && [ -n "${DEPLOY_QUEUE_TICKET:-}" ] && [ -e "$DEPLOY_QUEUE_TICKET" ] || return 0
@@ -843,7 +843,6 @@ retry_in_place() {
   train_drop
   ci_done
   retried=$1
-  export LAND_RETRIED=$1
   trap 'land_timing $? || true; queue_done' EXIT
   queue_wait_check() { train_verdict || true; }
   flock -u 9
@@ -851,7 +850,7 @@ retry_in_place() {
   unset -f queue_wait_check
   train_verdict held
   say "back at the front after its retry in place: starting over from the rebase"
-  LAND_REBASED=1 LAND_RETRY_NOW=1 exec bash "$tools/land.sh" "${args[@]}"
+  LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_RETRIED=$retried exec bash "$tools/land.sh" "${args[@]}"
 }
 # Perigee is busy: say so (at first, then every 5 min) and refuse once it has been busy QUIET_LIMIT s. $1: why CI didn't answer.
 busy_wait() {

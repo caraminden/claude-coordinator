@@ -38,6 +38,12 @@ test('a flake: the second red whose files all passed alone', () => {
   assert.equal(kind(mixed), null);
 });
 
+test('after a retry in place (#1360), only the second attempt is read: its real red is not a flake', () => {
+  const first = `run-tests: test/a.test.ts: failed in the full run, passed alone: likely load, not your change\nland: refused by the pipeline (only flakes failed on perigee: test/a.test.ts), not your change: keeping its place in line and riding the next train, once`;
+  assert.notEqual(kind(`${first}\nland: back at the front\n✖ test/b.test.ts › x › y (3ms)\nland: tests failed on the rebased branch (full log: /x), so main is untouched`), 'flake');
+  assert.equal(kind(`${first}\nland: back at the front\nrun-tests: test/a.test.ts: failed in the full run, passed alone: likely load\nland: refused by the pipeline again`), 'flake');
+});
+
 test('a repo-wide snapshot or budget test, and the change\'s own test', () => {
   const head = (f: string) => `✖ test/${f} › something › case (12ms)\nland: tests failed on the rebased branch (full log: /x), so main is untouched`;
   for (const f of ['prompt-budget.test.ts', 'access-matrix.test.ts', 'schema-compat.test.ts']) assert.equal(kind(head(f)), 'always-test');

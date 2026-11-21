@@ -82,11 +82,16 @@ export function relocate(store: Store, projectId: number, shared: string, from: 
   }
 }
 
-/** Rows still naming a handoff that is gone from handoffs/ but sits in shipped/ or not-picked/ (the sweep moves files only): follow it. */
-export function reconcileMoved(store: Store, dataDir: string, projectId: number) {
+/**
+ * Rows still naming a handoff that is gone from handoffs/ but sits in shipped/ or not-picked/ (the sweep moves files only):
+ * follow it. `has` answers whether a handoff is at a path relative to the shared folder; the minute's pass hands it the
+ * listing syncHandoffs just made, so the check costs no file call on the server's thread (#1463).
+ */
+export function reconcileMoved(store: Store, dataDir: string, projectId: number, has?: (rel: string) => boolean) {
   const shared = projectSharedDir(dataDir, projectId);
-  const where = (rel: string) => [SHIPPED, NOT_PICKED].map((d) => `${d}/${basename(rel)}`).find((c) => existsSync(join(shared, c)));
-  const gone = (rel: string) => isLoose(rel) && !existsSync(join(shared, rel));
+  const exists = has ?? ((rel: string) => existsSync(join(shared, rel)));
+  const where = (rel: string) => [SHIPPED, NOT_PICKED].map((d) => `${d}/${basename(rel)}`).find(exists);
+  const gone = (rel: string) => isLoose(rel) && !exists(rel);
   const rels = new Set<string>();
   for (const r of store.db.prepare('SELECT DISTINCT path FROM brief_starts WHERE project_id = ?').all(projectId) as { path: string }[]) {
     if (r.path.startsWith(`${shared}/`)) rels.add(r.path.slice(shared.length + 1));

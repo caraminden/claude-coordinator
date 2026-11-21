@@ -1,7 +1,7 @@
 // Search over a scheme's past minions (#1156): each closed minion's title, type, brief, last words and the files it
 // wrote, and the shared folder's handoffs, in SQLite full-text tables. Built a few minions at a time as they close,
 // never per question; search_minions and the citadel:scout Grunt read it.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Store } from './db.ts';
@@ -107,37 +107,67 @@ export class MinionIndex {
     return briefText;
   }
 
-  /** Bring the scheme's handoffs/ rows in line with the folder: new and changed files in, gone ones out. */
-  syncHandoffs(projectId: number, dataDir: string) {
+  /** Per scheme: what the last sync saw (each folder's and file's mtime) and the rows it left, so a pass that finds nothing changed touches no table (#1463). */
+  private handoffSeen = new Map<number, { dirs: Map<string, number>; files: Map<string, number>; rows: Map<string, { id: number; mtime: number }> }>();
+
+  /**
+   * Bring the scheme's handoffs/ rows in line with the folder: new and changed files in, gone ones out. Every file call
+   * is async (#1463: its readdir, stat and the table read held the server's thread for 3.4 s in 11 stalls on Nov 21).
+   * The filed folders (shipped/, not-picked/) are listed again only when their own mtime moves: files are moved into
+   * them, not edited. handoffs/ itself is stat'ed file by file, since a live handoff is edited in place. Returns whether
+   * a handoff file is at `rel` (relative to the shared folder), as of this listing.
+   */
+  async syncHandoffs(projectId: number, dataDir: string): Promise<(rel: string) => boolean> {
     const dir = join(projectSharedDir(dataDir, projectId), 'handoffs');
+    const seen = this.handoffSeen.get(projectId);
+    const dirs = new Map<string, number>();
+    const files = new Map<string, number>();
     // Filed handoffs (src/handoff-tidy.ts) stay searchable under their folder: "shipped/x.md", "not-picked/x.md".
-    const names: string[] = [];
     for (const sub of ['', 'shipped', 'not-picked']) {
+      const at = await stat(join(dir, sub)).then((s) => Math.floor(s.mtimeMs), () => null);
+      if (at === null) continue; // no such folder
+      dirs.set(sub, at);
+      const prefix = sub ? `${sub}/` : '';
+      if (sub && seen?.dirs.get(sub) === at) {
+        for (const [name, mtime] of seen.files) if (name.startsWith(prefix)) files.set(name, mtime);
+        continue;
+      }
+      let names: string[];
       try {
-        for (const n of readdirSync(join(dir, sub))) if (n.endsWith('.md')) names.push(sub ? `${sub}/${n}` : n);
-      } catch { /* no such folder */ }
-    }
-    const have = new Map((this.db.prepare('SELECT rowid AS id, name, mtime FROM handoff_index WHERE project_id = ?').all(projectId) as { id: number; name: string; mtime: number }[]).map((r) => [r.name, r]));
-    for (const name of names) {
-      let mtime: number;
-      try {
-        mtime = Math.floor(statSync(join(dir, name)).mtimeMs);
+        names = (await readdir(join(dir, sub))).filter((n) => n.endsWith('.md'));
       } catch {
         continue;
       }
-      const row = have.get(name);
-      have.delete(name);
+      // A few stats at a time: the thread pool is shared with every other file call the server makes.
+      for (let i = 0; i < names.length; i += 8) {
+        const batch = names.slice(i, i + 8);
+        const times = await Promise.all(batch.map((n) => stat(join(dir, sub, n)).then((s) => Math.floor(s.mtimeMs), () => null)));
+        batch.forEach((n, j) => times[j] !== null && files.set(`${prefix}${n}`, times[j]!));
+      }
+    }
+    const rows = seen?.rows ?? new Map((this.db.prepare('SELECT rowid AS id, name, mtime FROM handoff_index WHERE project_id = ?').all(projectId) as { id: number; name: string; mtime: number }[]).map((r) => [r.name, { id: r.id, mtime: r.mtime }]));
+    this.handoffSeen.set(projectId, { dirs, files, rows });
+    for (const [name, mtime] of files) {
+      const row = rows.get(name);
       if (row?.mtime === mtime) continue;
-      if (row) this.db.prepare('DELETE FROM handoff_index WHERE rowid = ?').run(row.id);
-      let body = '';
+      let body: string;
       try {
-        body = readFileSync(join(dir, name), 'utf8').slice(0, 20_000);
+        body = (await readFile(join(dir, name), 'utf8')).slice(0, 20_000);
       } catch {
-        continue;
+        continue; // gone or unreadable: the next pass tries it again
       }
-      this.db.prepare('INSERT INTO handoff_index (name, body, project_id, mtime) VALUES (?, ?, ?, ?)').run(name, body, projectId, mtime);
+      // Read again after the await: another pass may have filed it meanwhile.
+      const now = rows.get(name);
+      if (now) this.db.prepare('DELETE FROM handoff_index WHERE rowid = ?').run(now.id);
+      const { lastInsertRowid } = this.db.prepare('INSERT INTO handoff_index (name, body, project_id, mtime) VALUES (?, ?, ?, ?)').run(name, body, projectId, mtime);
+      rows.set(name, { id: Number(lastInsertRowid), mtime });
     }
-    for (const gone of have.values()) this.db.prepare('DELETE FROM handoff_index WHERE rowid = ?').run(gone.id);
+    for (const [name, gone] of [...rows]) {
+      if (files.has(name)) continue;
+      this.db.prepare('DELETE FROM handoff_index WHERE rowid = ?').run(gone.id);
+      rows.delete(name);
+    }
+    return (rel) => rel.startsWith('handoffs/') && files.has(rel.slice('handoffs/'.length));
   }
 
   /**
@@ -188,8 +218,8 @@ export class MinionIndexer {
       for (const p of this.store.listProjects()) {
         await new Promise((r) => setImmediate(r));
         while (this.store.minionIndex.indexClosed(p.id) > 0) await new Promise((r) => setImmediate(r));
-        try { reconcileMoved(this.store, this.dataDir, p.id); } catch (e) { console.error(`handoff tidy: ${(e as Error).message}`); }
-        this.store.minionIndex.syncHandoffs(p.id, this.dataDir);
+        const has = await this.store.minionIndex.syncHandoffs(p.id, this.dataDir);
+        try { reconcileMoved(this.store, this.dataDir, p.id, has); } catch (e) { console.error(`handoff tidy: ${(e as Error).message}`); }
       }
     } finally {
       this.running = false;

@@ -2,7 +2,7 @@
 // search never crosses schemes.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -114,7 +114,7 @@ test('a closed minion is indexed with its brief, last words and the files it wro
   store.db.close();
 });
 
-test('handoffs: in when written, changed when edited, out when deleted', () => {
+test('handoffs: in when written, changed when edited, out when deleted', async () => {
   const store = new Store(join(root, 'two.db'));
   const A = store.createProject('A', null);
   const data = join(root, 'data');
@@ -122,18 +122,50 @@ test('handoffs: in when written, changed when edited, out when deleted', () => {
   mkdirSync(dir, { recursive: true });
   const file = join(dir, 'handoff-scout.md');
   writeFileSync(file, '# Handoff: a scout Grunt\nSearch past minions.');
-  store.minionIndex.syncHandoffs(A.id, data);
+  await store.minionIndex.syncHandoffs(A.id, data);
   assert.deepEqual((store.minionIndex.search(A.id, 'scout') as any[]).map((h) => [h.kind, h.name]), [['handoff', 'handoff-scout.md']]);
   writeFileSync(file, '# Handoff: a lookout\nNothing else.');
   const later = new Date(Date.now() + 5000);
   utimesSync(file, later, later);
-  store.minionIndex.syncHandoffs(A.id, data);
+  await store.minionIndex.syncHandoffs(A.id, data);
   assert.deepEqual(store.minionIndex.search(A.id, 'grunt'), [], 'the old text is gone');
   assert.equal((store.minionIndex.search(A.id, 'lookout') as any[]).length, 1);
   unlinkSync(file);
-  store.minionIndex.syncHandoffs(A.id, data);
+  await store.minionIndex.syncHandoffs(A.id, data);
   assert.deepEqual(store.minionIndex.search(A.id, 'lookout'), []);
   store.db.close();
+});
+
+test('handoffs (#1463): a pass that finds nothing changed touches no table, a file filed into shipped/ is found, and a fresh index picks up the rows', async () => {
+  const db = join(root, 'three.db');
+  const store = new Store(db);
+  const A = store.createProject('A', null);
+  const data = join(root, 'data-three');
+  const dir = join(projectSharedDir(data, A.id), 'handoffs');
+  mkdirSync(join(dir, 'shipped'), { recursive: true });
+  writeFileSync(join(dir, 'live.md'), '# Handoff: walrus');
+  writeFileSync(join(dir, 'shipped', 'old.md'), '# Handoff: narwhal');
+  const has = await store.minionIndex.syncHandoffs(A.id, data);
+  assert.ok(has('handoffs/live.md') && has('handoffs/shipped/old.md') && !has('handoffs/old.md'));
+  const prepare = store.db.prepare.bind(store.db);
+  let sql = 0;
+  (store.db as any).prepare = (q: string) => (sql++, prepare(q));
+  await store.minionIndex.syncHandoffs(A.id, data);
+  assert.equal(sql, 0, 'nothing changed: no statement prepared');
+  // The tidy moves a live handoff into shipped/ (a rename keeps its mtime): the filed folder's own mtime moved, so it is listed again.
+  renameSync(join(dir, 'live.md'), join(dir, 'shipped', 'live.md'));
+  const after = await store.minionIndex.syncHandoffs(A.id, data);
+  (store.db as any).prepare = prepare;
+  assert.ok(sql > 0);
+  assert.ok(after('handoffs/shipped/live.md') && !after('handoffs/live.md'));
+  assert.deepEqual((store.minionIndex.search(A.id, 'walrus') as any[]).map((h) => h.name), ['shipped/live.md']);
+  assert.deepEqual((store.minionIndex.search(A.id, 'narwhal') as any[]).map((h) => h.name), ['shipped/old.md']);
+  // A restart: the new Store reads the rows once and rewrites none of them.
+  store.db.close();
+  const again = new Store(db);
+  await again.minionIndex.syncHandoffs(A.id, data);
+  assert.equal((again.db.prepare('SELECT count(*) AS n FROM handoff_index').get() as any).n, 2);
+  again.db.close();
 });
 
 test('the route and search_minions: the server fills the index itself, and a minion reads only its own scheme', { timeout: 60_000 }, async () => {

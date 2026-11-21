@@ -318,8 +318,9 @@ test('a container turn whose wrapper process is gone and whose heartbeat stopped
   await until('the wrapper has said its pid', () => !!turn() && existsSync(join(turn()!, 'pid.json')));
   const dir = turn()!;
   const { wrapper, claude } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
-  process.kill(claude, 'SIGKILL');
+  // The wrapper first, as a killed container ends both with no last word: killed second, a wrapper scheduled between the kills recorded claude's SIGKILL in exit.json, and the turn read as killed by a signal, not as its container gone (#1471).
   process.kill(wrapper, 'SIGKILL');
+  process.kill(claude, 'SIGKILL');
   const old = new Date(Date.now() - 60_000);
   utimesSync(join(dir, 'beat'), old, old);
   await until('the turn is cut off', () => status(id) !== 'running');

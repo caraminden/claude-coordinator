@@ -54,6 +54,22 @@ Each passes whatever the code does. Fix any you write; flag any you review.
   period, a row count that moves with data): a tautology with extra steps. Assert what the
   constant drives.
 
+## Timing patterns that flake
+
+Pass or fail should never depend on how fast the box is. Five patterns do exactly that; write the
+right-hand side. (Citadel guards them with a per-file count that only goes down:
+`.claude/rules/tests.md`.)
+
+- A bare sleep: wait on the thing's done signal with one shared `until`, never the first sign of it.
+- An assert that something was fast: take the clock as an injected knob and tick it. A deadline means
+  "it hung", never "it was fast".
+- A picked free port: bind port 0 and read the port back.
+- A custom short deadline on a wait: use the default; shortening it only moves the flake.
+- A hand-rolled recursive delete of temp folders: tear down through one shared helper.
+
+To show nothing happens, do a second action, wait for it, then check the first stayed quiet. An escape
+needs a written reason (`// timing-ok: <why>`) so a reviewer sees it.
+
 ## Tests that cost more than they prove
 
 These can go red, but they pay for it in lines, seconds or false alarms (Citadel's audit, #739,

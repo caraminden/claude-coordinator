@@ -1,0 +1,24 @@
+---
+paths:
+  - "test/**"
+---
+
+# Writing tests that don't flake (#1442; Cara, 2026-11-21: "conventions ... that will result in more consistent outcomes")
+
+`test/one-until.test.ts` counts five patterns per file against `test/flake-baseline.json` and fails when a
+count rises. Write the right-hand column instead.
+
+| Pattern the guard counts | Write instead |
+|---|---|
+| `await new Promise(r => setTimeout(..))` outside `until` | `until('<what>', () => cond)` from `./wait.ts`: wait on the done signal, never the first sign of it |
+| `assert` that an elapsed time is under N | an injected clock (the code takes a `now`/timer knob; the test ticks it). A deadline means "it hung", never "it was fast" |
+| `freePort(` | bind port 0 and read the port the server reports |
+| `until(.., N)` with N under 30 s | no number: the default is the "it hung" deadline |
+| `rmSync(.., { recursive: true })` | teardown through `bootServer` / `stopTurns` in `./helpers.ts` |
+
+- To show nothing happens, do a second action and wait for it (the queue drained, the next event arrived),
+  then check the first one stayed quiet. A fixed idle proves nothing and costs its whole length.
+- A real timer a test waits on gets a setting the test turns down; a sleep over 100 ms means the code needs a knob.
+- The one escape is `// timing-ok: <why>` on the row or the row above. It is counted in the baseline too.
+- Fixing or marking one: `FLAKE_BASELINE=write node test/one-until.test.ts`, then commit the JSON. The number only goes down.
+- Don't edit the guard's patterns to get green; fix the test, or say why the pattern is wrong.

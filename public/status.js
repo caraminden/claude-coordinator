@@ -305,7 +305,7 @@ function citadelTiles(c, days, now, ships, redraw) {
       hourLine(c.host.series, 3, { from, to: now, label: 'load each hour, at its highest', max: Math.max(c.host.cpuWarn * 1.25, ...c.host.series.map((s) => s[3] ?? 0)), rule: c.host.cpuWarn, tip: (v) => `load ${v} at its highest` }),
       { tone: c.verdict.tiles?.includes('cpu') ? 'warn' : null, key: 'cpu', chart: `load, hourly highest: ${perHour(c.host.series, 3)}` }),
     ...(c.host.cpu ? [cpuTile(c.host.cpu, now)] : []),
-    cacheTile(c.host, now),
+    cacheTile(c.host, now, c.verdict),
     tile('Starved', host?.cpu_psi == null ? 'No reading yet' : `CPU ${host.cpu_psi}% · memory ${host.mem_psi ?? 0}%`, 'How long work waited for a core or for memory over the last minute; background passes pause at 50% CPU or 20% memory',
       hourLine(c.host.series.filter((s) => s[4] != null), 4, { from, to: now, label: 'CPU pressure each hour, at its highest', rule: 50, tip: (v) => `CPU pressure ${v}% at its highest` }),
       { tone: host?.cpu_psi != null && (host.cpu_psi >= 50 || (host.mem_psi ?? 0) >= 20) ? 'warn' : null, key: 'pressure', chart: `CPU pressure %, hourly highest: ${perHour(c.host.series, 4)}; memory pressure %: ${perHour(c.host.series, 5)}` }),
@@ -338,16 +338,18 @@ function citadelTiles(c, days, now, ships, redraw) {
  * File cache (#1501): how much of the database is in memory and how hard the kernel discards and re-reads file cache. A database
  * mostly out of memory is what stalled the server for two days (#1492); the alert is a 'cache-cold' event in the verdict.
  */
-function cacheTile(host, now) {
+function cacheTile(host, now, verdict) {
   const l = host.latest;
   const from = now - 8 * 24 * 3_600_000;
   const MB = (pages) => (pages == null ? '-' : `${((pages * 4) / 1024).toFixed(1)} MB/s`);
   if (!l || l.db_size == null) return tile('File cache', 'No reading yet', 'Read every 5 minutes', null, { key: 'cache', chart: '' });
   const pct = Math.round(((l.db_cached ?? 0) / l.db_size) * 100);
-  return tile('File cache', `${pct}% in memory`,
-    `Database ${bytes(l.db_cached ?? 0)} of ${bytes(l.db_size)} · discarded ${MB(l.kswapd_rate)} · re-read ${MB(l.refault_rate)} (server ${MB(l.server_refault_rate)})`,
-    hourLine(host.cache, 1, { from, to: now, label: 'share of the database in memory each hour, at its lowest', rule: 25, tip: (v) => `${v}% in memory at its lowest` }),
-    { tone: pct < 25 ? 'warn' : null, key: 'cache', chart: `disk read ${l.pgpgin_rate == null ? '-' : `${(l.pgpgin_rate / 1024).toFixed(1)} MB/s`}, failed huge pages ${l.thp_fallback_rate ?? '-'}/s now; % of the database in memory, hourly lowest: ${perHour(host.cache, 1)}; discarded MB/s, hourly highest: ${perHour(host.cache, 2)}; re-read MB/s: ${perHour(host.cache, 3)}` });
+  const rows = [['Discarded by the kernel', MB(l.kswapd_rate)], ['Re-read, whole box', MB(l.refault_rate)], ['Re-read, the server', MB(l.server_refault_rate)],
+    ['Disk read', l.pgpgin_rate == null ? '-' : `${(l.pgpgin_rate / 1024).toFixed(1)} MB/s`], ['Failed huge pages', l.thp_fallback_rate == null ? '-' : `${l.thp_fallback_rate}/s`]];
+  return tile('File cache', `${pct}% in memory`, `Database ${bytes(l.db_cached ?? 0)} of ${bytes(l.db_size)}`,
+    h('div', {}, hourLine(host.cache, 1, { from, to: now, label: 'share of the database in memory each hour, at its lowest', rule: 25, tip: (v) => `${v}% in memory at its lowest` }),
+      h('ul', { class: 'st-list' }, ...rows.map(([k, v]) => h('li', {}, k, h('span', {}, v))))),
+    { tone: verdict?.tiles?.includes('cache') ? 'warn' : null, key: 'cache', chart: `${rows.map(([k, v]) => `${k} ${v}`).join(', ')}; % of the database in memory, hourly lowest: ${perHour(host.cache, 1)}; discarded MB/s, hourly highest: ${perHour(host.cache, 2)}; re-read MB/s: ${perHour(host.cache, 3)}` });
 }
 
 /**

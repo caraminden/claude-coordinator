@@ -723,7 +723,7 @@ async function flipCodex(box) {
 // minute whose stream spoke since it hid missed nothing, so it asks for nothing (#1528). Not on the stream's
 // readyState: a frozen phone page can show OPEN on a dead stream. A stream that broke and came back resyncs on
 // its open (connectStream), and a page the browser froze resyncs whatever the time.
-let hiddenAt = 0, frozen = false;
+let hiddenAt = Date.now(), frozen = false;
 document.addEventListener('freeze', () => { frozen = true; });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') return void ((hiddenAt = Date.now()), (frozen = false));

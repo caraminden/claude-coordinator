@@ -3,11 +3,13 @@
 // after the hooks' debounce. The fetches fail, so nothing reaches the strip's drawing (checked in a browser).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setView } from '../public/base.js';
-import { forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket } from '../public/inbox.js';
+import { newsArrived, setView } from '../public/base.js';
+import { countsIfOwed, forgetOtherSchemes, inboxEvent, inboxOtherTicket, inboxTicket } from '../public/inbox.js';
 
 const ITEMS = 'api/projects/2/inbox';
 const COUNTS = 'api/projects';
+// The counts, then the open scheme's items, which move with the same news (inbox.js refreshSchemeCounts).
+const BOTH = [COUNTS, ITEMS];
 
 const minion = { id: 900, number: 12, project_id: 2, kind: 'ticket', status: 'idle', state: null, replies: [] };
 const taskmaster = { id: 1, kind: 'coordinator', project_id: 2, status: 'idle' };
@@ -19,12 +21,15 @@ function scheme(t, over = {}) {
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (path) => {
     fetched.push(path);
-    return { ok: false, status: 500, json: async () => ({}) };
+    return { ok: false, status: 500, json: async () => ({}), text: async () => '{}' };
   };
   setView({ kind: 'project', projectId: 2, coordinator: taskmaster, tickets: new Map([[minion.id, minion]]), ...over });
   t.after(() => { globalThis.fetch = realFetch; setView(null); forgetOtherSchemes(); });
   return fetched;
 }
+
+/** Let the refused fetches finish, as they long have by the next news in a browser: a fetch still in flight is shared. */
+const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 const card = (ticketId, kind = 'question') => ({ ticket_id: ticketId, kind, data: '{}' });
 
@@ -51,12 +56,12 @@ test('a typed answer settles a card; other chat news fetches nothing', (t) => {
   assert.deepEqual(fetched, [ITEMS]);
 });
 
-test("a card in another scheme's minion refetches every scheme's counts, not this scheme's items, at most once a second", (t) => {
+test("a card in another scheme's minion refetches every scheme's counts, not this scheme's items, at most once every 2 s", (t) => {
   const fetched = scheme(t);
   inboxEvent(card(5000));
   t.mock.timers.tick(500);
   inboxEvent(card(5001, 'plan'));
-  t.mock.timers.tick(999);
+  t.mock.timers.tick(1499);
   assert.deepEqual(fetched, []);
   t.mock.timers.tick(1);
   assert.deepEqual(fetched, [COUNTS]);
@@ -80,24 +85,53 @@ test("this scheme's minion refetches the items when its count can move; a turn s
   inboxTicket(minion, { ...minion, state: 'ready' });
   t.mock.timers.tick(300);
   assert.deepEqual(fetched, [ITEMS], 'ready now waits on you');
+  newsArrived(); // as the stream does with each message (core.js), so this fetch doesn't share the one before
   inboxTicket(null, minion);
   t.mock.timers.tick(300);
   assert.deepEqual(fetched, [ITEMS, ITEMS], 'a minion new to the page');
 });
 
-test("another scheme's minion refetches the counts when it is new or its count or turn moved, and not for a repeat", (t) => {
+test("another scheme's minion refetches the counts when it is new or its count or turn moved, and not for a repeat", async (t) => {
   const fetched = scheme(t);
   const other = { ...minion, id: 5000, project_id: 1 };
   inboxOtherTicket(other);
-  t.mock.timers.tick(1000);
-  assert.deepEqual(fetched, [COUNTS], 'first seen');
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.deepEqual(fetched, BOTH, 'first seen');
   inboxOtherTicket({ ...other, title: 'Renamed' });
-  t.mock.timers.tick(1000);
-  assert.deepEqual(fetched, [COUNTS], 'nothing a count shows');
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.deepEqual(fetched, BOTH, 'nothing a count shows');
   inboxOtherTicket({ ...other, title: 'Renamed', status: 'running' });
-  t.mock.timers.tick(1000);
-  assert.deepEqual(fetched, [COUNTS, COUNTS], 'its turn started: the spinner');
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.deepEqual(fetched, [...BOTH, ...BOTH], 'its turn started: the spinner');
   inboxOtherTicket({ ...other, title: 'Renamed', status: 'running', state: 'try' });
-  t.mock.timers.tick(1000);
-  assert.deepEqual(fetched, [COUNTS, COUNTS, COUNTS], 'waits on you now');
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.deepEqual(fetched, [...BOTH, ...BOTH, ...BOTH], 'waits on you now');
+});
+
+test("a hidden tab leaves another scheme's spinner news until it is shown, but still fetches news that moves a count", async (t) => {
+  const fetched = scheme(t);
+  globalThis.document = { hidden: true };
+  t.after(() => { delete globalThis.document; });
+  const other = { ...minion, id: 5000, project_id: 1 };
+  inboxOtherTicket(other);
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.deepEqual(fetched, BOTH, 'new to the page: the badge can move');
+  inboxOtherTicket({ ...other, status: 'running' });
+  t.mock.timers.tick(10_000);
+  await settle();
+  assert.deepEqual(fetched, BOTH, 'only the spinner moved: nothing while hidden');
+  globalThis.document.hidden = false;
+  countsIfOwed();
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.deepEqual(fetched, [...BOTH, ...BOTH], 'shown again: the owed fetch');
+  countsIfOwed();
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.deepEqual(fetched, [...BOTH, ...BOTH], 'owed once, not on every show');
 });

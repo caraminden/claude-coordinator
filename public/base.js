@@ -71,18 +71,16 @@ export const newsArrived = () => inflight.clear();
  * browser froze it meanwhile, or the stream said nothing while it was hidden (`heardAt`, its last message).
  */
 /** Run `fn` now, or once the tab is next shown while it's hidden: a hidden tab's polls ask for nothing (#1528). */
-const owedShown = new Set();
 export function whenShown(fn) {
-  if (!globalThis.document?.hidden) return void fn();
-  owedShown.add(fn);
+  const doc = globalThis.document;
+  if (!doc?.hidden) return void fn();
+  doc.addEventListener('visibilitychange', function shown() {
+    if (doc.hidden) return;
+    doc.removeEventListener('visibilitychange', shown);
+    fn();
+  });
 }
-globalThis.document?.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
-  const fns = [...owedShown];
-  owedShown.clear();
-  for (const fn of fns) fn();
-});
-
+/** Whether a tab coming back may have missed stream news: frozen, hidden a minute or more, or no message since it hid (a dead stream can still read OPEN). */
 export const missedNews = (hiddenAt, heardAt, now, frozen) => frozen || now - hiddenAt >= 60_000 || heardAt < hiddenAt;
 
 const send = (path, opts) => fetch(path, {

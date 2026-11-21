@@ -6,7 +6,8 @@ const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [],
 
 test('another scheme\'s minion: news that can move its Needs-you count refetches the counts, the rest doesn\'t (#188)', () => {
   let fetches = 0;
-  const watch = otherSchemes(() => fetches++);
+  const badges: boolean[] = [];
+  const watch = otherSchemes((badge: boolean) => { fetches++; badges.push(badge); });
   watch.ticket(minion({ status: 'running' }));
   assert.equal(fetches, 1, 'a minion new to this page may already count');
   watch.ticket(minion({ status: 'running', activity: 'Reading files' }));
@@ -29,6 +30,8 @@ test('another scheme\'s minion: news that can move its Needs-you count refetches
   watch.event({ ticket_id: 7, kind: 'user_message', data: '{"text":"hi"}' });
   watch.event({ ticket_id: 7, kind: 'assistant_text', data: '{}' });
   assert.equal(fetches, 8, 'chat that settles no card moves nothing');
+  // A hidden tab still fetches for news that can move the app's badge, and leaves the spinner's for when it's shown (#1528).
+  assert.deepEqual(badges, [true, false, false, true, true, true, true, true], 'only a turn starting or ending is spinner-only');
 });
 
 test('cardEvent and countMoved, as the open scheme\'s badge uses them too', () => {

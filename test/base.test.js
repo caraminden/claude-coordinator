@@ -2,7 +2,7 @@
 // Importing it here is itself the check that it needs no document at load.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { account, ago, baseName, costText, fileExt, fileHref, fileKind, fileUrl, formatSize, isLocalPath, isSeen, joinPath, listGroupsOf, me, setAccount, setView, sharedHref, sharedUrl, shortPath, statusLabel, taskmasterName, threadFullName, threadHref, threadLabel, threadTitleParts, uploadUrl } from '../public/base.js';
+import { account, ago, api, missedNews, newsArrived, whenShown, baseName, costText, fileExt, fileHref, fileKind, fileUrl, formatSize, isLocalPath, isSeen, joinPath, listGroupsOf, me, setAccount, setView, sharedHref, sharedUrl, shortPath, statusLabel, taskmasterName, threadFullName, threadHref, threadLabel, threadTitleParts, uploadUrl } from '../public/base.js';
 
 test('joinPath resolves a relative link against its folder', () => {
   const rows = [
@@ -182,4 +182,68 @@ test('setAccount: who is signed in, as every module reads it, and nobody after s
   setAccount(null);
   assert.equal(me, null);
   assert.equal(account, null);
+});
+
+test('missedNews: a tab back within a minute with stream news since it hid asks for nothing; longer, silent or frozen resyncs (#1528)', () => {
+  const hid = 1_000_000;
+  assert.equal(missedNews(hid, hid + 5_000, hid + 59_999, false), false, 'hidden under a minute, the stream delivered meanwhile');
+  assert.equal(missedNews(hid, hid + 5_000, hid + 60_000, false), true, 'hidden a minute or more');
+  assert.equal(missedNews(hid, hid - 1, hid + 10_000, false), true, 'no stream message since it hid: maybe a dead stream that still reads OPEN');
+  assert.equal(missedNews(hid, hid + 5_000, hid + 10_000, true), true, 'the browser froze the page');
+});
+
+/** fetch replaced by one that counts calls and answers when told to. */
+function fakeFetch(t) {
+  const calls = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (path, opts) => new Promise((resolve) => calls.push({ path, method: opts?.method ?? 'GET', answer: (body) => resolve({ ok: true, status: 200, text: async () => JSON.stringify(body) }) }));
+  t.after(() => { globalThis.fetch = real; newsArrived(); });
+  return calls;
+}
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test('api: GETs of one path at once share a request, and each caller gets its own copy (#1528)', async (t) => {
+  const calls = fakeFetch(t);
+  const a = api('api/x'), b = api('api/x'), c = api('api/y');
+  assert.deepEqual(calls.map((x) => x.path), ['api/x', 'api/y']);
+  calls[0].answer({ list: [1] }); calls[1].answer({});
+  const [ra, rb] = await Promise.all([a, b, c]);
+  assert.deepEqual(ra, { list: [1] });
+  assert.notEqual(ra, rb, 'a caller changing its answer leaves the other\'s alone');
+  await settle();
+  api('api/x');
+  assert.equal(calls.length, 3, 'once answered, the next GET asks again');
+});
+
+test('api: a write, or news on the stream, stops a later GET joining one sent before it (#1528)', async (t) => {
+  const calls = fakeFetch(t);
+  api('api/x');
+  api('api/x', { method: 'POST', body: { a: 1 } });
+  api('api/x');
+  assert.deepEqual(calls.map((x) => x.method), ['GET', 'POST', 'GET'], 'after a write');
+  newsArrived();
+  api('api/x');
+  assert.equal(calls.length, 4, 'after stream news');
+  api('api/x');
+  assert.equal(calls.length, 4, 'and shares again after that');
+  for (const x of calls) x.answer({});
+});
+
+test('whenShown: runs at once in a shown tab, and only once the tab is next shown in a hidden one (#1528)', (t) => {
+  const ran = [];
+  whenShown(() => ran.push('no document'));
+  const listeners = new Set();
+  globalThis.document = { hidden: true, addEventListener: (_, f) => listeners.add(f), removeEventListener: (_, f) => listeners.delete(f) };
+  t.after(() => { delete globalThis.document; });
+  const change = (hidden) => { document.hidden = hidden; for (const f of [...listeners]) f(); };
+  whenShown(() => ran.push('poll'));
+  assert.deepEqual(ran, ['no document'], 'nothing while hidden');
+  change(true);
+  assert.deepEqual(ran, ['no document'], 'still hidden');
+  change(false);
+  assert.deepEqual(ran, ['no document', 'poll'], 'shown');
+  change(true); change(false);
+  assert.deepEqual(ran, ['no document', 'poll'], 'once');
+  whenShown(() => ran.push('shown tab'));
+  assert.deepEqual(ran, ['no document', 'poll', 'shown tab']);
 });

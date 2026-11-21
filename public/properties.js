@@ -115,13 +115,14 @@ export const propFilter = { projectId: null, keys: null, picks: new Map(), open:
 // Each scheme's keys and saved views as last fetched: a scheme you switch to draws its Filters button in the first paint.
 const filterSeen = new Map();
 
-// The registry is asked for by the filter and the Settings count in the same load: one read serves both for a few seconds.
+// The registry is asked for by the filter and the Settings count in the same load: one read serves both, until a few
+// seconds after it's answered (counted from the answer, so a slow open doesn't ask twice, #1528).
 let registryRead = null;
 function readRegistry(projectId) {
-  if (registryRead?.projectId !== projectId || Date.now() - registryRead.at > 5000) {
-    const read = api(`api/projects/${projectId}/properties`);
-    registryRead = { projectId, at: Date.now(), read };
-    read.catch(() => { if (registryRead?.read === read) registryRead = null; });
+  if (registryRead?.projectId !== projectId || (registryRead.at && Date.now() - registryRead.at > 5000)) {
+    const entry = { projectId, at: 0, read: api(`api/projects/${projectId}/properties`) };
+    registryRead = entry;
+    entry.read.then(() => { entry.at = Date.now(); }, () => { if (registryRead === entry) registryRead = null; });
   }
   return registryRead.read;
 }

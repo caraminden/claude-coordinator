@@ -12,6 +12,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { faultPoint } from './fault-points.ts';
 import { HostJobs } from './host-job.ts';
@@ -196,19 +197,19 @@ export class Landings {
   }
 
   /** The steps this hand-off's report already did, each with what it gave, so a report cut off by a throw or a kill doesn't do them again (C2, #1406). */
-  reported(ticketId: number): Record<string, { v?: unknown }> {
+  async reported(ticketId: number): Promise<Record<string, { v?: unknown }>> {
     try {
-      return JSON.parse(readFileSync(join(this.dir(ticketId), REPORTED), 'utf8'));
+      return JSON.parse(await readFile(join(this.dir(ticketId), REPORTED), 'utf8'));
     } catch {
       return {};
     }
   }
 
   /** Save the report's steps, written aside and renamed in so a kill mid-write keeps the last whole copy. */
-  markReported(ticketId: number, steps: Record<string, { v?: unknown }>) {
+  async markReported(ticketId: number, steps: Record<string, { v?: unknown }>) {
     const file = join(this.dir(ticketId), REPORTED);
-    writeFileSync(`${file}.tmp`, JSON.stringify(steps));
-    renameSync(`${file}.tmp`, file);
+    await writeFile(`${file}.tmp`, JSON.stringify(steps));
+    await rename(`${file}.tmp`, file);
   }
 
   /** Reported: it no longer counts as a hand-off. */
@@ -630,12 +631,12 @@ export class LandHandoffs {
     const r = landResult(run.output, run.code!);
     // Each step that says, counts or deploys something runs once per hand-off, even when a throw or a kill cuts the
     // report off and the next poll or server runs it again (C2, #1406). Setting the ticket's state is safe to repeat.
-    const done = this.d.landings.reported(id);
+    const done = await this.d.landings.reported(id);
     const once = async <T>(step: string, fn: () => T | Promise<T>): Promise<T> => {
       if (step in done) return done[step].v as T;
       const v = await fn();
       done[step] = { v };
-      this.d.landings.markReported(id, done);
+      await this.d.landings.markReported(id, done);
       return v;
     };
     try { await once('flakes', () => this.d.flakes?.(id, run.output)); } catch (err: any) { console.error(`Recording minion ${id}'s flakes failed: ${err?.message ?? err}`); }

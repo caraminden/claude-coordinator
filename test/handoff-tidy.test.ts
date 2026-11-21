@@ -106,7 +106,7 @@ test('a start naming a moved handoff makes no second ideas row, and reconcile do
   assert.equal(rows[0].ticket_id, t.id);
 });
 
-test('relocate combines a loose row with its shipped twin, decided fields win, and one failure skips no other file (#1432)', () => {
+test('relocate combines a loose row with its shipped twin, the twin gains what only the loose row has (#1432)', () => {
   const { dir, store, project, shared, file } = setup();
   file('a.md'); file('b.md');
   for (const n of ['a', 'b']) {
@@ -117,6 +117,6 @@ test('relocate combines a loose row with its shipped twin, decided fields win, a
   }
   rmSync(join(shared, 'handoffs/a.md')); rmSync(join(shared, 'handoffs/b.md'));
   reconcileMoved(store, dir, project);
-  const rows = store.db.prepare('SELECT card, pick FROM ideas WHERE project_id = ? ORDER BY card').all(project) as any[];
-  assert.deepEqual(rows.map((r) => [r.card, r.pick]), [['handoffs/shipped/a.md', 'go'], ['handoffs/shipped/b.md', 'go']]);
+  const rows = store.db.prepare('SELECT card, pick, decided_by FROM ideas WHERE project_id = ? ORDER BY card').all(project) as any[];
+  assert.deepEqual(rows.map((r) => [r.card, r.pick, r.decided_by]), [['handoffs/shipped/a.md', 'go', 'Cara'], ['handoffs/shipped/b.md', 'go', 'Cara']]);
 });

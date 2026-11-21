@@ -71,9 +71,13 @@ export function relocate(store: Store, projectId: number, shared: string, from: 
   if (loose && !twin) store.db.prepare('UPDATE ideas SET card = ? WHERE id = ?').run(to, loose.id);
   // A second row already made for the moved file (#1432): the twin keeps what it has, takes what only the loose row has, and the loose row goes.
   else if (loose && twin) {
-    const cols = ['title', 'source_number', 'pick', 'pick_label', 'decided_by', 'words', 'decided_at', 'ticket_id', 'number', 'status_manual', 'manual_by', 'manual_at'];
-    store.db.prepare(`UPDATE ideas SET ${cols.map((c) => `${c} = COALESCE(NULLIF(${c}, ''), (SELECT ${c} FROM ideas WHERE id = ?))`).join(', ')},
-      link_manual = MAX(link_manual, (SELECT link_manual FROM ideas WHERE id = ?)) WHERE id = ?`).run(...cols.map(() => loose.id), loose.id, twin.id);
+    const get = (id: number) => store.db.prepare('SELECT * FROM ideas WHERE id = ?').get(id) as Record<string, unknown>;
+    const [l, t] = [get(loose.id), get(twin.id)];
+    // Each group comes whole from one row, so a pick never mixes two people's decisions or a link two minions'.
+    const groups = [['pick', 'pick_label', 'decided_by', 'words', 'decided_at'], ['status_manual', 'manual_by', 'manual_at'], ['ticket_id', 'number', 'link_manual']];
+    const takeLoose = [t.pick == null && l.pick != null, t.status_manual == null && l.status_manual != null, l.link_manual === 1 || (t.ticket_id == null && l.ticket_id != null)];
+    groups.forEach((cols, i) => { if (takeLoose[i]) store.db.prepare(`UPDATE ideas SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...cols.map((c) => l[c] as string | number | null), twin.id); });
+    if (!t.title && l.title) store.db.prepare('UPDATE ideas SET title = ? WHERE id = ?').run(l.title as string, twin.id);
     store.db.prepare('DELETE FROM ideas WHERE id = ?').run(loose.id);
   }
 }

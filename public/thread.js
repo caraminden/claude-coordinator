@@ -2,7 +2,7 @@
 import { presenceHead } from './presence.js';
 import { gloss } from './help-words.js';
 import { account, ago, api, baseName, clearHighlights, dismissedWhen, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
-import { mergedView } from './mine.js';
+import { mergedView, TM_VIEW } from './mine.js';
 import { toast } from './ui/status.js';
 import { cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
 import { alertNote, composer, composerPlaceholder, outbox, renderModelPicker } from './composer.js';
@@ -34,7 +34,6 @@ import { headState, initSeen, leftText, narrow, phaseRows, progressUi, renderPro
 import { answerRef, answerSummary, approvalCard, loopCard, messagesBelow, planCard, questionCard, settleSpend, speaker, spendCard } from './cards.js';
 
 // Mine or Everyone (#920): how this device opens your Taskmaster in a scheme with several.
-const TM_VIEW = 'cc-tm-view';
 export function tmViewMode() {
   try { return localStorage.getItem(TM_VIEW) === 'everyone' ? 'everyone' : 'mine'; } catch { return 'mine'; }
 }

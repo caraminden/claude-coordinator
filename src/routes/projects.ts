@@ -785,12 +785,12 @@ export const projectRoutes: Route[] = [
       // Builds' previews are of this server's own code, so only its own scheme's headers link one (src/previews.ts).
       const build_previews = !!app.previews && app.previews.buildScheme()?.id === project.id;
       // Per-person Taskmasters (#919): a person's page opens their own, and `taskmasters` lists every session for
-      // Mine and Everyone (#920): person_id null is the Overlord. Empty until the scheme splits. updated_at: when its
-      // offered replies count as seen in Needs you, as for any minion (#1400).
+      // Mine and Everyone (#920): person_id null is the Overlord. Empty until the scheme splits. updated_at and status: when its
+      // offered replies count as seen in Needs you and whether its turn spins the pill, as for any minion (#1400).
       const all_tms = app.store.listCoordinators(project.id);
       const own = !caller && all_tms.length > 1 ? app.store.coordinatorFor(project.id, session.uid) ?? coordinator : coordinator;
       const taskmasters = all_tms.length > 1
-        ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : app.store.getUser(t.coordinator_of)?.name ?? null, updated_at: t.updated_at }))
+        ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : app.store.getUser(t.coordinator_of)?.name ?? null, updated_at: t.updated_at, status: t.status }))
         : [];
       return json(res, 200, { project, coordinator: ticketView(app, own.id), taskmasters, tickets, dismissed, ...(which === 'closed' ? { more } : {}), seen, person_notes, pins, builds, build_previews });
     },

@@ -1,7 +1,8 @@
 // The Needs-you inbox: everything in the scheme waiting on a person, as a strip at the top of the
 // minions list, minimized to a count until you open it.
 import { ago, api, h, isCoordinator, isSeen, jumpHref, schemeIcon, STATES, taskmasterLabel, threadHref, view } from './base.js';
-import { cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
+import { cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from './schemecounts.js';
+import { TM_VIEW } from './mine.js';
 import { iconSrc } from './schemes.js';
 import { askWhy, mentions } from './threadstate.js';
 import { mountTips } from './ui/tip.js';
@@ -59,10 +60,7 @@ export function refreshSchemeCounts() {
   return api('api/projects').then((projects) => {
     if (view?.kind === 'project') view.projects = projects;
     for (const p of projects) {
-      // The open scheme's pill is the strip's (renderInbox, from refreshInbox below): drawing the server's here too would
-      // flip it between the two answers whenever they disagree for a moment (#1400).
-      const own = p.id === view?.projectId && inbox.projectId === p.id;
-      if (!own) for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
+      for (const el of document.querySelectorAll(`[data-scheme-inbox="${p.id}"]`)) el.replaceWith(schemeCount(p));
       // A favicon a merge added or changed since the page drew it.
       for (const el of document.querySelectorAll(`[data-scheme-icon="${p.id}"]`)) if (el.getAttribute('src') !== iconSrc(p)) el.replaceWith(schemeIcon(p));
     }
@@ -125,7 +123,7 @@ export function schemeCount(p) {
   // No words on the pill (Cara, 2026-11-17): its reason is the popover, hover or a long press, as a tap opens the scheme (#906).
   pillTips ??= mountTips(document.body, { selector: '.scheme-count[data-tip]', acts: '.scheme-count' });
   // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
-  const { need, busy, working, shipping, fresh, label } = schemePill(p.id === view?.projectId && seenHere.projectId === p.id ? { ...p, fresh: seenHere.fresh } : p);
+  const { need, busy, working, shipping, fresh, label } = schemePill(openPill(p, view?.projectId, seenHere));
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy && !shipping, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
     busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i'), working ? h('b', {}, working) : null) : null,
     shipping ? h('span', { class: 'ship', 'aria-hidden': 'true' }, h('b', {}, shipping), h('i', { style: `--ship-delay: -${Date.now() % 1500}ms` }, h('u', {}, '.'), h('u', {}, '.'), h('u', {}, '.'))) : null,
@@ -141,7 +139,8 @@ export const updateBadge = () => syncBadge(wantsBadge(view?.projects, view?.proj
 // The items each scheme last told the server you saw (sorted keys, joined), so a redraw with nothing new writes nothing.
 const seenSent = new Map();
 // The open scheme's waiting items you've seen (seenInScheme), the chat you were on at the last redraw, and whether anything's new.
-const seenHere = { projectId: null, chatId: null, keys: new Set(), fresh: false };
+// pill: the open scheme's count and spinner as its strip has them, which every draw of its pill uses (openPill, #1400).
+const seenHere = { projectId: null, chatId: null, keys: new Set(), fresh: false, pill: null };
 
 /** Record the items you've seen waiting in the scheme you're in on the server when they change (#539), behind the page. */
 function markItemsSeen(projectId, keys) {
@@ -186,18 +185,17 @@ export function renderInbox() {
   const shown = minionCount(all);
   // A scheme you hid (#226) keeps its strip but no pill.
   const hidden = view.projects?.find((p) => p.id === view.projectId)?.hidden;
-  const running = !hidden && [view.coordinator, ...view.tickets.values()].some(isWorking);
+  // Every Taskmaster session's turn spins it, as the server's pill does: a split scheme's Overlord too (#919).
+  const running = !hidden && [view.coordinator, ...view.tickets.values(), ...(view.taskmasters ?? []).map((tm) => itemTicket(view, tm.id))].some(isWorking);
   const working = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && isWorking(t)).length;
   const shipping = hidden ? 0 : [...view.tickets.values()].filter((t) => t.kind !== 'coordinator' && isShipping(t)).length;
   // Settings or Artifacts (no chat open) isn't moving minions: coming back to the same chat sees nothing more.
   const moved = seenHere.projectId !== view.projectId || (view.id != null && seenHere.chatId !== view.id);
   const keys = seenInScheme(seenHere.keys, waiting, view.id, moved);
-  Object.assign(seenHere, { projectId: view.projectId, chatId: view.id ?? seenHere.chatId, keys, fresh: waiting.some((i) => !keys.has(i.key)) });
+  const pill = { inbox: hidden ? 0 : count, running, working, shipping };
+  Object.assign(seenHere, { projectId: view.projectId, chatId: view.id ?? seenHere.chatId, keys, fresh: waiting.some((i) => !keys.has(i.key)), pill });
   if (!hidden) markItemsSeen(view.projectId, [...keys]);
-  // The scheme list's next redraw (hidden.js) draws the open scheme's pill from this count too, not the server's older one.
-  const listed = view.projects?.find((p) => p.id === view.projectId);
-  if (listed) Object.assign(listed, { inbox: hidden ? 0 : count, running, working, shipping });
-  for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, inbox: hidden ? 0 : count, running, working, shipping }));
+  for (const el of document.querySelectorAll(`[data-scheme-inbox="${view.projectId}"]`)) el.replaceWith(schemeCount({ id: view.projectId, ...pill }));
   updateBadge();
   strip.hidden = false;
   if (!items.length) {
@@ -257,7 +255,10 @@ export function inboxRow(items) {
   inboxTips ??= mountTips(document.body, { selector: '.inbox-row .chip[data-tip]', tapOpens: true });
   const seen = items.every(faded);
   const target = rowTarget(items);
-  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t) },
+  // Another person's Taskmaster (#919) shows only in Everyone: its card addressed to you opens there (#1400).
+  const everyone = view.taskmasters?.some((x) => x.id === t.id && x.person_id != null && x.id !== view.coordinator?.id);
+  const open = everyone ? () => { try { localStorage.setItem(TM_VIEW, 'everyone'); } catch {} } : null;
+  return h('a', { class: `inbox-row${seen ? ' seen' : ''}${view.id === t.id ? ' active' : ''}`, href: target ? jumpHref(t, target) : threadHref(t), onclick: open },
     h('span', { class: 'name' }, from ? `${from.scheme} ` : '',
       isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h('span', { class: 'asks' }, [...asks].map(([ask, { n, why }]) => h('span', { class: 'chip', tabindex: 0, 'data-tip': why, 'data-tip-row': t.id }, n > 1 ? `${ask} ×${n}` : ask))),

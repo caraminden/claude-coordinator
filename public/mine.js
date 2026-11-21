@@ -1,6 +1,9 @@
 // Which of the Overlord's events show in every person's Mine (#920): what's marked for everyone, and its
 // cards' answers and results so the cards settle there. src/db.ts MINE_EVENTS is the same rule as a query.
 
+/** Where this device keeps Mine or Everyone (#920): thread.js's switch, and a Needs-you row whose card only Everyone shows (#1400). */
+export const TM_VIEW = 'cc-tm-view';
+
 /** Whether an Overlord event (a row with its JSON `data`) shows in Mine. */
 export function inMine(event) {
   if (['question_result', 'question_more', 'plan_result', 'approval_result'].includes(event.kind)) return true;

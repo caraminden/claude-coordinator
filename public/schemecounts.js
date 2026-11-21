@@ -55,7 +55,14 @@ export function schemePill(p) {
  * `projects` as api/projects sends them; the open scheme's `fresh` is this page's own (`seen`, as inbox.js holds it).
  */
 export const wantsBadge = (projects, openId, seen) =>
-  (projects || []).some((p) => !p.hidden && !p.minimized && schemePill(p.id === openId && seen?.projectId === p.id ? { ...p, fresh: seen.fresh } : p).fresh);
+  (projects || []).some((p) => !p.hidden && !p.minimized && schemePill(openPill(p, openId, seen)).fresh);
+
+/**
+ * The scheme you're in, as this page saw it (`seen`: inbox.js's seenHere): its strip's count and spinner (`seen.pill`) and
+ * whether anything's new, over the server's word, which lags it or another tab wrote. Every draw of its pill goes through
+ * this, so a scheme-list refresh can't put the server's older count back for a moment (#1400).
+ */
+export const openPill = (p, openId, seen) => (p.id === openId && seen?.projectId === p.id ? { ...p, ...seen.pill, fresh: seen.fresh } : p);
 
 /**
  * Set or clear the app badge to match `want`, only when it changed since the last call (`state.on`), and only where
@@ -117,7 +124,7 @@ export function itemTicket(view, id) {
   if (t) return t;
   const tm = view?.taskmasters?.find((x) => x.id === id);
   if (!tm) return undefined;
-  return tm.ticket ?? { id, kind: 'coordinator', project_id: view.projectId, status: 'idle', updated_at: tm.updated_at ?? 0 };
+  return tm.ticket ?? { id, kind: 'coordinator', project_id: view.projectId, status: tm.status ?? 'idle', updated_at: tm.updated_at ?? 0 };
 }
 
 /**

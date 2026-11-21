@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
+import { cardEvent, countMoved, isShipping, isWorking, itemTicket, minionCount, openPill, otherSchemes, rowTarget, schemePill, seenInScheme, stripItems, syncBadge, turnMoved, wantsBadge } from '../public/schemecounts.js';
 
 const minion = (over = {}) => ({ id: 7, project_id: 2, state: null, replies: [], status: 'idle', activity: null, ...over });
 
@@ -164,4 +164,15 @@ test("the open scheme's strip shows every item the badge counts, a card on a Tas
   // A minion you dismissed here drops at once, before the server's next list (#589).
   view.tickets.set(2955, { ...shipping, status: 'closed' });
   assert.equal(minionCount(stripItems(view, items)), 1);
+});
+
+test("the open scheme's pill is its strip's, whichever list draws it: a scheme-list refresh can't put the server's count back (#1400)", () => {
+  const server = { id: 3, inbox: 1, fresh: true, running: false, working: 0, shipping: 0 };
+  const seen = { projectId: 3, fresh: false, pill: { inbox: 2, running: true, working: 1, shipping: 1 } };
+  assert.deepEqual(schemePill(openPill(server, 3, seen)), schemePill({ id: 3, ...seen.pill, fresh: false }));
+  assert.equal(schemePill(openPill(server, 3, seen)).need, 2);
+  assert.equal(openPill(server, 4, seen), server, 'another scheme keeps the server\'s word');
+  assert.equal(openPill(server, 3, { projectId: 4, fresh: false, pill: seen.pill }), server, 'not drawn here yet');
+  assert.equal(wantsBadge([server], 3, seen), false, 'the badge follows the same pill');
+  assert.equal(itemTicket({ projectId: 3, taskmasters: [{ id: 9, person_id: null, status: 'running' }] }, 9).status, 'running', 'an Overlord\'s turn spins it from the first paint');
 });

@@ -138,7 +138,6 @@ test('a stall line states its own start and end clock time, measured when it was
   const logged: string[] = [];
   const watch = watchLoopLag((text) => logged.push(text), 10, 150);
   try {
-    await new Promise((r) => setTimeout(r, 50));
     const before = Date.now();
     spin(400);
     await waitFor(() => logged.length > 0);
@@ -160,9 +159,12 @@ test('a hold of the main thread is sampled from /proc by a worker: the line name
   const logged: string[] = [];
   const watch = watchLoopLag((text) => logged.push(text), 10, 150);
   try {
-    await new Promise((r) => setTimeout(r, 300)); // the worker starts
-    spin(700);
-    await waitFor(() => logged.some((l) => /Main thread waited on: R ×\d+/.test(l)));
+    // The worker takes a moment to start: hold the loop again until a line carries its samples.
+    await until('a stall line with the held thread running', async () => {
+      spin(700);
+      await new Promise((r) => setImmediate(r));
+      return logged.some((l) => /Main thread waited on: R ×\d+/.test(l));
+    });
     // Blocked off-CPU, as on a disk wait: the thread sleeps in the kernel.
     logged.length = 0;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);

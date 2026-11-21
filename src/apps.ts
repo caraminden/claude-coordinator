@@ -173,6 +173,28 @@ const page = (title: string, text: string, more?: { href: string; label: string 
   (more ? `<a href="${escape(more.href)}" target="_top">${escape(more.label)}</a>` : '') +
   `</div></main><script>document.getElementById('back').onclick=function(){if(parent!==window)parent.postMessage({protocol:'citadel-frame-1',type:'leave'},'*');else location.href='${home}/c/'}</script></body>`;
 
+/**
+ * What a page load gets while its app doesn't answer (a restart, a crash, a stop; #1376), in place of a bare 502: the
+ * kit's look (theme.css and base.css are Citadel's, so they load with the app down), Retry, Back to Citadel, and it
+ * asks again by itself (2 s, backing off to 15 s) and reloads once the app answers.
+ */
+export const appDown = (title: string, home = '') =>
+  `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title>` +
+  `<link rel="stylesheet" href="/apps/_citadel/theme.css"><link rel="stylesheet" href="/apps/_citadel/ui/base.css">` +
+  `<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:var(--citadel-space-4);background:var(--citadel-bg);color:var(--citadel-text);font:var(--citadel-size-body)/1.5 var(--citadel-font)}` +
+  `main{max-width:26rem;width:100%;box-sizing:border-box;padding:var(--citadel-space-5);background:var(--citadel-surface);border:1px solid var(--citadel-border);border-radius:var(--citadel-radius-lg)}` +
+  `h1{margin:0 0 var(--citadel-space-2);font-size:var(--citadel-size-h2)}p{margin:0 0 var(--citadel-space-4);color:var(--citadel-muted)}` +
+  `.row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--citadel-space-2)}` +
+  `.again{display:flex;align-items:center;gap:var(--citadel-space-2);margin:var(--citadel-space-4) 0 0;color:var(--citadel-muted);font-size:var(--citadel-size-small)}</style>` +
+  `<body><main><h1>Can't reach ${escape(title)}</h1><p>${escape(title)} isn't answering right now. It may be restarting, which takes a few seconds.</p>` +
+  `<div class="row"><button type="button" class="cui-btn cui-primary" id="retry">Retry</button><button type="button" class="cui-btn cui-ghost" id="back">Back to ${APP_NAME}</button></div>` +
+  `<p class="again"><span class="cui-spin" aria-hidden="true"></span><span>This page opens by itself once it's back.</span></p></main>` +
+  `<script>(function(){var d=2000;` +
+  `function check(){fetch(location.href,{cache:'no-store',redirect:'manual'}).then(function(r){if(r.status<500)location.reload();else later()},later)}` +
+  `function later(){d=Math.min(d*1.5,15000);setTimeout(check,d)}setTimeout(check,d);` +
+  `document.getElementById('retry').onclick=function(){location.reload()};` +
+  `document.getElementById('back').onclick=function(){if(parent!==window)parent.postMessage({protocol:'citadel-frame-1',type:'leave'},'*');else location.href='${home}/c/'}})()</script></body>`;
+
 type Refusal = { status: number; reason: string; headers: OutgoingHttpHeaders; body: string };
 /** renewed: a fresh session cookie for the person (Auth.renewal), added to the contraption's answer. */
 type Admitted = { row: ContraptionRow; path: string; headers: OutgoingHttpHeaders; uid: number | null; renewed?: string | null; sandboxed?: boolean };
@@ -282,7 +304,8 @@ export class AppProxy {
     if ('status' in a) return void res.writeHead(a.status, a.headers).end(a.body);
     this.track(res, a);
     const failed = (status: number, note?: string) => this.onServerError(a.row, status, req.method ?? 'GET', a.path, note);
-    const go = (held?: boolean) => forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed, ...(held || this.restarts.isStopped(a.row.name) ? { retryMs: 0 } : {}) });
+    const downPage = isPage(req) ? appDown(a.row.title, host !== null ? this.origin(req, null) : '') : undefined;
+    const go = (held?: boolean) => forward(req, res, a.row.port, a.path, a.headers, { ...this.options(a.row, a.renewed, a.sandboxed), failed, downPage, ...(held || this.restarts.isStopped(a.row.name) ? { retryMs: 0 } : {}) });
     this.restarts.whenUp(a.row.name, a.row.port, res, go);
   }
 

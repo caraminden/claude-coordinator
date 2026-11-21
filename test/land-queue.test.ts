@@ -482,35 +482,46 @@ test('a waiter further back naps between looks and starts no process but its nap
     await until('a to hold the lock', () => order(state).length === 1);
     const join1 = (label: string, pre = '') => { ws.push(napper(state, label, pre)); return until(`${label}'s ticket`, () => issued(state) === ws.length + 1); };
     await join1('b');
-    // c traces every command with its subshell depth: a $( ) or a pipe in a look shows as depth 1.
-    await join1('c', `PS4='+$BASH_SUBSHELL '; set -x; `);
-    await join1('d', `queue_wait_check() { [ ! -e '${state}/moved' ] || { echo "queue: main moved under d" >&2; return 1; }; }; `);
-    await join1('e');
+    // c, d and e trace every command with its subshell depth: a $( ) or a pipe in a look shows as depth 1, and each nap
+    // as "+0 sleep 4". Counting naps, not seconds, keeps a loaded box from failing it: a change made at any moment is
+    // seen at the end of the nap under way, so before the second nap that starts after it.
+    const trace = `PS4='+$BASH_SUBSHELL '; set -x; `;
+    await join1('c', trace);
+    await join1('d', `${trace}queue_wait_check() { [ ! -e '${state}/moved' ] || { echo "queue: main moved under d" >&2; return 1; }; }; `);
+    await join1('e', trace);
     const [b, c, d, e] = ws;
+    const naps = (s: string) => (s.match(/^\+0 sleep 4$/gm) ?? []).length;
+    // What a waiter traced from `from` up to where it first said `what`.
+    const upTo = (s: string, from: number, what: RegExp) => { const t = s.slice(from); const m = what.exec(t); return m ? t.slice(0, m.index) : t; };
     await until('e to say its place', () => /5th in line/.test(e.stderr()));
-    await until('c to nap twice', () => (c.stderr().match(/^\+0 sleep 4$/gm) ?? []).length >= 2, 15_000);
+    await until('c to nap twice', () => naps(c.stderr()) >= 2);
     const look = c.stderr().split(/^\+0 sleep 4$/m)[1];
     assert.doesNotMatch(look, /^\++[1-9]/m, `a look back in line started a subshell:\n${look}`);
     assert.doesNotMatch(c.stderr().split('3rd in line')[1], /^\+0 sleep 0\.05$/m, 'c, two back, never looked at the poll beat');
 
     const [, , , , te] = tickets(state);
-    const t0 = Date.now();
+    let atC = c.stderr().length, atE = e.stderr().length;
     writeFileSync(join(state, 'queue', '.order'), `# Cara moved #5 to the front\n${te}\n`);
-    await until('e to see the reorder', () => /queue: 2nd in line .*\(ahead: a, starting\)/.test(e.stderr().split('Cara moved #5')[1] ?? ''), 6_000);
-    await until('c, further back, to see it too', () => /4th in line/.test(c.stderr().split('Cara moved #5').pop()!), 6_000);
-    assert.ok(Date.now() - t0 < 6_000);
+    await until('e to see the reorder', () => /queue: 2nd in line .*\(ahead: a, starting\)/.test(e.stderr().slice(atE)));
+    await until('c, further back, to see it too', () => /4th in line/.test(c.stderr().slice(atC)));
+    assert.ok(naps(upTo(e.stderr(), atE, /2nd in line/)) <= 1, 'e saw the reorder within a nap');
+    assert.ok(naps(upTo(c.stderr(), atC, /4th in line/)) <= 1, 'c saw the reorder within a nap');
 
+    atC = c.stderr().length;
     b.child.kill('SIGKILL');
     await b.exit;
-    await until('c to move up past the dead ticket', () => /3rd in line/.test(c.stderr().split('Cara moved #5').pop()!), 6_000);
+    await until('c to move up past the dead ticket', () => /3rd in line/.test(c.stderr().slice(atC)));
+    assert.ok(naps(upTo(c.stderr(), atC, /3rd in line/)) <= 1, 'c passed the dead ticket within a nap');
 
+    const atD = d.stderr().length;
     writeFileSync(join(state, 'moved'), '');
-    assert.equal(await Promise.race([d.exit, new Promise((ok) => setTimeout(() => ok('late'), 6_000))]), 2, d.stderr());
+    assert.equal(await d.exit, 2, d.stderr());
     assert.match(d.stderr(), /main moved under d/);
+    assert.ok(naps(upTo(d.stderr(), atD, /main moved under d/)) <= 1, 'd acted on its wait check within a nap');
 
     writeFileSync(join(state, 'go'), '');
-    await until('e, next in line, to take the lock', () => order(state).includes('e'), 2_000);
     assert.equal(await e.exit, 0, e.stderr());
+    assert.equal(naps(e.stderr().slice(e.stderr().indexOf('2nd in line'))), 0, 'e, next in line, only ever looked at the poll beat');
     assert.equal(await c.exit, 0);
     assert.deepEqual(order(state), ['a', 'e', 'c']);
   } finally {
@@ -527,11 +538,12 @@ test('a waiter further back still gives up on time when nothing moves (#1545)', 
     await until('a to hold the lock', () => order(state).length === 1);
     ws.push(napper(state, 'b')); // its own stall is the default 15 min, so its leaving doesn't count as c's progress
     await until("b's ticket", () => issued(state) === 2);
-    const t0 = Date.now();
-    ws.push(napper(state, 'c', '', { DEPLOY_QUEUE_STALL: '3', DEPLOY_QUEUE_NAP: '2' }));
+    ws.push(napper(state, 'c', `PS4='+$BASH_SUBSHELL '; set -x; `, { DEPLOY_QUEUE_STALL: '3', DEPLOY_QUEUE_NAP: '2' }));
     assert.equal(await ws[1].exit, 1);
-    const took = Date.now() - t0;
-    assert.ok(took >= 3_000 && took < 6_500, `gave up after ${took} ms`);
+    // A 3 s stall with 2 s naps: it gives up at the look after the nap the stall ends in, so after one nap or two
+    // (whole seconds), never a third. Naps counted, not seconds, so a loaded box can't fail it.
+    const naps = (ws[1].stderr().match(/^\+0 sleep 2$/gm) ?? []).length;
+    assert.ok(naps >= 1 && naps <= 2, `gave up after ${naps} naps`);
     assert.match(ws[1].stderr(), /nothing has moved for 0 min \(ahead: a, starting; pid \d+, state S; the lock is held\)/);
   } finally {
     a.child.kill('SIGKILL');

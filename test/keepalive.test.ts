@@ -374,6 +374,19 @@ test('a minion waiting on its ship gets a keepalive too, and a ship that ends du
   assert.equal(turnsOf(id).at(-1)!.keepalive, 1);
 });
 
+test('a deploy that goes live during a keepalive dismisses its pending-deploy minion at the keepalive\'s end (#1274)', async () => {
+  const id = minion();
+  const end = pst(14, 20);
+  await realTurn(id, end);
+  store.updateTicket(id, { state: 'outside', note: 'landing: in line' });
+  // The ship needed a restart, and the deploy went live while the ping ran.
+  await duringKeepalive(id, end, () => {
+    store.updateTicket(id, { state: 'pending-deploy', note: null });
+    assert.equal(runner.deployLive(id), false, 'not while the ping runs');
+  });
+  await until('the minion to be dismissed', () => store.getTicket(id)!.status === 'closed');
+});
+
 test('no keepalive outside the window or past the 8-hour cap', async () => {
   const id = minion();
   const end = pst(23, 30);

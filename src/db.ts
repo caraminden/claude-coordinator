@@ -2593,12 +2593,12 @@ export class Store {
   /** updateTicket's (src/db/minions.ts): each close gets its own closed_at. */
   lastClosedAt = 0;
 
-  addEvent(ticketId: number, kind: string, data: unknown): EventRow {
+  addEvent(ticketId: number, kind: string, data: unknown, reserved?: number): EventRow {
     const now = Date.now();
     const json = JSON.stringify(data);
     // With the write worker on, the id is handed out here, so the row is known before the worker writes it (src/db-writer.ts).
-    let id: number | null = null;
-    if (this.eventIds) this.eventIds.next = (id = Math.max(this.eventIds.next, this.eventIds.floor())) + 1;
+    let id: number | null = reserved ?? null;
+    if (id === null && this.eventIds) this.eventIds.next = (id = Math.max(this.eventIds.next, this.eventIds.floor())) + 1;
     const rowid = this.insertEvent(id, ticketId, kind, json, now, data);
     if (kind === 'user_message' && json.includes('status:')) this.noteLooks(ticketId, json, now);
     return { id: id ?? (rowid as number), ticket_id: ticketId, kind, data: json, created_at: now };

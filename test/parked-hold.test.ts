@@ -52,7 +52,7 @@ function minion(state: string | null = 'parked') {
   return store.getTicket(t.id)!;
 }
 const messages = (id: number) => store.listEvents(id).filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
-const held = (id: number) => store.getSetting<any[]>(`mail:${id}`) ?? [];
+const held = (id: number) => (store.getSetting<any>(`minion-queue:${id}`)?.held ?? null) ?? [];
 const promptCount = () => lines(prompts).length;
 const lastPrompt = () => withoutTurnNote(jsonLines(prompts).at(-1).message.content).map((c: any) => c.text);
 async function turn(start: () => unknown): Promise<string[]> {
@@ -144,7 +144,7 @@ test("wake_when_live's wake starts a parked minion's turn, its held messages aft
 test("the cold sweep never wakes a parked minion's held messages", () => {
   const m = minion();
   runner.relay(m.id, m.id, 'Taskmaster', 'note for later');
-  store.setSetting(`cold:${m.id}`, NOW - COLD_HOLD_MAX_MS - 60_000); // as if cold mail were also waiting
+  store.setSetting(`minion-queue:${m.id}`, { ...store.getSetting<any>(`minion-queue:${m.id}`), coldAt: NOW - COLD_HOLD_MAX_MS - 60_000 }); // as if cold mail were also waiting
   runner.coldSweep();
   assert.equal(runner.isRunning(m.id), false);
   assert.equal(held(m.id).length, 1);

@@ -82,7 +82,7 @@ test('a message shows in both chats, labelled with the sender, and the Taskmaste
   assert.deepEqual([copy.from, copy.to], [1, 2]);
   assert.match(copy.text, /^I changed/);
   // A chat-only row (#924): nothing queued for its next turn, and no message of its own.
-  assert.equal((store.getSetting<unknown[]>(`mail:${TM.id}`) ?? []).length, 0, "the Taskmaster's next turn gets no copy");
+  assert.equal(((store.getSetting<any>(`minion-queue:${TM.id}`)?.held ?? null) ?? []).length, 0, "the Taskmaster's next turn gets no copy");
   assert.equal(events(TM.id, 'user_message').length, 0);
   const { data: tm } = await srv.call(`/api/tickets/${TM.id}`);
   assert.notEqual(tm.ticket.status, 'running');
@@ -119,7 +119,7 @@ test('unpark: true wakes a minion parked on the sender, and the Taskmaster gets 
   const copy = events(TM.id, 'minion_copy').at(-1);
   assert.equal(copy.unparked, true);
   assert.match(copy.text, /^my work is on main/);
-  assert.equal((store.getSetting<unknown[]>(`mail:${TM.id}`) ?? []).length, 0);
+  assert.equal(((store.getSetting<any>(`minion-queue:${TM.id}`)?.held ?? null) ?? []).length, 0);
 });
 
 test('unpark: a chain a person put on hold is refused and stays parked', async () => {

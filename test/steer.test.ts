@@ -165,7 +165,8 @@ test('a message queued after Stop survives a restart that finds the stopped turn
   const r = server();
   r.resumeGapMs = 10;
   store.updateTicket(t.id, { status: 'running' });
-  store.setSetting(`turn:${t.id}`, { resumes: 0, stopped: true, queued: [{ author: 'Cara', text: 'after the stop', images: [] }] });
+  store.setSetting(`turn:${t.id}`, { resumes: 0, stopped: true });
+  store.setSetting(`minion-queue:${t.id}`, { msgs: [{ author: 'Cara', text: 'after the stop', images: [] }] });
   r.recover();
   await until('seen(t.dir).length === 1', () => seen(t.dir).length === 1);
   assert.equal(seen(t.dir)[0], '[Cara]: after the stop');
@@ -202,7 +203,7 @@ test('✕ takes back a queued message, which then never reaches claude', async (
   assert.equal(r.unqueue(t.id, msg.id, 'Cara'), false, 'only once');
   assert.equal(r.queued(t.id), 0);
   assert.deepEqual(events(t.id, 'unqueued').map((e) => [e.id, e.by]), [[msg.id, 'Cara']]);
-  assert.deepEqual((store.getSetting(`turn:${t.id}`) as any).queued, [], 'a restart would not bring it back');
+  assert.equal(store.getSetting<any>(`minion-queue:${t.id}`)?.msgs, undefined, 'a restart would not bring it back');
   writeFileSync(join(t.dir, 'release'), '');
   await until('!r.isRunning(t.id)', () => !r.isRunning(t.id));
   await new Promise((res) => setTimeout(res, 100));

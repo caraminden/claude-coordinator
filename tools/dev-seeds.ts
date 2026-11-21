@@ -15,7 +15,8 @@ import { projectSlug } from '../src/sessions.ts';
 import { inviteHash } from '../src/auth.ts';
 import { pacificDay } from '../src/pacific.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
-import { coldKey, loopKey, mailKey, type LoopState } from '../src/minion-relay.ts';
+import { loopKey, type LoopState } from '../src/minion-relay.ts';
+import { queueKey } from '../src/minion-queue.ts';
 import { CARD_OPTIONS } from '../src/welcome.ts';
 import { memoryFolders, readFolder } from '../src/memory-files.ts';
 import { checkChanges, countLine } from '../src/memory-curator.ts';
@@ -438,7 +439,7 @@ mock.boards('#takes', { boards: [
       // One message already read (no longer held) and one still waiting: the bubble says "Not sent yet" with Unpark and send (#910).
       c.store.addEvent(t.id, 'user_message', { text: 'Also keep the old redirect.', author: c.who, mail: true, parked: true });
       const row = c.store.addEvent(t.id, 'user_message', { text: 'Please start with the docs page first.', author: c.who, mail: true, parked: true });
-      c.store.setSetting(`mail:${t.id}`, [{ author: c.who, text: 'Please start with the docs page first.', images: [], id: row.id, parked: '2026-11-17 19:35' }]);
+      c.store.setSetting(queueKey(t.id), { held: [{ author: c.who, text: 'Please start with the docs page first.', images: [], id: row.id, parked: '2026-11-17 19:35' }] });
       return route(c, t);
     },
   },
@@ -829,8 +830,7 @@ mock.boards('#takes', { boards: [
         held('Taskmaster', '(for your tracking; nothing to do) #12 shipped the rail tokens you build on.', { need: 'fyi' }),
         held('Citadel', `#${other.number} shipped 4f2a91c: the rail colours moved to tokens; rebase before you touch sidebar.css.`, { note: true }),
       ];
-      c.store.setSetting(mailKey(t.id), mail);
-      c.store.setSetting(coldKey(t.id), Date.now() - 40 * 60_000);
+      c.store.setSetting(queueKey(t.id), { held: mail, coldAt: Date.now() - 40 * 60_000 });
       const now = Date.now();
       const loop: LoopState = { sent: Array.from({ length: 8 }, (_, i) => now - (20 - i) * 60_000), held: [
         { to: t.id, author: 'Taskmaster', text: 'Run the badge tests again and report the counts.', from: tm.id, at: now - 5 * 60_000 },
@@ -851,7 +851,7 @@ mock.boards('#takes', { boards: [
         m.asked(`Build the ${title.toLowerCase()}.`);
         m.init();
         m.said('Writing it; the first two tests pass.');
-        c.store.setSetting(mailKey(t.id), texts.map((text) => ({ author: by, text, images: [], id: m.put('user_message', { author: by, text, mail: true, need: 'fyi', from: from.id }), from: from.id })));
+        c.store.setSetting(queueKey(t.id), { held: texts.map((text) => ({ author: by, text, images: [], id: m.put('user_message', { author: by, text, mail: true, need: 'fyi', from: from.id }), from: from.id })) });
         return t;
       };
       const one = working('Aura replay harness', [`From #${from.number} (aura success loop): your brief's optional part 4 can reuse my fixture in test/aura.test.ts.`]);

@@ -169,8 +169,8 @@ test('a message queued when a manual fresh start\'s handoff turn starts is in th
   assert.match(promptText(handoff.prompt), /Call fresh_session/);
   assert.doesNotMatch(promptText(handoff.prompt), /m1 queued/);
   // What reattach and recover read back after a restart.
-  assert.deepEqual(store.getSetting<any>(`turn:${id}`)?.queued?.map((m: any) => m.text), ['m1 queued']);
-  assert.equal(store.getSetting(`waiting:${id}`), null, 'no stale wait left for the next turn to drop');
+  assert.deepEqual(store.getSetting<any>(`minion-queue:${id}`)?.msgs?.map((m: any) => m.text), ['m1 queued']);
+  assert.equal(store.getSetting<any>(`minion-queue:${id}`)?.taken, undefined, 'the handoff turn took nothing from the queue');
   assert.equal(runner.queued(id), 1);
   assert.equal(runner.recordHandoff(id, 'Nothing open.'), null);
   await endTurn(id, 'ok');

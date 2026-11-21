@@ -9,7 +9,6 @@ import { after, before, test } from 'node:test';
 import { adminOwned, lendsMachine, mayReceive, messagePerson, messageScope, turnPlace, turnRefusal } from '../src/access.ts';
 import { Auth, hashPassword } from '../src/auth.ts';
 import { askerKey, Store } from '../src/db.ts';
-import { mailKey } from '../src/minion-relay.ts';
 import { Runner } from '../src/runner.ts';
 import { bootServer, PASSWORD, until, type Booted, stopTurns } from './helpers.ts';
 
@@ -182,7 +181,7 @@ test("a member taken out of a scheme stops paying for their old minions' automat
   // A CI result's queued start, held mail and a restart resume each run on the owner's Claude.
   runner.send(hers.id, 'GitHub', 'CI passed');
   await until('the queued start asks for a place', () => asked.length === 1);
-  store.setSetting(mailKey(hers.id), [{ author: 'Held mail from #4 Work', text: 'fyi', images: [] }]);
+  store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Held mail from #4 Work', text: 'fyi', images: [] }] });
   assert.equal(runner.releaseMail(store.getTicket(hers.id)!, store.getProject(games.id)!), 0);
   (runner as any).resume(hers.id, 1);
   await until('the resume asks for a place', () => asked.length === 3);
@@ -218,7 +217,7 @@ test("a disabled person's minion runs no turn on any start path, not only a new 
   const link = { place: () => ({ host: true as const }), linked: () => 'linked' as const };
   runner.placeFor = (person, warm) => turnPlace(store, link, person, warm);
   store.updateUser(olive.id, { disabled_at: Date.now() });
-  store.setSetting(mailKey(hers.id), [{ author: 'Held mail from #4 Work', text: 'fyi', images: [] }]);
+  store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Held mail from #4 Work', text: 'fyi', images: [] }] });
   assert.equal(runner.releaseMail(store.getTicket(hers.id)!, store.getProject(games.id)!), 0, 'held mail stays held');
   assert.ok(notes(store, hers.id).some((n) => /Olive's login is disabled/.test(n)));
   assert.equal(runner.isRunning(hers.id), false);
@@ -230,6 +229,8 @@ test("a disabled person's minion runs no turn on any start path, not only a new 
   runner.send(hers.id, 'Olive', 'one more thing');
   await until('her queued message is refused', () => notes(store, hers.id).filter((n) => /Olive's login is disabled/.test(n)).length === 3);
   assert.equal(runner.isRunning(hers.id), false);
+  // Refused, it is dropped, not kept as held mail: kept, it would pick her to pay for every later batch and refuse it too (#1378).
+  assert.deepEqual(runner.queue.peek(hers.id).map((m) => m.text), ['fyi']);
 });
 
 test('a machine goes to exactly the schemes on its list, even a non-admin\'s, and a new one to none (#303, #438)', () => {

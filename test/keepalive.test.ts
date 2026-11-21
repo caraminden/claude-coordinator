@@ -296,7 +296,7 @@ test('a keepalive turn left by a restart is killed and dropped, not resumed', as
   assert.equal(store.getSetting(`turn:${id}`), null);
   assert.equal(existsSync(join(root, 'gone-turn')), false);
   assert.equal(r.isRunning(id), false, 'no resume started');
-  assert.equal(store.getSetting(`resume-owed:${id}`), null);
+  assert.equal((store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null), null);
 });
 
 test('the weekly readout switches keepalives off when they cost more than they saved', async () => {

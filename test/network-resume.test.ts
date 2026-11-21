@@ -357,11 +357,11 @@ test('a message held by the network wait shows as queued and can be taken back (
   const msg = store.listEvents(id).filter((e) => e.kind === 'user_message').at(-1)!;
   writeFileSync(release, OUTAGE);
   await until('the turn to die', () => !runner.isRunning(id));
-  assert.deepEqual(runner.netWait(id)?.queued?.map((m) => m.id), [msg.id]);
+  assert.deepEqual(runner.queue.msgs(id).map((m) => m.id), [msg.id], 'it waits in the queue, for the resume');
   const shown = runner.view(store.getTicket(id)!);
   assert.deepEqual([shown.queued, shown.queued_ids], [1, [msg.id]]);
   assert.equal(runner.unqueue(id, msg.id, 'Cara'), true);
-  assert.equal(runner.netWait(id)?.queued, undefined, 'gone from the saved wait too');
+  assert.deepEqual(runner.queue.msgs(id), [], 'gone from the saved queue too');
   assert.equal(runner.view(store.getTicket(id)!).queued, 0);
   const before = turnsRun();
   writeFileSync(release, 'ok');

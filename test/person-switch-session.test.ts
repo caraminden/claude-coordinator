@@ -237,10 +237,10 @@ test('while a turn waits for its restore, its message is saved for a restart, an
   const r = runner();
   r.send(t.id, 'Cara', 'one');
   assert.equal(r.isRunning(t.id), false, 'the turn waits for the restore');
-  assert.deepEqual(store.getSetting<{ text: string }[]>(`waiting:${t.id}`)?.map((m) => m.text), ['one'], 'a restart now would still run it');
+  assert.deepEqual(store.getSetting<any>(`minion-queue:${t.id}`)?.msgs?.map((m: any) => m.text), ['one'], 'a restart now would still run it');
   await until("turns().length === 1 && store.getTicket(t.id)!.status !== 'running'", () => turns().length === 1 && store.getTicket(t.id)!.status !== 'running');
   assert.equal(turns()[0].resume, 'waits');
-  assert.equal(store.getSetting(`waiting:${t.id}`), null, 'the turn took it');
+  assert.equal(store.getSetting<any>(`minion-queue:${t.id}`)?.msgs, undefined, 'the turn took it');
   await until('!(r as any).lanes.busy(t.id)', () => !(r as any).lanes.busy(t.id)); // its save
   // Again, with the host's copy gone, and dismissed before the restore is back.
   rmSync(join(hostConfig, 'projects', projectSlug(cwd)), { recursive: true });
@@ -250,7 +250,7 @@ test('while a turn waits for its restore, its message is saved for a restart, an
   await r.close(t.id, 'Dismissed.');
   await new Promise((res) => setTimeout(res, 200));
   assert.equal(turns().length, 1, 'no turn for a dismissed minion');
-  assert.equal(store.getSetting(`waiting:${t.id}`), null);
+  assert.equal(store.getSetting(`minion-queue:${t.id}`), null, 'the dismissal noted it and cleared the queue');
   assert.equal(store.getTicket(t.id)!.status, 'closed');
 });
 

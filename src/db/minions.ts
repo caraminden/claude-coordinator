@@ -5,6 +5,18 @@ import { askerKey, buildOwnerKey, pagePlanKey, planKey } from '../db-keys.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 
 export const minionQueries = {
+  /**
+   * The id the next event in a chat gets, handed out before its row is written: a message goes into its minion's queue
+   * first, then its chat line (#1378), so a crash between the two never loses it. Pass it to addEvent before any other
+   * event is added.
+   */
+  reserveEventId(this: Store): number {
+    if (!this.eventIds) return (this.db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS id FROM events').get() as { id: number }).id;
+    const id = Math.max(this.eventIds.next, this.eventIds.floor());
+    this.eventIds.next = id + 1;
+    return id;
+  },
+
   nextNumber(this: Store, projectId: number): number {
     const row = this.db.prepare('SELECT MAX(number) AS n FROM tickets WHERE project_id = ?').get(projectId) as { n: number | null };
     return (row.n ?? 0) + 1;

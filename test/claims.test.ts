@@ -124,7 +124,7 @@ test('a holder whose work shipped passes its claim on as shipped when dismissed,
     runner.heldFor = (id) => (id === c.id ? '#2 B\'s work is live' : null);
     await runner.close(b.id, 'Cara dismissed this minion.');
     assert.equal(store.claims.get(p, 'pipeline-lane')?.holder, c.id);
-    assert.match(JSON.stringify(store.getSetting(`mail:${c.id}`)), /You hold the pipeline-lane claim now/);
+    assert.match(JSON.stringify((store.getSetting<any>(`minion-queue:${c.id}`)?.held ?? null)), /You hold the pipeline-lane claim now/);
     assert.equal(runner.isRunning(c.id), false, 'no turn of its own');
     assert.deepEqual(how(), [[a.id, 'live'], [b.id, 'dismissed']]);
     assert.ok(!store.getSetting(`claim-shipped:${a.id}`), 'the mark goes with the dismissal');

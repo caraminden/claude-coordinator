@@ -361,7 +361,7 @@ test('dismissing ends the wait; a held message can be taken back', async () => {
   runner.send(id, 'Cara', 'never mind');
   const held = store.listEvents(id).filter((e) => e.kind === 'user_message').at(-1)!.id;
   assert.equal(runner.unqueue(id, held, 'Cara'), true);
-  assert.deepEqual(store.getSetting<any[]>('limit-resumes')!.find((w) => w.ticket === id).queued, []);
+  assert.deepEqual(runner.queue.msgs(id), [], 'gone from the saved queue');
   runner.close(id, 'Cara dismissed this minion.');
   assert.equal(runner.limitWait(id), null);
   assert.equal(store.getTicket(id)!.status, 'closed');
@@ -445,7 +445,7 @@ test('a restart after a switch to the next account, before its resume starts, st
     assert.equal(s.inUse, 2);
     assert.match(lines(prompts).at(-1)!, /another of your person's Claude accounts/, 'it resumes as the account switch, not as a plain restart');
     assert.equal(store.getTicket(id)!.status, 'idle');
-    assert.equal(store.getSetting(`resume-owed:${id}`), null, 'the debt is paid once the resume starts');
+    assert.equal((store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null), null, 'the debt is paid once the resume starts');
   } finally {
     noAccounts();
   }
@@ -466,7 +466,9 @@ test('a restart while a limit resume restores the session keeps the resume and i
   // The old server dies mid-restore: nothing it would do after that happens.
   old.detachAll();
   clearTimeout((old as any).limitTimer);
+  // takeQueue too: it writes the queue (#1378), which a dead server never gets to.
   for (const k of ['startTurn', 'next', 'cancelLimitWait']) (old as any)[k] = () => false;
+  (old as any).takeQueue = () => [];
   runner = makeRunner();
   runner.recover();
   await until('the resume after the restart', () => turnsRun() === before + 1 && !runner.isRunning(id), 5_000);

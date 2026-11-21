@@ -77,14 +77,14 @@ test("a minion's message to a cold Taskmaster is held as mail and rides along wi
   assert.equal(shown.cold, true);
   assert.equal(runner.isRunning(tm.id), false, 'a cold Taskmaster must not wake for it');
   assert.equal(runner.queued(tm.id), 0);
-  assert.equal(store.getSetting(`cold:${tm.id}`), NOW);
+  assert.equal((store.getSetting<any>(`minion-queue:${tm.id}`)?.coldAt ?? null), NOW);
 
   const before = promptCount();
   runner.send(tm.id, 'Cara', 'anything new?');
   await until('the turn', async () => promptCount() > before);
   assert.deepEqual(lastPrompt(), ['[Cara]: anything new?', `[Held mail from #${minion.number} M, sent Nov 8, 06:05 PST]: please start #9 from its handoff`]);
   await idle(tm.id);
-  assert.equal(store.getSetting(`cold:${tm.id}`), null, 'delivered: the cap has nothing left to wake');
+  assert.equal((store.getSetting<any>(`minion-queue:${tm.id}`)?.coldAt ?? null), null, 'delivered: the cap has nothing left to wake');
 });
 
 test("a minion's wake: false message to a warm Taskmaster starts no turn and rides along with its next one", async () => {
@@ -94,7 +94,7 @@ test("a minion's wake: false message to a warm Taskmaster starts no turn and rid
   assert.equal(lastMessage(tm.id).mail, true);
   assert.equal(runner.isRunning(tm.id), false, 'a status note must not wake it');
   assert.equal(runner.queued(tm.id), 0);
-  assert.equal(store.getSetting(`cold:${tm.id}`), null, 'not cold mail: no cap wakes it');
+  assert.equal((store.getSetting<any>(`minion-queue:${tm.id}`)?.coldAt ?? null), null, 'not cold mail: no cap wakes it');
 
   const before = promptCount();
   runner.send(tm.id, 'Cara', 'anything new?');
@@ -125,7 +125,7 @@ test("a card's answer, addressed (#687) or not, wakes a cold asker at once: neve
   runner.send(cold.id, 'Joshua', 'My answers to your question card: 3 slots', [], { answer: { questionId: 'q1', answers: [{ selected: ['3 slots'], other: '' }] } });
   const shown = lastMessage(cold.id);
   assert.deepEqual([shown.author, shown.mail, shown.cold, shown.answer.questionId], ['Joshua', undefined, undefined, 'q1']);
-  assert.equal(store.getSetting(`mail:${cold.id}`), null, 'nothing waits in held mail');
+  assert.equal((store.getSetting<any>(`minion-queue:${cold.id}`)?.held ?? null), null, 'nothing waits in held mail');
   await until('the turn', async () => promptCount() > before);
   assert.deepEqual(lastPrompt(), ['[Joshua]: My answers to your question card: 3 slots']);
   await idle(cold.id);
@@ -150,15 +150,14 @@ test("another scheme's Taskmaster: cold holds a waking message, urgent wakes, wa
   const c = ticket('coordinator', 4 * 3_600_000);
   assert.deepEqual(runner.relayTaskmaster(a.id, c.id, 'Taskmaster of P', '#388 is live', false), { held: false, left: 5 });
   assert.equal(lastMessage(c.id).cold, undefined);
-  assert.equal(store.getSetting(`cold:${c.id}`), null, 'asked-for held mail waits for a turn, however long');
+  assert.equal((store.getSetting<any>(`minion-queue:${c.id}`)?.coldAt ?? null), null, 'asked-for held mail waits for a turn, however long');
 
   const before = promptCount();
   assert.equal(runner.relayTaskmaster(a.id, c.id, 'Taskmaster of P', 'blocked on you', true, '', true).cold, undefined);
   await until('the turn', async () => promptCount() > before);
   await idle(c.id);
   // b's held mail is still waiting; settle it so its sweep below starts from a clean slate.
-  store.deleteSetting(`mail:${b.id}`);
-  store.deleteSetting(`cold:${b.id}`);
+  store.deleteSetting(`minion-queue:${b.id}`);
 });
 
 test('the sweep wakes a cold session once its held mail has waited COLD_HOLD_MAX_MS, not before', async () => {
@@ -168,15 +167,15 @@ test('the sweep wakes a cold session once its held mail has waited COLD_HOLD_MAX
   const before = promptCount();
   runner.coldSweep(NOW + COLD_HOLD_MAX_MS - 60_000);
   assert.equal(runner.isRunning(tm.id), false);
-  assert.ok(store.getSetting(`mail:${tm.id}`));
+  assert.ok((store.getSetting<any>(`minion-queue:${tm.id}`)?.held ?? null));
 
   runner.coldSweep(NOW + COLD_HOLD_MAX_MS);
   await until('the turn', async () => promptCount() > before);
   assert.deepEqual(lastPrompt(), [`[Held mail from #${minion.number} M, sent Nov 8, 06:05 PST]: my PR is up`]);
   assert.ok(store.listEvents(tm.id).some((e) => e.kind === 'note' && JSON.parse(e.data).text.includes('waited 3 hours')));
   await idle(tm.id);
-  assert.equal(store.getSetting(`cold:${tm.id}`), null);
-  assert.equal(store.getSetting(`mail:${tm.id}`), null);
+  assert.equal((store.getSetting<any>(`minion-queue:${tm.id}`)?.coldAt ?? null), null);
+  assert.equal((store.getSetting<any>(`minion-queue:${tm.id}`)?.held ?? null), null);
 });
 
 test('the sweep delivers held mail at once to a session that went fresh meanwhile', async () => {
@@ -204,8 +203,8 @@ test('a dismissed minion is never cold: a message reopens it as before; one dism
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(promptCount(), before, 'the cap must not reopen a dismissed minion');
   assert.equal(runner.isRunning(minion.id), false);
-  assert.ok(store.getSetting(`mail:${minion.id}`), 'its mail waits for a person');
-  assert.equal(store.getSetting(`cold:${minion.id}`), null);
+  assert.ok((store.getSetting<any>(`minion-queue:${minion.id}`)?.held ?? null), 'its mail waits for a person');
+  assert.equal((store.getSetting<any>(`minion-queue:${minion.id}`)?.coldAt ?? null), null);
 });
 
 test("cold mail keeps its sender's person, so a turn the cap starts runs as the relay would have", () => {
@@ -215,13 +214,12 @@ test("cold mail keeps its sender's person, so a turn the cap starts runs as the 
   runner.personOf = (author, from) => (seen.push([author, from]), from === minion.id ? 42 : null);
   try {
     runner.relay(minion.id, tm.id, `#${minion.number} M`, 'my PR is up');
-    const [held] = store.getSetting<{ from?: number; asker?: number | null }[]>(`mail:${tm.id}`)!;
+    const [held] = (store.getSetting<any>(`minion-queue:${tm.id}`)?.held ?? null)!;
     assert.equal(held.from, minion.id);
     assert.equal(held.asker, 42);
   } finally {
     runner.personOf = undefined;
-    store.deleteSetting(`mail:${tm.id}`);
-    store.deleteSetting(`cold:${tm.id}`);
+    store.deleteSetting(`minion-queue:${tm.id}`);
   }
 });
 
@@ -234,16 +232,17 @@ test("held mail outlives a turn whose Claude can't start, and rides along with t
   try {
     runner.send(tm.id, 'Cara', 'first try');
     assert.equal(runner.isRunning(tm.id), false);
-    assert.ok(store.getSetting(`mail:${tm.id}`), 'the held mail stays held');
+    assert.ok((store.getSetting<any>(`minion-queue:${tm.id}`)?.held ?? null), 'the held mail stays held');
     // The sweep's cap meets the same refusal: the mail still waits.
     runner.coldSweep(NOW + COLD_HOLD_MAX_MS);
     assert.equal(runner.isRunning(tm.id), false);
-    assert.ok(store.getSetting(`mail:${tm.id}`), 'the sweep keeps it held too');
+    assert.ok((store.getSetting<any>(`minion-queue:${tm.id}`)?.held ?? null), 'the sweep keeps it held too');
   } finally {
     runner.placeFor = undefined;
   }
   runner.send(tm.id, 'Cara', 'second try');
   await until('the turn', async () => promptCount() > before);
+  // The refused message itself is dropped, as the refusal note says; kept, it would make every later batch hers (#1378 review).
   assert.deepEqual(lastPrompt(), ['[Cara]: second try', `[Held mail from #${minion.number} M, sent Nov 8, 06:05 PST]: please start #9`]);
   await idle(tm.id);
 });

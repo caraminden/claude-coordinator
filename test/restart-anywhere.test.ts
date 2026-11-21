@@ -9,10 +9,10 @@
 // turns don't run (startTurn only records what it was handed). Then, for that cut:
 // - Owed: if the uncut run started a turn later in the same step (nothing outside the runner asked for it), the restarted
 //   runner starts one too or waits on a named timer (the usage-limit resume, the network probe, the cold-mail sweep).
-// - Held: every message sent before the cut and not yet handed to a turn is in the turn it starts, its queue, a wait's
-//   held messages or its held mail.
-// - Idle: with nothing started or waiting, no `running` status, no queue, and no turn:, saving:, waiting: or
-//   resume-owed: record left that nothing acts on.
+// - Held: every message sent before the cut and not yet handed to a turn is in the turn it starts or its one queue
+//   record (#1378, `minion-queue:<id>`: queued, held mail, a taken batch or a steer), unless a stop dropped it on purpose.
+// - Idle: with nothing started or waiting, no `running` status, nothing queued, no held mail that nothing will release,
+//   no taken batch or owed resume, and no turn: or saving: record left that nothing acts on.
 // A failure names the flow, the cut, its step and what the task before it wrote, so it can be found again by hand.
 //
 // A flow with `outbox` runs the one outbox (src/outbox.ts, ADR 0021) beside each runner, as server.ts does: a wake it
@@ -34,7 +34,6 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { coldKey, mailKey } from '../src/minion-relay.ts';
 import { VALUE_WRITES, WRITES } from '../src/db-writer.ts';
 import { Outbox } from '../src/outbox.ts';
 import { Runner } from '../src/runner.ts';
@@ -59,7 +58,7 @@ const LIMIT = `You've hit your 5-hour limit · resets ${new Date(Date.now() + 2 
 
 type Msg = { text: string };
 /** What a flow's steps see: the runner now serving (a step may restart it), its store and minion. */
-type Ctx = { runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; mail: (from: string, text: string) => void; wake: (note: string, inMs: number) => void; quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner };
+type Ctx = { runner: Runner; store: Store; id: number; say: (author: string, text: string) => void; mail: (from: string, text: string) => void; hold: (author: string, text: string) => void; wake: (note: string, inMs: number) => void; stop: () => void; quiet: (what: string, also?: () => boolean) => Promise<void>; restart: () => Runner };
 type Flow = {
   name: string;
   /** Runs the one outbox beside each runner (wake_at on it), as server.ts does. */
@@ -157,6 +156,45 @@ const FLOWS: Flow[] = [
     ],
   },
   {
+    name: 'mail held for a parked minion, and its unpark',
+    steps: [
+      { name: 'the minion is parked and Josh leaves it a message', run: async (c) => {
+        c.store.updateTicket(c.id, { state: 'parked' });
+        c.hold('Josh', 'for when you are back');
+        await sleep(30);
+      } },
+      { name: 'Cara unparks it and the turn reads the message', run: async (c) => {
+        setRelease('ok');
+        const before = turnsRun();
+        c.runner.unpark(c.id, 'Cara', 'Cara');
+        await c.quiet('the unparked turn', () => turnsRun() === before + 1);
+      } },
+    ],
+  },
+  {
+    name: 'a stop drops the queue but keeps held mail',
+    steps: [
+      { name: 'Cara asks for a turn, and a message and some mail wait behind it', run: async (c) => {
+        setRelease(null);
+        c.say('Cara', 'build it');
+        await until('the turn to start', () => c.runner.isRunning(c.id));
+        c.say('Josh', 'dropped by the stop');
+        c.mail('Taskmaster', 'held: kept through the stop');
+        await sleep(50);
+      } },
+      { name: 'Cara stops the turn', run: async (c) => {
+        c.stop();
+        setRelease('ok');
+        await c.quiet('the stopped turn to end');
+      } },
+      { name: 'Cara carries on, and the mail rides along', run: async (c) => {
+        const before = turnsRun();
+        c.say('Cara', 'carry on');
+        await c.quiet('the next turn', () => turnsRun() === before + 1);
+      } },
+    ],
+  },
+  {
     name: 'a turn cut off by a restart, and its resume',
     steps: [
       { name: 'Cara asks for a turn', run: async (c) => {
@@ -242,7 +280,7 @@ function makeRunner(store: Store, hooks?: (r: Runner) => void) {
 
 /** A point a restart could land on: the store's copy there, and what the uncut run had done by then. */
 type Cut = { n: number; dir: string; step: number; what: string };
-type Logged = { kind: 'sent' | 'start'; texts: string[]; at: number; step: number };
+type Logged = { kind: 'sent' | 'start' | 'dropped'; texts: string[]; at: number; step: number };
 
 /**
  * Copies the store at every event-loop task boundary after a task that wrote to it. A restart lands between tasks
@@ -337,9 +375,9 @@ class Recorder {
     return parts.join('; ') || 'other rows';
   }
 
-  /** Messages sent before cut `n` and not yet handed to a turn that started (a wake's note is inside the text it sends). */
+  /** Messages sent before cut `n` and not yet handed to a turn that started, nor dropped by a stop (a wake's note is inside the text it sends). */
   held(n: number): string[] {
-    const handed = this.log.filter((l) => l.kind === 'start' && l.at <= n).flatMap((l) => l.texts);
+    const handed = this.log.filter((l) => l.kind !== 'sent' && l.at <= n).flatMap((l) => l.texts);
     return this.log.filter((l) => l.kind === 'sent' && l.at <= n).flatMap((l) => l.texts).filter((t) => !handed.some((h) => h.includes(t)));
   }
 
@@ -396,6 +434,15 @@ async function record(flow: Flow) {
     mail: (from, text) => {
       rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
       ctx.runner.relays.mail(t.id, from, text, undefined, true); // held for a cold session
+    },
+    hold: (author, text) => {
+      rec.log.push({ kind: 'sent', texts: [text], at: rec.cuts.length, step: rec.step });
+      ctx.runner.send(t.id, author, text, [], { hold: true }); // held for a parked minion
+    },
+    stop: () => {
+      // A stop drops what was queued on purpose: those messages are owed to nobody.
+      rec.log.push({ kind: 'dropped', texts: ctx.runner.queue.msgs(t.id).map((m) => m.text), at: rec.cuts.length, step: rec.step });
+      ctx.runner.stop(t.id);
     },
     quiet: async (what, also = () => true) => {
       await until(what, () => !ctx.runner.isRunning(t.id) && !(ctx.runner as any).lanes.busy(t.id) && also(), 15_000);
@@ -461,28 +508,32 @@ async function restartAt(flow: Flow, rec: Recorder, cut: Cut, id: number, hooks?
     const t = store.getTicket(id)!;
     const limit = r.limitWait(id);
     const net = r.netWait(id);
-    const mail = store.getSetting<Msg[]>(mailKey(id)) ?? [];
-    const queue: Msg[] = (r as any).queues.get(id) ?? [];
+    const q = r.queue.get(id);
+    const queue = q.msgs ?? [];
+    const mail = q.held ?? [];
     // The outbox's rows still to send: its timer waits on them, or a delivery is queued on the minion's lane.
     const rows = store.listDeliveries({ to: id, states: ['waiting', 'held', 'sending'] });
     const armed = outbox && ((outbox as any).timer || (outbox as any).busy.size);
     // A sending row is rechecked on its due: sent again (marked) unless the runner still holds it.
     for (const d of rows) if (d.due == null) problems.push(`delivery #${d.id} is left ${d.state} with no time to look at it again`);
     const outboxWait = rows.length && armed ? 'the outbox timer' : null;
-    const waiting = limit ? 'the usage-limit resume' : net ? 'the network probe' : mail.length && store.getSetting(coldKey(id)) ? 'the cold-mail sweep' : mail.length && r.parked(t) ? 'its unpark' : outboxWait;
+    const waiting = limit ? 'the usage-limit resume' : net ? 'the network probe' : mail.length && q.coldAt ? 'the cold-mail sweep' : mail.length && r.parked(t) ? 'its unpark' : outboxWait;
     // A saved wait is only a wait if its timer is armed (the cold sweep and an unpark come from outside the runner).
     if (limit && !(r as any).limitTimer) problems.push('its usage-limit wait is saved, but no timer is armed to resume it');
     if (net && !(r as any).netTimer) problems.push('its network wait is saved, but no probe is armed');
-    const carried = [...started.flat(), ...queue, ...(limit?.queued ?? []), ...(net?.queued ?? []), ...mail].map((m) => m.text);
+    // The one invariant (#1378): every message sent is in a turn that started, in the minion's queue record, or (a wake) in an outbox row still to send.
+    const carried = [...started.flat(), ...queue, ...mail, ...(q.taken ?? []), ...(q.steered ?? []).map((s) => s.msg)].map((m) => m.text);
     if (armed) carried.push(...rows.map((d) => String(d.payload.note)));
-    for (const text of rec.held(cut.n)) if (!carried.some((c) => c.includes(text))) problems.push(`lost "${text}": no turn, queue, wait, held mail or outbox row has it`);
+    for (const text of rec.held(cut.n)) if (!carried.some((c) => c.includes(text))) problems.push(`lost "${text}": no turn, queue record or outbox row has it`);
     if (!started.length && !waiting) {
       const owed = rec.owed(cut.n);
       if (owed) problems.push(`owed a turn (the uncut run started one next, with ${JSON.stringify(owed.texts.map((x) => x.slice(0, 40)))}) but it sits idle`);
       if (t.status === 'running') problems.push('its status says running, with no turn');
       if (queue.length) problems.push(`${queue.length} message(s) queued with nothing to run them`);
       if (mail.length) problems.push('held mail with no cold time and not parked: nothing will release it');
-      for (const key of [`turn:${id}`, `resume-owed:${id}`, `waiting:${id}`, `saving:${id}`]) if (store.getSetting(key) !== null) problems.push(`${key} is left with nothing acting on it`);
+      if (q.taken?.length) problems.push(`a taken batch (${q.taken.length} message(s)) with no turn to finish it`);
+      if (q.owed) problems.push('a resume is owed but nothing will start it');
+      for (const key of [`turn:${id}`, `saving:${id}`]) if (store.getSetting(key) !== null) problems.push(`${key} is left with nothing acting on it`);
     }
   } finally {
     outbox?.stop();

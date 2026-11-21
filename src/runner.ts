@@ -9,9 +9,9 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
-import { Relay, clip, coldKey, loopHolds, loopKey, mailKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
+import { Relay, clip, loopHolds, loopKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
-import { askerKey, buildOwnerKey, onboardingOpen, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
+import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import type { Claim } from './claims.ts';
 import { fableMeter } from './costs.ts';
@@ -61,6 +61,7 @@ import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, renderSet, reviewSetLine } from './review-set.ts';
 import { clockTime, pacificDay, parseResetTime } from './pacific.ts';
 import { turnPayer } from './access.ts';
+import { MinionQueue, migrateQueues, type Steer } from './minion-queue.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -147,14 +148,9 @@ export interface QueuedMessage {
 interface TurnState {
   /** Auto-resumes in a row that led to this turn; 0 for a turn people or GitHub started. */
   resumes: number;
-  /** The messages it was started with: a turn cut off before its process started runs them again (#1364). */
-  batch?: QueuedMessage[];
   stopped?: true;
   /** Present (a reason or null) once the thread asked to close after this turn. */
   closing?: string | null;
-  queued?: QueuedMessage[];
-  /** Messages appended to its steer.jsonl, with where each ends there; those past steer.sent never reached claude. */
-  steered?: { end: number; msg: QueuedMessage }[];
   /** The turn's folder (see src/turn-wrapper.ts); absent for turns from before they had one. */
   dir?: string;
   /** Its transient unit, or null when it runs as a child of the server (and dies with it). */
@@ -351,7 +347,7 @@ export function wrapperInProc(dir: string, orStarting = false): boolean {
 }
 
 /** A turn's steers its wrapper never passed to claude (see src/turn-wrapper.ts). */
-export function unsentSteers(turn: Pick<TurnState, 'steered' | 'dir'>): QueuedMessage[] {
+export function unsentSteers(turn: { steered?: Steer[]; dir?: string }): QueuedMessage[] {
   if (!turn.steered?.length || !turn.dir) return [];
   let text: string;
   try {
@@ -377,12 +373,6 @@ const goesKey = (projectId: number) => `merge_goes:${projectId}`;
 const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
 /** A turn's end-of-turn session save that hasn't finished yet: the config dir it reads, so a restart redoes it (#259). */
 const savingKey = (ticketId: number) => `saving:${ticketId}`;
-/** Messages waiting for a minion's lane while no turn runs (its last turn's save), so a restart doesn't lose them (#259). */
-const waitingKey = (ticketId: number) => `waiting:${ticketId}`;
-/** A restart's resume of a cut-off turn not started yet, with what it carries, so a second restart still owes it (#468 S03-8). */
-const owedKey = (ticketId: number) => `resume-owed:${ticketId}`;
-/** A resume a restart must still start: its count, the messages it carries, and (an account switch's, #779) how it resumes. */
-type OwedResume = { resumes: number; queued?: QueuedMessage[]; limitTries?: number; onAccount?: true; killTries?: number };
 /** Idle this long, a session's prompt cache (1 hour) is about to lapse, so a machine message to it waits (#413). */
 export const COLD_MS = MSG_DEFAULTS.coldMin * 60_000;
 /** The longest a message held for a cold session waits before it wakes the session anyway. */
@@ -403,8 +393,6 @@ interface LimitResume {
   at: number;
   /** Limit resumes in a row this one will be. */
   tries: number;
-  /** Messages people sent while it waited; they go into the resume. */
-  queued?: QueuedMessage[];
   /** Several accounts all limited (#819): each one's reset, so the banner says which limit is which. */
   accounts?: LimitedAccount[];
   /** Its person switched to Codex: it resumes on Codex now (#337). */
@@ -457,8 +445,6 @@ interface NetResume {
   ticket: number;
   /** Network resumes in a row this one will be. */
   tries: number;
-  /** Messages queued behind the turn that died; they go into the resume. */
-  queued?: QueuedMessage[];
 }
 /** The minion's note while it waits: cleared by the next turn's start. */
 const NET_NOTE = 'Network outage: resumes once it is back';
@@ -479,8 +465,6 @@ interface KillResume {
   tries: number;
   /** The killed turn's restart resumes in a row, carried so the two caps together still end a loop. */
   resumes: number;
-  /** Messages queued behind the killed turn; they go into the resume. */
-  queued?: QueuedMessage[];
 }
 /** How long the kill line waits for the last resume it started to take its wait before the next goes anyway. */
 const KILL_START_MAX_MS = 2 * 60_000;
@@ -572,7 +556,10 @@ export class Runner {
   private turns = new Map<number, LiveTurn>();
   /** Each minion's lifecycle steps, one at a time (src/lanes.ts): a turn and its session save, a resume, a dismissal's cleanup. */
   private lanes = new Lanes();
-  private queues = new Map<number, QueuedMessage[]>();
+  /** Every message for a minion, from its send until its turn is durably done (src/minion-queue.ts, #1378). */
+  readonly queue: MinionQueue;
+  /** Minions a message reached during a network or kill wait: their next free lane starts a turn now, as that message asked. */
+  private wakeNow = new Set<number>();
   /** Tickets that asked to close when their current turn ends, with the reason they gave. */
   private closing = new Map<number, string | null>();
   /** Minions whose deploy went live mid-turn: dismissed when that turn ends, if still pending-deploy. */
@@ -796,12 +783,16 @@ export class Runner {
   constructor(store: Store, broadcast: Broadcast, coordinatorEnv: CoordinatorEnv, claudeBin = 'claude') {
     this.store = store;
     this.broadcast = broadcast;
+    // Saved queues and waits from before #1378 move into each minion's one queue on the first boot, never dropped.
+    const moved = migrateQueues(store);
+    if (moved) console.log(`Moved ${moved} minions' saved messages into their queues (#1378).`);
+    this.queue = new MinionQueue(store);
     this.approvals = new Approvals((ticketId, kind, data) => {
       this.emit(ticketId, kind, data);
       // The threads list shows which threads are waiting on an approval.
       this.broadcastTicket(ticketId);
     }, { get: (p) => store.getSetting<Go[]>(goesKey(p)) ?? [], set: (p, goes) => store.setSetting(goesKey(p), goes) });
-    this.relays = new Relay({ store, approvals: this.approvals, emit: (id, kind, data) => this.emit(id, kind, data), now: () => this.now(), isRunning: (id) => this.isRunning(id), send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer), personOf: () => this.personOf, broadcastTicket: (id) => this.broadcastTicket(id), cold: (id) => this.cold(id), parked: (t) => this.parked(t) });
+    this.relays = new Relay({ store, approvals: this.approvals, emit: (id, kind, data, reserved) => this.emit(id, kind, data, reserved), now: () => this.now(), isRunning: (id) => this.isRunning(id), send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer), personOf: () => this.personOf, broadcastTicket: (id) => this.broadcastTicket(id), cold: (id) => this.cold(id), parked: (t) => this.parked(t), hold: (id, msg, coldAt) => this.queue.hold(id, msg, coldAt) });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
     // Messages that arrived while a step ran start a turn once the minion's lane is free.
@@ -828,9 +819,9 @@ export class Runner {
     return this.turns.has(ticketId);
   }
 
-  /** The message ids each of these minions would take into its next turn, a usage-limit wait's too (as `holds`), read only (the standing checks, #1415). */
+  /** The message ids each of these minions would take into its next turn, a usage-limit wait's too (they wait in its queue, #1378), read only (the standing checks, #1415). */
   queuedIds(ticketIds: number[]): Record<number, number[]> {
-    return Object.fromEntries(ticketIds.map((id) => [id, [...this.peekQueue(id), ...(this.limitWait(id)?.queued ?? [])].flatMap((m) => m.id ?? [])]).filter(([, ids]) => (ids as number[]).length));
+    return Object.fromEntries(ticketIds.map((id) => [id, this.peekQueue(id).flatMap((m) => m.id ?? [])]).filter(([, ids]) => (ids as number[]).length));
   }
 
   /** gh's env for a lookup the server makes for a running turn (#200): the GitHub login that turn runs as; null with no turn. */
@@ -866,12 +857,12 @@ export class Runner {
   }
 
   queued(ticketId: number): number {
-    return this.queues.get(ticketId)?.length ?? 0;
+    return this.queue.size(ticketId);
   }
 
-  /** Whether the minion's next turn still carries event `eventId`: queued, held mail, or held by a network or usage-limit wait (the outbox, #1385). */
+  /** Whether the minion's next turn still carries event `eventId`: queued or held mail, waits included, all in its one queue (the outbox, #1385; #1378). */
   holds(ticketId: number, eventId: number): boolean {
-    return [...this.peekQueue(ticketId), ...(this.limitWait(ticketId)?.queued ?? [])].some((m) => m.id === eventId);
+    return this.peekQueue(ticketId).some((m) => m.id === eventId);
   }
 
   /**
@@ -889,8 +880,6 @@ export class Runner {
   view(ticket: Ticket, list?: { once: <T>(key: string, read: () => T) => T; properties: Record<string, string | number | string[]> }) {
     const once = list?.once ?? (<T>(_key: string, read: () => T) => read());
     const project = once(`project:${ticket.project_id}`, () => this.store.getProject(ticket.project_id));
-    const net = once(NET_RESUMES, () => this.netResumes()).find((w) => w.ticket === ticket.id) ?? null;
-    const kill = once(KILL_RESUMES, () => this.killResumes()).find((w) => w.ticket === ticket.id) ?? null;
     const limit = once(LIMIT_RESUMES, () => this.limitResumes()).find((w) => w.ticket === ticket.id) ?? null;
     const closed = ticket.status === 'closed';
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
@@ -903,8 +892,8 @@ export class Runner {
     const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
     const cards = closed ? [] : this.store.openCardsOf(ticket.id);
     return {
-      // A network or kill wait's held messages are queued too: they go first into its resume (takeQueue).
-      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id) + (net?.queued?.length ?? 0) + (kill?.queued?.length ?? 0), held_ids: (this.store.getSetting<QueuedMessage[]>(mailKey(ticket.id)) ?? []).flatMap((m) => m.id ?? []), queued_ids: [...(net?.queued ?? []), ...(kill?.queued ?? []), ...(this.queues.get(ticket.id) ?? [])].flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
+      // A wait's held messages stay in the queue (src/minion-queue.ts): they go into its resume.
+      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id), held_ids: this.queue.heldMail(ticket.id).flatMap((m) => m.id ?? []), queued_ids: this.queue.msgs(ticket.id).flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
       // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
       step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
@@ -1014,7 +1003,8 @@ export class Runner {
    * build output (#336) go on its lane, after its last turn's save; resolves once they are gone.
    */
   close(ticketId: number, text: string): Promise<void> {
-    if (this.cancelLimitWait(ticketId)) this.queues.delete(ticketId);
+    // A wait's messages stay in the queue: dropQueue below names them.
+    this.cancelLimitWait(ticketId);
     this.cancelNetWait(ticketId);
     this.cancelKillWait(ticketId);
     this.store.deleteSetting(closeCancelledKey(ticketId));
@@ -1022,6 +1012,8 @@ export class Runner {
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');
     this.emit(ticketId, 'note', { text });
+    // At once, not on the lane: a closed minion holds nothing for a next turn, and next() must find nothing to start.
+    this.dropQueue(ticketId);
     this.freeClaims(ticketId);
     // A split scheme's Taskmasters read it in their next turn's digest (#919's noteDigest).
     const gone = this.store.getTicket(ticketId);
@@ -1040,12 +1032,35 @@ export class Runner {
       // Read again: it may have been reopened while its preview stopped.
       const still = this.store.getTicket(ticketId);
       if (still?.status === 'closed') {
+        this.closedRows(ticketId);
         await this.clearBuild(still).then(
           (r) => r?.dirs && console.log(`Ticket ${ticketId}: cleared ${size(r.bytes)} of build output on dismissal.`),
           (err) => console.error(`Ticket ${ticketId}: could not clear its build output: ${err.message}`),
         );
       }
     });
+  }
+
+  /**
+   * A dismissed minion's queue and the per-minion rows nothing else deletes (#1378). What still waited in the queue,
+   * held mail included, is named in a chat line (no-action notices aside): each already has its own message in the chat, marked unread.
+   */
+  closedCleanup(ticketId: number, keepHeld = false) {
+    this.dropQueue(ticketId, keepHeld);
+    this.closedRows(ticketId);
+  }
+
+  private dropQueue(ticketId: number, keepHeld = false) {
+    // A no-action notice (its own PR merged, #619) was never meant to be read before a close: it isn't named.
+    const left = this.queue.clear(ticketId, keepHeld).filter((m) => !m.fyi);
+    if (left.length) {
+      const what = left.map((m) => clip(`${m.author}: ${m.text}`)).join('; ');
+      this.emit(ticketId, 'note', { text: `Dismissed before ${left.length === 1 ? 'this message was' : `these ${left.length} messages were`} read: ${what}` });
+    }
+  }
+
+  private closedRows(ticketId: number) {
+    for (const key of [contextKey(ticketId), windowKey(ticketId), commandsKey(ticketId), planKey(ticketId), pagePlanKey(ticketId), keepaliveKey(ticketId), budgetKey(ticketId), askerKey(ticketId)]) this.store.deleteSetting(key);
   }
 
   /**
@@ -1417,7 +1432,7 @@ export class Runner {
   closeIfSeen(ticketId: number, name: string): boolean {
     const t = this.store.getTicket(ticketId);
     if (!t || t.state !== 'complete' || t.status === 'closed' || t.status === 'running' || this.isRunning(ticketId)) return false;
-    if (this.queues.get(ticketId)?.length || this.store.openCardAt(ticketId) !== null || this.approvals.waiting(ticketId)) return false;
+    if (this.queue.size(ticketId) || this.store.openCardAt(ticketId) !== null || this.approvals.waiting(ticketId)) return false;
     if (this.store.seenAt(name, ticketId) < t.updated_at) return false;
     void this.close(ticketId, `Closed: ${name} saw its result`);
     return true;
@@ -1454,6 +1469,10 @@ export class Runner {
     const later: (() => void)[] = [];
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
+        // A minion dismissed with messages still in its queue: its chat says so. Its held mail stays: mail sent after a
+        // dismissal waits for a reopen (#783). Read one by one: a key listing doesn't see the boot migration's rows
+        // still queued on the write worker.
+        if (t.status === 'closed' && Object.keys(this.queue.get(t.id)).some((k) => k !== 'held')) this.closedCleanup(t.id, true);
         // A keepalive cut off by a restart (#862) is dropped, not resumed: the next sweep sends another if it is still due.
         // What waited behind it waits for the save below, or starts a turn.
         const kept = t.status !== 'running' ? this.store.getSetting<TurnState>(turnKey(t.id)) : null;
@@ -1462,27 +1481,22 @@ export class Runner {
           // Its unit outlives the server; killed first (pid.json is in its folder) so it can't race the next real turn on the session.
           if (kept.dir) this.signal({ dir: kept.dir, unit: kept.unit ?? null, container: kept.container ?? null }, 'SIGKILL');
           if (kept.dir) rmSync(kept.dir, { recursive: true, force: true });
-          if (kept.queued?.length) this.store.setSetting(waitingKey(t.id), [...(this.store.getSetting<QueuedMessage[]>(waitingKey(t.id)) ?? []), ...kept.queued]);
         }
         // A save the last server didn't finish: redone first on the lane, from the config dir its turn used.
         const saving = this.store.getSetting<{ configDir: string }>(savingKey(t.id));
         if (saving) this.lanes.run(t.id, 'session save cut off by a restart', () => this.saveAfterTurn(t.id, saving.configDir, null));
-        // Messages that waited for that save start a turn once it is in.
-        const waiting = this.store.getSetting<QueuedMessage[]>(waitingKey(t.id));
-        const owed = t.status !== 'running' ? this.store.getSetting<OwedResume>(owedKey(t.id)) : null;
-        if (waiting?.length && t.status !== 'running' && !owed) {
-          this.queues.set(t.id, [...waiting]);
-          later.push(() => this.next(t.id));
-        }
-        // An owed resume takes them instead: one turn, not a plain one and then the resume. They were saved from the
-        // queue the owed record's messages went into, so they are the newer copy.
-        if (owed) {
-          const q = waiting?.length ? waiting : owed.queued;
-          if (q?.length) this.queues.set(t.id, [...q]);
-          later.push(() => this.resume(t.id, owed.resumes, owed.limitTries ?? 0, false, 0, !!owed.onAccount, owed.killTries ?? 0));
-        }
         // A turn saved but not yet shown as running when the last server died (#1364) counts as cut off too.
-        if (t.status === 'running' || (kept && !kept.keepalive)) {
+        const cut = t.status === 'running' || (!!kept && !kept.keepalive);
+        const owed = !cut && t.status !== 'closed' ? this.queue.owed(t.id) : undefined;
+        if (!cut && t.status !== 'closed') {
+          // A batch taken by a turn that never got as far as running (the server died in its start) goes back.
+          if (!saving && this.queue.get(t.id).taken) this.queue.giveBack(t.id);
+          // Messages that waited (for that save, say) start a turn once it is in; an owed resume takes them instead:
+          // one turn, not a plain one and then the resume.
+          if (!owed && this.queue.size(t.id)) later.push(() => this.next(t.id));
+        }
+        if (owed) later.push(() => this.resume(t.id, owed.resumes, owed.limitTries ?? 0, false, 0, !!owed.onAccount, owed.killTries ?? 0));
+        if (cut) {
           const turn = this.store.getSetting<TurnState>(turnKey(t.id));
           // This turn's waiting cards come back: if it is still running, it still polls for them (#209).
           this.approvals.restore(t.id, this.store.eventsOfKinds(t.id, ['approval', 'approval_result']), turn?.startedAt);
@@ -1493,50 +1507,45 @@ export class Runner {
           }
           // Its turn is gone, so nobody's click can count for them now.
           this.approvals.endTurn(t.id, 'The server restarted while this waited.');
-          const unsent = turn ? unsentSteers(turn) : [];
-          // Output it never read still says claude had its prompt (#1364): that turn resumes, it doesn't rerun.
-          let wrote = false;
+          // Steers it never passed on go back to the queue.
+          this.queue.endSteers(t.id, turn?.dir ? unsentSteers({ steered: this.queue.steers(t.id), dir: turn.dir }) : []);
+          // A line read, or output it never read, says claude had its prompt (#1364): that turn resumes with its batch.
+          // One cut off before claude wrote a line may never have had it, so its batch goes back and runs again as a
+          // plain turn, not a resume of a session that may lack it. Not a stopped turn's batch (the stop dropped it),
+          // nor one whose turn ended and owes only its save.
+          let wrote = !!turn?.offset;
           try {
-            wrote = !!turn?.dir && statSync(join(turn.dir, 'stream.jsonl')).size > (turn.offset ?? 0);
+            wrote ||= !!turn?.dir && statSync(join(turn.dir, 'stream.jsonl')).size > (turn.offset ?? 0);
           } catch { /* no stream: it never began */ }
+          const back = !turn?.stopped && !saving && !wrote;
+          const rerun = back && !!this.queue.get(t.id).taken?.length;
+          if (back) this.queue.giveBack(t.id);
+          this.store.deleteSetting(turnKey(t.id));
           if (turn?.dir) rmSync(turn.dir, { recursive: true, force: true });
-          // Idle first, then the record goes with what replaces it in one commit (#1364): a crash between leaves an
-          // idle minion with its record, which the next boot reads as cut off again.
           this.setStatus(t.id, 'idle');
-          const replace = (set: Record<string, unknown>) => this.store.setSettings(set, [turnKey(t.id)]);
           // Stopped on purpose: it already says so, and no resume. What was queued before the stop went with it;
           // what came after waits for a turn of its own.
           if (turn?.stopped) {
-            if (turn.queued?.length) {
-              this.queues.set(t.id, [...turn.queued]);
-              later.push(() => !this.isRunning(t.id) && this.next(t.id));
-            }
-            replace(turn.queued?.length ? { [waitingKey(t.id)]: turn.queued } : {});
+            this.queue.done(t.id);
+            if (this.queue.size(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
             continue;
           }
-          // With no record, what its end saved for the next turn (wrapUp saves it as the record goes, #1364).
-          const queued = [...(turn ? turn.queued ?? [] : waiting ?? []), ...unsent];
-          // Cut off before claude wrote a line (#1364): it may never have had its prompt, so its own messages run again
-          // as a plain turn, not a resume of a session that may lack them.
-          if (turn?.batch?.length && !wrote) {
-            this.queues.set(t.id, [...turn.batch, ...queued]);
-            replace({ [waitingKey(t.id)]: [...turn.batch, ...queued] });
+          if (rerun) {
             later.push(() => !this.isRunning(t.id) && this.next(t.id));
             continue;
           }
-          if (queued.length) this.queues.set(t.id, [...queued]);
           const resumes = turn?.resumes ?? 0;
           let skipped: string | null = null;
           if (turn && 'closing' in turn) skipped = 'It was set to be dismissed, so it was not resumed.';
           else if (resumes >= MAX_RESUMES) skipped = `It was not resumed: it had already been resumed ${resumes} times in a row.`;
           if (skipped) {
             this.emit(t.id, 'note', { text: `The server restarted during this turn, so it was interrupted. ${skipped}` });
-            if (queued.length) later.push(() => !this.isRunning(t.id) && this.next(t.id));
-            replace(queued.length ? { [waitingKey(t.id)]: queued } : {});
+            this.queue.done(t.id);
+            if (this.queue.size(t.id)) later.push(() => !this.isRunning(t.id) && this.next(t.id));
           } else {
             // A kill resume's count rides along, so a kill after the restart still counts as the second in a row.
             const killTries = turn?.killTries ?? 0;
-            replace({ [owedKey(t.id)]: { resumes: resumes + 1, ...(queued.length ? { queued } : {}), ...(killTries ? { killTries } : {}) } satisfies OwedResume });
+            this.queue.owe(t.id, { resumes: resumes + 1, ...(killTries ? { killTries } : {}) });
             later.push(() => this.resume(t.id, resumes + 1, 0, false, 0, false, killTries));
           }
         }
@@ -1554,8 +1563,7 @@ export class Runner {
       }
     }
     later.forEach((start, i) => setTimeout(start, this.resumeGapMs * (i + 1)));
-    // Minions waiting on the usage limit keep waiting, with the messages held for them.
-    for (const w of this.limitResumes()) if (w.queued?.length) this.queues.set(w.ticket, [...w.queued]);
+    // Minions waiting on the usage limit keep waiting; the messages held for them wait in their queues.
     this.armLimitTimer();
     // Threads waiting on the network keep waiting: the probe starts over (#366).
     this.armNetProbe();
@@ -1611,7 +1619,6 @@ export class Runner {
       this.turns.delete(ticketId);
       return false;
     }
-    if (turn.queued?.length) this.queues.set(ticketId, turn.queued);
     if ('closing' in turn) this.closing.set(ticketId, turn.closing ?? null);
     if (turn.deployed) this.deployedMidTurn.add(ticketId);
     this.lanes.run(ticketId, 're-attached turn', () => live.ended);
@@ -1645,7 +1652,7 @@ export class Runner {
       const project = ticket && this.store.getProject(ticket.project_id);
       if (!ticket || !project || ticket.status === 'closed') {
         if (killLine) this.cancelKillWait(ticketId);
-        return this.store.deleteSetting(owedKey(ticketId));
+        return this.queue.owe(ticketId, null);
       }
       // A network resume needs its wait still there: a person's message, a stop or an earlier resume took it.
       if (netTries && !this.netWait(ticketId)) return;
@@ -1655,13 +1662,10 @@ export class Runner {
       if (token && !ours()) return;
       const person = this.turnPerson(ticket, project, this.peekQueue(ticketId), true);
       if (this.refused(ticketId, person)) {
-        // Nothing it would have carried is dropped: the queue, held mail and a network wait wait for the next turn (#468 S03-6).
-        // A kill wait's messages join them: the wait ends here, as the turn that would have taken it.
-        const held = killLine ? this.cancelKillWait(ticketId)?.queued ?? [] : [];
-        if (held.length) this.queues.set(ticketId, [...held, ...(this.queues.get(ticketId) ?? [])]);
-        const q = this.queues.get(ticketId);
-        if (q?.length) this.store.setSetting(waitingKey(ticketId), q);
-        this.store.deleteSetting(owedKey(ticketId));
+        // Nothing it would have carried is dropped: the queue and held mail wait for the next turn (#468 S03-6).
+        // A kill wait ends here, as the turn that would have taken it.
+        if (killLine) this.cancelKillWait(ticketId);
+        this.queue.owe(ticketId, null);
         return;
       }
       // An account switch's note went with the turn that stopped (switchAccount); a kill resume's with the kill (one line).
@@ -1679,10 +1683,9 @@ export class Runner {
    * (restoreAhead: on a worker thread, as a 60 MB transcript held the event loop for seconds, #612). With nothing
    * to restore, as on most turns, the step runs at once, so a turn still counts as running as soon as it starts.
    * startTurn's own restore stays: it finds the files in place, and retries and reports a restore that failed here.
-   * `person` guesses whose turn it is; a wrong guess only leaves the work to startTurn's restore. `keepQueue`
-   * saves the queue while it waits, as next() does behind a busy lane (a resume's is in its owed record).
+   * `person` guesses whose turn it is; a wrong guess only leaves the work to startTurn's restore.
    */
-  private afterRestore(ticketId: number, person: (ticket: Ticket, project: Project) => number | null, step: () => unknown, keepQueue = false): unknown {
+  private afterRestore(ticketId: number, person: (ticket: Ticket, project: Project) => number | null, step: () => unknown): unknown {
     let ahead: Promise<number> | null = null;
     try {
       const ticket = this.noTurns ? undefined : this.store.getTicket(ticketId);
@@ -1697,23 +1700,18 @@ export class Runner {
       console.error(`Ticket ${ticketId}: could not check its session files before the turn: ${err.message}`);
     }
     if (!ahead) return step();
-    // No turn record holds the queue until the turn starts: a restart meanwhile starts it from here, as after a save.
-    const q = this.queues.get(ticketId);
-    if (keepQueue && q?.length) this.store.setSetting(waitingKey(ticketId), q);
     return ahead.then(
       (n) => n && console.log(`Ticket ${ticketId}: restored the Claude session from the database off the event loop (${n} file${n === 1 ? '' : 's'}).`),
       (err) => console.error(`Ticket ${ticketId}: restoring the session off the event loop failed, so the turn's start tries again: ${err.message}`),
     ).then(() => {
+      // Dismissed meanwhile, which a running turn would have refused: no turn; the dismissal's cleanup notes the queue.
       if (this.store.getTicket(ticketId)?.status !== 'closed') return step();
-      // Dismissed meanwhile, which a running turn would have refused: no turn, now or once the lane is free.
-      this.queues.delete(ticketId);
-      this.store.deleteSetting(waitingKey(ticketId));
     });
   }
 
   /** What takeQueue would take, left where it is. */
   private peekQueue(ticketId: number): QueuedMessage[] {
-    return [...(this.netWait(ticketId)?.queued ?? []), ...(this.killWait(ticketId)?.queued ?? []), ...(this.queues.get(ticketId) ?? []), ...(this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [])];
+    return this.queue.peek(ticketId);
   }
 
   /** Whether `person`'s Claude can't run a turn now (Runner.placeFor); the chat says why. Asked before the queue is taken. */
@@ -1725,28 +1723,16 @@ export class Runner {
     return true;
   }
 
-  /** Everything queued for the minion's next turn, which starts now: a network wait's held messages first, as that wait ends. */
+  /**
+   * Everything queued for the minion's next turn, which starts now: it moves into the queue's taken batch (src/minion-queue.ts)
+   * until the turn is durably done. A network or kill wait ends with it; held mail rides along after what woke the turn,
+   * so the turn is still that message's.
+   */
   private takeQueue(ticketId: number): QueuedMessage[] {
-    // Their saved copies go in the same commit as the turn that takes them (startTurn), so a crash between the two
-    // can't lose them (#1364); a turn that doesn't start deletes them then, as before.
-    this.taken.set(ticketId, [waitingKey(ticketId), owedKey(ticketId), mailKey(ticketId), coldKey(ticketId)]);
-    const held = [...(this.cancelNetWait(ticketId)?.queued ?? []), ...(this.cancelKillWait(ticketId)?.queued ?? [])];
-    // Held mail rides along after what woke the turn, so the turn is still that message's.
-    const mail = this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [];
-    return [...held, ...(this.queues.get(ticketId)?.splice(0) ?? []), ...mail];
-  }
-
-  /** Minions whose usage-limit wait the turn starting now ends as its record is saved. */
-  private limitTaken = new Set<number>();
-
-  /** Saved queue keys takeQueue took that the next turn's record deletes as it is saved. */
-  private taken = new Map<number, string[]>();
-
-  /** Delete what takeQueue took, if no turn's record did. */
-  private dropTaken(ticketId: number) {
-    const keys = this.taken.get(ticketId);
-    this.taken.delete(ticketId);
-    if (keys) this.store.setSettings({}, keys.filter((k) => this.store.getSetting(k) !== null));
+    this.wakeNow.delete(ticketId);
+    this.cancelNetWait(ticketId);
+    this.cancelKillWait(ticketId);
+    return this.queue.take(ticketId);
   }
 
   private netResumes(): NetResume[] {
@@ -1758,11 +1744,10 @@ export class Runner {
     return this.netResumes().find((w) => w.ticket === ticketId) ?? null;
   }
 
-  /** Wait for the network, holding the messages queued behind the turn that died; one probe loop serves every waiting thread. */
+  /** Wait for the network, the messages queued behind the turn that died held in its queue; one probe loop serves every waiting thread. */
   private waitForNetwork(ticketId: number, tries: number) {
     const list = this.netResumes().filter((w) => w.ticket !== ticketId);
-    const queued = this.queues.get(ticketId)?.splice(0);
-    list.push({ ticket: ticketId, tries, ...(queued?.length ? { queued } : {}) });
+    list.push({ ticket: ticketId, tries });
     this.store.setSetting(NET_RESUMES, list);
     this.armNetProbe();
   }
@@ -1826,9 +1811,8 @@ export class Runner {
   private waitForKillResume(ticketId: number, live: LiveTurn, turn: TurnState, killed: string) {
     // What is left of it goes first: a claude whose wrapper alone was killed (no unit) would race its resume on the session.
     this.signal(live, 'SIGKILL');
-    const queued = this.queues.get(ticketId)?.splice(0);
     const list = this.killResumes().filter((w) => w.ticket !== ticketId);
-    list.push({ ticket: ticketId, tries: (turn.killTries ?? 0) + 1, resumes: turn.resumes ?? 0, ...(queued?.length ? { queued } : {}) });
+    list.push({ ticket: ticketId, tries: (turn.killTries ?? 0) + 1, resumes: turn.resumes ?? 0 });
     this.store.setSetting(KILL_RESUMES, list);
     this.killStarted.delete(ticketId);
     this.emit(ticketId, 'note', { text: `${killed}\nCitadel resumes it by itself in a moment, once: killed again, it stops for good. Messages queued behind it go into that resume.` });
@@ -1901,16 +1885,14 @@ export class Runner {
    */
   private killResumeEnded(ticketId: number) {
     if (!this.killStarted.has(ticketId) || this.isRunning(ticketId)) return;
-    const w = this.cancelKillWait(ticketId);
-    if (!w) return;
-    const held = w.queued ?? [];
-    if (held.length) this.queues.set(ticketId, [...held, ...(this.queues.get(ticketId) ?? [])]);
-    const text = `Its resume after the kill failed to start, so it stopped: ${held.length ? 'the messages queued behind it run next.' : 'send a message to carry on.'}`;
+    if (!this.cancelKillWait(ticketId)) return;
+    const held = this.queue.size(ticketId);
+    const text = `Its resume after the kill failed to start, so it stopped: ${held ? 'the messages queued behind it run next.' : 'send a message to carry on.'}`;
     const event = this.emit(ticketId, 'error', { text });
     this.setFailNote(ticketId, { note: 'Kill resume failed to start' });
     this.onTurnError(ticketId, text, event.id);
-    // As a message arriving now would: next() keeps them for a busy lane (waiting setting) and runs them on a free one.
-    if (held.length) this.next(ticketId);
+    // As a message arriving now would: next() leaves them for a busy lane and runs them on a free one.
+    if (held) this.next(ticketId);
     this.armKillResumes();
   }
 
@@ -1935,8 +1917,7 @@ export class Runner {
     const list = this.limitResumes().filter((w) => w.ticket !== ticketId);
     let at = resetAt + this.limitDelayMs;
     for (const w of [...list].sort((a, b) => a.at - b.at)) if (Math.abs(w.at - at) < this.limitGapMs) at = w.at + this.limitGapMs;
-    const queued = this.queues.get(ticketId);
-    list.push({ ticket: ticketId, at, tries, ...(queued?.length ? { queued } : {}), ...(accounts?.length ? { accounts } : {}) });
+    list.push({ ticket: ticketId, at, tries, ...(accounts?.length ? { accounts } : {}) });
     this.saveLimitResumes(list);
     return at;
   }
@@ -1947,17 +1928,6 @@ export class Runner {
     const list = this.limitResumes();
     if (!list.some((w) => w.ticket === ticketId)) return false;
     this.saveLimitResumes(list.filter((w) => w.ticket !== ticketId));
-    return true;
-  }
-
-  /** Hold the minion's queued messages for its usage-limit resume, if it waits for one. */
-  private holdForLimit(ticketId: number): boolean {
-    const list = this.limitResumes();
-    const w = list.find((x) => x.ticket === ticketId);
-    if (!w) return false;
-    w.queued = [...(this.queues.get(ticketId) ?? [])];
-    // They're the wait's now: send's or wrapUp's waiting copy goes in the same commit (#1364).
-    this.store.setSettings({ [LIMIT_RESUMES]: list }, this.store.getSetting(waitingKey(ticketId)) !== null ? [waitingKey(ticketId)] : []);
     return true;
   }
 
@@ -2056,16 +2026,61 @@ export class Runner {
     // Nor a low-effort turn (#951) something other than a success notice: it waits for a turn at the minion's own effort.
     const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !otherPerson && !(turn.light && !light) && existsSync(join(live.dir, 'steer.jsonl')));
     const parked = !!(hold && !live && ticket && this.parked(ticket));
-    // Saved before the chat shows it, so a crash between can't lose it (#1364); the copy below, with its event id, replaces it.
-    // A steer is saved as it is passed in.
-    const unsent: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(extra.typed || 'answer' in extra ? { own: true } : {}), ...(fyi ? { fyi: true } : {}), ...(light ? { light: true as const } : {}), asker };
-    if (!steers) this.keepUnsent(ticketId, unsent, parked);
+    // The message goes into the queue (or steer file) first, then its chat line (#1378): a crash between the two leaves a
+    // message the next turn reads, never a line in the chat that no turn gets. Its id is the line's, handed out now.
     // The chat shows it masked; the turn still gets it as typed, for a key someone hands over on purpose.
-    const row = this.emit(ticketId, 'user_message', {
+    const id = this.store.reserveEventId();
+    const line = () => this.emit(ticketId, 'user_message', {
       author, text: hideTokens(text), ...(images.length ? { images: images.map((i) => i.name) } : {}),
       ...(files.length ? { files: files.map(({ name, size, type }) => ({ name, size, type })) } : {}), ...extra, ...(steers ? { steered: true } : {}), ...(parked ? { mail: true, parked: true } : {}),
-    });
-    const msg: QueuedMessage = { ...unsent, id: row.id };
+    }, id);
+    const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(extra.typed || 'answer' in extra ? { own: true } : {}), ...(fyi ? { fyi: true } : {}), ...(light ? { light: true as const } : {}), asker };
+    if (parked) {
+      // With the held mail, in order: whatever next wakes it (Unpark, a wake, its chained start) reads it after its own message.
+      this.queue.hold(ticketId, { ...msg, parked: new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ') });
+      const row = line();
+      this.heard(ticketId, ticket, msg);
+      this.broadcastTicket(ticketId);
+      return { event: row, parked: true };
+    }
+    if (steers) {
+      const file = join(live!.dir, 'steer.jsonl');
+      appendFileSync(file, promptMessage([msg]));
+      // A typed steer is a message the turn now answers too; a second person's leaves it no one's (#268).
+      const typedBy = msg.typed && person && !extra.from ? (turn!.typedBy == null || turn!.typedBy === person ? person : 0) : turn!.typedBy;
+      this.queue.steered(ticketId, { end: statSync(file).size, msg });
+      const row = line();
+      this.heard(ticketId, ticket, msg);
+      this.saveTurn(ticketId, { typedBy });
+      // A person steering in speaks after the relay, so what the turn starts now is theirs.
+      if (person && !extra.from) this.turnFrom.delete(ticketId);
+      return { event: row };
+    }
+    const limited = !!(ticket && this.limitWait(ticketId));
+    // Waiting on its payer's usage limit, a message on another plan carries on now (sender pays): first, so the turn is its sender's.
+    const project = ticket && this.store.getProject(ticket.project_id);
+    const otherPlan = !!(person && limited && project && this.payerOf(person) !== this.payerOf(this.turnPerson(ticket!, project, [], true)));
+    this.queue.put(ticketId, msg, otherPlan);
+    const row = line();
+    this.heard(ticketId, ticket, msg);
+    // A person's own message tries now too: the reset time is only Claude's word, and a reset can come sooner. Still limited, it waits again (#477).
+    if (otherPlan || (limited && person && !extra.from)) this.cancelLimitWait(ticketId);
+    if (!this.isRunning(ticketId)) {
+      // A network or kill wait's held messages go with it, in a turn that starts now.
+      this.next(ticketId, true);
+      const wait = this.limitWait(ticketId);
+      if (wait) {
+        this.emit(ticketId, 'note', { text: `Held for the resume at ${clockTime(wait.at)}, after the usage limit resets.` });
+        this.broadcastTicket(ticketId);
+      }
+      return { event: row };
+    }
+    this.broadcastTicket(ticketId);
+    return { event: row };
+  }
+
+  /** What a message sent to a minion sets off once its line is in the chat: a go it quotes, and its one-tap replies cleared. */
+  private heard(ticketId: number, ticket: Ticket | null | undefined, msg: QueuedMessage) {
     // A person's typed "merge it" stands for the whole scheme until its PR merges (#260), whenever a turn reads it.
     // In the Taskmaster chat "#N" names minion N (#939).
     if (ticket) this.approvals.said(ticket.project_id, { id: ticket.id, number: ticket.number, branch: ticket.branch }, msg, (n) => {
@@ -2077,83 +2092,12 @@ export class Runner {
       this.store.updateTicket(ticketId, { replies: null });
       this.broadcastTicket(ticketId);
     }
-    if (parked) {
-      // With the held mail, in order: whatever next wakes it (Unpark, a wake, its chained start) reads it after its own message.
-      const list = this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [];
-      if (list.length && list.at(-1)!.id == null) list.pop(); // the copy saved before the emit
-      list.push({ ...msg, parked: new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ') });
-      this.store.setSetting(mailKey(ticketId), list);
-      this.broadcastTicket(ticketId);
-      return { event: row, parked: true };
-    }
-    if (steers) {
-      const line = promptMessage([msg]);
-      const file = join(live!.dir, 'steer.jsonl');
-      appendFileSync(file, line);
-      // A typed steer is a message the turn now answers too; a second person's leaves it no one's (#268).
-      const typedBy = msg.typed && person && !extra.from ? (turn!.typedBy == null || turn!.typedBy === person ? person : 0) : turn!.typedBy;
-      this.saveTurn(ticketId, { steered: [...(turn!.steered ?? []), { end: statSync(file).size, msg }], typedBy });
-      // A person steering in speaks after the relay, so what the turn starts now is theirs.
-      if (person && !extra.from) this.turnFrom.delete(ticketId);
-      return { event: row };
-    }
-    const q = this.queues.get(ticketId) ?? [];
-    const limited = !!(ticket && this.limitWait(ticketId));
-    // Waiting on its payer's usage limit, a message on another plan carries on now (sender pays): first, so the turn is its sender's.
-    const project = ticket && this.store.getProject(ticket.project_id);
-    const otherPlan = !!(person && limited && project && this.payerOf(person) !== this.payerOf(this.turnPerson(ticket!, project, [], true)));
-    if (otherPlan) q.unshift(msg);
-    else q.push(msg);
-    // A person's own message tries now too: the reset time is only Claude's word, and a reset can come sooner. Still limited, it waits again (#477).
-    if (otherPlan || (limited && person && !extra.from)) this.cancelLimitWait(ticketId);
-    this.queues.set(ticketId, q);
-    if (!this.isRunning(ticketId)) {
-      this.next(ticketId);
-      const wait = this.limitWait(ticketId);
-      if (wait) {
-        this.emit(ticketId, 'note', { text: `Held for the resume at ${clockTime(wait.at)}, after the usage limit resets.` });
-        this.broadcastTicket(ticketId);
-      }
-      return { event: row };
-    }
-    this.saveTurn(ticketId, { queued: q });
-    this.broadcastTicket(ticketId);
-    return { event: row };
-  }
-
-  /** A message's first saved copy, before its event (send): in held mail, its running turn's record, or waiting. */
-  private keepUnsent(ticketId: number, msg: QueuedMessage, parked: boolean) {
-    if (parked) {
-      const list = this.store.getSetting<QueuedMessage[]>(mailKey(ticketId)) ?? [];
-      this.store.setSetting(mailKey(ticketId), [...list, { ...msg, parked: new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ') }]);
-    } else if (this.isRunning(ticketId)) this.saveTurn(ticketId, { queued: [...(this.queues.get(ticketId) ?? []), msg] });
-    else this.store.setSetting(waitingKey(ticketId), [...(this.queues.get(ticketId) ?? []), msg]);
   }
 
   /** Take back a message still queued for the next turn; false once it has gone to Claude. */
   unqueue(ticketId: number, eventId: number, by: string): boolean {
-    const q = this.queues.get(ticketId);
-    const i = q?.findIndex((m) => m.id === eventId) ?? -1;
-    if (i < 0) return this.unqueueHeld(ticketId, eventId, by);
-    q!.splice(i, 1);
-    const projectId = this.store.getTicket(ticketId)?.project_id;
-    if (projectId !== undefined) this.approvals.unsaid(projectId, eventId);
-    if (this.isRunning(ticketId)) this.saveTurn(ticketId, { queued: q });
-    else if (!this.holdForLimit(ticketId) && this.store.getSetting(waitingKey(ticketId))) this.store.setSetting(waitingKey(ticketId), q);
-    this.emit(ticketId, 'unqueued', { id: eventId, by });
-    this.broadcastTicket(ticketId);
-    return true;
-  }
-
-  /** Take back a message a network wait holds for its resume (#468 S03-9). */
-  private unqueueHeld(ticketId: number, eventId: number, by: string): boolean {
-    const list = this.netResumes();
-    const w = list.find((x) => x.ticket === ticketId);
-    const i = w?.queued?.findIndex((m) => m.id === eventId) ?? -1;
-    if (i < 0) return false;
-    w!.queued!.splice(i, 1);
-    if (!w!.queued!.length) delete w!.queued;
-    this.store.setSetting(NET_RESUMES, list);
+    // A wait's held messages are in the queue too (#468 S03-9).
+    if (!this.queue.remove(ticketId, eventId)) return false;
     const projectId = this.store.getTicket(ticketId)?.project_id;
     if (projectId !== undefined) this.approvals.unsaid(projectId, eventId);
     this.emit(ticketId, 'unqueued', { id: eventId, by });
@@ -2196,7 +2140,7 @@ export class Runner {
 
   /** Messages held for this minion's next turn (#718's parked ones and held mail). */
   heldCount(ticketId: number): number {
-    return this.store.getSetting<QueuedMessage[]>(mailKey(ticketId))?.length ?? 0;
+    return this.queue.get(ticketId).held?.length ?? 0;
   }
 
   /**
@@ -2208,13 +2152,15 @@ export class Runner {
   unpark(ticketId: number, by: string, author: string, quiet = false): boolean {
     const t = this.store.getTicket(ticketId);
     if (!t || t.kind === 'coordinator' || t.status === 'closed' || t.state !== 'parked') return false;
-    this.store.updateTicket(ticketId, { state: null });
     this.emit(ticketId, 'note', { text: `${by} unparked this minion.` });
+    if (!quiet && !this.isRunning(ticketId)) {
+      const n = this.heldCount(ticketId);
+      const held = n ? `${n === 1 ? 'The message' : `The ${n} messages`} left for you while you were parked ${n === 1 ? 'follows' : 'follow'}.` : 'Nothing was left for you while you were parked.';
+      // Queued before the state clears (#1378): a crash between the two leaves a turn to start, not held mail nothing releases.
+      this.send(ticketId, author, `${author === by ? 'Unparked' : `${by} unparked`} you. ${held} Pick up where you left off.`);
+    }
+    this.store.updateTicket(ticketId, { state: null });
     this.broadcastTicket(ticketId);
-    if (quiet || this.isRunning(ticketId)) return true;
-    const n = this.heldCount(ticketId);
-    const held = n ? `${n === 1 ? 'The message' : `The ${n} messages`} left for you while you were parked ${n === 1 ? 'follows' : 'follow'}.` : 'Nothing was left for you while you were parked.';
-    this.send(ticketId, author, `${author === by ? 'Unparked' : `${by} unparked`} you. ${held} Pick up where you left off.`);
     return true;
   }
 
@@ -2227,7 +2173,7 @@ export class Runner {
     if (this.noTurns) return;
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
-        const since = this.store.getSetting<number>(coldKey(t.id));
+        const since = this.queue.get(t.id).coldAt;
         if (!since || (t.session_id && now - since < msgSettings(p).holdH * 3_600_000)) continue;
         // A parked minion's mail waits for its unpark or wake, however long (#718).
         if (this.parked(t)) continue;
@@ -2242,18 +2188,15 @@ export class Runner {
    * Never a dismissed minion's, nor while its Claude can't run a turn (#468 S03-6). Returns how many messages went.
    */
   releaseMail(t: Ticket, p: Project, by = ''): number {
-    const mail = this.store.getSetting<QueuedMessage[]>(mailKey(t.id)) ?? [];
-    // A dismissed minion isn't reopened by the cap: its mail waits for a person's message.
-    if (!mail.length || t.status === 'closed') { this.store.deleteSetting(coldKey(t.id)); return 0; }
+    const mail = this.queue.heldMail(t.id);
+    // A dismissed minion isn't reopened by the cap: its mail waits for a person's message, or its dismissal's cleanup notes it.
+    if (!mail.length || t.status === 'closed') { this.queue.warm(t.id); return 0; }
     if (this.refused(t.id, this.turnPerson(t, p, mail))) return 0; // keeps the cold time, so the cap still fires
-    // Saved as waiting in the commit that clears it as mail (#1364): the turn that takes it deletes that copy.
-    const q = [...(this.queues.get(t.id) ?? []), ...mail];
-    this.store.setSettings({ [waitingKey(t.id)]: q }, [coldKey(t.id), mailKey(t.id)]);
     const hours = msgSettings(p).holdH;
     const text = by ? `${by} delivered the held mail, so it runs now.` : t.session_id ? `Held mail has waited ${hours} hours, so it runs now.` : 'Held mail runs now: the session is fresh, so waking it is cheap.';
     this.emit(t.id, 'note', { text });
-    this.queues.set(t.id, q);
-    this.next(t.id);
+    this.queue.release(t.id);
+    this.next(t.id, true);
     return mail.length;
   }
 
@@ -2262,9 +2205,8 @@ export class Runner {
    * or for a parked one. `until` is when a cold hold's cap sends it anyway. Null when nothing waits.
    */
   heldMail(t: Ticket): { until: number | null; items: { id: number | null; author: string; from: number | null; need: string | null; note: boolean; parked: boolean; at: number; text: string }[] } | null {
-    const mail = this.store.getSetting<QueuedMessage[]>(mailKey(t.id)) ?? [];
-    if (!mail.length) return null;
-    const since = this.store.getSetting<number>(coldKey(t.id));
+    const { held: mail, coldAt: since } = this.queue.get(t.id);
+    if (!mail?.length) return null;
     const p = this.store.getProject(t.project_id);
     return {
       until: since && p ? since + msgSettings(p).holdH * 3_600_000 : null,
@@ -2419,6 +2361,8 @@ export class Runner {
     if (!live) {
       // Waiting for its resume after a kill (#1364): likewise.
       if (this.cancelKillWait(ticketId)) {
+        this.queue.drop(ticketId);
+        this.wakeNow.delete(ticketId);
         this.setFailNote(ticketId, { note: 'Killed: stopped, send a message to carry on' });
         this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
         this.broadcastTicket(ticketId);
@@ -2426,6 +2370,8 @@ export class Runner {
       }
       // Waiting on the network: a stop ends the wait, and as with a turn, its held messages go too.
       if (this.cancelNetWait(ticketId)) {
+        this.queue.drop(ticketId);
+        this.wakeNow.delete(ticketId);
         this.setFailNote(ticketId, { note: 'Network outage: stopped, send a message to carry on' });
         this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
         this.broadcastTicket(ticketId);
@@ -2433,14 +2379,15 @@ export class Runner {
       }
       // Waiting on the usage limit: a stop ends the wait, and as with a turn, its held messages go too.
       if (!this.cancelLimitWait(ticketId)) return false;
-      this.queues.delete(ticketId);
+      this.queue.drop(ticketId);
       this.setFailNote(ticketId, { note: 'Usage limit: stopped, send a message to carry on' });
       this.emit(ticketId, 'note', { text: 'Stopped by user: it won\'t resume by itself.' });
       this.broadcastTicket(ticketId);
       return true;
     }
-    this.queues.delete(ticketId);
-    this.saveTurn(ticketId, { stopped: true, queued: [], steered: [] });
+    this.queue.drop(ticketId);
+    this.wakeNow.delete(ticketId);
+    this.saveTurn(ticketId, { stopped: true });
     this.emit(ticketId, 'note', { text: 'Stopped by user.' });
     live.stopPending = !existsSync(join(live.dir, 'pid.json'));
     // claude has a pid: SIGINT first, so it writes its result (cost, usage) before it exits. Not yet: nothing to
@@ -2770,18 +2717,21 @@ export class Runner {
     if (r.filled) this.tellCitadel(fullText(r.trial));
   }
 
-  private next(ticketId: number) {
-    const q = this.queues.get(ticketId);
-    if (!q?.length && !this.freshStep(ticketId) && !this.keepalivePending.has(ticketId)) return;
+  /**
+   * Start a turn with what waits in the queue, once the minion's lane is free. During a network or kill wait the queue
+   * holds the messages for its resume: only `now` (a message or a release arriving) starts a turn that takes them sooner.
+   */
+  private next(ticketId: number, now = false) {
+    if (!this.queue.size(ticketId) && !this.freshStep(ticketId) && !this.keepalivePending.has(ticketId)) return;
     // Waiting for the usage limit to reset: the messages go into the resume, not a turn that would fail at once.
-    if (this.holdForLimit(ticketId)) return;
-    // One step at a time per minion (src/lanes.ts): the lane calls next() again once it is free. Its last
-    // turn's save above all: a turn on another login restores from that save (#250).
-    if (this.lanes.busy(ticketId)) {
-      // A running turn keeps its queue in its own record; in the gap after it, they're kept here (#259).
-      if (!this.isRunning(ticketId) && q?.length) this.store.setSetting(waitingKey(ticketId), q);
-      return;
+    if (this.limitWait(ticketId)) return;
+    if (this.netWait(ticketId) || this.killWait(ticketId)) {
+      if (now) this.wakeNow.add(ticketId);
+      else if (!this.wakeNow.has(ticketId)) return;
     }
+    // One step at a time per minion (src/lanes.ts): the lane calls next() again once it is free. Its last
+    // turn's save above all: a turn on another login restores from that save (#250). The queue keeps the messages.
+    if (this.lanes.busy(ticketId)) return;
     // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
     const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.peekQueue(ticketId));
     this.lanes.run(ticketId, 'turn', () => this.afterRestore(ticketId, person, () => {
@@ -2801,13 +2751,8 @@ export class Runner {
           console.error(`Ticket ${ticketId}: its fresh start's turn could not start:`, err);
           ended = this.turns.get(ticketId)?.ended;
         }
-        if (this.isRunning(ticketId)) {
-          // The queue waits behind this turn as behind any: in its record, so a restart keeps it.
-          const q = this.queues.get(ticketId);
-          if (q?.length) this.saveTurn(ticketId, { queued: q });
-          this.store.deleteSetting(waitingKey(ticketId));
-          return ended;
-        }
+        // The queue waits behind this turn as behind any.
+        if (this.isRunning(ticketId)) return ended;
         // No turn started (a preview, a refused place): drop it, or the idle lane would ask again at once,
         // and forget its size, or the idle check would ask again each minute.
         this.store.deleteSetting(freshKey(ticketId));
@@ -2816,7 +2761,7 @@ export class Runner {
       }
       // A real message that came in meanwhile goes first, and the keepalive is dropped: that turn re-reads the cache anyway.
       const skew = this.keepalivePending.get(ticketId);
-      if (this.keepalivePending.delete(ticketId) && !this.queues.get(ticketId)?.length && !this.netWait(ticketId) && !this.killWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
+      if (this.keepalivePending.delete(ticketId) && !this.queue.size(ticketId) && !this.netWait(ticketId) && !this.killWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
         return this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, []));
       }
       // Everything queued while the last turn ran goes into one turn.
@@ -2824,13 +2769,15 @@ export class Runner {
       if (!waiting.length) return;
       const person = this.turnPerson(ticket, project, waiting);
       if (this.refused(ticketId, person)) {
-        // What woke it is refused, as in send(); held mail and a network wait's messages stay for the next turn (#468 S03-6).
-        this.queues.delete(ticketId);
-        this.store.deleteSetting(waitingKey(ticketId));
+        // What woke it is refused, as in send(); held mail stays for the next turn (#468 S03-6). Not kept as held mail:
+        // a refused person's message would pick them to pay for every later batch, and refuse it too (#1378 review).
+        this.queue.refuse(ticketId);
+        this.wakeNow.delete(ticketId);
+        this.broadcastTicket(ticketId);
         return;
       }
       return this.startTurn(project, ticket, this.takeQueue(ticketId), person);
-    }, true));
+    }));
   }
 
   /** The one person whose own typed message a ticket's running turn answers (TurnState.typedBy), else null. */
@@ -2876,16 +2823,31 @@ export class Runner {
     this.broadcastTicket(ticketId);
   }
 
-  private startTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0, killTries = 0) {
+  /**
+   * Start a turn with `batch`. A start that runs no turn (a preview, a refused place, no folder, a launch that can't be
+   * built, a throw) gives the queue's taken batch back as held mail (#1378): it rides along with the next turn, and asks
+   * for none now, which would only fail the same way.
+   */
+  private startTurn(...args: Parameters<Runner['launchTurn']>): ReturnType<Runner['launchTurn']> {
+    const id = args[1].id;
+    // A resume that couldn't start pays its debt too, so the freed lane doesn't try it again at once.
+    const back = () => {
+      if (this.turns.has(id)) return;
+      this.queue.owe(id, null);
+      if (this.queue.giveBack(id, true).length) this.broadcastTicket(id);
+    };
+    let started: ReturnType<Runner['launchTurn']>;
     try {
-      return this.startTurnNow(project, ticket, batch, person, resumes, limitTries, netTries, killTries);
-    } finally {
-      this.dropTaken(ticket.id);
-      if (this.limitTaken.delete(ticket.id)) this.cancelLimitWait(ticket.id);
+      started = this.launchTurn(...args);
+    } catch (err) {
+      back();
+      throw err;
     }
+    back();
+    return started;
   }
 
-  private startTurnNow(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0, killTries = 0) {
+  private launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, resumes = 0, limitTries = 0, netTries = 0, killTries = 0) {
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
     if (this.noTurns) {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
@@ -3039,8 +3001,7 @@ export class Runner {
       if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, { state: ticket.state, note: ticket.note });
       // A handed-off land's outside is the server's (#962): LandHandoffs replaces it when the land ends.
       else if (ticket.state && ticket.state !== 'pending-deploy' && !(ticket.state === 'outside' && this.serverWork(ticket.id, true))) this.store.updateTicket(ticket.id, ticket.state === 'limited' || ticket.state === 'complete' ? { state: null, note: null } : { state: null });
-      // Its usage-limit wait ends in the commit that saves this turn (#1364), or below if none starts.
-      this.limitTaken.add(ticket.id);
+      this.cancelLimitWait(ticket.id);
       // A network wait ended when its held messages were taken (takeQueue); its note goes with it.
       if (ticket.note === NET_NOTE || ticket.note === KILL_NOTE) this.store.updateTicket(ticket.id, { note: null });
       // A Taskmaster's note is only ever the server's word on how its last turn failed or stopped: a new turn makes it stale (#428).
@@ -3110,25 +3071,23 @@ export class Runner {
     writeFileSync(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
     const turn: TurnState = { resumes, dir, unit, offset: 0, startedAt: Date.now(), configDir, chosenEffort: !!ticket.effort || codex || light, ...(light ? { light: true as const } : {}), ...(limitTries ? { limitTries } : {}), ...(netTries ? { netTries } : {}), ...(killTries ? { killTries } : {}), ...(codex ? { codex: true as const } : {}), ...(handBack.length ? { handBack: true as const } : {}), ...(step ? { fresh: step } : {}), ...(handoff ? { handoff: true as const } : {}), person, asker, typedBy, hashes, ...(secretPerson ? { secretPerson } : {}), ...(github ? { github: github.login } : {}), ...(place.host ? {} : { container: place.container }), ...(codex ? {} : { account: claudePlace.account ?? 1 }),
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
-      ...(keepalive ? { keepalive: true as const } : { batch }), ...(fp ? { fp, fpParts: fpParts! } : {}) };
-    // With the saved copies of what it takes, in one commit (#1364).
-    const taken = (this.taken.get(ticket.id) ?? []).filter((k) => this.store.getSetting(k) !== null);
-    this.taken.delete(ticket.id);
-    const limits = this.limitTaken.delete(ticket.id) ? this.limitResumes() : [];
-    const rest = limits.filter((w) => w.ticket !== ticket.id);
-    if (rest.length < limits.length) this.limitStarting.delete(ticket.id);
-    this.store.setSettings({ [turnKey(ticket.id)]: turn, ...(rest.length < limits.length && rest.length ? { [LIMIT_RESUMES]: rest } : {}) }, [...taken, ...(rest.length < limits.length && !rest.length ? [LIMIT_RESUMES] : [])]);
-    if (rest.length < limits.length) this.armLimitTimer();
+      ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}) };
+    this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     live.had = had;
     // A keepalive never shows as running: the list and the chat don't know it happened.
     if (keepalive) this.keepalives.add(ticket.id);
-    else this.setStatus(ticket.id, 'running');
-    // Saved with a running turn now, so recover() resumes it: the outbox's rows it carries are sent (#1385, ADR 0021 "Accepted means durable").
-    try {
-      this.onTurnStart(ticket.id, batch.flatMap((m) => (m.id == null ? [] : [m.id])));
-    } catch (err) {
-      console.error(`onTurnStart for #${ticket.id} failed:`, err);
+    else {
+      this.setStatus(ticket.id, 'running');
+      // The owed resume is paid once the turn is saved as running, not at the take (#1378): recover resumes a running
+      // turn: from there, and a crash any sooner still owes it.
+      this.queue.owe(ticket.id, null);
+      // Saved with a running turn now, so recover() resumes it: the outbox's rows it carries are sent (#1385, ADR 0021 "Accepted means durable").
+      try {
+        this.onTurnStart(ticket.id, batch.flatMap((m) => (m.id == null ? [] : [m.id])));
+      } catch (err) {
+        console.error(`onTurnStart for #${ticket.id} failed:`, err);
+      }
     }
     // Its step on the lane lasts until it has ended and its session is saved (finish).
     if (plan.spawn.how === 'container') {
@@ -3424,8 +3383,7 @@ export class Runner {
           }
           // Saved per line, so a restart carries on from the next one: nothing shown twice or skipped.
           live.offset = base + Math.min(start, take);
-          // Its first line says claude has the prompt: the batch kept for a turn that never started goes (#1364).
-          this.saveTurn(ticketId, base ? { offset: live.offset } : { offset: live.offset, batch: undefined });
+          this.saveTurn(ticketId, { offset: live.offset });
         }
         if (atEnd) return;
       }
@@ -3455,17 +3413,19 @@ export class Runner {
     const secrets = this.secretsOfTurn(ticketId);
     this.turnSecrets.delete(ticketId);
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
-    // What waits for the next turn is saved as the record that held it goes, in one commit (#1364).
-    const pending = [...(this.queues.get(ticketId) ?? []), ...(turn && !turn.stopped && !turn.keepalive ? unsentSteers(turn) : [])];
-    this.store.setSettings(pending.length && !this.limitWait(ticketId) ? { [waitingKey(ticketId)]: pending } : {}, [turnKey(ticketId)]);
     const stopped = !!turn?.stopped;
+    // Steers that came in as the turn's reply went out never reached claude: they start the next turn. Moved back into
+    // the queue before the turn's record goes, which is what says which were passed on.
+    const unsent = turn && !stopped ? unsentSteers({ steered: this.queue.steers(ticketId), dir: turn.dir }) : [];
+    this.queue.endSteers(ticketId, unsent);
+    // The save is owed before the turn's record goes, so a crash between finds one of them and never gives back the
+    // batch this turn already answered (#1378): recover redoes the save, which takes it out of the queue.
+    this.store.setSetting(savingKey(ticketId), { configDir: live.configDir });
+    this.store.deleteSetting(turnKey(ticketId));
     // Its session's cache is warm on this account for the next hour (src/account-pick.ts): its next turn stays there.
     if (turn?.person && !turn.codex && turn.account) this.onRan?.(turn.person, `ticket:${ticketId}`, turn.account);
     if (this.keepalives.delete(ticketId)) return this.wrapUpKeepalive(ticketId, live, turn, exit);
-    // Steers that came in as the turn's reply went out never reached claude: they start the next turn.
-    const unsent = turn && !stopped ? unsentSteers(turn) : [];
     if (unsent.length) {
-      this.queues.set(ticketId, [...(this.queues.get(ticketId) ?? []), ...unsent]);
       this.emit(ticketId, 'note', { text: `${unsent.length === 1 ? 'A message' : `${unsent.length} messages`} arrived as the turn ended, so the next turn picks ${unsent.length === 1 ? 'it' : 'them'} up.` });
     }
     // A Codex turn's log joins its thread's, for the way back to Claude (#337); the turn's folder goes below.
@@ -3547,11 +3507,9 @@ export class Runner {
     this.closing.delete(ticketId);
     // Checked again here: the turn may have posted a card or set try/ready after close_self.
     // A notice that needs no action (the PR it just merged, #619) doesn't count as a new message; it stays in the chat, unrun.
-    const asks = this.queues.get(ticketId)?.some((m) => !m.fyi);
+    const asks = this.queue.msgs(ticketId).some((m) => !m.fyi);
     const keep = closing && status === 'idle' && !stopped && !signal ? (asks ? 'a new message arrived' : this.keptOpen(ticketId)) : null;
     if (closing && status === 'idle' && !stopped && !signal && !keep) {
-      this.queues.delete(ticketId);
-      if (this.store.getSetting(waitingKey(ticketId)) !== null) this.store.deleteSetting(waitingKey(ticketId));
       this.close(ticketId, `Claude dismissed this minion${reason ? `: ${reason}` : '.'}`);
     } else {
       if (keep) this.emit(ticketId, 'note', { text: `Claude asked to dismiss this minion, but ${keep}, so it stays open.` });
@@ -3583,9 +3541,12 @@ export class Runner {
     }
     // The next turn may run on another person's login, which only has the session once this lands (#250):
     // the turn's step on its lane ends with the save, so the next step starts after it.
-    if (!after || !project) return live.end();
-    // Messages queued during the turn wait for the save now; a usage-limit wait (or a kill's) keeps its own.
-    this.saveForNext(ticketId, live.configDir);
+    if (!after || !project) {
+      this.queue.done(ticketId);
+      this.store.deleteSetting(savingKey(ticketId));
+      return live.end();
+    }
+    // Messages queued during the turn wait in the queue for the save.
     this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
   }
 
@@ -3597,19 +3558,14 @@ export class Runner {
       this.stopSeries(ticketId, 'failed');
     }
     rmSync(live.dir, { recursive: true, force: true });
-    if (!this.store.getTicket(ticketId)) return live.end();
-    // A message that came in meanwhile waited behind it, as behind any turn.
-    this.saveForNext(ticketId, live.configDir);
+    if (!this.store.getTicket(ticketId)) {
+      this.store.deleteSetting(savingKey(ticketId));
+      return live.end();
+    }
+    // A message that came in meanwhile waits behind it in the queue, as behind any turn.
     this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
   }
 
-  /** A turn's end: its session save is owed, and what is queued waits for it, in one commit; nothing queued clears wrapUp's copy (#1364). */
-  private saveForNext(ticketId: number, configDir: string) {
-    const q = this.queues.get(ticketId);
-    const keep = !!q?.length && !this.limitWait(ticketId);
-    const stale = !keep && this.store.getSetting(waitingKey(ticketId)) !== null;
-    this.store.setSettings({ [savingKey(ticketId)]: { configDir }, ...(keep ? { [waitingKey(ticketId)]: q } : {}) }, stale ? [waitingKey(ticketId)] : []);
-  }
 
   /** Copy a minion's session into the database after its turn (or a restart cut that off); never rejects. */
   private async saveAfterTurn(ticketId: number, configDir: string, had: Set<string> | null) {
@@ -3620,6 +3576,8 @@ export class Runner {
     } catch (err) {
       console.error(`Saving the session of ticket ${ticketId} failed:`, err);
     } finally {
+      // The turn's batch is in its saved transcript now: out of the queue (#1378), in the same order a restart redoes it.
+      this.queue.done(ticketId);
       this.store.deleteSetting(savingKey(ticketId));
     }
   }
@@ -3730,7 +3688,7 @@ export class Runner {
     this.emit(ticketId, 'note', { text: `${why}\nCarrying on with ${next.label} (account ${next.n}): this turn picks up where it stopped.` });
     // Owed until its turn takes it (takeQueue): it waits behind this turn's save, and the turn's own record is gone,
     // so a restart meanwhile would otherwise leave nothing to say it carries on (A1, #1286).
-    this.store.setSetting(owedKey(ticketId), { resumes: 0, ...(turn.limitTries ? { limitTries: turn.limitTries } : {}), onAccount: true } satisfies OwedResume);
+    this.queue.owe(ticketId, { resumes: 0, ...(turn.limitTries ? { limitTries: turn.limitTries } : {}), onAccount: true });
     this.resume(ticketId, 0, turn.limitTries ?? 0, false, 0, true);
     return true;
   }
@@ -4345,14 +4303,14 @@ export class Runner {
     if (ticket) this.broadcast({ type: 'ticket', ticket: this.view(ticket) });
   }
 
-  emit(ticketId: number, kind: string, data: unknown): EventRow {
+  emit(ticketId: number, kind: string, data: unknown, reserved?: number): EventRow {
     // A split scheme's Overlord asks for everyone (#921): its cards show in every member's chat (#920 reads the flag). A note is for
     // everyone only when its emitter says so (`everyone: true`, and only on the Overlord): most are one person's.
     const lord = (EVERYONES.has(kind) || (data as { everyone?: unknown } | null)?.everyone === true) && this.isOverlord(this.store.getTicket(ticketId));
     // The flag goes last, whatever order the caller wrote it in: the db's `data LIKE '{"text":…'` queries match a prefix.
     if (data && typeof data === 'object' && 'everyone' in data) { const { everyone: _, ...rest } = data as Record<string, unknown>; data = rest; }
     if (lord) data = { ...(data as object), everyone: true };
-    const row = this.store.addEvent(ticketId, kind, data);
+    const row = this.store.addEvent(ticketId, kind, data, reserved);
     this.broadcast({ type: 'event', event: row });
     if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId);
     return row;

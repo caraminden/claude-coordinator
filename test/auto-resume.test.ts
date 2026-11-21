@@ -61,7 +61,7 @@ async function crash(r: Runner, id: number) {
   const dir: string = (r as any).turns.get(id).dir;
   await until("existsSync(join(dir, 'pid.json'))", () => existsSync(join(dir, 'pid.json')));
   // Its first line is in: claude had the prompt, so it resumes (a turn killed before that reruns its batch, #1364).
-  await until('the first line', () => !store.getSetting<any>(`turn:${id}`)?.batch);
+  await until('the first line', () => (store.getSetting<any>(`turn:${id}`)?.offset ?? 0) > 0);
   r.detachAll();
   const { wrapper, claude } = JSON.parse(readFileSync(join(dir, 'pid.json'), 'utf8'));
   for (const pid of [wrapper, -claude]) {
@@ -196,7 +196,7 @@ test('a resume still owed when the server restarts again is resumed by the next 
   await until("existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs')", () => existsSync(prompts) && readFileSync(prompts, 'utf8').includes('and the docs'));
   assert.match(readFileSync(prompts, 'utf8'), /\[System\]: The \S+ server restarted while you were working/);
   await finish(third, id);
-  assert.equal(store.getSetting(`resume-owed:${id}`), null, 'the debt is paid once the resume starts');
+  assert.equal((store.getSetting<any>(`minion-queue:${id}`)?.owed ?? null), null, 'the debt is paid once the resume starts');
 });
 
 test("messages queued behind a cut-off turn that isn't resumed outlive a second restart (#468 S03-8)", async () => {

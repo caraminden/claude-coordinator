@@ -61,7 +61,7 @@ function world(live = true) {
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const olive = store.createUser({ name: 'Olive', login: 'olive' });
   const scheme = store.createProject('Peek Auras', 'https://github.com/caraminden/peek-auras.git', cara.id);
-  const gh = fakeGithub({ gho_cara: 'caraminden', gho_josh: 'KatzMeIfYouCan', gho_olive: 'olive-gh' });
+  const gh = fakeGithub({ gho_cara: 'caraminden', gho_josh: 'KatzMeIfYouCan', gho_olive: 'olive-gh', gho_josh2: 'josh-two', gho_olive2: 'olive-two' });
   gh.owners.set('caraminden/peek-auras', 'caraminden');
   const linkGithub = (uid: number, token: string, login: string) => creds.put(uid, 'github', token, { login, id: uid, name: null });
   linkGithub(cara.id, 'gho_cara', 'caraminden');
@@ -332,4 +332,38 @@ test('leaving through an owner\'s limited link that can\'t see the repo keeps th
   w.gh.owners.set('caraminden/peek-auras', 'caraminden');
   assert.equal(await w.access.remove(w.scheme.id, w.josh.id), null);
   assert.ok(!w.gh.collaborators.get('caraminden/peek-auras')!.has('KatzMeIfYouCan'));
+});
+
+test('a member who links GitHub again as another login is invited with it; only an old login Citadel added is taken off (#1509 2C3)', async () => {
+  const w = world();
+  const repo = () => [...w.gh.collaborators.get('caraminden/peek-auras')!].sort();
+  w.linkGithub(w.josh.id, 'gho_josh', 'KatzMeIfYouCan');
+  w.linkGithub(w.olive.id, 'gho_olive', 'olive-gh');
+  w.gh.collaborators.set('caraminden/peek-auras', new Set(['olive-gh'])); // Olive was a collaborator before Citadel
+  for (const p of [w.josh, w.olive]) {
+    w.store.addMember(w.scheme.id, p.id);
+    await w.access.sync(w.scheme.id, p.id);
+  }
+  assert.deepEqual(repo(), ['KatzMeIfYouCan', 'olive-gh']);
+  // Unlinked for a moment: nothing to compare, so nothing moves.
+  w.creds.remove(w.josh.id, 'github');
+  await w.access.sync(w.scheme.id, w.josh.id);
+  assert.equal(w.store.getRepoCollaborator(w.scheme.id, w.josh.id)?.login, 'KatzMeIfYouCan');
+  // Both link again as other logins (the case of a login is no change).
+  w.linkGithub(w.josh.id, 'gho_josh2', 'josh-two');
+  w.linkGithub(w.olive.id, 'gho_olive2', 'olive-two');
+  for (const p of [w.josh, w.olive]) await w.access.syncPerson(p.id);
+  assert.deepEqual(repo(), ['josh-two', 'olive-gh', 'olive-two'], "Citadel's old login goes, the one from before Citadel stays");
+  assert.equal(w.store.getRepoCollaborator(w.scheme.id, w.josh.id)?.login, 'josh-two');
+  assert.deepEqual(w.access.view(w.scheme.id, w.josh.id), { state: 'added', slug: 'caraminden/peek-auras', error: null });
+  assert.equal(w.store.getRepoCollaborator(w.scheme.id, w.olive.id)?.login, 'olive-two');
+  // Leaving now takes off only the login Citadel added: Olive's own old one stays.
+  w.store.removeMember(w.scheme.id, w.olive.id);
+  assert.equal(await w.access.remove(w.scheme.id, w.olive.id), null);
+  assert.deepEqual(repo(), ['josh-two', 'olive-gh']);
+  // Same login in another case: settled, GitHub isn't asked.
+  w.linkGithub(w.josh.id, 'gho_josh2', 'JOSH-TWO');
+  const before = w.gh.calls.length;
+  await w.access.sync(w.scheme.id, w.josh.id);
+  assert.equal(w.gh.calls.length, before);
 });

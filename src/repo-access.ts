@@ -59,16 +59,23 @@ export class RepoAccess {
     const member = this.store.getUser(userId);
     if (!project || !slug || !member || project.owner_id === userId) return;
     if (!this.store.listMembers(projectId).some((m) => m.id === userId)) return;
-    const prev = this.store.getRepoCollaborator(projectId, userId);
+    let prev = this.store.getRepoCollaborator(projectId, userId);
+    const login = this.link.login(userId)?.login;
+    // Linked again as another GitHub login (#1509): the row's login no longer pushes for them. No link: nothing to compare.
+    const relinked = !!prev?.login && !!login && prev.login.toLowerCase() !== login.toLowerCase();
     // shortcut: a scheme pointed at a different repo starts over there and forgets the old one, whose collaborator stays on GitHub; track both if repos ever move.
-    if ((prev?.state === 'added' || prev?.state === 'existing') && prev.slug === slug && !prev.error) return;
+    if ((prev?.state === 'added' || prev?.state === 'existing') && prev.slug === slug && !prev.error && !relinked) return;
+    // Citadel's old login comes off first (a refusal stays on its row for the next sweep); one from before Citadel (existing) stays.
+    if (relinked && prev!.slug === slug && (prev!.state === 'added' || prev!.state === 'invited')) {
+      if (await this.remove(projectId, userId)) return;
+      prev = undefined;
+    }
     // An invite or collaborator Citadel made here stays Citadel's through a failure, so leaving still undoes it.
     const ours = prev?.slug === slug && (prev.state === 'invited' || prev.state === 'added') ? prev : null;
     const put = (state: RepoCollaborator['state'], fields: Partial<Pick<RepoCollaborator, 'login' | 'invitation_id' | 'error'>> = {}) =>
       this.store.putRepoCollaborator(ours && (state === 'failed' || state === 'waiting')
         ? { ...ours, error: fields.error ?? null }
         : { project_id: projectId, user_id: userId, slug, login: null, invitation_id: null, error: null, state, ...fields });
-    const login = this.link.login(userId)?.login;
     if (!login) return put('waiting');
     const owner = this.store.getUser(project.owner_id ?? -1);
     const ownerToken = owner ? this.link.token(owner) : null;

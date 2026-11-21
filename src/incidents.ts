@@ -15,7 +15,8 @@ import { promisify } from 'node:util';
 import type { Store } from './db.ts';
 import type { GhGet } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
-import { ZONE, pacific } from './pacific.ts';
+import { ZONE, clockTime, pacific } from './pacific.ts';
+import { HEALTH_KIND, keptChecks } from './standing-checks.ts';
 import { PLANNED } from './sd-watchdog.ts';
 
 const run = promisify(execFile);
@@ -312,6 +313,11 @@ export async function gather(store: IncidentStore, src: Sources, from: number, t
   await take('health_events', async () => {
     const rows = store.healthBetween(from, to, 2000);
     return { list: healthEntries(rows), said: rows.length === 2000 ? `the first 2000 rows (the cap: later ones not read)` : `${rows.length} rows` };
+  });
+  // A standing check's broken promise first seen before the window is still broken now (#1415): its row is older, so it is named here.
+  await take('standing checks', async () => {
+    const older = (keptChecks(store)?.findings ?? []).filter((f) => f.since < from);
+    return { list: older.map((f) => ({ at: from, source: 'health' as const, text: clip(oneLine(`${HEALTH_KIND} (broken since ${clockTime(f.since)}): ${f.check}: ${f.text}`), 220), key: `${HEALTH_KIND}: ${f.key}` })), said: `${older.length} still broken from before` };
   });
   await take('runner_load', async () => {
     const rows = store.runnerLoadSince(from).filter((r) => r.at <= to);

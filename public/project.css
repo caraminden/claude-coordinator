@@ -576,6 +576,10 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-list li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-width: 0; }
 .st-list li > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-list.st-jobs { max-height: 22rem; }
+.st-list.st-checks { max-height: 22rem; }
+/* The check and its "since" on one line, the finding's text wrapping under them at any width. */
+.st-list.st-checks li { flex-wrap: wrap; align-items: baseline; row-gap: 0.15rem; }
+.st-list.st-checks li > :nth-child(2) { order: 1; flex: 1 0 100%; white-space: normal; overflow-wrap: anywhere; }
 .st-list li.st-job-error { display: block; overflow-wrap: anywhere; padding-left: var(--space-3); }
 .st-errors .st-err { font-family: var(--mono, monospace); font-size: 0.92em; }
 .st-none { padding: 0 0.6rem; }

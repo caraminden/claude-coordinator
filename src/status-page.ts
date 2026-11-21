@@ -18,6 +18,7 @@ import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 import { parseStorm, type Storm } from './memory-storms.ts';
 import { BOOT_STALL } from './deploy-watch.ts';
 import { every, jobList, type JobRow, type Job } from './every.ts';
+import { standingStatus, type StandingStatus } from './standing-checks.ts';
 
 const DAY_MS = 24 * 60 * 60_000;
 /** Days of history each tile shows: today and the 7 before it. */
@@ -475,6 +476,7 @@ export class StatusPage {
       ciVisible,
       // Every periodic job (#1311), for those who see Citadel's scheme.
       jobs: ciVisible ? jobList(now) : [],
+      checks: ciVisible ? standingStatus(this.deps.store) : null,
       ships: { counts: days.map((d) => ships[d]), median: days.map((d) => median(shipTimes[d])), last: lastShip ? { at: lastShip.live_at!, version: lastShip.version.slice(0, 8), changes: ciVisible ? shipChanges(lastShip) : [] } : null },
       ci,
       unitsFailed: units === null,
@@ -583,6 +585,8 @@ export interface CitadelStatus {
   storms: { counts: number[]; stalled: number[]; last: (Storm & { at: number }) | null; now: Storm[] };
   /** Every periodic job (#1311): empty for a viewer who can't see Citadel's scheme. */
   jobs: (JobRow & { overdue: boolean; slow: boolean })[];
+  /** The standing checks' broken promises now (#1415): null for a viewer who can't see Citadel's scheme. */
+  checks: StandingStatus | null;
   ships: { counts: number[]; median: (number | null)[]; last: { at: number; version: string; changes: string[] } | null };
   /** Whether the viewer may see Citadel's CI: `ci` is null for them only when there is no reading yet. */
   ciVisible: boolean;

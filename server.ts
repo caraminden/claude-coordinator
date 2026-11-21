@@ -22,7 +22,8 @@ import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { StatusPage, recordBoot } from './src/status-page.ts';
 import { MemoryStorms } from './src/memory-storms.ts';
-import { Reaper } from './src/reaper.ts';
+import { Reaper, shownCommand } from './src/reaper.ts';
+import { StandingChecks } from './src/standing-checks.ts';
 import { restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { UltraReviews } from './src/ultrareview.ts';
@@ -707,6 +708,9 @@ if (!BOOT_CHECK) {
   every('reap closed minions', 3600_000, () => reaper.reap(), 10 * 60_000);
   liveOn(BOOT_COMMIT);
 }
+// Citadel's recovery promises, checked at boot and hourly, report only (#1415, src/standing-checks.ts): reads in a worker.
+const standingChecks = new StandingChecks({ store, dataDir: DATA_DIR, commit: BOOT_COMMIT ?? null, queued: (ids) => runner.queuedIds(ids), appTurns: () => contraptionTurns.liveIds(), procs: async () => (await reaper.owned()).map((x) => ({ pid: x.proc.pid, ticketId: x.ticketId, projectId: x.projectId, command: shownCommand(x.proc.argv) })) });
+if (!BOOT_CHECK && !PREVIEW) every('standing checks', 3600_000, () => standingChecks.run(), 3 * 60_000);
 
 /**
  * A new minion with its properties and its own worktree in the scheme's repo, not started yet: the

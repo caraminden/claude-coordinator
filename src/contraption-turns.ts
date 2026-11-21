@@ -327,6 +327,11 @@ export class ContraptionTurns {
     return this.live.size;
   }
 
+  /** The contraption_turns rows of the turns running now (the standing checks' snapshot, #1415). */
+  liveIds(): number[] {
+    return [...this.live.keys()];
+  }
+
   /** Turns running in a container now (it isn't restarted under them). */
   inContainer(container: string): number {
     return [...this.live.values()].filter((t) => t.container === container).length;

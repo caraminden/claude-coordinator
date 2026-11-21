@@ -225,6 +225,19 @@ function jobsTile(jobs, now) {
     { tone: bad.some((j) => j.overdue || flags(j).some(([t]) => t === 'danger')) ? 'bad' : bad.length ? 'warn' : null, wide: true, key: 'jobs', chart: bad.map((j) => `${j.name}: ${flags(j).map((f) => f[1]).join(', ')}${j.error ? ` (${j.error})` : ''}`).join('; ') });
 }
 
+/** The standing checks (#1415): Citadel's recovery promises, checked hourly; each broken one with its check and since when. Report only. */
+function checksTile(c, now) {
+  const found = c.last?.findings ?? [];
+  const named = new Map(c.checks.map((x) => [x.name, x.promise]));
+  const sub = c.last ? `${plural(c.checks.length, 'promise')} checked hourly · last ${ago(c.last.ranAt)}${c.last.error ? ` · last run failed: ${c.last.error}` : ''}` : `${plural(c.checks.length, 'promise')} checked hourly, from a few minutes after a start`;
+  const list = found.length
+    ? found.map((f) => h('li', { title: named.get(f.check) ?? '' }, h('code', {}, f.check), h('span', {}, f.text), h('span', { class: 'muted' }, `since ${ago(f.since)}`)))
+    : c.checks.map((x) => h('li', {}, h('code', {}, x.name), h('span', { class: 'muted' }, x.promise)));
+  return tile('Standing checks', !c.last ? 'Not run yet' : found.length ? `${plural(found.length, 'broken promise')}` : 'All kept', sub,
+    h('ul', { class: 'st-list st-checks' }, ...list),
+    { tone: found.length || c.last?.error ? 'warn' : null, wide: true, key: 'checks', chart: found.map((f) => `${f.check}: ${f.text}`).join('; ') });
+}
+
 /** CPU by source (#1332): cores each source averaged over the last hour, day and week with its kernel share, and the week by hour as stacked bars. */
 const GROUP_CLASS = ['server', 'turns', 'containers', 'builds', 'godot', 'apps', 'mine', 'others'];
 function cpuTile(cpu, now) {
@@ -282,6 +295,7 @@ function citadelTiles(c, days, now, ships, redraw) {
       { key: 'stalls', chart: `stalls a day: ${perDay(days, c.stalls.counts)}; longest a day (s): ${perDay(days, c.stalls.longest)}` }),
     stormTile(c.storms, days, now),
     ...(c.jobs?.length ? [jobsTile(c.jobs, now)] : []),
+    ...(c.checks ? [checksTile(c.checks, now)] : []),
     tile('Memory', mem === null ? 'No reading yet' : `${mem}% used`, host ? `${bytes(host.mem_avail)} free of ${bytes(host.mem_total)} · Citadel's server ${bytes(host.rss)}` : 'Read every 5 minutes',
       hourLine(c.host.series, 1, { from, to: now, label: 'memory used each hour, at its worst' }), { tone: mem !== null && mem >= 90 ? 'warn' : null, key: 'memory', chart: `% used, hourly worst: ${perHour(c.host.series, 1)}` }),
     tile('CPU', host ? `load ${host.load1.toFixed(1)} on ${c.host.cores} cores` : 'No reading yet',

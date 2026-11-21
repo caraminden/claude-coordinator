@@ -377,3 +377,16 @@ test('a merged CI line names every branch it hit, in the timeline, the first-fai
   const many = render({ from: at(0), last: at(6), why: ['x'] }, at(0), at(9), { entries: ciEntries(['a', 'b', 'c', 'd', 'e', 'f'].map((b, i) => run(i, b))), read: {} }, '/db');
   assert.match(many, /\(a ×1, b ×1, c ×1, d ×1, \+2 more\)/);
 });
+
+test("a standing check's promise broken since before the window is named in the timeline (#1415)", async () => {
+  const s = setup(T0);
+  const inc = s.make();
+  s.store.setSetting('standing-checks', { ranAt: T0, integrityAt: null, error: null, findings: [
+    { check: 'shipped-live', key: 'shipped-live:9', ticket: 9, text: '#9 (Citadel) has waited 90 min for its ship to go live, and nothing has told it why not.', since: T0 - 45 * MIN },
+    { check: 'turn-record', key: 'turn-record:8', ticket: 8, text: '#8 (Citadel) shows running but has no turn record.', since: T0 + MIN },
+  ] });
+  await inc.write({ from: T0, last: T0 + 5 * MIN, why: ['test'] }, T0 + 60 * MIN);
+  assert.match(s.files[0].text, /standing-check \(broken since [^)]+\): shipped-live: #9 \(Citadel\) has waited 90 min/);
+  // One first seen inside the window has its own health row there; it isn't named twice.
+  assert.doesNotMatch(s.files[0].text, /turn-record: #8/);
+});

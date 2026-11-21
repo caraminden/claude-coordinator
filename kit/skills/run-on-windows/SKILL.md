@@ -37,9 +37,11 @@ Citadel's `tools/win-test-box/README.md`.
    until it ends. A cold Rust build takes about 10 minutes; later ones take 1–3. If someone has
    the screen, a `run`, `run-gpu` or other screen task takes a place in the box's one line, which
    CI desktop jobs share. It comes back "waiting in line for the screen (job …)", naming who has
-   the screen and how many are ahead. Keep calling `job`: it starts by itself when its turn comes,
-   and its 30 minutes count from then. A queued job nobody calls `job` on for 3 minutes leaves
-   the line when its turn comes, so don't end your turn on one. `stop_job` leaves the line.
+   the screen and how many are ahead. It starts by itself when its turn comes, and its 30 minutes
+   count from then. Citadel follows a queued job for you, which keeps its place: end your turn,
+   and a message comes to your chat when it gets the screen and again when it ends, with its exit
+   code and last lines. Calling `job` yourself still works if you'd rather keep your turn. If your
+   turn is stopped or you're closed while it waits, it leaves the line. `stop_job` leaves it too.
 6. **To see the app:**
    - `run_task {task: "run", args: ["cargo run --release"], wait: 5}`. It comes back still running,
      with a job id.
@@ -101,8 +103,9 @@ point, and leaves a shot at `%TEMP%\electron-drag.png`. After editing `public/`,
 
 - **Waiting in line:** "waiting in line for the screen … desktop CI job … for GitHub Actions has
   the screen" means a CI run has it, for as long as that job takes; "… for Peek Auras #N" means
-  another minion. Wait with `job`. A queued job holds its workspace, so `build` and `git_sync`
-  there are refused until it starts and ends, or you stop it: build first, as step 4 says.
+  another minion. End your turn and wait for Citadel's message, or wait with `job`. A queued job
+  holds its workspace, so `build` and `git_sync` there are refused until it starts and ends, or
+  you stop it: build first, as step 4 says.
   Never stop someone else's job.
 - **Busy:** only `screenshot` says "The screen is busy". It waits 50 s in line and can't keep a
   place. Try again in a few minutes, or take it while your own `run` job has the screen.

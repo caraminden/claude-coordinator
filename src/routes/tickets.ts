@@ -1178,7 +1178,10 @@ export const ticketRoutes: Route[] = [
       const { res, app, ticket } = ctx;
       const { id } = ticket;
       const { runner } = app;
-      return json(res, 200, { stopped: runner.stop(id) });
+      const stopped = runner.stop(id);
+      // Its test-box job still waiting for the screen leaves the line, as it did when its turn ended (#1425).
+      if (stopped) app.machines.minionStopped(id);
+      return json(res, 200, { stopped });
     },
   },
   // "Is this still going?" on a quiet turn's chip (#906): a look at its process, no message and no model call.
@@ -1197,7 +1200,9 @@ export const ticketRoutes: Route[] = [
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
       const turn = Number((await readJson(req))?.turn);
-      return json(res, 200, { stopped: app.runner.turnStartedAt(ticket.id) === turn && app.runner.stop(ticket.id) });
+      const stopped = app.runner.turnStartedAt(ticket.id) === turn && app.runner.stop(ticket.id);
+      if (stopped) app.machines.minionStopped(ticket.id);
+      return json(res, 200, { stopped });
     },
   },
   {

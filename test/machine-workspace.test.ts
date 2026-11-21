@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 // @ts-ignore: a plain .mjs the agent's computers download
 import { WorkspaceHost, expand, loadConfig, screenLine, screenState, workspaceReply } from '../public/machine-agent.mjs';
+import { JOB_WORDS } from '../src/machines.ts';
 
 // The agent's workspace tools against a real clone with a real origin, as on a laptop.
 const root = mkdtempSync(join(tmpdir(), 'machine-ws-'));
@@ -345,6 +346,16 @@ test('a queued task leaves the line when stopped, or when its turn comes and nob
   assert.match((await boxCall('job', { id: b })).text, /FAILED \(Left the screen's line: its turn came and nobody had called job for it in 3 minutes\. Nothing was started\.\)/);
   assert.equal(existsSync(lockFile), false, 'it never took the screen');
   assert.deepEqual(readdirSync(lineDir), []);
+});
+
+test('Citadel reads the agent\'s own words for a job waiting, running, ended and forgotten (#1425): the box never updates itself, so they must keep matching', async () => {
+  holdLock(process.ppid);
+  const id = JOB_WORDS.queued.exec((await boxCall('run_task', { workspace: 'peek', task: 'app', wait: 0 })).text)?.[1];
+  assert.ok(id, 'waiting in line');
+  rmSync(lockFile);
+  assert.equal(JOB_WORDS.running.exec((await boxCall('job', { id, wait: 1 })).text)?.[1], id);
+  assert.equal(JOB_WORDS.ended.exec((await boxCall('stop_job', { id })).text)?.[1], id);
+  await refused(boxCall('job', { id: 'ffff0000' }), JOB_WORDS.gone);
 });
 
 test('the screen lock: a dead holder is taken over; an unreadable fresh one is waited on', async () => {

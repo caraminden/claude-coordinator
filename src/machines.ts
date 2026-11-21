@@ -19,6 +19,7 @@ import { seal, unseal } from './credentials.ts';
 import type { Machine, Store } from './db.ts';
 import { type AgentJobMessage, cleanOffer, storedOffer, storedSettings } from './machine-jobs.ts';
 import { every } from './every.ts';
+import { asData } from './quote.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
 export const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,29}$/;
@@ -244,6 +245,52 @@ interface Session {
   res: ServerResponse;
   /** Its GPU_TASK calls waiting on the agent's answer, by JSON-RPC id, to learn the job's id. */
   gpuAsks?: Set<unknown>;
+  /** A minion's run_task, job and stop_job calls waiting on the agent's answer, by JSON-RPC id: a job waiting for the screen gets a box watch (#1425). */
+  jobAsks?: Set<unknown>;
+}
+
+/**
+ * A test-box job waiting in line for the screen that Citadel follows for its minion (#1425), so the minion can end
+ * its turn: Citadel calls job for it, which keeps its place in the line, and messages the minion's chat when it gets
+ * the screen and when it ends. Kept in a setting, so a restart carries on following it.
+ */
+export type BoxWatch = { machine: number; job: string; ticket: number; what: string; since: number; started?: true };
+/** A watch while Citadel follows it: `cancel` ends the call it is waiting on, closing its session. */
+type LiveWatch = BoxWatch & { done?: true; cancel?: () => void };
+const BOX_WATCHES = 'box-watches';
+/** A waiting job is asked after this often (its start is heard within about this long), a running one as long as the agent allows. */
+const WATCH_QUEUED_WAIT_S = 10;
+const WATCH_RUNNING_WAIT_S = 50;
+/** No answer this long: the session is closed and another opened. */
+const WATCH_ASK_MS = 90_000;
+const WATCH_RETRY_MS = 15_000;
+/** Past the line's worst case (CI's 40 minute take and 30 minute holds) and a 30 minute run: Citadel stops and says so. */
+const WATCH_MAX_MS = 3 * 60 * 60_000;
+/** The agent's words (public/machine-agent.mjs report()) for a job waiting, running, ended, or forgotten by a restart. */
+export const JOB_WORDS = {
+  queued: /waiting in line for the screen \(job ([0-9a-f]+)\)/,
+  running: /still running after \d+ s \(job ([0-9a-f]+)\)/,
+  ended: /\. Job ([0-9a-f]+); full log/,
+  gone: /^No job \S+ here/,
+};
+const { queued: QUEUED_JOB, running: RUNNING_JOB, ended: ENDED_JOB, gone: NO_JOB } = JOB_WORDS;
+const replyText = (reply: any): string => String(reply?.result?.content?.[0]?.text ?? reply?.error?.message ?? '');
+const watchKey = (w: Pick<BoxWatch, 'machine' | 'job'>) => `${w.machine}:${w.job}`;
+
+function cleanWatches(v: unknown): BoxWatch[] {
+  return (Array.isArray(v) ? v : []).flatMap((w: any) => (Number.isInteger(w?.machine) && Number.isInteger(w?.ticket) && typeof w?.job === 'string' && /^[0-9a-f]{1,32}$/.test(w.job) && Number.isFinite(w?.since)
+    ? [{ machine: w.machine, job: w.job, ticket: w.ticket, what: String(w.what ?? 'a task').slice(0, 200), since: w.since, ...(w.started ? { started: true as const } : {}) }]
+    : []));
+}
+
+/** `p`, or a throw once `ms` pass without it. */
+function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, fail) => {
+    timer = setTimeout(() => fail(new Error(`no answer in ${Math.round(ms / 1000)}s`)), ms);
+    timer.unref?.();
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
 /** The workspaces an agent reports, cut down to what the Machines page shows. */
@@ -292,6 +339,10 @@ export class MachineRelay {
    * shortcut: a job switched off inside its run_task call's first wait (50 s at most) is stopped when that answer comes, not at once.
    */
   private gpuJobs = new Map<number, Set<string>>();
+  /** Test-box jobs waiting for the screen that Citadel follows for their minions (#1425), by machine and job. */
+  private watches = new Map<string, LiveWatch>();
+  /** How a box watch reaches its minion's chat; null (a preview, a test that doesn't ask) follows no jobs. */
+  private wake: ((ticketId: number, text: string) => void) | null = null;
   /** Checks running now, by machine: one at a time each (#437). */
   private checks = new Map<number, Promise<CheckResult[]>>();
   private store: Store;
@@ -667,11 +718,155 @@ export class MachineRelay {
   /** Stop a GPU_TASK job (the GPU jobs switch went off) over a session of its own: the turn that ran it may be gone. */
   private stopGpuJob(machineId: number, job: string) {
     this.gpuJobs.get(machineId)?.delete(job);
-    this.converse(machineId, { check: machineId }, 'ws', GPU_OFF_WHO, CHECK_MS, async (ask) => {
+    this.stopJob(machineId, job, GPU_OFF_WHO);
+  }
+
+  /** Stop a job on a machine, or take it out of the screen's line, over a session of its own. */
+  private stopJob(machineId: number, job: string, who: string) {
+    this.converse(machineId, { check: machineId }, 'ws', who, CHECK_MS, async (ask) => {
       const r = await ask(2, 'tools/call', { name: 'stop_job', arguments: { id: job } });
       if (r?.error) throw new Error(r.error.message ?? JSON.stringify(r.error));
       return [];
-    }).then((r) => r.ok || console.error(`[machines] couldn't stop GPU job ${job} on machine ${machineId}: ${r.error}`));
+    }).then((r) => r.ok || console.error(`[machines] couldn't stop job ${job} on machine ${machineId} for ${who}: ${r.error}`));
+  }
+
+  /** Start following test-box jobs for minions (#1425), with how a message reaches a minion's chat; carries on with the ones a restart left. */
+  watchBoxes(wake: (ticketId: number, text: string) => void) {
+    this.wake = wake;
+    for (const w of cleanWatches(this.store.getSetting(BOX_WATCHES))) this.watch(w);
+  }
+
+  /** The jobs Citadel follows now. */
+  boxWatches(): BoxWatch[] {
+    return [...this.watches.values()].map(({ done: _, cancel: __, ...w }) => w);
+  }
+
+  /** A person stopped this minion's turn: Citadel stops following its jobs, and one still waiting for the screen leaves the line. */
+  minionStopped(ticketId: number) {
+    for (const w of [...this.watches.values()]) if (w.ticket === ticketId) this.unwatch(w, 'stopped');
+  }
+
+  /** Follow a job for a minion; false if another minion's watch has it. */
+  private watch(w: BoxWatch): boolean {
+    const had = this.watches.get(watchKey(w));
+    if (had) return had.ticket === w.ticket;
+    const mine = { ...w };
+    this.watches.set(watchKey(w), mine);
+    this.saveWatches();
+    void this.follow(mine);
+    return true;
+  }
+
+  private saveWatches() {
+    this.store.setSetting(BOX_WATCHES, this.boxWatches());
+  }
+
+  /** Stop following a job. A minion stopped or closed takes a job still waiting for the screen out of the line, as its turn ending did before. */
+  private unwatch(w: LiveWatch, why: 'seen' | 'told' | 'stopped' | 'closed') {
+    if (w.done) return;
+    w.done = true;
+    if (this.watches.get(watchKey(w)) === w) this.watches.delete(watchKey(w));
+    this.saveWatches();
+    w.cancel?.();
+    if ((why === 'stopped' || why === 'closed') && !w.started) this.stopJob(w.machine, w.job, `Citadel, for ${this.minionName(w.ticket)} (${why === 'stopped' ? 'its turn was stopped' : 'it was closed'})`);
+  }
+
+  private minionName(ticketId: number): string {
+    const t = this.store.getTicket(ticketId);
+    const p = t && this.store.getProject(t.project_id);
+    return t ? `${p ? `${p.name} ` : ''}#${t.number}` : `minion ${ticketId}`;
+  }
+
+  private machineName(machineId: number): string {
+    return this.store.getMachine(machineId)?.name ?? `machine ${machineId}`;
+  }
+
+  /** Ask after a watched job until it ends, over sessions of Citadel's own, opened again after the machine drops or stalls. */
+  private async follow(w: LiveWatch) {
+    while (!w.done) {
+      const r = await this.converse(w.machine, { check: w.machine }, 'ws', `Citadel, following job ${w.job} for ${this.minionName(w.ticket)}`, WATCH_MAX_MS, (ask) => this.followJob(w, ask));
+      if (w.done || this.watchOver(w)) return;
+      if (!r.ok) console.error(`[machines] following job ${w.job} on machine ${w.machine}: ${r.error}; trying again`);
+      await new Promise((ok) => setTimeout(ok, WATCH_RETRY_MS).unref?.());
+    }
+  }
+
+  /** True, with the watch ended, once its minion is closed or Citadel has followed it too long. */
+  private watchOver(w: LiveWatch): boolean {
+    if (w.done) return true;
+    const t = this.store.getTicket(w.ticket);
+    if (!t || t.status === 'closed') {
+      this.unwatch(w, 'closed');
+      return true;
+    }
+    if (Date.now() - w.since > WATCH_MAX_MS) {
+      this.unwatch(w, 'told');
+      this.tell(w, `Citadel stopped following your job ${w.job} on ${this.machineName(w.machine)} (${w.what}) after ${WATCH_MAX_MS / 3_600_000} hours. Call job with id "${w.job}" there to see where it is.`);
+      return true;
+    }
+    return false;
+  }
+
+  private tell(w: BoxWatch, text: string) {
+    try {
+      this.wake?.(w.ticket, text);
+    } catch (err: any) {
+      console.error(`[machines] couldn't tell ${this.minionName(w.ticket)} about job ${w.job}: ${err.message}`);
+    }
+  }
+
+  private async followJob(w: LiveWatch, ask: (id: number, method: string, params: object) => Promise<any>): Promise<string[]> {
+    const box = this.machineName(w.machine);
+    const cancelled = new Promise<never>((_, fail) => {
+      w.cancel = () => fail(new Error('Citadel stopped following it'));
+    });
+    cancelled.catch(() => {});
+    for (let id = 2; !this.watchOver(w); id++) {
+      const asked = ask(id, 'tools/call', { name: 'job', arguments: { id: w.job, wait: w.started ? WATCH_RUNNING_WAIT_S : WATCH_QUEUED_WAIT_S, lines: 40 } });
+      const reply = await Promise.race([within(asked, WATCH_ASK_MS), cancelled]);
+      if (w.done) break;
+      const text = replyText(reply);
+      if (reply?.error) throw new Error(text || JSON.stringify(reply.error));
+      if (QUEUED_JOB.test(text)) continue;
+      if (RUNNING_JOB.test(text)) {
+        if (!w.started) {
+          w.started = true;
+          this.saveWatches();
+          this.tell(w, `Your job ${w.job} on ${box} (${w.what}) has the screen now and is running. Citadel messages you again when it ends, with its exit code and last lines. While it runs you can take a screenshot, or stop it with stop_job (id "${w.job}"); if you're only waiting for its result, end your turn.`);
+        }
+        continue;
+      }
+      this.unwatch(w, 'told');
+      if (ENDED_JOB.test(text)) this.tell(w, `Your job ${w.job} on ${box} (${w.what}) ${w.started ? 'has ended' : 'got the screen and has ended'}. Its report:\n${asData(box, text)}`);
+      else if (NO_JOB.test(text)) this.tell(w, `Your job ${w.job} on ${box} (${w.what}) is gone: the box's agent restarted and forgot it, so it ${w.started ? 'may not have finished' : 'never ran'}. Run it again if you still need it.`);
+      else this.tell(w, `Citadel stopped following your job ${w.job} on ${box} (${w.what}): the box answered\n${asData(box, text)}`);
+    }
+    return [];
+  }
+
+  /** A minion heard of a job (#1425): one waiting for the screen gets a watch, and the reply says so; one it saw start or end needs no message for that. */
+  private heardJob(s: Session, reply: any): any {
+    if (s.ticketId === null || !this.wake || reply?.error) return reply;
+    const text = replyText(reply);
+    const queued = QUEUED_JOB.exec(text)?.[1];
+    if (queued) {
+      const what = /^(.+?) is waiting in line for the screen/.exec(text)?.[1]?.slice(0, 200) ?? 'a task';
+      if (!this.watch({ machine: s.machineId, job: queued, ticket: s.ticketId, what, since: Date.now() })) return reply;
+      const note = `\n\nCitadel is following job ${queued} for you, which keeps its place in line: you can end your turn now. A message comes to this chat when it gets the screen and again when it ends, with its exit code and last lines. Calling job yourself still works too.`;
+      const content = [...reply.result.content];
+      content[0] = { ...content[0], text: `${content[0].text}${note}` };
+      return { ...reply, result: { ...reply.result, content } };
+    }
+    const job = RUNNING_JOB.exec(text)?.[1] ?? ENDED_JOB.exec(text)?.[1];
+    const w = job && this.watches.get(watchKey({ machine: s.machineId, job }));
+    if (w && w.ticket === s.ticketId) {
+      if (ENDED_JOB.test(text)) this.unwatch(w, 'seen');
+      else if (!w.started) {
+        w.started = true;
+        this.saveWatches();
+      }
+    }
+    return reply;
   }
 
   /** Open a session on a machine's server as a turn's proxy does, initialize it, run `talk`, and close it. */
@@ -768,7 +963,8 @@ export class MachineRelay {
         if (now && storedLend(now)?.gpu_off) this.stopGpuJob(s.machineId, job);
       }
     }
-    s.res.write(`data: ${JSON.stringify({ message: body.message })}\n\n`);
+    const message = s.jobAsks?.delete(reply?.id) ? this.heardJob(s, reply) : body.message;
+    s.res.write(`data: ${JSON.stringify({ message })}\n\n`);
     return true;
   }
 
@@ -805,6 +1001,7 @@ export class MachineRelay {
       }
       (s.gpuAsks ??= new Set()).add(call.id);
     }
+    if (s.server === 'ws' && s.ticketId !== null && call?.method === 'tools/call' && ['run_task', 'job', 'stop_job'].includes(call.params?.name)) (s.jobAsks ??= new Set()).add(call.id);
     const agent = this.agents.get(s.machineId);
     if (!agent) return false;
     if (agent.res.writableLength > MAX_BACKLOG) {

@@ -492,6 +492,8 @@ const jobs = new MachineJobs({
   },
 });
 machines.jobHooks = { info: (m, known, since) => jobs.reconcile(m, known, since), offline: (id) => jobs.offline(id) };
+// A minion whose test-box job waits for the screen can end its turn: Citadel follows the job and messages its chat (#1425).
+if (!BOOT_CHECK) machines.watchBoxes((id, text) => runner.send(id, APP_NAME, text, [], {}, true));
 if (!BOOT_CHECK && !PREVIEW) jobs.start();
 const ciStore = new CiStore(store, DATA_DIR);
 const ciNumbers = new CiNumbers(store);

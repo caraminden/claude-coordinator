@@ -195,3 +195,128 @@ test('ships (#1268) go to every runner agent at each look, and to one that conne
   assert.deepEqual(linux.sent.filter((m) => m.ships), [{ ships }, { ships: [] }]);
   assert.ok(!lent.sent.some((m) => m.ships));
 });
+
+/** A test box lending workspace w to a minion's turn, with Citadel following its jobs (#1425): what each side was told. */
+function followed() {
+  const { store, relay, box } = world();
+  const owner = store.createProject('Peek', null, null);
+  const minion = store.createTicket({ project_id: owner.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const agent = stream();
+  relay.connectAgent(box, agent, { host: 'h', command: '', managed: true });
+  relay.setInfo(box, { v: 2, workspaces: [{ name: 'w', tasks: [{ name: 'run', run: ['run.ps1'] }] }] });
+  relay.setLend(box.id, { server: null, workspaces: ['w'] });
+  const wakes: { id: number; text: string }[] = [];
+  relay.watchBoxes((id, text) => wakes.push({ id, text }));
+  const holder = { ticketId: minion.id, projectId: owner.id };
+  const proxy = stream();
+  relay.openSession(box.id, holder, 'ws', '#1', proxy);
+  const session = proxy.sent[0].session;
+  const say = (s: string, id: number, text: string) => relay.fromAgent(box, s, { message: { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text }] } } });
+  /** The minion calls a tool and the box answers. */
+  const minionCalls = (id: number, name: string, args: object, text: string) => {
+    relay.fromSession(session, holder, { jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } });
+    say(session, id, text);
+    return proxy.sent.at(-1).message.result.content[0].text as string;
+  };
+  /** Citadel's own sessions on the box, by who opened them. */
+  const opened = (who: RegExp) => agent.sent.filter((m) => m.message?.method === 'initialize' && who.test(m.who));
+  /** The box answers Citadel's session's last call, then lets it make its next. */
+  const answer = async (s: string, text: string | null) => {
+    const last = agent.sent.filter((m) => m.session === s && m.message?.id).at(-1).message;
+    if (text === null) relay.fromAgent(box, s, { message: { jsonrpc: '2.0', id: last.id, result: {} } });
+    else say(s, last.id, text);
+    for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
+    return agent.sent.filter((m) => m.session === s && m.message?.id).at(-1).message;
+  };
+  return { store, relay, box, minion, agent, proxy, wakes, minionCalls, opened, answer };
+}
+
+const QUEUED = 'run in w is waiting in line for the screen (job ab12cd34), 50 s so far: desktop CI job for GitHub Actions has the screen; it is next, 1 in line. Nothing has started yet.';
+const RUNNING = 'run in w is still running after 3 s (job ab12cd34). Call job with id "ab12cd34" to wait for it.';
+const ENDED = 'run in w FAILED (exit 2) after 40 s. Job ab12cd34; full log on that computer: C:\\jobs\\ab12cd34.log\n--- last 2 lines ---\nassert failed\nsee above';
+
+test('a minion whose job waits for the test box\'s screen can end its turn (#1425): Citadel keeps asking after it and messages its chat when it starts and when it ends', async () => {
+  const { store, relay, minion, wakes, minionCalls, opened, answer } = followed();
+  const reply = minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
+  assert.match(reply, /^run in w is waiting in line.*\n\nCitadel is following job ab12cd34 for you.*you can end your turn now/s, 'the turn is told it can stop');
+  assert.deepEqual(relay.boxWatches().map((w) => [w.job, w.ticket, w.what]), [['ab12cd34', minion.id, 'run in w']]);
+  assert.equal((store.getSetting('box-watches') as any[]).length, 1, 'kept for a restart');
+
+  const [init] = opened(/^Citadel, following job ab12cd34 for Peek #1$/);
+  let call = await answer(init.session, null);
+  assert.deepEqual(call.params, { name: 'job', arguments: { id: 'ab12cd34', wait: 10, lines: 40 } }, 'calling job keeps its place in line');
+  call = await answer(init.session, QUEUED);
+  assert.deepEqual(call.params.arguments.wait, 10);
+  assert.equal(wakes.length, 0, 'still waiting: nothing said');
+
+  call = await answer(init.session, RUNNING);
+  assert.equal(call.params.arguments.wait, 50, 'running: it waits as long as the box allows');
+  assert.equal(wakes.length, 1);
+  assert.equal(wakes[0].id, minion.id);
+  assert.match(wakes[0].text, /^Your job ab12cd34 on box \(run in w\) has the screen now and is running\./);
+  await answer(init.session, RUNNING);
+  assert.equal(wakes.length, 1, 'its start is told once');
+
+  await answer(init.session, ENDED);
+  assert.equal(wakes.length, 2);
+  assert.match(wakes[1].text, /^Your job ab12cd34 on box \(run in w\) has ended\. Its report:\n> run in w FAILED \(exit 2\)[^]*> assert failed\n> see above\n\(Quoted from box/);
+  assert.deepEqual(relay.boxWatches(), []);
+  assert.deepEqual(store.getSetting('box-watches'), []);
+});
+
+test('a minion whose turn is stopped, or that is closed, takes its waiting job out of the screen\'s line (#1425)', async () => {
+  for (const how of ['stopped', 'closed'] as const) {
+    const { store, relay, minion, wakes, minionCalls, opened, answer } = followed();
+    minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
+    const [init] = opened(/^Citadel, following/);
+    await answer(init.session, null);
+    if (how === 'stopped') relay.minionStopped(minion.id);
+    else {
+      store.updateTicket(minion.id, { status: 'closed' });
+      await answer(init.session, QUEUED);
+    }
+    const [stopper] = opened(how === 'stopped' ? /^Citadel, for Peek #1 \(its turn was stopped\)$/ : /^Citadel, for Peek #1 \(it was closed\)$/);
+    assert.ok(stopper, how);
+    assert.deepEqual((await answer(stopper.session, null)).params, { name: 'stop_job', arguments: { id: 'ab12cd34' } });
+    assert.deepEqual(relay.boxWatches(), []);
+    assert.equal(wakes.length, 0, `${how}: nothing to tell it`);
+  }
+});
+
+test('a job the minion saw start or end itself is not told again; one the box forgot is (#1425)', async () => {
+  const { relay, wakes, minionCalls, opened, answer } = followed();
+  minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
+  const [init] = opened(/^Citadel, following/);
+  await answer(init.session, null);
+  minionCalls(6, 'job', { id: 'ab12cd34' }, RUNNING);
+  await answer(init.session, RUNNING);
+  assert.equal(wakes.length, 0, 'it saw the start');
+  minionCalls(7, 'job', { id: 'ab12cd34' }, ENDED);
+  assert.deepEqual(relay.boxWatches(), [], 'it saw the end');
+  assert.equal(wakes.length, 0);
+
+  minionCalls(8, 'run_task', { workspace: 'w', task: 'run' }, QUEUED.replaceAll('ab12cd34', 'cd34ef56'));
+  const [again] = opened(/^Citadel, following job cd34ef56/);
+  await answer(again.session, null);
+  await answer(again.session, 'No job cd34ef56 here. Jobs are forgotten when the agent restarts; their logs stay in C:\\jobs.');
+  assert.match(wakes[0].text, /^Your job cd34ef56 on box \(run in w\) is gone: the box's agent restarted and forgot it, so it never ran\./);
+  assert.deepEqual(relay.boxWatches(), []);
+});
+
+test('a restart carries on following the jobs it was following (#1425)', async () => {
+  const { store, relay, box, minion, minionCalls } = followed();
+  minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
+  relay.minionStopped(-1); // someone else's stop changes nothing
+  assert.equal(relay.boxWatches().length, 1);
+  const next = new MachineRelay(store, () => {});
+  relays.push({ relay: next, store });
+  const agent = stream();
+  next.connectAgent(box, agent, { host: 'h', command: '', managed: true });
+  next.setInfo(box, { v: 2, workspaces: [{ name: 'w', tasks: [{ name: 'run', run: ['run.ps1'] }] }] });
+  next.setLend(box.id, { server: null, workspaces: ['w'] });
+  next.watchBoxes(() => {});
+  assert.deepEqual(next.boxWatches().map((w) => [w.job, w.ticket]), [['ab12cd34', minion.id]]);
+  assert.ok(agent.sent.some((m) => m.message?.method === 'initialize' && /^Citadel, following job ab12cd34/.test(m.who)));
+  relay.minionStopped(minion.id);
+  next.minionStopped(minion.id);
+});

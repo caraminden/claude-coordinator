@@ -18,6 +18,7 @@ import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 import { parseStorm, type Storm } from './memory-storms.ts';
 import { BOOT_STALL } from './deploy-watch.ts';
 import { every, jobList, type JobRow, type Job } from './every.ts';
+import { CacheSampler, dbCold, COLD_SAMPLES } from './cache-health.ts';
 import { standingStatus, type StandingStatus } from './standing-checks.ts';
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -186,6 +187,8 @@ export interface StatusDeps {
   disk?: (dir: string) => Promise<{ total: number; free: number }>;
   /** The CPU ledger reading (#1332); the real cgroups unless a test says otherwise. */
   cpuLedger?: () => Promise<unknown>;
+  /** The file-cache reading (#1501); the real kernel counters and fincore unless a test says otherwise. */
+  cache?: (now: number) => Promise<import('./cache-health.ts').CacheReading>;
 }
 
 /** One tile as a person saw it when they pressed Investigate (#1273): what the Taskmaster is sent. */
@@ -201,6 +204,7 @@ export class StatusPage {
   private built = new Map<string, { at: number; data: Promise<StatusData> }>();
   private units: { at: number; rows: UnitState[] } | null = null;
   private timer: Job | null = null;
+  private cacheSampler: CacheSampler | null = null;
   readonly deps: StatusDeps;
   constructor(deps: StatusDeps) {
     this.deps = deps;
@@ -220,18 +224,32 @@ export class StatusPage {
       }))(this.deps.dataDir);
       const psi = await pressure.read();
       const ledger = await (this.deps.cpuLedger ?? readLedger)().catch(() => null);
+      const at = this.now();
+      this.cacheSampler ??= new CacheSampler({ dbPath: join(this.deps.dataDir, 'coordinator.db') });
+      const cache = await (this.deps.cache ?? ((n) => this.cacheSampler!.read(n)))(at).catch(() => null);
       const s: HostSample = {
-        at: this.now(), mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
+        ...cache, at, mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
         disk_total: disk.total, disk_free: disk.free, load1: loadavg()[0], rss: process.memoryUsage.rss(), cpu_psi: psi.cpu, mem_psi: psi.mem,
         io_psi: psi.io, swap_used: Number.isFinite(mem.swap) ? mem.swap : null,
         cpu_ledger: ledger ? JSON.stringify(ledger) : null,
       };
       this.deps.store.addHostSample(s);
+      this.checkCold(at);
       return s;
     } catch (err: any) {
       console.error(`Status sample failed: ${err?.message ?? err}`);
       return null;
     }
+  }
+
+  /** #1501: the database mostly out of memory while the box has plenty free, for COLD_SAMPLES readings in a row: one 'cache-cold' health event per spell. */
+  checkCold(now: number) {
+    const { store } = this.deps;
+    const rows = store.hostSamples(now - (COLD_SAMPLES + 1) * SAMPLE_EVERY_MS);
+    if (!dbCold(rows)) return;
+    if (store.healthEventsSince(['cache-cold'], now - 6 * 3_600_000).length) return;
+    const r = rows.at(-1)!;
+    store.addHealthEvent('cache-cold', now, null, `${Math.round((r.db_cached ?? 0) / 1048576)} MB of the ${Math.round((r.db_size ?? 0) / 1048576)} MB database in memory for ${COLD_SAMPLES} readings, with ${(r.mem_avail / 1024 ** 3).toFixed(1)} GB available`);
   }
 
   start() {
@@ -413,6 +431,16 @@ export class StatusPage {
     }
     const series = [...hourly.entries()].map(([h, s]) => [h, Math.round((1 - s.mem_avail / s.mem_total) * 1000) / 10, Math.round((1 - s.disk_free / s.disk_total) * 1000) / 10, Math.round(s.load1 * 10) / 10, ...(psiMax.get(h) ?? [null, null])] as HostPoint);
     const latest = samples.at(-1) ?? null;
+    // File cache (#1501), hourly from the first row that has it: the least share of the database in memory, and the highest discard and re-read in MB/s.
+    const cacheHours = new Map<number, [number, number, number, number]>();
+    for (const x of samples) {
+      if (x.db_size == null || !x.db_size) continue;
+      const h = Math.floor(x.at / 3_600_000) * 3_600_000;
+      const pct = Math.round(((x.db_cached ?? 0) / x.db_size) * 1000) / 10;
+      const mb = (pages: number | null | undefined) => Math.round(((pages ?? 0) * 4) / 1024 * 10) / 10;
+      const p = cacheHours.get(h);
+      cacheHours.set(h, p ? [h, Math.min(p[1], pct), Math.max(p[2], mb(x.kswapd_rate)), Math.max(p[3], mb(x.refault_rate))] : [h, pct, mb(x.kswapd_rate), mb(x.refault_rate)]);
+    }
     const cpuSteps = ledgerSteps(samples); // each row's JSON parsed once
     const cpuWindows = { hour: cpuTable(cpuSteps, now, 3_600_000), day: cpuTable(cpuSteps, now, 86_400_000), week: cpuTable(cpuSteps, now, 7 * 86_400_000) };
     // CPU (#1273): load against the cores, today's peak, and whether it has sat high for CPU_WARN_MS.
@@ -463,6 +491,8 @@ export class StatusPage {
     if (longStall >= STALL_WARN_S) reasons.push(['warn', `a ${longStall.toFixed(1)} s stall in the last day`, 'stalls']);
     const stormS = storms.filter((s) => s.at >= dayAgo).reduce((n, s) => n + s.stalled, 0) + stormsNow.reduce((n, s) => n + s.stalled, 0);
     if (stormS >= STORM_WARN_S) reasons.push(['warn', `${stormS < 90 ? `${Math.round(stormS)} s` : `${Math.round(stormS / 60)} min`} stalled at a memory limit in the last day`, 'memory-limits']);
+    const cold = store.healthEventsSince(['cache-cold'], dayAgo).at(-1);
+    if (cold) reasons.push(['warn', `the database fell out of memory ${pacificStamp(cold.at)}: ${cold.detail}`, 'cache']);
     if (latest && latest.mem_avail / latest.mem_total < 0.1) reasons.push(['warn', 'under 10% of memory free', 'memory']);
     if (latest && latest.disk_free / latest.disk_total < 0.1) reasons.push(['warn', 'under 10% of disk free', 'disk']);
     if (cpuHigh) reasons.push(['warn', `load over ${cores * CPU_WARN_PER_CORE} on ${cores} cores for ${CPU_WARN_MS / 60_000} min`, 'cpu']);
@@ -479,7 +509,7 @@ export class StatusPage {
       canInvestigate: ciVisible,
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
       stalls: { counts: days.map((d) => stallCount[d]), afterBoot: days.map((d) => stallBoot[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
-      host: { series, latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
+      host: { series, cache: [...cacheHours.values()], latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
       // Every periodic job (#1311), for those who see Citadel's scheme.
@@ -584,7 +614,7 @@ export interface CitadelStatus {
   uptime: { bootAt: number; commit: string; reason: string | null; restarts: number[]; boots: { at: number; reason: string; commit: string | null }[] };
   stalls: { counts: number[]; afterBoot: number[]; longest: number[]; last: { at: number; seconds: number | null; cause: string | null; afterBoot: boolean; detail: string } | null };
   /** series: [hour, memory used %, disk used %, load], the hour's worst; peak: today's highest load. */
-  host: { series: HostPoint[]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null;
+  host: { series: HostPoint[]; /** Hourly [time, least % of the database in memory, highest discard MB/s, highest re-read MB/s] (#1501). */ cache: [number, number, number, number][]; latest: HostSample | null; sampledFrom: number | null; cores: number; cpuWarn: number; cpuWarnMin: number; peak: { at: number; load1: number } | null;
     /** CPU by source (#1332): the last hour, day and week as a table, and the week by hour for the stacked chart. */
     cpu: { windows: { hour: CpuWindow; day: CpuWindow; week: CpuWindow }; hours: CpuHour[]; groups: { key: string; label: string }[] } };
   /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */

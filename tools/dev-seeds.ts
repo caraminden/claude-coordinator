@@ -1475,7 +1475,7 @@ mock.boards('#takes', { boards: [
         const wave = Math.sin(t / (6 * HOUR));
         for (const k of Object.keys(rate)) cum[k] = (cum[k] ?? 0) + rate[k] * (1 + 0.6 * wave) * 15 * 60e6;
         forks += 900 * 8; busy += 4.6 * 900 * 1000;
-        c.store.addHostSample({ at: t, mem_total: 64e9, mem_avail: Math.round(64e9 * (0.42 + 0.12 * wave)), disk_total: 2e12, disk_free: Math.round(2e12 * (0.31 - 0.04 * ((t - now) / (8 * 24 * HOUR) + 1))), load1: 2 + wave, rss: 450e6, cpu_ledger: JSON.stringify({ v: 1, s: Object.fromEntries(Object.entries(cum).map(([k, v]) => [k, [Math.round(v), Math.round(v * 0.3)]])), h: [Math.round(busy), Math.round(busy * 0.26), Math.round(busy * 0.03), forks] }) });
+        c.store.addHostSample({ at: t, mem_total: 64e9, mem_avail: Math.round(64e9 * (0.42 + 0.12 * wave)), disk_total: 2e12, disk_free: Math.round(2e12 * (0.31 - 0.04 * ((t - now) / (8 * 24 * HOUR) + 1))), load1: 2 + wave, rss: 450e6, db_size: 2e9, db_cached: Math.round(2e9 * (t > now - 30 * HOUR && t < now - 20 * HOUR ? 0.08 : 0.93)), kswapd_rate: 4000 * (1 + wave), refault_rate: 1500 * (1 + wave), server_refault_rate: 90, pgpgin_rate: 20000, thp_fallback_rate: 12, cpu_ledger: JSON.stringify({ v: 1, s: Object.fromEntries(Object.entries(cum).map(([k, v]) => [k, [Math.round(v), Math.round(v * 0.3)]])), h: [Math.round(busy), Math.round(busy * 0.26), Math.round(busy * 0.03), forks] }) });
       }
       const sha = (n: number) => `${n}`.repeat(40).slice(0, 40);
       c.store.addHealthEvent('boot', now - 6 * 24 * HOUR, sha(1), 'a ship: new code 11111111');

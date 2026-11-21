@@ -64,6 +64,9 @@ export interface HostSample {
   swap_used?: number | null;
   /** Cumulative CPU by source and the host's counters as JSON (#1332, src/cpu-ledger.ts); null before it or when unreadable. */
   cpu_ledger?: string | null;
+  /** File-cache health (#1501, src/cache-health.ts): the database's bytes in memory and its size, then per-second rates; null before it or when unreadable. */
+  db_cached?: number | null; db_size?: number | null;
+  kswapd_rate?: number | null; refault_rate?: number | null; server_refault_rate?: number | null; pgpgin_rate?: number | null; thp_fallback_rate?: number | null;
 }
 
 export interface ReleaseRow {
@@ -1362,7 +1365,14 @@ CREATE TABLE IF NOT EXISTS host_samples (
   mem_psi INTEGER,
   io_psi INTEGER,
   swap_used INTEGER,
-  cpu_ledger TEXT
+  cpu_ledger TEXT,
+  db_cached INTEGER,
+  db_size INTEGER,
+  kswapd_rate REAL,
+  refault_rate REAL,
+  server_refault_rate REAL,
+  pgpgin_rate REAL,
+  thp_fallback_rate REAL
 );
 -- One row per test file that failed in a land's or fast mode's run and passed alone (#1063): the CI page's Test health tab counts them.
 CREATE TABLE IF NOT EXISTS flake_events (
@@ -1556,6 +1566,13 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['host_samples', 'io_psi', 'ALTER TABLE host_samples ADD COLUMN io_psi INTEGER'],
   ['host_samples', 'swap_used', 'ALTER TABLE host_samples ADD COLUMN swap_used INTEGER'],
   ['host_samples', 'cpu_ledger', 'ALTER TABLE host_samples ADD COLUMN cpu_ledger TEXT'],
+  ['host_samples', 'db_cached', 'ALTER TABLE host_samples ADD COLUMN db_cached INTEGER'],
+  ['host_samples', 'db_size', 'ALTER TABLE host_samples ADD COLUMN db_size INTEGER'],
+  ['host_samples', 'kswapd_rate', 'ALTER TABLE host_samples ADD COLUMN kswapd_rate REAL'],
+  ['host_samples', 'refault_rate', 'ALTER TABLE host_samples ADD COLUMN refault_rate REAL'],
+  ['host_samples', 'server_refault_rate', 'ALTER TABLE host_samples ADD COLUMN server_refault_rate REAL'],
+  ['host_samples', 'pgpgin_rate', 'ALTER TABLE host_samples ADD COLUMN pgpgin_rate REAL'],
+  ['host_samples', 'thp_fallback_rate', 'ALTER TABLE host_samples ADD COLUMN thp_fallback_rate REAL'],
   ['tickets', 'closed_at', 'ALTER TABLE tickets ADD COLUMN closed_at INTEGER'],
   ['tickets', 'kind', "ALTER TABLE tickets ADD COLUMN kind TEXT NOT NULL DEFAULT 'ticket'"],
   ['tickets', 'number', 'ALTER TABLE tickets ADD COLUMN number INTEGER'],
@@ -1754,6 +1771,7 @@ export const SCHEMA_HISTORY = [
   [104, 'deliveries (#1385)'],
   [105, 'ci_numbers, ci_number_steps (#1369)'],
   [106, 'flake_events.test_name, message, class (#1438)'],
+  [107, 'host_samples cache-health columns (#1501)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3561,8 +3579,9 @@ export class Store {
 
   /** One reading of perigee's memory, disk and load (#1123); drops readings past HOST_SAMPLE_KEEP_MS. */
   addHostSample(s: HostSample) {
-    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used, cpu_ledger) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.at, s.mem_total, s.mem_avail, s.disk_total, s.disk_free, s.load1, s.rss, s.cpu_psi ?? null, s.mem_psi ?? null, s.io_psi ?? null, s.swap_used ?? null, s.cpu_ledger ?? null);
+    this.db.prepare('INSERT OR REPLACE INTO host_samples (at, mem_total, mem_avail, disk_total, disk_free, load1, rss, cpu_psi, mem_psi, io_psi, swap_used, cpu_ledger, db_cached, db_size, kswapd_rate, refault_rate, server_refault_rate, pgpgin_rate, thp_fallback_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.at, s.mem_total, s.mem_avail, s.disk_total, s.disk_free, s.load1, s.rss, s.cpu_psi ?? null, s.mem_psi ?? null, s.io_psi ?? null, s.swap_used ?? null, s.cpu_ledger ?? null,
+        s.db_cached ?? null, s.db_size ?? null, s.kswapd_rate ?? null, s.refault_rate ?? null, s.server_refault_rate ?? null, s.pgpgin_rate ?? null, s.thp_fallback_rate ?? null);
     this.db.prepare('DELETE FROM host_samples WHERE at < ?').run(s.at - HOST_SAMPLE_KEEP_MS);
   }
 

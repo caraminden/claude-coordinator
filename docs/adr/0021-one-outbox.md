@@ -204,7 +204,7 @@ Each step moves saved data, so each ships high risk with a member's go. Each add
 test (`test/restart-anywhere.test.ts`): a server killed at each step of the send order loses no row.
 
 0. **The table, the dispatcher and `wake_at`.** The timer, `boot`, the crash rule and the 3-day rule, proved on the
-   simplest timed kind (34 live rows). Built in #1385 (`src/outbox.ts`, `src/db/deliveries.ts`, schema 102). What
+   simplest timed kind (34 live rows). Built in #1385 (`src/outbox.ts`, `src/db/deliveries.ts`, schema 103). What
    ran: `test/outbox.test.ts` (kill-resend marked across two kills, late at boot, reopen on day 2 and drop on day 4,
    the retry ladder to the Taskmaster, a limit-held wake never sent twice, a refused start retried, the migration
    keeping ids with the dual read, the limits and pruning), two `wake_at` flows in `test/restart-anywhere.test.ts`,

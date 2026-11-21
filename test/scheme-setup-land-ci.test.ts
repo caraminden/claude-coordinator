@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { env, git, landLockFree, sleep, until, queueSetup } from './scheme-setup-land-fixture.ts';
+import { env, git, landLockFree, sleep, until, queueSetup, timingLines } from './scheme-setup-land-fixture.ts';
 
 // The CI gate and the stack (#537). CI is faked two ways: a CI_STATUS command that answers from a file named after
 // the commit (its exit code; no file: not started; "<code> once": that answer one time, then not started), and for
@@ -647,6 +647,11 @@ test('batches: three share one run on the top commit; main moves once, straight 
     assert.match(a.stderr(), /landed in a batch with ticket\/2-x, ticket\/3-x, on ticket\/3-x's CI run/);
     assert.match(b.stderr(), /landed in a batch with ticket\/1-x, ticket\/3-x, on ticket\/3-x's CI run \(main is now [0-9a-f]{12}\)/);
     assert.match(d.stderr(), /landed in a batch with ticket\/1-x, ticket\/2-x, on its own CI run/);
+    // The ship line (#1320): each its own commit and place; the timing lines, with no shared folder, in .git/land-log.
+    assert.deepEqual([a, b, d].map((l) => l.stderr().trimEnd().split('\n').pop()), [ta, tb, td].map((t, i) => `ship: landed ${t} batch ${i + 1} of 3 deploy none`));
+    const timed = timingLines(join(c.state, 'land-log')).sort((x, y) => x.split(' · ')[2].localeCompare(y.split(' · ')[2]));
+    assert.equal(timed.length, 3, timed.join('\n'));
+    timed.forEach((l, i) => assert.match(l, new RegExp(`· timing · ticket/${i + 1}-x · line \\d+ · rebase \\d+ · ci-queue ${i === 2 ? '\\d+' : '-'} · ci-run - · landed · batch ${i + 1} of 3$`)));
     assert.deepEqual([1, 2, 3].map(c.on), ['ticket/1-x', 'ticket/2-x', 'ticket/3-x']);
     assert.deepEqual([1, 2, 3].map((i) => branchAt(c, i)), [ta, tb, td], 'each branch sits on its own commit');
     assert.equal(readFileSync(join(c.state, 'land-queue', '.took'), 'utf8').trim().split('\n').length, 1, 'only the head held the lock, so only it is timed');

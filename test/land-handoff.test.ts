@@ -591,6 +591,20 @@ test('landResult reads deploy.sh\'s lines; outputTail keeps the last lines', () 
   assert.ok(!outputTail(long).includes('line 400\n'));
 });
 
+// #1320: the kit template's last line decides when it is there; without it (Citadel's land.sh for now), the lines above.
+test("landResult reads the ship line when there is one: its own commit, the subject only from a line naming that commit, refused as failed", () => {
+  assert.deepEqual(landResult('land: main is now at abc1234 "#9: usage bar"\nship: landed abc1234def0 batch 1 of 1 deploy none\n', 0), { kind: 'landed', commit: 'abc1234def0', subject: '#9: usage bar' });
+  assert.deepEqual(landResult('land: landed in a batch with ticket/1-x, on its own CI run (main is now 999999999999)\nship: landed abc1234def0 batch 2 of 2 deploy none\n', 0), { kind: 'landed', commit: 'abc1234def0' }, "a batch member: its own commit, which no subject line names");
+  assert.deepEqual(landResult(`${LIVE}ship: landed abc1234def0 batch 1 of 1 deploy none\n`, 0), { kind: 'landed', commit: 'abc1234def0', subject: '#9: usage bar' }, 'the ship line, not prose, says what deployed');
+  assert.equal(landResult('ship: landed abc1234def0 batch 1 of 1 deploy live\n', 0).kind, 'live');
+  assert.equal(landResult('ship: landed abc1234def0 batch 1 of 1 deploy restart\n', 0).kind, 'restart');
+  assert.deepEqual(landResult('ship: refused abc1234def0 batch 1 of 3 deploy none\n', 0), { kind: 'failed' });
+  assert.deepEqual(landResult('ship: refused - batch 1 of 1 deploy none\n', 1), { kind: 'failed' });
+  assert.equal(landResult('ship: refused abc1234def0 batch 1 of 1 deploy none\n', 75).kind, 'no-ci', 'exit 75 tells a park apart');
+  assert.equal(landResult('land: main moved, but the push to origin failed: nope\nship: landed abc1234def0 batch 1 of 1 deploy none\n', 1).kind, 'unpushed');
+  assert.deepEqual(landResult('land: main is now at abc1234 "#9: x"\nland: ship: landed fff batch 1 of 1 deploy live\n', 0), { kind: 'landed', commit: 'abc1234', subject: '#9: x' }, 'only a line of its own');
+});
+
 test("landConflict reads only land.sh --check's exit 3 as a conflict: an older land.sh, a failure or a hang hands off as before (#770)", async () => {
   const cwd = mkdtempSync(join(root, 'check-'));
   mkdirSync(join(cwd, 'tools'));

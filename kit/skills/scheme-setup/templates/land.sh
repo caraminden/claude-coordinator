@@ -72,6 +72,11 @@
 # for LAND_CI_DOWN seconds after a landing waited out one of those limits, no runner has taken this one's yet):
 # nothing is wrong with the branch and nothing landed, so park and run this again once a person says
 # the runners are back.
+# Its last line, however a landing ends (not --check, --lane, --verify, --into or --full), is the one Citadel reads:
+#   ship: <landed|refused> <commit> batch <n> of <m> deploy <state|none>
+# <commit>: its own commit, 12 hex digits (the rebased one once it has one); batch: its place in the batch that
+# shipped together (1 of 1 alone; refused: the batch it was last in); deploy: none (this script deploys nothing).
+# Exit 75 says refused too: the exit code tells a park apart. And a timing line goes to the retro log (TIMING_LOG).
 set -euo pipefail
 
 # The check command, exactly as Project facts names it under "Check commands" ('true' while it has none).
@@ -142,6 +147,9 @@ CI_STACK=${LAND_STACK_DEPTH:-3}
 CI_BATCH=${LAND_BATCH:-1}
 # 0: main stays in the main checkout and is never pushed (a scheme whose origin isn't its own).
 PUSH_MAIN=1
+# Where each landing's timing line goes ("The timing line" below): <folder>/<UTC day>/land.md. The scheme's retro log
+# (its shared folder's retro-log/, which Citadel names for every land it runs); '' or no shared folder: <.git>/land-log.
+TIMING_LOG=${COORDINATOR_SHARED_DIR:+$COORDINATOR_SHARED_DIR/retro-log}
 # Fast mode: the paths (bash case patterns, where * also matches /, split by spaces) that keep a land on the full gate
 # besides the pipeline's own files: 'migrations/* src/auth/*'.
 FAST_FULL=''
@@ -930,6 +938,36 @@ B_NUM=''   # with batches: which batch this one is in, from the head's (1); "Bat
 fronted='' # with batches: it has been in the head's batch, so CI's limits count
 g_last='' g_quiet='' # with batches, the head: when it last asked CI about the commit it lands, and since when with no answer
 
+# The timing line: when each phase began ($SECONDS; '' for not yet), and the phase a refusal from here on is at.
+# line: from getting in line to holding the lock (with batches: to its batch reaching the front); rebase: the rebase
+# and the check; ci-queue: until a runner took the job; ci-run: until CI's verdict. A rebuild starts the last three over.
+T_start='' T_lock='' T_build='' T_built='' T_ci='' T_cirun='' T_gate='' at=smoke
+SHIP_N=1 SHIP_M=1 # its place in its batch, and how many shipped with it (or, refused, were in its batch)
+ship_timing() (
+  set +eu
+  [ -n "$T_start" ] || exit 0 # refused before the line (the smoke check): no timing line, as Citadel's
+  now=$SECONDS
+  span() { if [ -n "$1" ]; then echo $((${2:-$now} - $1)); else echo -; fi; } # <start> [<end>, else now]
+  if [ -n "$landed" ]; then out=landed
+  elif [ "$1" = 1 ]; then out="refused at $at"
+  else out="stopped at $at"; [ "$1" = 0 ] || out="$out (exit $1)"; fi
+  [ "$SHIP_M" = 1 ] || out="$out · batch $SHIP_N of $SHIP_M"
+  dir=${TIMING_LOG:-$state/land-log}/$(date -u +%F)
+  mkdir -p "$dir" || exit 0
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' "Written by the scheme's tools/land.sh (no session id, so one file per day): a timing line per landing that got in line, landed or not. Phase times in whole seconds, - for a phase never reached: line (waiting in line for the lock), rebase (the rebase and the check), ci-queue (until a runner took the job), ci-run (until CI's verdict)." >>"$dir/land.md"
+  printf -- '- %sZ · timing · %s · line %s · rebase %s · ci-queue %s · ci-run %s · %s\n' "$(date -u +%T)" "$branch" \
+    "$(span "$T_start" "$T_lock")" "$(span "$T_build" "$T_built")" "$(span "$T_ci" "${T_cirun:-$T_gate}")" \
+    "$(span "$T_cirun" "$T_gate")" "$out" >>"$dir/land.md"
+)
+# However a landing ends: the timing line (best effort: a failure here never changes the outcome), then the ship line.
+ship_end() {
+  local what=refused c=${tip:-${keep:-$pre}}
+  [ -z "$landed" ] || what=landed c=$keep
+  ship_timing "$1" >/dev/null 2>&1 || true
+  c=${c:0:12}
+  echo "ship: $what ${c:--} batch $SHIP_N of $SHIP_M deploy none" >&2
+}
+
 # CI's verdict on [commit] ($tip if none) in [lane] ($ci_lane if none), by the exit codes in the header at CI_STATUS;
 # what it found goes to $cilog. A lane that runs no CI is green. ci_verdict: the same, but red only on failures that
 # aren't known reds (known_red); with those waived, it is the other workflows' (ci_open).
@@ -1016,7 +1054,7 @@ ci_runs() {
 # range, from the commit under its first member (B_BASE[1], from batch_look) to $tip; one not under $tip is full.
 ci_start() {
   local rc=0 l
-  ci_clock=$SECONDS ci_last=$SECONDS ci_begun=''
+  ci_clock=$SECONDS ci_last=$SECONDS ci_begun='' T_ci=$SECONDS T_cirun='' T_gate='' at=ci
   if [ -n "$BATCH" ] && [ -n "$LANES" ]; then
     l="full (${B_BASE[1]:--} is not under ${tip:0:12})"
     ! git merge-base --is-ancestor "${B_BASE[1]:--}" "$tip" 2>/dev/null || l=$(lane_of "${B_BASE[1]}" "$tip" "refs/heads/$BRANCH")
@@ -1024,7 +1062,7 @@ ci_start() {
     say "its batch's run, from ${B_BASE[1]:0:12} up, takes lane ${l%% *}: ${l#* }"
   fi
   if ! lane_ci "$ci_lane"; then
-    green=1 verdict=green
+    green=1 verdict=green T_gate=$SECONDS at=line
     say "lane $ci_lane runs no CI, so nothing is pushed and ${tip:0:12} is green as checked"
     queue_set 5 green
     queue_phase "checked ${tip:0:12}: lane $ci_lane runs no CI"
@@ -1032,7 +1070,7 @@ ci_start() {
   fi
   ci_verdict || rc=$?
   case $rc in
-    0) green=1 && rm -f "$state/ci-down" && say "CI already passed ${tip:0:12}" ;;
+    0) green=1 T_gate=$SECONDS at=line && rm -f "$state/ci-down" && say "CI already passed ${tip:0:12}" ;;
     2) say "CI is already running on ${tip:0:12}" ;;
     *) ci_push ;;
   esac
@@ -1087,9 +1125,10 @@ ci_ask() {
   if [ -n "$pushed_at" ] && [ $((SECONDS - pushed_at)) -lt "$CI_GRACE" ]; then
     case $rc in 1 | 4) rc=3 ;; esac
   fi
+  [ "$rc" != 2 ] || [ -n "$T_cirun" ] || T_cirun=$SECONDS
   case $rc in
     0)
-      green=1 verdict=green
+      green=1 verdict=green T_gate=$SECONDS at=line
       rm -f "$state/ci-down"
       say "CI is green on ${tip:0:12}"
       queue_set 5 green
@@ -1100,7 +1139,7 @@ ci_ask() {
       say "CI is red on ${tip:0:12}"
       [ "$Q_AHEAD" = 0 ] || say "that commit sits on $Q_PREDNAME's, which hasn't landed: waiting to see whether it does before giving up"
       blocked="CI is red on ${tip:0:12} (above), so $BRANCH is untouched. Fix it, commit, then run this again"
-      keep=$tip verdict=red
+      keep=$tip verdict=red T_gate=$SECONDS
       queue_set 5 red
       # Nobody builds on a red commit. In a batch they already have: it stays, and the bisect finds where the fault is.
       [ -n "$BATCH" ] || { tip=''; queue_set 4 skip; }
@@ -1149,6 +1188,7 @@ build() {
   local want=$1 on phase rc=0 clashes fork log chk v
   [ -z "$pushed" ] || ci_cancel # its run is on a commit that will never land now
   base=$want tip='' blocked='' keep='' green='' retried='' pushed_at='' verdict=-
+  T_build=$SECONDS T_built='' T_ci='' T_cirun='' T_gate='' at=rebase
   queue_set 4 -
   queue_set 5 "$UNRUN"
   queue_set 6 "$want"
@@ -1182,6 +1222,7 @@ build() {
     return 0
   fi
 
+  at=check
   queue_phase "checking numbered things"
   fork=$(git merge-base "$want" "$pre")
   clashes=$(numbered_clashes "$want" "$fork" "$pre") || rc=$?
@@ -1242,7 +1283,7 @@ build() {
     fi
   fi
 
-  tip=$(git rev-parse HEAD)
+  tip=$(git rev-parse HEAD) T_built=$SECONDS at=line
   if [ -n "$BATCH" ]; then
     queue_phase "checked ${tip:0:12}: CI runs on its batch's top"
   elif [ -n "$CI_ON" ]; then
@@ -1273,7 +1314,7 @@ batch_look() {
     batch_add "$label" "$sha" "$ver" "$bas" "$pid"
   done
   batch_add "$branch" "${tip:--}" "$verdict" "${base:--}" "$Q_ME"
-  B_NUM=$B_AT B_I=$B_N
+  B_NUM=$B_AT B_I=$B_N SHIP_N=$B_N
   for t in "${Q_ORDER[@]}"; do
     [ "$B_N" -lt "$CI_BATCH" ] || break
     [ -n "$behind" ] || { [ "$t" != "$Q_N" ] || behind=1; continue; } # the ones behind this one, in queue_look's order
@@ -1283,6 +1324,7 @@ batch_look() {
     [ -n "${l[5]:-}" ] && [ "${l[5]}" != old ] || break # older than batches, or fast mode's: the next batch
     batch_add "${l[2]:-?}" "${l[4]:--}" "${l[5]}" "${l[6]:--}" "${l[0]}"
   done
+  SHIP_M=$B_N
 }
 
 # Which member of a red batch runs CI next: halfway between the deepest green one (0: main) and the shallowest red one.
@@ -1346,7 +1388,9 @@ batch_landed() {
   for ((i = 1; i < ${#B_SHA[@]}; i++)); do
     [[ ${B_SHA[i]} =~ ^[0-9a-f]{40,}$ ]] && git merge-base --is-ancestor "${B_SHA[i]}" "refs/heads/$BRANCH" 2>/dev/null || continue
     if [ "$i" = "$B_I" ]; then on='its own'; else with="$with, ${B_LABEL[i]}" on="${B_LABEL[i]}'s"; fi
+    SHIP_M=$i
   done
+  SHIP_N=$B_I
   keep=$tip landed=ok
   say "landed in a batch with ${with#, }, on $on CI run (${BRANCH} is now $(git rev-parse --short=12 "refs/heads/$BRANCH"))"
   exit 0
@@ -1388,6 +1432,7 @@ leave() {
       (land_after "${i%% *}" "${i#* }") >&2 || say "land.local.sh's land_after failed for ${i#* } (exit $?), which landed all the same"
     done
   fi
+  ship_end "$rc"
   exit "$rc"
 }
 
@@ -1635,8 +1680,11 @@ if [ "$mode" = into ] || [ "$mode" = full ]; then
   exit 0
 fi
 
+trap 'ship_end $?' EXIT # until leave takes over
 [ "${LAND_SMOKE:-1}" = 0 ] || smoke
+at=line
 queue_join "$state" "$branch"
+T_start=$SECONDS
 trap leave EXIT
 seen_main='' looked='' checked_main=''
 while :; do
@@ -1655,7 +1703,7 @@ while :; do
     batch_look
     looked=1
     # The limits on CI count from here: until now its run could be waiting on the batches ahead.
-    [ "$B_NUM" != 1 ] || [ -n "$fronted" ] || fronted=1 ci_clock=$SECONDS ci_begun=''
+    [ "$B_NUM" != 1 ] || [ -n "$fronted" ] || fronted=1 ci_clock=$SECONDS ci_begun='' T_lock=$SECONDS
   fi
   if [ "$Q_AHEAD" = 0 ]; then
     [ -n "$Q_HELD" ] || continue # queue_look waited on the lock, so this is no busy loop
@@ -1663,7 +1711,7 @@ while :; do
       # Under the lock: another landing fast-forwarding main there looks like uncommitted changes while it runs.
       [ "$(git -C "$MAIN" branch --show-current)" = "$BRANCH" ] || refuse "$MAIN is not on $BRANCH; a person needs to look"
       [ -z "$(git -C "$MAIN" status --porcelain --untracked-files=no)" ] || refuse "$MAIN has uncommitted changes; a person needs to look"
-      seen_main=1 ci_clock=$SECONDS ci_begun='' # the limits on CI count from here: until now its run could be waiting on the ones ahead
+      seen_main=1 ci_clock=$SECONDS ci_begun='' T_lock=${T_lock:-$SECONDS} # the limits on CI count from here: until now its run could be waiting on the ones ahead
     fi
     want=$(git rev-parse "refs/heads/$BRANCH")
   elif [ -n "$BATCH" ]; then
@@ -1708,6 +1756,7 @@ while :; do
   fi
   sleep "$QUEUE_POLL"
 done
+at=landing
 
 # The head of the line, holding the lock, with $tip checked (and green in CI) on exactly today's main; with
 # batches, main moves to G, the deepest green commit of its batch, which holds $tip.
@@ -1718,6 +1767,7 @@ done
 to=$tip
 [ -z "$BATCH" ] || to=$G
 git -C "$MAIN" -c gc.auto=0 merge -q --ff-only "$to" || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
+[ -z "$BATCH" ] || SHIP_N=1 SHIP_M=$GI
 keep=$tip landed=ok # it landed, so its time counts toward the estimate, whatever the push does
 say "$BRANCH is now at $(git log -1 --format='%h "%s"' "$to")"
 if [ -n "$BATCH" ] && [ "$GI" != 1 ]; then

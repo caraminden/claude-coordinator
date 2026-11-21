@@ -4,29 +4,44 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { root, env, git, n, setup, landLockFree, until, queueSetup, sleep } from './scheme-setup-land-fixture.ts';
+import { root, env, git, n, setup, landLockFree, until, queueSetup, sleep, timingLines } from './scheme-setup-land-fixture.ts';
 
-test('rebases onto main, checks, fast-forwards main and pushes it past the pre-push hook', () => {
+// The day's land.md in the retro log (#1320): Citadel's timing fields, the ones the kit's landings have.
+const timings = (shared: string) => timingLines(join(shared, 'retro-log'));
+const TIMING = /^- \d\d:\d\d:\d\dZ · timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue - · ci-run - · /;
+
+test('rebases onto main, checks, fast-forwards main and pushes it past the pre-push hook; logs its timing and ends on the ship line', () => {
   const r = setup();
   r.commit(r.wt, 'b.txt', 'mine\n');
   r.commit(r.main, 'c.txt', 'someone else\n');
-  const res = r.run();
+  const shared = join(r.dir, 'shared');
+  const res = r.run({ COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 0, res.stderr);
   const tip = git(r.wt, 'rev-parse', 'HEAD');
   assert.equal(git(r.main, 'rev-parse', 'main'), tip);
   assert.equal(git(r.origin, 'rev-parse', 'main'), tip);
   assert.equal(git(r.main, 'log', '--format=%s', '-3'), 'b.txt: mine\nc.txt: someone else\nbase');
+  assert.equal(res.stderr.trimEnd().split('\n').pop(), `ship: landed ${tip.slice(0, 12)} batch 1 of 1 deploy none`);
+  const [line, ...more] = timings(shared);
+  assert.match(line, TIMING);
+  assert.ok(line.endsWith(' · landed'), line);
+  assert.deepEqual(more, []);
 });
 
-test('a red check leaves main and origin untouched', () => {
+test('a red check leaves main and origin untouched, and the ship line and timing line say refused', () => {
   const r = setup();
   const before = git(r.main, 'rev-parse', 'main');
   r.commit(r.wt, 'red', 'x\n');
-  const res = r.run();
+  const shared = join(r.dir, 'shared');
+  const res = r.run({ COORDINATOR_SHARED_DIR: shared });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /check failed/);
   assert.equal(git(r.main, 'rev-parse', 'main'), before);
   assert.equal(git(r.origin, 'rev-parse', 'main'), before);
+  assert.match(res.stderr.trimEnd().split('\n').pop()!, /^ship: refused [0-9a-f]{12} batch 1 of 1 deploy none$/);
+  const [line] = timings(shared);
+  assert.match(line, TIMING);
+  assert.ok(line.endsWith(' · refused at check'), line);
 });
 
 // The check runs under the land lock, so it must end and must not take the lock with it (#468 S10-2).

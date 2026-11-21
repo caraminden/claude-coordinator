@@ -336,7 +336,8 @@ export interface LandResult {
    * (another scheme's land.sh, or a merge into a build); no-ci: exit 75, CI gave no verdict; failed: anything else;
    * unpushed: the kit template's land.sh moved the branch locally, then its push to origin failed (#911). */
   kind: 'live' | 'restart' | 'landed' | 'no-ci' | 'failed' | 'unpushed';
-  /** The commit main moved to and its subject, from land.sh's "main is now at" line. */
+  /** The commit main moved to and its subject, from land.sh's "main is now at" line; from its ship line (#1320), the
+   * landing's own commit (a batch member's sits under main's), with the subject only when that line names it too. */
   commit?: string;
   subject?: string;
   /** With unpushed: the branch that moved, and what git said. */
@@ -361,6 +362,14 @@ export function landResult(output: string, code: number): LandResult {
   // into a build says "build/<n> is now at", which isn't the commit main moved to.
   // A batch member's own line names its commit, which sits under main's tip (KT3): "land: landed <sha> "<subject>" in a batch".
   const at = [...output.matchAll(/^land: (?:(?!build\/)\S+ is now at|landed) ([0-9a-f]{7,40}) "(.*)"/gm)].pop();
+  // The kit template's last line (#1320), when there is one: "ship: <landed|refused> <commit> batch <n> of <m> deploy
+  // <state|none>". It decides; a land.sh without it (Citadel's own, until it prints one) falls back to the lines below.
+  const ship = [...output.matchAll(/^ship: (landed|refused) ([0-9a-f]{7,40}|-) batch \d+ of \d+ deploy (\S+)$/gm)].pop();
+  if (ship) {
+    if (ship[1] === 'refused') return { kind: 'failed' };
+    const own = ship[2] === '-' ? {} : { commit: ship[2], ...(at && (at[1].startsWith(ship[2]) || ship[2].startsWith(at[1])) ? { subject: at[2] } : {}) };
+    return { kind: ship[3] === 'live' ? 'live' : ship[3] === 'restart' ? 'restart' : 'landed', ...own };
+  }
   const commit = at ? { commit: at[1], subject: at[2] } : {};
   // deploy.sh's lines: "live now:" (front end reloaded, or the restart went live), "nothing to deploy: the server
   // already runs" (live already), "restart queued" / "a restart is already queued" / "not live yet" (waiting on it).
@@ -731,7 +740,7 @@ export class LandHandoffs {
     if (r.kind === 'unpushed') {
       // It landed, but only locally. The minion can't push the default branch itself (the kit's guard.sh, pre-push and
       // the tripwire all refuse it, KT1 #1519): a passing failure ships again, a lasting one goes to a person.
-      const what = r.commit ? `${r.commit} "${r.subject}"` : `the branch's new tip`;
+      const what = r.commit ? `${r.commit}${r.subject === undefined ? '' : ` "${r.subject}"`}` : `the branch's new tip`;
       const apps = h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
       store.updateTicket(id, { state: null, note: 'shipped locally; push to origin failed' });
       runner.broadcastTicket(id);
@@ -747,7 +756,7 @@ export class LandHandoffs {
     }
     const into = h.args[0] === '--into' ? h.args[1] : null;
     if (!into && r.commit) await once('landed', () => this.d.landed?.(id, r.commit!));
-    const what = r.commit ? `${r.commit} "${r.subject}"` : into ? `into ${into}` : 'the branch';
+    const what = r.commit ? `${r.commit}${r.subject === undefined ? '' : ` "${r.subject}"`}` : into ? `into ${into}` : 'the branch';
     const where = r.kind === 'live' ? 'Live now.' : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build ships.` : 'Shipped.';
     const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');
     // On main, the scheme's apps go out now rather than at auto-deploy's next quiet spell (#712), and the line says how.

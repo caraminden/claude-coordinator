@@ -75,6 +75,36 @@ export const RESERVED: Reserved[] = [
   },
 ];
 
+/** The rule for a stand-in in a command people run (Cara, 2026-11-17: "just put the address into their shell commands"). */
+export const PLACEHOLDER = {
+  term: 'placeholder',
+  why: 'Every value in a command people run is filled in (Cara, 2026-11-17: "just put the address into their shell commands"); only a secret, or a value only the person knows, stays a placeholder',
+  suggest: 'the real value (an address, distro, path or name you can look up); a secret such as <token> or <password> may stay, with the text before the block saying where to find it',
+};
+
+/** Fenced blocks tagged with a shell people run. */
+const SHELL_BLOCK = /^ {0,3}(```|~~~)[ \t]*(?:powershell-admin|powershell|wsl|fish|bash|cmd|sh)\b[^\n]*\n([\s\S]*?)(?:^ {0,3}\1|(?![\s\S]))/gim;
+/** `<the address>`: angle brackets round words, not after a name (`List<string>`) or another `<` (`<<EOF`). */
+const STAND_IN = /(?<![\w\]<])<([A-Za-z](?:[A-Za-z0-9 _'-]*[A-Za-z0-9])?)>/g;
+/** A stand-in with one of these words names a secret, which only the person has. */
+export const SECRET_WORDS = /^(?:token|password|passphrase|passcode|secret|key|pat|pin|credentials?)$/i;
+
+/** The stand-ins people would have to fill in, in the shell blocks of `text`, one per line. */
+function placeholders(text: string): Misuse[] {
+  const found: Misuse[] = [];
+  for (const b of text.matchAll(SHELL_BLOCK)) {
+    for (const line of b[2].split('\n')) {
+      const code = line.replace(/<#[\s\S]*?#>/g, ' ');
+      for (const m of code.matchAll(STAND_IN)) {
+        if (m[1].split(/[\s_-]+/).some((w) => SECRET_WORDS.test(w))) continue;
+        found.push({ term: PLACEHOLDER.term, word: m[0], sentence: quote(line, m.index) });
+        break;
+      }
+    }
+  }
+  return found;
+}
+
 /** How many words either side of a reserved word may show its meaning. */
 const WINDOW = 8;
 
@@ -126,7 +156,7 @@ function quote(sentence: string, at: number): string {
 /** The reserved words `text` uses the wrong way, one per sentence and term. */
 export function misusedWords(text: string, html = false): Misuse[] {
   const p = prose(text, html);
-  const found: Misuse[] = [];
+  const found: Misuse[] = html ? [] : placeholders(text);
   for (const [start, end] of sentences(p)) {
     const sentence = p.slice(start, end);
     for (const r of RESERVED) {
@@ -151,12 +181,12 @@ export function misusedWords(text: string, html = false): Misuse[] {
 /** The send-back's lines for these misuses: why, the quoted sentences, and what to write instead. */
 export function explain(found: Misuse[]): string {
   const lines: string[] = [];
-  for (const r of RESERVED) {
+  for (const r of [...RESERVED, PLACEHOLDER]) {
     const mine = found.filter((f) => f.term === r.term);
     if (!mine.length) continue;
     lines.push(`${r.why}:`);
     for (const f of mine) lines.push(`- "${f.sentence}" (${f.word})`);
-    lines.push(`Say ${r.suggest}. Quoting someone's words? Put them in backticks.`);
+    lines.push(r === PLACEHOLDER ? `Use ${r.suggest}.` : `Say ${r.suggest}. Quoting someone's words? Put them in backticks.`);
   }
   return lines.join('\n');
 }

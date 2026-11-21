@@ -10,7 +10,7 @@ import { WORDING_MATCHER, wordingHooks } from '../src/turn-launch.ts';
 import { testPins } from './helpers.ts';
 
 const { WORDING } = testPins();
-import { checkCall, misusedWords } from '../src/wording.ts';
+import { checkCall, explain, misusedWords } from '../src/wording.ts';
 
 const flagged = (text: string) => misusedWords(text).map((f) => f.word);
 
@@ -144,4 +144,40 @@ test('the hook script prints a deny decision, or nothing', () => {
   // A check that can't run never holds up the call.
   assert.deepEqual([run('{bad').status, run('{bad').stdout], [0, '']);
   assert.equal(run(bad, '{bad').stdout, '');
+});
+
+const fence = (tag: string, body: string) => `Run this:\n\n\`\`\`${tag}\n${body}\n\`\`\`\n`;
+
+test('flags a <stand-in> in a command block people run, naming it and quoting the rule', () => {
+  for (const tag of ['powershell-admin', 'powershell', 'wsl', 'fish', 'bash', 'cmd', 'sh']) {
+    assert.deepEqual(flagged(fence(tag, 'ssh <the address>')), ['<the address>'], tag);
+  }
+  assert.deepEqual(flagged(fence('wsl', 'wsl -d <distro> -- ls <path>')), ['<distro>']);
+  const [f] = misusedWords(fence('fish', 'cd <path>'));
+  assert.equal(f.sentence, 'cd <path>');
+  assert.match(explain([f]), /just put the address into their shell commands/);
+  assert.match(explain([f]), /<path>|real value/);
+});
+
+test('lets a secret stand-in through', () => {
+  for (const ok of ['<token>', '<password>', '<api key>', '<Secret>', '<your-api-key>', '<GitHub token>']) {
+    assert.deepEqual(flagged(fence('bash', `curl -H "Authorization: ${ok}" x`)), [], ok);
+  }
+});
+
+test('lets shell syntax through: redirects, heredocs, <# #> comments, generics; and other fences', () => {
+  for (const ok of ['sort < in.txt > out.txt', 'cat <<EOF > f\nhi\nEOF', '<# the address #> ls', '$x = New-Object List<string>', 'cmd <in >out']) {
+    assert.deepEqual(flagged(fence('powershell', ok)), [], ok);
+  }
+  assert.deepEqual(flagged(fence('json', '{"a": "<the address>"}')), []);
+  assert.deepEqual(flagged('Use `ssh <the address>` here, or <the address> in prose.'), []);
+});
+
+test('the hook sends a reply with a stand-in back once', () => {
+  const input = { tool_name: 'mcp__x__send', tool_input: { text: fence('bash', 'ssh <the address>') } };
+  const dir = mkdtempSync(join(tmpdir(), 'ph-'));
+  const cfg = { shared: [], sent: join(dir, 'sent.json') };
+  assert.match(JSON.stringify(checkCall(input, cfg)), /the address/);
+  assert.equal(checkCall(input, cfg), null);
+  rmSync(dir, { recursive: true });
 });

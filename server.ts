@@ -104,7 +104,7 @@ import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { addRunnerWaiter, CiHealth, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
 import { Incidents, readCiRuns, readDeploys, readJournal } from './src/incidents.ts';
-import { ghGet } from './src/gh-api.ts';
+import { ghGet, ghHelpers } from './src/gh-api.ts';
 import { ciEvidence } from './src/flake-evidence.ts';
 import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
@@ -433,6 +433,8 @@ function ownScheme(): Project | null {
 }
 // The server reads a scheme's GitHub (PRs, merges, fetches) as its owner (#321): a private repo may let no one else in.
 const githubOf = (repoDir: string) => schemeGithub(store, githubLink, repoDir, DATA_DIR);
+// GitHub reads go through a helper per login that stays up, not a `gh` per read (#1542). A test server keeps `gh`.
+if (process.env.GH_HELPER !== '0') ghHelpers.dir = join(DATA_DIR, 'run', 'gh');
 waiters.prs = githubPrs(githubOf, missingCommits(store));
 mainSync.as = githubOf;
 // A contraption's deploy clones and fetches its repo the same way, as its home scheme's owner (#915).

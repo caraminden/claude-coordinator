@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { ci, git, setup, landAsync, tickets, issued, quietProc } from './land-fixture.ts';
 import { until } from './wait.ts';
 
-type Ship = { change?: [string, string]; env?: Record<string, string>; on?: number };
+type Ship = { change?: [string, string]; also?: [string, string]; env?: Record<string, string>; on?: number };
 
 // Ship 1 (ticket/1-x) lands alone and holds the lock in its deploy until every other ship is in line behind it, so
 // ship 2 is the front of a train with the rest behind it. Ship i changes f<i>.txt unless it says otherwise, and starts
@@ -27,6 +27,7 @@ async function line(ships: Ship[], extra: Record<string, string> | ((dir: string
   }
   ships.forEach((s, i) => s.on || r.commit(wts[i], ...(s.change ?? [`f${i + 1}.txt`, `${i + 1}\n`])));
   ships.forEach((s, i) => s.on && (git(wts[i], 'reset', '-q', '--hard', `ticket/${s.on}-x`), r.commit(wts[i], ...(s.change ?? [`f${i + 1}.txt`, `${i + 1}\n`]))));
+  ships.forEach((s, i) => s.also && r.commit(wts[i], ...s.also));
   const was = wts.map((wt) => git(wt, 'rev-parse', 'HEAD'));
   const out = wts.map(() => '');
   const lands = [landAsync(wts[0], { ...env, ...ships[0].env }, 150_000, (s) => (out[0] = s))];
@@ -423,5 +424,87 @@ test('a retried ship whose train goes red is bisected like any rider, and refuse
   for (const i of [1, 3, 4]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f3.txt: 3', 'f4.txt: 4']);
   assert.deepEqual(retried(l), ['· retry in place · ticket/2-x · CI and perigee both busy for 0 min · refused']);
+  l.done();
+});
+
+// Conflict prep (#1366, Cara, 2026-11-20: "we know what main WILL look like, and we can deal with the merge issues before
+// we try to ship"): ship 4 waits behind ship 2's train, which carries ship 3, and conflicts with ship 3 in a.txt. While the
+// train is tested, land.sh tells it so; its minion records the fix with git rerere in a scratch worktree (prepMessage's
+// steps), off its branch; once the train ships, ship 4's real rebase replays the fix and it ships.
+// keep: the fix keeps the train's side whole, so ship 4's a.txt commit drops out and only its second commit ships.
+async function prepped(red: boolean, keep = false) {
+  let gate = '';
+  const l = await line(
+    [{}, {}, { change: ['a.txt', 'three\n'], ...(red ? { also: ['red.txt', 'red\n'] as [string, string] } : {}) }, { change: ['a.txt', 'four\n'], ...(keep ? { also: ['g.txt', 'g\n'] as [string, string] } : {}) }],
+    (dir) => ({ ...shared(dir), FAKE_CI_GATE: (gate = join(dir, 'ci-gate')), ...(red ? { FAKE_RED_PATH: 'red.txt' } : {}) }),
+    (r) => writeFileSync(join(r.dir, 'ci-gate'), ''), // ship 1's run goes through; the train's waits
+  );
+  rmSync(gate);
+  const all = l.go();
+  await until("ship 4's prep line", () => /land: prep: ticket\/4-x will conflict/.test(l.out[3]));
+  const m = /land: prep: ticket\/4-x will conflict with ticket\/3-x once ticket\/2-x's ship train ships; conflicted files: a\.txt; record the fix against ([0-9a-f]{40}) from ([0-9a-f]{40}) to ([0-9a-f]{40})$/m.exec(l.out[3]);
+  assert.ok(m, l.out[3]);
+  assert.equal(m[3], l.was[3], "ship 4's own head");
+  // What the minion runs, in a scratch worktree of its own.
+  const wt = join(l.r.dir, 'train-prep');
+  git(l.wts[3], 'worktree', 'add', '-q', '--detach', wt, m[1]);
+  assert.throws(() => git(wt, '-c', 'rerere.enabled=true', 'cherry-pick', `${m[2]}..${m[3]}`));
+  writeFileSync(join(wt, 'a.txt'), keep ? 'three\n' : 'three\nfour\n');
+  git(wt, 'add', 'a.txt');
+  if (keep) {
+    assert.throws(() => git(wt, '-c', 'rerere.enabled=true', '-c', 'core.editor=true', 'cherry-pick', '--continue'), 'nothing to commit');
+    git(wt, '-c', 'rerere.enabled=true', 'rerere');
+    git(wt, 'cherry-pick', '--skip');
+  } else git(wt, '-c', 'rerere.enabled=true', '-c', 'core.editor=true', 'cherry-pick', '--continue');
+  git(l.wts[3], 'worktree', 'remove', '--force', wt);
+  assert.equal(git(l.r.source, 'rev-parse', 'ticket/4-x'), l.was[3], 'its branch is as it was');
+  await until('the fix is seen', () => /land: prep: ticket\/4-x conflicts with ticket\/3-x on ticket\/2-x's ship train \(a\.txt\), but the fix recorded ahead of time \(git rerere\) resolves it/.test(l.out[3]));
+  writeFileSync(gate, '');
+  return { l, done: await all };
+}
+
+test('conflict prep: a ship that will conflict with a rider is told while the train is tested, records the fix, and ships on it (#1366)', async () => {
+  const { l, done } = await prepped(false);
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[3].stderr, /land: the fix recorded ahead of time \(git rerere, conflict prep\) resolved the rebase's conflicts/);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'a.txt: three', 'a.txt: four']);
+  assert.equal(git(l.r.source, 'show', 'main:a.txt'), 'three\nfour');
+  assert.equal(git(l.r.source, 'config', '--get', 'rerere.enabled'), 'false', "rerere stays land.sh's: rr-cache would turn it on for every command");
+  const log = join(l.r.dir, 'shared', 'retro-log');
+  const lines = readFileSync(join(log, readdirSync(log)[0], 'land.md'), 'utf8').split('\n').filter((x) => x.includes(' · train prep ')).map((x) => x.replace(/^- \S+ · /, '').replace(/\(([0-9a-f]{7,})\)/, '(sha)'));
+  assert.deepEqual(lines, ["train prep conflict · ticket/4-x onto ticket/2-x's train (sha) · ticket/3-x: a.txt", 'train prep replayed · ticket/4-x onto main (sha)']);
+  l.done();
+});
+
+test('conflict prep: when the train goes red and the rider drops out, the ship carries no foreign commits and the record goes unused (#1366)', async () => {
+  const { l, done } = await prepped(true);
+  assert.equal(done[2].status, 1, 'ship 3 turned the train red');
+  for (const i of [1, 2, 4]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
+  assert.doesNotMatch(done[3].stderr, /resolved the rebase's conflicts/);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'a.txt: four']);
+  assert.equal(git(l.r.source, 'show', 'main:a.txt'), 'four');
+  assert.equal(git(l.r.source, 'rev-parse', 'ticket/3-x'), l.was[2], 'the red ship is as it was');
+  l.done();
+});
+
+test("conflict prep: a fix that keeps the train's side whole drops that commit, and the ship's other commits ship (#1366)", async () => {
+  const { l, done } = await prepped(false, true);
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[3].stderr, /resolved the rebase's conflicts/);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'a.txt: three', 'g.txt: g']);
+  assert.equal(git(l.r.source, 'show', 'main:a.txt'), 'three');
+  l.done();
+});
+
+test('conflict prep off: <state>/prep-off, and no prep line is said (#1366)', async () => {
+  const l = await line([{}, {}, { change: ['a.txt', 'three\n'] }, { change: ['a.txt', 'four\n'] }], {}, (r) => {
+    const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+    mkdirSync(state, { recursive: true });
+    writeFileSync(join(state, 'prep-off'), '');
+  });
+  const done = await l.go();
+  assert.equal(done[3].status, 1, 'the conflict is refused as before');
+  assert.doesNotMatch(done[3].stderr, /land: prep:/);
+  assert.throws(() => git(l.r.source, 'config', '--get', 'rerere.enabled'), 'land.sh leaves the repo\'s rerere setting alone');
   l.done();
 });

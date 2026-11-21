@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, type DeployOps, type HandoffDeps } from '../src/land.ts';
+import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, prepConflict, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
 import { git } from './git.ts';
 import { withRealDeploy } from './land-fixture.ts';
@@ -29,6 +29,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
   const did: string[] = [];
   const sent: string[] = [];
   const light: boolean[] = [];
+  const fyi: boolean[] = [];
   const notes: string[] = [];
   const owned: any[] = [];
   const waits: { commit: string | null; text: string }[] = [];
@@ -37,7 +38,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
     store: { getTicket: (id: number) => (id === 1 ? ticket : { number: 9, title: 'The build', status: 'idle', state: opts.ownerState ?? null }), updateTicket: (_id, f) => { Object.assign(ticket, f); did.push(`state ${f.state}`); } },
     runner: {
       emit: (_id, _kind, data: any) => { notes.push(data.text); },
-      send: (_id, _from, text, _images, extra) => { sent.push(text); light.push(!!extra?.light); },
+      send: (_id, _from, text, _images, extra) => { sent.push(text); light.push(!!extra?.light); fyi.push(!!extra?.fyi); },
       unpark: (id, by) => { did.push(`unpark ${id} by ${by}`); return true; },
       relayMinion: (from, to, author, text, urgent, wake, unparked) => { owned.push({ from, to, author, text, urgent, wake, unparked }); return false; },
       close: async (_id, text) => { ticket.status = 'closed'; did.push(`close: ${text}`); },
@@ -61,7 +62,7 @@ function setup(name: string, opts: { owner?: number | null; ownerState?: string 
     assert.ok(landings.handOff(1, cwd, { PATH: process.env.PATH! }, args, { ...H, ...h }));
     await until('land.sh ends', () => landings.get(1)?.code !== null);
   };
-  return { owned, waits, landings, ticket, did, sent, light, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
+  return { owned, waits, landings, ticket, did, sent, light, fyi, notes, deps, land, handoffs: new LandHandoffs(deps), data, cwd };
 }
 
 test('a clean land that is live now posts the shipped line and dismisses the minion, with no message to it', async () => {
@@ -711,6 +712,10 @@ test('landPhase reads the phase from land.sh\'s newest phase line', () => {
   assert.equal(landPhase('land: waiting for CI on abc\nland: main is now at abc1234 "#9"\ndeploy: restart queued as citadel-restart\n'), 'landing: deploying');
   assert.equal(landPhase('land: smoke: checking ticket/1-x before it queues\nland: smoke: running 5 test files\n'), 'landing: smoke check');
   assert.equal(landPhase('land: smoke: passed in 19 s\nqueue: 2nd in line (ahead: #12)\n'), 'landing: in line');
+  // A rider (#1166) says which train it rides in (#1366, for #1303), and is in line again once it goes back.
+  assert.equal(landPhase("queue: 2nd in line (ahead: #12)\nland: riding in ticket/12-usage-bar's ship train: waiting for CI on the train\n"), "landing: riding in #12's train");
+  assert.equal(landPhase("queue: 3rd in line\nland: riding in build/3's ship train: waiting for CI on the train\n"), "landing: riding in build/3's train");
+  assert.equal(landPhase("land: riding in ticket/12-x's ship train: waiting\nland: back in line on its own: the ship train went without ticket/7-x\n"), 'landing: in line');
 });
 
 const SMOKE_RED = 'land: smoke: checking ticket/1-x before it queues\nland: smoke: ✖ test/prompt-budget.test.ts › budget\nland: smoke: tests failed (exit 1), before the line (21 s), so nothing landed and nobody waited on it. Fix it, re-test (citadel-test), commit, then run this again\n';
@@ -799,4 +804,31 @@ test('handoffs() answers from memory: it does not read the landings folder again
   assert.deepEqual(l.handoffs(), [7], 'found at start, then served from memory');
   l.settled(7);
   assert.deepEqual(l.handoffs(), []);
+});
+
+// Conflict prep (#1366): land.sh says a ship waiting in line will conflict once the train ahead ships; the server wakes
+// its minion once per train top with the steps to record the fix (git rerere in a scratch worktree), and leaves its land running.
+test('a prep line from a running land wakes the minion once, with the scratch-worktree steps, and the land keeps running', async () => {
+  const top = 'a'.repeat(40), base = 'b'.repeat(40), head = 'c'.repeat(40);
+  const line = `land: prep: ticket/7-x will conflict with ticket/3-y once ticket/2-z's ship train ships; conflicted files: a.txt, src/b.ts; record the fix against ${top} from ${base} to ${head}`;
+  assert.deepEqual(prepConflict(`queue: 2nd in line\n${line}\n`), { branch: 'ticket/7-x', cause: 'ticket/3-y', front: 'ticket/2-z', files: 'a.txt, src/b.ts', top, base, head });
+  assert.equal(prepConflict(`${line}\nland: prep: ticket/7-x conflicts with ticket/3-y on ticket/2-z's ship train (a.txt), but the fix recorded ahead of time (git rerere) resolves it, so its rebase goes through once that train ships\n`), null, 'recorded already');
+  const s = setup('prep');
+  const gate = join(s.cwd, 'gate');
+  writeFileSync(join(s.cwd, 'tools', 'land.sh'), `echo 'queue: 2nd in line (ahead: #2)' >&2\necho ${JSON.stringify(line)} >&2\nuntil [ -e ${JSON.stringify(gate)} ]; do sleep 0.05; done\nexit 1\n`);
+  assert.ok(s.landings.handOff(1, s.cwd, { PATH: process.env.PATH! }, [], H));
+  await until('the prep line', () => /land: prep:/.test(s.landings.get(1)?.output ?? ''));
+  await s.handoffs.poll();
+  await s.handoffs.poll();
+  assert.equal(s.sent.length, 1, 'once per train top');
+  assert.match(s.sent[0], /conflict with ticket\/3-y in a\.txt, src\/b\.ts/);
+  assert.match(s.sent[0], new RegExp(`git worktree add --detach "\\$TMPDIR/train-prep" ${top}`));
+  assert.match(s.sent[0], new RegExp(`-c rerere\\.enabled=true cherry-pick ${base}\\.\\.${head}`));
+  assert.match(s.sent[0], /Don't hand it off again/);
+  assert.match(s.sent[0], /cherry-pick --skip/, 'and what to do when the fix keeps the train\'s side whole');
+  assert.deepEqual(s.fyi, [true], "not someone writing while it waits in line: a clean ship still closes it (Runner.send's onMessage → Landings.talked)");
+  assert.equal(s.ticket.state, 'outside', 'still landing');
+  assert.deepEqual(s.landings.handoffs(), [1]);
+  writeFileSync(gate, '');
+  await until('land.sh ends', () => s.landings.get(1)?.code !== null);
 });

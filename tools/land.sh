@@ -37,6 +37,9 @@
 # as before and reads its verdict from <state>/train/<its ticket> (train_verdict below). Off: LAND_TRAIN=0, or for
 # every landing, touch <state>/train-off.
 # A ship refused by the pipeline, not its change, keeps its ticket and rides the next train, once (retry_in_place, #1360).
+# Conflict prep (#1366): a ship waiting behind a train that will conflict once it ships is told so while the train is
+# tested (a "prep:" line; the server wakes its minion), and the fix it records with git rerere is replayed by its
+# rebase. Off: LAND_PREP=0, or touch <state>/prep-off.
 #
 # Build branches (#593, specs/build-branches.md in the scheme's shared folder): a build is a branch build/<n>, checked out nowhere.
 #   tools/land.sh --into build/<n> <test files>   a feeder merges into it: rebases onto build/<n> (no rebase when it is
@@ -146,6 +149,17 @@ branch=$(git branch --show-current)
 [ -z "$(git status --porcelain --untracked-files=no)" ] || refuse "$here has uncommitted changes: commit them first"
 state=$(git -C "$LIVE" rev-parse --absolute-git-dir)/cc-deploy
 [ -n "$check" ] || mkdir -p -m 700 "$state"
+# Conflict prep (#1366; Cara, 2026-11-20: "Can we prepare the train that is next up against the version that is
+# attempting to ship? ... we can deal with the merge issues before we try to ship and hit a failure"). While a train
+# ahead is tested, each plain land waiting behind it checks it would still rebase once that train ships (prep_check).
+# On a conflict its minion is woken (src/land.ts) to record the fix ahead of time with git rerere, in a scratch
+# worktree on the train's top, never on its own branch; this line's rebases then replay the fix (rerere_on), and the
+# early checks count a conflict the fix resolves as clean (rerere_covers). A fix the train never needs (it went red,
+# that ship dropped out) just goes unused. Off: LAND_PREP=0, or for every landing, touch <state>/prep-off.
+rr=()
+[ "$mode" != land ] || [ "${LAND_PREP:-1}" = 0 ] || [ -e "$state/prep-off" ] || rr=(-c rerere.enabled=true -c rerere.autoupdate=true -c rebase.updateRefs=false)
+# git turns rerere on everywhere once rr-cache exists, which these rebases make: keep it to land.sh and the prep steps.
+[ ${#rr[@]} -eq 0 ] || [ -n "$(git config --get rerere.enabled)" ] || git config rerere.enabled false 2>/dev/null || true
 # Build claims (#1159): build-claims.md on build/<n>, the build minion's plan, names the files each feeder writes
 # ("#<n>: <paths>"; a path ending in / is a folder, the longest match wins), the hub files any feeder may add to
 # ("shared: <paths>") and the build minion ("build: #<n>"). A feeder's --into is refused when it writes a file another
@@ -288,11 +302,52 @@ conflict_fix() {
 # that changes a line and changes it back can pass here and still stop in the rebase, which catches it as before; and a
 # branch whose commit main already has as a cherry-pick, with a later commit on the same lines, is refused here though
 # the rebase would skip it: the git rebase the refusal names then goes through clean. Upgrade to a replay if that bites.
-early_check() {
-  local out rc=0 files at
+# A conflict the fix recorded with git rerere resolves counts as clean (conflict prep, above): rerere_covers replays it.
+# <onto>: git merge-tree's trial of that rebase. 1 on a conflict, its files (comma-separated) in $mt_files.
+trial() {
+  local out rc=0
+  mt_files=''
   out=$(numbers_git ours -c "attr.tree=$1" merge-tree --write-tree --name-only --no-messages ${under:+"--merge-base=$under"} "$1" HEAD 2>/dev/null) || rc=$?
   [ "$rc" = 1 ] || return 0
-  files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
+  mt_files=$(sed -n '2,${/^$/q;p}' <<<"$out" | sort -u | sed ':a;N;$!ba;s/\n/, /g')
+  return 1
+}
+# <dir> <git or numbers_git ours>: after a rebase in <dir> stopped, go on while every stop is one rerere resolved in full
+# (git stops even then): no file left unmerged. 1 at any other stop, the rebase left for the caller.
+rerere_on() {
+  local d=$1 n step
+  shift
+  [ ${#rr[@]} -gt 0 ] || return 1
+  for ((n = 0; n < 1000; n++)); do
+    [ -d "$(git -C "$d" rev-parse --absolute-git-dir)/rebase-merge" ] && [ -z "$(git -C "$d" diff --name-only --diff-filter=U)" ] || return 1
+    # Nothing staged: the recorded fix kept the other side whole, so this commit is empty now and drops out.
+    if git -C "$d" diff --cached --quiet; then step=--skip; else step=--continue; fi
+    GIT_EDITOR=true "$@" -C "$d" "${rr[@]}" rebase "$step" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+# <onto>: whether the rebase onto <onto>, which trial() says stops, goes through with the fixes recorded with git rerere.
+# Replayed in a scratch worktree, so no ref or worktree of the minion's moves. shortcut: a checkout each time (about 1 s
+# for Citadel's 18 MB), only after trial() found a conflict; cache by commits if that ever runs often.
+rerere_covers() {
+  local wt base ok=1
+  [ ${#rr[@]} -gt 0 ] && base=${under:-$(git merge-base "$1" HEAD)} && wt=$(mktemp -d "${TMPDIR:-/tmp}/land-prep.XXXXXX") || return 1
+  if git worktree add -q --detach "$wt" HEAD >/dev/null 2>&1; then
+    { numbers_git ours -C "$wt" "${rr[@]}" rebase -q --onto "$1" "$base" >/dev/null 2>&1 || rerere_on "$wt" numbers_git ours; } && ok=0
+    git -C "$wt" "${rr[@]}" rebase --abort >/dev/null 2>&1 || true # with rerere on, so it drops the preimage it left
+    git worktree remove --force "$wt" >/dev/null 2>&1 || true
+  fi
+  rmdir "$wt" 2>/dev/null || true
+  return $ok
+}
+early_check() {
+  local files at
+  trial "$1" && return 0
+  files=$mt_files
+  if rerere_covers "$1"; then
+    say "$branch conflicts with ${1#refs/heads/} by git merge-tree $2 (${files:-no files named}), but a fix recorded ahead of time (git rerere, conflict prep) resolves it"
+    return 0
+  fi
   at=$(git log -1 --format='%h "%s"' "$1")
   retro_log "land conflict · $label onto ${at%% *}: ${files:-no conflicted files named} · $2"
   say "$branch won't $([ "$mode" = build ] && echo "merge ${1#refs/heads/} in" || echo "rebase onto ${1#refs/heads/}") ($at) cleanly, by git merge-tree $2, so nothing landed${files:+; conflicted files: $files}.$(number_hint "$files" "$1") $(conflict_fix)"
@@ -491,6 +546,32 @@ build_lock() {
   say "waited $((wait / 60)) min for the run on $build ahead of this one, so nothing merged: run it again later, or look at what holds $lock"
   return 1
 }
+# Conflict prep's waiting side (#1366, above): while a train ahead of this one is tested (<state>/train-top, top_say
+# below), whether this would still rebase once it ships, by git merge-tree, as against main. Once per train top, branch
+# tip and count of recorded fixes. A conflict the recorded fixes don't resolve says one "prep:" line, which the server
+# turns into a wake with the steps (src/land.ts), naming the ship on the train that brings it (the first train commit it
+# conflicts with). It never leaves the line: the minion's fix, or the conflict at its rebase, decides as before.
+prepped=''
+prep_check() {
+  local top fb fp key files c b cause='' head base
+  [ ${#rr[@]} -gt 0 ] && read -r top fb fp 2>/dev/null <"$state/train-top" && [ -n "$top" ] && [ "$fb" != "$branch" ] && kill -0 "$fp" 2>/dev/null || return 0
+  [ "$top" != "$(git rev-parse -q --verify refs/heads/main)" ] && git cat-file -e "$top^{commit}" 2>/dev/null || return 0
+  head=$(git rev-parse HEAD)
+  key="$top $head $(find "$(git rev-parse --path-format=absolute --git-common-dir)/rr-cache" -name 'postimage*' 2>/dev/null | wc -l)"
+  [ "$key" != "$prepped" ] || return 0
+  prepped=$key under=$(under_of)
+  trial "$top" && return 0
+  files=$mt_files
+  while read -r c b; do trial "$c" || { cause=$b; break; }; done < <(tail -n +2 "$state/train-top" 2>/dev/null)
+  if rerere_covers "$top"; then
+    say "prep: $branch conflicts with ${cause:-a ship} on $fb's ship train ($files), but the fix recorded ahead of time (git rerere) resolves it, so its rebase goes through once that train ships"
+    return 0
+  fi
+  base=${under:-$(git merge-base "$top" HEAD)}
+  retro_log "train prep conflict · $label onto $fb's train ($(git rev-parse --short "$top")) · ${cause:-?}: $files"
+  say "prep: $branch will conflict with ${cause:-a ship} once $fb's ship train ships; conflicted files: ${files:-none named}; record the fix against $top from $base to $head"
+  return 0
+}
 # The rebased copy is the same process, so the ticket it was started with (none, from a land.sh older than the
 # line) still names it, and it holds both locks already (an exec keeps its fds); only the trap that removes the
 # ticket at the end has to be set again.
@@ -503,6 +584,7 @@ if [ -z "$resumed" ]; then
     queue_wait_check() {
       local now
       [ "$mode" != land ] || train_verdict || return 0 # riding: the train's top decides, not main
+      [ "$mode" != land ] || prep_check
       [ "$mode" != full ] && now=$(git rev-parse -q --verify refs/heads/main) && [ "$now" != "$waited_on" ] || return 0
       waited_on=$now under=$(under_of)
       early_check main "waiting in line"
@@ -542,7 +624,7 @@ conflict() {
   conflicted=$(git diff --name-only --diff-filter=U 2>/dev/null | sed ':a;N;$!ba;s/\n/, /g' || true)
   if [ -n "$conflicted" ]; then what=" onto $(git log -1 --format=%h "$1"): $conflicted"; else what=": no conflicted files found (the $2 may not have started)"; fi
   retro_log "land conflict · $label$what"
-  git "$2" --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
+  git "${rr[@]}" "$2" --abort 2>/dev/null || true # nothing to abort if it never started (an untracked file in the way)
   refuse "$3${conflicted:+; conflicted files: $conflicted}.$(number_hint "$conflicted" "$1") $(conflict_fix)"
 }
 if [ "$mode" = build ] && [ "$redo" = 1 ]; then
@@ -554,7 +636,9 @@ case $mode in
     [ -z "$under" ] || say "$branch sits on $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back: leaving it behind"
     [ -n "$quiet" ] || queue_phase "rebasing onto main"
     [ -n "$quiet" ] || say "rebasing $branch onto main ($(git log -1 --format='%h "%s"' main))"
-    numbers_git ours rebase -q ${under:+--onto} main ${under:+"$under"} || conflict main rebase "the rebase onto main failed (see git's output above), so nothing landed" ;;
+    if numbers_git ours "${rr[@]}" rebase -q ${under:+--onto} main ${under:+"$under"}; then :
+    elif rerere_on . numbers_git ours; then say "the fix recorded ahead of time (git rerere, conflict prep) resolved the rebase's conflicts"; retro_log "train prep replayed · $label onto main ($(git rev-parse --short main))"
+    else conflict main rebase "the rebase onto main failed (see git's output above), so nothing landed"; fi ;;
   into | full)
     if git merge-base --is-ancestor "$base" HEAD; then
       say "$build is already under $branch: no rebase"
@@ -860,10 +944,11 @@ retry_in_place() {
   [ "$mode" = land ] && [ -n "${DEPLOY_QUEUE_TICKET:-}" ] && [ -e "$DEPLOY_QUEUE_TICKET" ] || return 0
   say "refused by the pipeline ($1), not your change: keeping its place in line and riding the next train, once"
   train_drop
+  top_done
   ci_done
   retried=$1
   trap 'land_timing $? || true; queue_done' EXIT
-  queue_wait_check() { train_verdict || true; }
+  queue_wait_check() { { train_verdict && prep_check; } || true; }
   flock -u 9
   QUEUE_KEEP=$DEPLOY_QUEUE_TICKET QUEUE_YIELD=yield queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
   unset -f queue_wait_check
@@ -1104,6 +1189,15 @@ train_others() {
   echo "$own $branch"
   for ((i = 0; i + 1 < ${#train_n[@]}; i++)); do echo "${train_tip[$i]} ${train_br[$i]}"; done
 }
+# What the ships waiting behind test their conflict prep against (prep_check): <state>/train-top while this one's gate
+# runs, by a rename. Line 1: "<top> <this branch> <pid>"; then "<commit> <branch>" for each ship on it, this one first.
+# Only its own is removed (top_done): a front that let go of the line for its restart (#566) leaves the next one's.
+top_say() {
+  local i f=$state/train-top
+  [ ${#rr[@]} -gt 0 ] || return 0
+  { echo "$tip $branch $$"; echo "$own $branch"; for ((i = 0; i < ${#train_n[@]}; i++)); do echo "${train_tip[$i]} ${train_br[$i]}"; done; } >"$f.tmp$$" && mv -f "$f.tmp$$" "$f"
+}
+top_done() { local x _ p; read -r x _ p 2>/dev/null <"$state/train-top" && [ "$p" = $$ ] && rm -f "$state/train-top"; return 0; }
 # <member>: the train's commit through that ship (0: this one's own, 1 on: its riders).
 train_at() { if [ "$1" = 0 ]; then echo "$own"; else echo "${train_tip[$(($1 - 1))]}"; fi; }
 # [<ticket>...]: those first, in that order, then the rest of the line in its order (a refill after suspects, #1346).
@@ -1147,14 +1241,14 @@ train_build() {
       if [ -z "$wt" ]; then
         wt=$(mktemp -d "${TMPDIR:-/tmp}/land-train.XXXXXX") && git worktree add -q --detach "$wt" "$cur" 2>/dev/null || { say "ship train: couldn't make a scratch worktree, so this ships alone"; wt=''; break; }
       fi
-      if git -C "$wt" checkout -q --detach "$r" 2>/dev/null && git -C "$wt" rebase -q --onto "$cur" "$base" >/dev/null 2>&1; then
+      if git -C "$wt" checkout -q --detach "$r" 2>/dev/null && { git -C "$wt" "${rr[@]}" rebase -q --onto "$cur" "$base" >/dev/null 2>&1 || { rerere_on "$wt" git && retro_log "train prep replayed · $b onto $branch's train ($(git rev-parse --short "$cur"))"; }; }; then
         c=$(git -C "$wt" rev-parse HEAD)
         if [ "$c" = "$cur" ]; then skip="main already has all of it"
         elif pipeline_touch "$cur" "$c"; then skip="it changes the ship pipeline, which ships alone"
         elif ! (cd "$wt" && branch=$b && undo_guard "$cur") >/dev/null 2>&1; then skip="the undo guard stops it on the train"
         fi
       else
-        git -C "$wt" rebase --abort >/dev/null 2>&1 || true
+        git -C "$wt" "${rr[@]}" rebase --abort >/dev/null 2>&1 || true
         skip="it doesn't rebase cleanly onto the train"
       fi
     fi
@@ -1315,6 +1409,7 @@ train_suspects() {
     train_tip=() train_br=() train_n=() train_was=()
     tip=$own short=$(git rev-parse --short "$own")
     train_build "${keep[@]}"
+    top_say
     for t in "${was[@]}"; do # a rider the train no longer takes (it no longer rebases onto it, say): back in line
       [[ " ${train_n[*]} " != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
     done
@@ -1355,10 +1450,11 @@ train_bisect() {
   train_drop "$hi"
   train_tip=("${train_tip[@]:0:$((hi - 1))}") train_br=("${train_br[@]:0:$((hi - 1))}") train_n=("${train_n[@]:0:$((hi - 1))}") train_was=("${train_was[@]:0:$((hi - 1))}")
   tip=$(train_at "$lo") short=$(git rev-parse --short "$(train_at "$lo")") rc=0
+  top_say
 }
 
 # The line and the lock go before the clean-up on GitHub (#553 M14): a hung gh or push held the lock up to 60 s more.
-trap 'land_rc=$?; train_drop; land_timing $land_rc || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
+trap 'land_rc=$?; train_drop; top_done; land_timing $land_rc || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
 fellback=
 rc=0
 failed=''
@@ -1380,6 +1476,7 @@ else
     done
   }
   train_build
+  top_say
   gate "$tip" || rc=$?
   # A train keeps its riders while it waits (#1361): they go back only once the gate gives up for good, to run here.
   busy_gate
@@ -1388,6 +1485,7 @@ else
     say "the ship train goes back in line, since CI gave no answer ($why): $branch goes on alone"
     train_drop
     tip=$own short=$(git rev-parse --short "$own")
+    top_say
     busy_gate
   fi
 fi
@@ -1469,6 +1567,7 @@ for ((i = 0; i < ${#train_n[@]}; i++)); do
   say "ship train: ${train_br[$i]} left the line while the train was tested, so it ships without it and the ships after it go back in line"
   train_drop "$i"
   tip=$(train_at "$i") short=$(git rev-parse --short "$(train_at "$i")")
+  top_say
   [[ $greens == *" $tip "* ]] || tested=''
   break
 done
@@ -1500,7 +1599,7 @@ trap 'main_back; exit 129' HUP
 bad_check # again: a rollback may have come while this one waited for CI
 # Until this ends by itself, however the deploy goes; a kill that skips the trap leaves it for the next landing.
 { echo "$old $tip"; echo "$train_owner"; train_others; } >"$state/moving"
-trap 'land_rc=$?; train_drop; land_timing $land_rc || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
+trap 'land_rc=$?; train_drop; top_done; land_timing $land_rc || true; [ "$(head -n 1 "$state/moving" 2>/dev/null)" != "$old $tip" ] || rm -f "$state/moving"; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
 moved=1
 git -C "$SOURCE" merge -q --ff-only "$tip" || refuse "could not fast-forward main to $branch; nothing landed"
 say "main is now at $(git log -1 --format='%h "%s"' "$tip")"

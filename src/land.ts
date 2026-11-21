@@ -209,6 +209,15 @@ export class Landings {
     return existsSync(join(this.dir(ticketId), 'talked'));
   }
 
+  /** Whether the minion still has to hear about this conflict-prep `key` (#1366); true once, then it's noted for this run. */
+  prepNew(ticketId: number, key: string): boolean {
+    const f = join(this.dir(ticketId), 'prep-told');
+    const told = existsSync(f) ? readFileSync(f, 'utf8').split('\n') : [];
+    if (told.includes(key)) return false;
+    writeFileSync(f, [...told.filter(Boolean), key, ''].join('\n'));
+    return true;
+  }
+
   /** Where a landing's whole output is. */
   log(ticketId: number): string {
     return join(this.dir(ticketId), 'output.log');
@@ -324,11 +333,53 @@ const PHASES: [RegExp, string][] = [
   [/^land: smoke: /, 'smoke check'],
   [/^queue: got the deploy lock/, 'starting'],
   [/^queue: /, 'in line'],
+  // A rider waits outside the line for its train's verdict (#1166); "back in line" puts it in line again.
+  [/^land: riding in \S+'s ship train/, 'riding'],
+  [/^land: back in line on its own/, 'in line'],
 ];
 
 export function landPhase(output: string): string {
-  for (const line of output.split('\n').reverse()) for (const [re, phase] of PHASES) if (re.test(line)) return `landing: ${phase}`;
+  for (const line of output.split('\n').reverse())
+    for (const [re, phase] of PHASES)
+      if (re.test(line)) {
+        if (phase !== 'riding') return `landing: ${phase}`;
+        const front = /^land: riding in (\S+)'s ship train/.exec(line)![1];
+        const n = /^ticket\/(\d+)-/.exec(front)?.[1];
+        return `landing: riding in ${n ? `#${n}` : front}'s train`;
+      }
   return 'landing: starting';
+}
+
+/** land.sh's conflict-prep lines (#1366): a ship waiting in line that will conflict once the train ahead ships. */
+const PREP = /^land: prep: (\S+) will conflict with (.+) once (\S+)'s ship train ships; conflicted files: (.*); record the fix against ([0-9a-f]{7,64}) from ([0-9a-f]{7,64}) to ([0-9a-f]{7,64})$/;
+
+export interface PrepConflict { branch: string; cause: string; front: string; files: string; top: string; base: string; head: string }
+
+/** The newest conflict-prep line in a landing's output, if any. */
+export function prepConflict(output: string): PrepConflict | null {
+  for (const line of output.split('\n').reverse()) {
+    if (/^land: prep: \S+ conflicts with .* resolves it/.test(line)) return null; // the fix is recorded already
+    const m = PREP.exec(line);
+    if (m) return { branch: m[1], cause: m[2], front: m[3], files: m[4], top: m[5], base: m[6], head: m[7] };
+  }
+  return null;
+}
+
+/** The wake for a prep conflict: record the fix with git rerere in a scratch worktree, off the minion's branch. */
+export function prepMessage(p: PrepConflict): string {
+  const wt = '"$TMPDIR/train-prep"';
+  return [
+    `Heads-up while your ship waits in line: once ${p.front}'s ship train ships, your rebase onto it will conflict with ${p.cause} in ${p.files || 'files git didn\'t name'}. Record the fix now, ahead of time, so the real rebase replays it and your ship isn't refused (conflict prep, #1366).`,
+    '',
+    `Don't touch your branch or worktree: land.sh is running in it, and your branch must never take those unshipped commits. Work in a scratch worktree (\`git worktree\` and \`git cherry-pick\` there are fine; the folder is yours):`,
+    '```bash',
+    `git worktree add --detach ${wt} ${p.top}`,
+    `git -C ${wt} -c rerere.enabled=true cherry-pick ${p.base}..${p.head}`,
+    '```',
+    `At each stop, resolve the conflicted files in ${wt} keeping both sides' intent, \`git -C ${wt} add\` them, then run \`git -C ${wt} -c rerere.enabled=true -c core.editor=true cherry-pick --continue\` until the pick is done. If it says there is nothing to commit (your fix kept the train's side whole), run \`git -C ${wt} -c rerere.enabled=true rerere\` and then \`git -C ${wt} cherry-pick --skip\` instead. Then \`git worktree remove --force ${wt}\`.`,
+    '',
+    `Don't hand it off again: your ship keeps its place. land.sh checks again within seconds and says "prep: … resolves it" in its output. If the train changes before it ships, the record just goes unused. End your turn once it's recorded.`,
+  ].join('\n');
 }
 
 /** The end of land.sh's output for a wake message: its last lines, not the whole 64 KB. */
@@ -415,7 +466,7 @@ export async function deployApps(ticketId: number, names: string[], commit: stri
 }
 
 export interface HandoffDeps {
-  landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log'>;
+  landings: Pick<Landings, 'handoffs' | 'handoff' | 'get' | 'settled' | 'wasTalked' | 'log' | 'prepNew'>;
   store: { getTicket(id: number): { status: string; state: string | null; note?: string | null } | undefined | null; updateTicket(id: number, fields: { state?: string | null; note?: string | null }): unknown };
   runner: {
     emit(id: number, kind: string, data: unknown): unknown;
@@ -473,7 +524,10 @@ export class LandHandoffs {
       if (this.busy.has(id)) continue;
       const run = this.d.landings.get(id);
       const h = this.d.landings.handoff(id);
-      if (h && run && run.code === null) this.showLanding(id, run);
+      if (h && run && run.code === null) {
+        this.showLanding(id, run);
+        this.tellPrep(id, run);
+      }
       if (!h || !run || run.code === null) continue;
       this.busy.add(id);
       try {
@@ -498,6 +552,14 @@ export class LandHandoffs {
     if (!t || t.status === 'closed' || (t.state === 'outside' && t.note === note)) return;
     this.d.store.updateTicket(id, { state: 'outside', note });
     this.d.runner.broadcastTicket(id);
+  }
+
+  /** A ship in line that will conflict once the train ahead ships (#1366): its minion records the fix now, once per train top and head. */
+  private tellPrep(id: number, run: Landing) {
+    const p = prepConflict(run.output);
+    if (!p || !this.d.landings.prepNew(id, `${p.top} ${p.head}`)) return;
+    // fyi: it still runs a turn, but isn't someone writing in line (Landings.talked), so a clean ship still closes it.
+    this.d.runner.send(id, this.d.from, prepMessage(p), [], { fyi: true });
   }
 
   /**

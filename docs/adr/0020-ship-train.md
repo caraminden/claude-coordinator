@@ -45,7 +45,7 @@ the last one in line waited for every run ahead of it.
 Who is passed over (each keeps its place, and ships on its own when it reaches the front):
 
 - a ship that changes the ship pipeline (`tools/pipeline-files.txt`). Such a ship never fronts a train either;
-- a ship that doesn't rebase cleanly onto the train, has merge commits, sits on a commit that came off main, or fails
+- a ship that doesn't rebase cleanly onto the train (since #1366, a conflict a fix recorded ahead of time resolves counts as clean), has merge commits, sits on a commit that came off main, or fails
   the undo guard against the train;
 - a ship landed with `LAND_TRAIN=0`, or by a land.sh older than the train (its queue ticket has no `train` line);
 - merges into a build, `--full` and `--build` runs.
@@ -81,3 +81,28 @@ Limits we know about:
   front. Upgrade if flake blame starts to matter per ship.
 - A rider that hasn't moved its branch within 10 s of main moving may be missing from the release row. The deploy
   still ships its commit, and its own shipped line still posts.
+
+## Conflict prep (#1366)
+
+Cara, 2026-11-20: "Can we prepare the train that is next up against the version that is attempting to ship?
+Basically assuming everything goes well, then we know what main WILL look like, and we can deal with the merge issues
+before we try to ship and hit a failure?"
+
+While a train is tested, its front writes `<state>/train-top` with the train's top and each rider's commit. Every
+plain land waiting behind it runs a `git merge-tree` trial against that top in its waiting check (`prep_check`). On a
+conflict it prints a `prep:` line naming the files and the rider that causes it, and keeps its place. The server
+wakes its minion with the steps (`prepMessage` in `src/land.ts`). The minion cherry-picks its commits onto the top in
+a scratch worktree with `git rerere` on, resolves them, and finishes the pick there. Its own branch never takes the
+unshipped commits.
+
+The land's rebases (its own onto main, and a rider's onto a train) run with rerere on and continue past conflicts the
+record resolves. Every merge-tree check (the hand-off's `--check` too) counts a conflict the record resolves as clean, by replaying
+it in a scratch worktree (`rerere_covers`), so the waiting check doesn't eject the ship once main moves. If the train
+changes (red, a rider dropped), the record goes unused and the ship rebases as it would have. Off: `LAND_PREP=0`, or
+`<state>/prep-off`. git turns rerere on for every command once `rr-cache` exists, so land.sh sets the repo's
+`rerere.enabled` to false when it is unset: only land.sh and the prep steps (`-c rerere.enabled=true`) use it.
+
+- shortcut: rerere matches on the conflict's text, so a resolution recorded for the same hunks by an earlier
+  conflict is replayed too, for any ship: a fix one minion recorded against a rider is replayed for that rider if it
+  drops out and later rebases onto main holding the first ship. Its minion isn't told; the land says "a fix recorded
+  ahead of time" and writes a `train prep replayed` retro-log line. CI still tests the result. Upgrade (scope the record per ship) if one is ever replayed wrongly.

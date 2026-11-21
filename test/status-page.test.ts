@@ -370,7 +370,8 @@ test('the CPU tile (#1273) reads load1 from host_samples against the cores, and 
 
 test('Investigate (#1273): an app tile goes to its home scheme, and the minion quoting its tag is the one on it', async () => {
   const { store, mia, josh, peekScheme, citadel } = setup('investigate');
-  let now = sameDayNow();
+  // Real time, not sameDayNow(): the minion's tag is noted at the store's Date.now(), and a clock shifted ahead puts the click over a minute after it (failed 00:00-01:30 PST).
+  let now = Date.now();
   const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now });
   const tile = { target: 'app:peek-auras', tile: 'errors', title: 'Errors', value: '12 today', sub: 'http 5xx', chart: 'errors a day: Thu 12', reasons: ['12 errors today'] };
   // Mia is only in Peek's scheme: Citadel's tiles and an app she can't see are no target of hers.

@@ -59,7 +59,7 @@
  },
  "app-services.test.ts": {
   "sleep": {
-   "n": 3,
+   "n": 2,
    "ok": 0
   },
   "elapsed": {

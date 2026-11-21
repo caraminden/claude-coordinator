@@ -1283,12 +1283,19 @@ test('a deploy started while a stop or restart drains the app is refused, not st
   appFolder('mandate');
   const m = { ...row('mandate', 7341), repo: 'cara/mandate' } as ContraptionRow;
   await services.install(m);
-  drainSpy(null, 150);
+  // The drain is held open until the deploy has been tried: a fixed sleep raced act()'s awaits before the drain under load.
+  let draining = false, open = () => {};
+  const gate = new Promise<void>((r) => (open = r));
+  services.drain = async () => ((draining = true), await gate, { said: null, release: () => {} });
   const acting = services.act(m, 'restart');
-  await new Promise((r) => setTimeout(r, 30));
-  assert.throws(() => services.deploy(m, 'Cara'), /being installed or deployed already/);
-  await acting;
-  services.drain = async () => ({ said: null, release: () => {} });
+  try {
+    await until('the restart to start draining', () => draining);
+    assert.throws(() => services.deploy(m, 'Cara'), /being installed or deployed already/);
+  } finally {
+    open();
+    await acting;
+    services.drain = async () => ({ said: null, release: () => {} });
+  }
 });
 
 test('startAfterCut starts an installed app\'s service, and says no for one never installed (C2)', async () => {

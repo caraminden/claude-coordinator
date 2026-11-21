@@ -1373,6 +1373,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
   attempts INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
   reason TEXT,
+  event_id INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );

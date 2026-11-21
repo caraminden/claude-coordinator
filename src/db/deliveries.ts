@@ -20,15 +20,17 @@ export type Delivery = {
   attempts: number;
   last_error: string | null;
   reason: string | null;
+  /** The runner event a `sending` row was handed as: it is sent once a turn carrying that event starts. */
+  event_id: number | null;
   created_at: number;
   updated_at: number;
 };
 export type NewDelivery = Pick<Delivery, 'project_id' | 'kind' | 'to_kind' | 'to_id' | 'when_kind' | 'set_by'> &
   Partial<Pick<Delivery, 'id' | 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'dedupe_key' | 'origin' | 'reason'>>;
-export type DeliveryPatch = Partial<Pick<Delivery, 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'attempts' | 'last_error' | 'reason'>>;
+export type DeliveryPatch = Partial<Pick<Delivery, 'when_arg' | 'payload' | 'state' | 'due' | 'met_at' | 'attempts' | 'last_error' | 'reason' | 'event_id'>>;
 
 const row = (r: any): Delivery => ({ ...r, when_arg: JSON.parse(r.when_arg), payload: JSON.parse(r.payload) });
-const PATCHABLE = new Set(['when_arg', 'payload', 'state', 'due', 'met_at', 'attempts', 'last_error', 'reason']);
+const PATCHABLE = new Set(['when_arg', 'payload', 'state', 'due', 'met_at', 'attempts', 'last_error', 'reason', 'event_id']);
 
 function insert(store: Store, d: NewDelivery, now: number): number {
   const cols = ['project_id', 'kind', 'to_kind', 'to_id', 'when_kind', 'when_arg', 'payload', 'set_by', 'state', 'due', 'met_at', 'dedupe_key', 'origin', 'reason', 'created_at', 'updated_at'];

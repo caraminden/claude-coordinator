@@ -860,6 +860,11 @@ export class Runner {
     return this.queues.get(ticketId)?.length ?? 0;
   }
 
+  /** Whether the minion's next turn still carries event `eventId`: queued, held mail, or held by a network or usage-limit wait (the outbox, #1385). */
+  holds(ticketId: number, eventId: number): boolean {
+    return [...this.peekQueue(ticketId), ...(this.limitWait(ticketId)?.queued ?? [])].some((m) => m.id === eventId);
+  }
+
   /**
    * view() for a list's rows (#1029): what rows share (the scheme, the waits, the people) is read once, and every
    * row's properties in one query. Read per row, Citadel's ~1,000 dismissed minions held the server 0.4 s a page load.
@@ -3041,17 +3046,17 @@ export class Runner {
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
       ...(keepalive ? { keepalive: true as const } : {}), ...(fp ? { fp, fpParts: fpParts! } : {}) };
     this.store.setSetting(turnKey(ticket.id), turn);
-    // Its messages are saved with the turn now: the outbox's rows they carry are sent (#1385, ADR 0021 "Accepted means durable").
-    try {
-      this.onTurnStart(ticket.id, batch.flatMap((m) => (m.id == null ? [] : [m.id])));
-    } catch (err) {
-      console.error(`onTurnStart for #${ticket.id} failed:`, err);
-    }
     const live = this.follow(ticket.id, turn);
     live.had = had;
     // A keepalive never shows as running: the list and the chat don't know it happened.
     if (keepalive) this.keepalives.add(ticket.id);
     else this.setStatus(ticket.id, 'running');
+    // Saved with a running turn now, so recover() resumes it: the outbox's rows it carries are sent (#1385, ADR 0021 "Accepted means durable").
+    try {
+      this.onTurnStart(ticket.id, batch.flatMap((m) => (m.id == null ? [] : [m.id])));
+    } catch (err) {
+      console.error(`onTurnStart for #${ticket.id} failed:`, err);
+    }
     // Its step on the lane lasts until it has ended and its session is saved (finish).
     if (plan.spawn.how === 'container') {
       this.spawnInContainer(place as Exclude<TurnPlace, { host: true }>, dir, plan.spawn.wrapper, ticket.id);

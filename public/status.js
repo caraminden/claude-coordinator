@@ -291,7 +291,7 @@ function citadelTiles(c, days, now, ships, redraw) {
     tile('Memory', mem === null ? 'No reading yet' : `${mem}% used`, host ? `${bytes(host.mem_avail)} free of ${bytes(host.mem_total)} · Citadel's server ${bytes(host.rss)}` : 'Read every 5 minutes',
       hourLine(c.host.series, 1, { from, to: now, label: 'memory used each hour, at its worst' }), { tone: mem !== null && mem >= 90 ? 'warn' : null, key: 'memory', chart: `% used, hourly worst: ${perHour(c.host.series, 1)}` }),
     tile('CPU', host ? `load ${Math.round(host.load1)} on ${c.host.cores} cores` : 'No reading yet',
-      c.host.peak ? `Load counts tasks running or waiting for a core, not a percent · Peak today ${Math.round(c.host.peak.load1)} at ${pacificClockBare(c.host.peak.at)} · warns when it stays over ${c.host.cpuWarn} for ${c.host.cpuWarnMin} min` : 'Read every 5 minutes',
+      c.host.peak ? `Load is tasks running or waiting, not a percent · Peak ${Math.round(c.host.peak.load1)} at ${pacificClockBare(c.host.peak.at)} · warns over ${c.host.cpuWarn} for ${c.host.cpuWarnMin} min` : 'Read every 5 minutes',
       hourLine(c.host.series, 3, { from, to: now, label: 'load each hour, at its highest', max: Math.max(c.host.cpuWarn * 1.25, ...c.host.series.map((s) => s[3] ?? 0)), rule: c.host.cpuWarn, tip: (v) => `load ${v} at its highest` }),
       { tone: c.verdict.tiles?.includes('cpu') ? 'warn' : null, key: 'cpu', chart: `load, hourly highest: ${perHour(c.host.series, 3)}` }),
     tile('Uptime', `up ${span(now - c.uptime.bootAt)}`, `Started ${when(c.uptime.bootAt)}: ${c.uptime.reason ?? 'no reason on record yet'}`,

@@ -33,6 +33,8 @@ test("no workflow but a ship's run can take the first runner: every other self-h
   const landOnly = "startsWith(github.ref, 'refs/heads/land/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux\"]')";
   // A ship's own check (#1567) only on the check runner, which carries no other label.
   const checkOnly = "startsWith(github.ref, 'refs/heads/check/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux-check\"]')";
+  // The early next train's run (#1568) is a ship's run on a ship runner, guarded by its own branch, never GitHub's.
+  const earlyOnly = "startsWith(github.ref, 'refs/heads/early/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux\"]')";
   const bad: string[] = [];
   let sideJobs = 0;
   for (const f of files) {
@@ -48,7 +50,7 @@ test("no workflow but a ship's run can take the first runner: every other self-h
       // name a self-hosted runner at all: a form this test can't read counts against it.
       let rest = sel.split(side).join('');
       if (f === 'citadel-heavy.yml') rest = rest.split(long).join('');
-      if (f === 'tests.yml') rest = rest.split(landOnly).join('').split(checkOnly).join('');
+      if (f === 'tests.yml') rest = rest.split(landOnly).join('').split(checkOnly).join('').split(earlyOnly).join('');
       if (/self-hosted|citadel-ci-linux/.test(rest)) bad.push(`${f}:${i + 1}: ${sel.trim()}`);
     });
   }
@@ -83,7 +85,7 @@ test("a ship's run reruns its failed files alone in a step of its own, inside th
   assert.match(suite, /DEPLOY_RERUN_LATER="\$RUNNER_TEMP\/reruns"/, 'the full suite leaves its reruns to that step');
   assert.doesNotMatch(suite, /DEPLOY_RERUN_DEADLINE/, 'the full suite reruns nothing, so it needs no deadline');
   // A land's job outlives the longest wait land.sh gives it.
-  const minutes = Number(yml.match(/timeout-minutes: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/land\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/check\/'\)\) && (\d+)/)?.[1]);
+  const minutes = Number(yml.match(/timeout-minutes: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/land\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\)\) && (\d+)/)?.[1]);
   const burn = land.match(/CI_BURN=\$\{LAND_CI_BURN:-(\d+)\}/)?.[1];
   assert.ok(burn, "land.sh's burn-in extension");
   assert.ok(minutes * 60 >= Number(limit) + Number(window) + Number(burn) + 60, `land runs' ${minutes} min job limit covers ${limit} + ${window} + ${burn} s`);
@@ -102,7 +104,7 @@ test("a ship's run burns in its new and changed tests before the full suite, in 
   assert.ok(at > 0 && at < yml.indexOf('- name: the full suite'), 'the burn-in comes before the full suite');
   assert.ok(at > yml.indexOf('- name: wait for the lands'), 'and after the wait for the lands, on the runner the suite gets');
   const body = yml.slice(at, yml.indexOf('- name:', at + 1));
-  assert.match(body, /if: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/land\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/check\/'\) \}\}/, "lands and ships' own checks only");
+  assert.match(body, /if: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/land\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\) \}\}/, "lands, ships' own checks and early runs only");
   // land/<branch> compares with land-base/<branch>, check/<branch> with check-base/<branch> (tools/own-check.sh).
   assert.equal(base, 'land-base');
   assert.ok(body.includes('base=origin/${GITHUB_REF_NAME%%/*}-base/${GITHUB_REF_NAME#*/}'), "it compares with the base land.sh pushes");
@@ -117,9 +119,24 @@ test("a ship's run burns in its new and changed tests before the full suite, in 
 // desktop never runs two checks at once. Its numbers aren't kept as a land's.
 test("a ship's own check runs only on the check runner, in its own group, and keeps no land numbers", () => {
   const yml = read('.github/workflows/tests.yml');
-  assert.match(yml, /branches: \['land\/\*\*', 'check\/\*\*'\]/);
+  assert.match(yml, /branches: \['land\/\*\*', 'check\/\*\*', 'early\/\*\*'\]/);
   assert.match(yml, /group: .*startsWith\(github\.ref, 'refs\/heads\/check\/'\) && 'citadel-check'/);
   assert.match(runsOn(yml), /runs-on: \$\{\{ startsWith\(github\.ref, 'refs\/heads\/check\/'\) && fromJSON\('\["self-hosted", "citadel-ci-linux-check"\]'\) \|\|/, 'before the hosted-runner switch, so it never goes to GitHub');
-  assert.match(yml, /if: \$\{\{ success\(\) && !startsWith\(github\.ref, 'refs\/heads\/check\/'\) \}\}/);
+  assert.match(yml, /if: \$\{\{ success\(\) && !startsWith\(github\.ref, 'refs\/heads\/check\/'\) && !startsWith\(github\.ref, 'refs\/heads\/early\/'\) \}\}/);
   assert.match(read('tools/own-check.sh'), /^OWN_CHECK_LABEL=citadel-ci-linux-check$/m);
+});
+
+// The early next train's run (#1568; Cara, 2026-11-22, "Low-priority run on a ship runner"): early/<branch> runs beside the
+// train ahead's, so it has a group per branch (the lands' one-at-a-time group would hold it until that run ends), takes a
+// ship runner before the hosted-runner switch, runs niced, skips the wait for the lands, and keeps no land numbers.
+test("the early next train's run goes beside the lands' run, niced, on a ship runner, never GitHub's", () => {
+  const yml = read('.github/workflows/tests.yml');
+  assert.match(yml, /group: .*startsWith\(github\.ref, 'refs\/heads\/early\/'\) && format\('citadel-early-\{0\}', github\.ref_name\)/);
+  const r = runsOn(yml);
+  assert.ok(r.indexOf("refs/heads/early/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux\"]')") < r.indexOf("vars.CI_RUNNER"), 'before the hosted-runner switch, so it never goes to GitHub');
+  assert.match(yml, /NICENESS: \$\{\{ !startsWith\(github\.ref, 'refs\/heads\/land\/'\) && '10' \|\| '0' \}\}/);
+  assert.match(yml, /BURN_IN_NICE: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\)\) && 'nice -n 10'/);
+  const wait = yml.slice(yml.indexOf('- name: wait for the lands'), yml.indexOf('- name:', yml.indexOf('- name: wait for the lands') + 1));
+  assert.match(wait, /!startsWith\(github\.ref, 'refs\/heads\/early\/'\)/, "it doesn't wait for the lands' run it goes beside");
+  assert.match(read('tools/land.sh'), /"\+\$top:refs\/heads\/early\/\$nb" "\+\$tip:refs\/heads\/early-base\/\$nb"/, 'land.sh pushes it there, with its base');
 });

@@ -558,9 +558,9 @@ train_verdict() {
       exit 0 ;;
     refused)
       mapfile -t lines <"$f" || true
+      queue_done # out of line before the verdict goes, so early_next never takes it for the next in line
       rm -f "$f"
       [ ${#lines[@]} -lt 2 ] || printf '%s\n' "${lines[@]:1}" >&2
-      queue_done
       land_timing 1 || true
       [ "$c" != guard ] || refuse "the guard tests failed on $a's ship train in ${d//,/, } with $branch on it and passed on the train before it, so it is the cause, and it was taken off the train before any CI run on it (output above): nothing of it landed and $untouched; $branch is as it was. Run citadel-test on that file, fix it, commit, then run this again"
       [ "$c" != burn ] || refuse "a new or changed test failed its burn-in in CI on $a's ship train ($b): ${d//,/, }, which $branch changed or which imports what it changed, so it is likely the cause, and it was taken off the train: nothing of it landed and $untouched; $branch is as it was. A file that fails when run as copies at once is racy (its output is above): fix the race (a shared path, a fixed port, a timing assumption), not the wait, then run this again"
@@ -1458,18 +1458,22 @@ top_say() {
   { echo "$tip $branch $$"; echo "$own $branch"; for ((i = 0; i < ${#train_n[@]}; i++)); do echo "${train_tip[$i]} ${train_br[$i]}"; done; } >"$f.tmp$$" && mv -f "$f.tmp$$" "$f"
 }
 top_done() { local x _ p; read -r x _ p 2>/dev/null <"$state/train-top" && [ "$p" = $$ ] && rm -f "$state/train-top"; return 0; }
-# Early next train (#1366; Cara, 2026-11-20, picked "Also test next train early"). Once this train passed its gate, just
-# before its deploy, early_next stacks the ship next in line, and the train it would take, on this train's top in a
-# scratch worktree and pushes that to CI, so its run goes while this one deploys. Only then: two suites at once on Cara's
-# desktop flaked (tests.yml), and the lands' runs go one at a time anyway. Each stack goes to <state>/stacked
-# ("<onto> <commit> <result>"), which that ship's own rebase and train_build take instead of rebasing again (a re-run
-# rebase is a new commit), so a train that comes out the same is the same commit, and ci_gate takes the early run as its
-# own. <state>/early: "<top> <its branch> <when pushed> <this branch>"; the next landing to reach its gate counts it, or
-# cancels it (early_gate). Off: LAND_EARLY=0, or for every landing, touch <state>/early-off.
-early_ahead=''
+# Early next train (#1366; Cara, 2026-11-20, picked "Also test next train early"; #1568: Cara, 2026-11-22, picked
+# "Low-priority run on a ship runner"). While this train's CI runs (top_gate), early_next stacks the ship next in line,
+# and the train it would take, on this train's top in a scratch worktree, and once this train's run has a runner and
+# another ship runner is free, pushes it to early/<its branch>: tests.yml runs it niced beside this one. A red here drops
+# it, and the train built again stacks a new one; this train's deploy keeps one stacked on its top, or stacks one then.
+# Each stack goes to <state>/stacked ("<onto> <commit> <result>"), which that ship's own rebase and train_build take
+# instead of rebasing again (a re-run rebase is a new commit), so a train that comes out the same is the same commit,
+# and ci_gate takes the early run as its own. <state>/early: "<top> <its branch> <when pushed> <this branch> <onto>
+# <its riders' tickets, comma-separated, or ->"; that landing builds its train of those riders only (early_look), so
+# ships that joined the line since don't change it, and at its gate counts the run or cancels it (early_gate). Off:
+# LAND_EARLY=0, or for every landing, touch <state>/early-off.
+early_ahead='' early_top='' early_pid='' train_only=''
 early_slug() { local url; url=$(git remote get-url "$REMOTE" 2>/dev/null) || return 1; url=${url#*github.com[:/]}; echo "${url%.git}"; }
+# [<what this train is doing>]: the words for the say line, at its deploy (default: while its CI runs, top_gate).
 early_next() {
-  local q=$state/queue t x c l nb='' nt='' r own_e wt lane_e slug free out top n
+  local q=$state/queue t x c l nb='' nt='' r own_e wt lane_e slug free out top n riders st waited=$SECONDS
   [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
   ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
   local -A QUEUE_RANK=()
@@ -1478,7 +1482,7 @@ early_next() {
   while read -r x t; do # the first in line that isn't on this train
     [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && mapfile -t l 2>/dev/null <"$t" || continue
     [ "${l[1]:-}" = 0 ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
-    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = riding || $x = moving ]] && continue
+    read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = riding || $x = moving || $x = refused ]] && continue # refused: on its way out
     [ "${l[5]:-}" = train ] && [[ $(queue_state "${l[0]%% *}") != [Tt] ]] && nt=${t##*/} nb=${l[2]:-}
     break
   done < <(for t in "$q"/[0-9]*; do [[ ${t##*/} =~ ^[0-9]+$ ]] && printf '%s %s\n' "$(queue_key "${t##*/}")" "$t"; done | sort)
@@ -1487,8 +1491,6 @@ early_next() {
     [ "$c" != "$nb" ] && git merge-base --is-ancestor "$x" "$r" 2>/dev/null && ! git merge-base --is-ancestor "$x" main 2>/dev/null && return 0
   done < <(cat "$state/taken-back" 2>/dev/null || true)
   slug=$(early_slug) || return 0
-  free=$(hub gh api "repos/$slug/actions/runners" --jq "[.runners[] | select(.status == \"online\" and .busy == false and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>/dev/null) || free=''
-  [[ $free =~ ^[1-9][0-9]*$ ]] || { say "early next train: no free $CI_LABEL runner, so $nb's CI waits for its turn"; return 0; }
   wt=$(mktemp -d "${TMPDIR:-/tmp}/land-early.XXXXXX") || return 0
   if git worktree add -q --detach "$wt" "$r" >/dev/null 2>&1 && { numbers_git ours -C "$wt" "${rr[@]}" rebase -q "$tip" >/dev/null 2>&1 || { rerere_on "$wt" numbers_git ours && retro_log "train prep replayed · $nb onto $label's train ($(git rev-parse --short "$tip")), early"; }; }; then
     own_e=$(git -C "$wt" rev-parse HEAD)
@@ -1505,35 +1507,102 @@ early_next() {
   # The train it would take, as train_build will build it once it has the line, with no verdicts said and nothing logged.
   out=$(
     early_memo=$state/stacked.tmp$$ branch=$nb own=$own_e old=$tip lane=$lane_e tip=$own_e DEPLOY_QUEUE_TICKET=$nt
-    train_n=() train_br=() train_tip=() train_was=()
+    train_n=() train_br=() train_tip=() train_was=() train_only=''
     say() { :; }
     retro_log() { :; }
     train_say() { :; }
     train_build >/dev/null 2>&1 || true
-    echo "$tip ${#train_n[@]} ${train_br[*]}"
+    t=$(IFS=,; echo "${train_n[*]}")
+    echo "$tip ${#train_n[@]} ${t:--} ${train_br[*]}"
   ) || out=''
-  read -r top n x <<<"$out" && [ -n "$top" ] || { rm -f "$state/stacked.tmp$$"; return 0; }
+  read -r top n riders x <<<"$out" && [ -n "$top" ] || { rm -f "$state/stacked.tmp$$"; return 0; }
   mv -f "$state/stacked.tmp$$" "$state/stacked"
   # Not on a top the guard tests fail (#1479): its front's own train_guards refuses the ship that broke them.
   guard_at "$top" || [ $? != 1 ] || { say "early next train: the guard tests fail on $nb's train, so its CI waits for its turn"; return 0; }
+  # Not before this train's own run has a runner, which it must not lose to this one (at its deploy it has had one); and
+  # only on a free one.
+  while [ -z "${1:-}" ]; do
+    [ ! -e "$state/early-stop.$$" ] || return 0 # this train's gate ended without a green, or the landing is ending
+    st=$(hub gh api "repos/$slug/actions/runs?head_sha=$tip&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status] | @tsv" 2>/dev/null) || st=''
+    read -r _ st _ <<<"$st" || true
+    [[ $st != in_progress && $st != completed ]] || break
+    [ $((SECONDS - waited)) -lt "${LAND_EARLY_WAIT:-600}" ] || { say "early next train: this train's run had no runner within ${LAND_EARLY_WAIT:-600} s, so $nb's CI waits for its turn"; return 0; }
+    sleep "$CI_POLL"
+  done
+  free=$(hub gh api "repos/$slug/actions/runners?per_page=100" --jq "[.runners[] | select(.status == \"online\" and .busy == false and any(.labels[]; .name == \"$CI_LABEL\"))] | length" 2>/dev/null) || free=''
+  [[ $free =~ ^[1-9][0-9]*$ ]] || { say "early next train: no free $CI_LABEL runner, so $nb's CI waits for its turn"; return 0; }
+  [ ! -e "$state/early-stop.$$" ] || return 0
   # With its base (this train's top: main once it deploys), atomic, as ci_gate pushes it: the burn-in (#1443) compares with it.
-  hub git push -q --atomic "$REMOTE" "+$top:refs/heads/land/$nb" "+$tip:refs/heads/land-base/$nb" 2>"$state/ci.err" || { say "early next train: pushing $nb's train to GitHub failed$(ci_said), so its CI waits for its turn"; return 0; }
-  echo "$top $nb $(date +%s) $branch" >"$state/early"
-  say "early next train: $nb${x:+ (with $x riding)} is stacked on this train's top and its CI starts now, while this one deploys ($(git rev-parse --short "$top")); if its train comes out the same, that run is its CI"
+  hub git push -q --atomic "$REMOTE" "+$top:refs/heads/early/$nb" "+$tip:refs/heads/early-base/$nb" 2>"$state/ci.err" || { say "early next train: pushing $nb's train to GitHub failed$(ci_said), so its CI waits for its turn"; return 0; }
+  echo "$top $nb $(date +%s) $branch $tip $riders" >"$state/early"
+  say "early next train: $nb${x:+ (with $x riding)} is stacked on this train's top and its CI starts now, while ${1:-"this one's CI runs"} ($(git rev-parse --short "$top")); if its train comes out the same, that run is its CI"
   retro_log "early train · $nb${x:+ + $n riders} onto $label's train ($(git rev-parse --short "$tip")) · pushed $(git rev-parse --short "$top")"
 }
-# At this landing's gate, with its train built: an early run on it counts (early_ahead: how long ago it started), and
-# any other early run is cancelled, so it doesn't hold up this one's in the lands' one-at-a-time CI group.
+# Before this landing builds its train: one stacked early for it rides the riders it was stacked with, and only those.
+early_look() {
+  local top b at fb onto riders
+  read -r top b at fb onto riders 2>/dev/null <"$state/early" && [ "$b" = "$branch" ] && [ -n "$riders" ] || return 0
+  train_only=" ${riders//,/ } "
+  [ "$riders" != - ] || train_only=' '
+}
+# <top> <id> <its branch> <why>: an early run nobody will count is cancelled, and its scratch branches go, so a push of
+# the same commit later starts a fresh run.
+early_cancel() {
+  [[ ! $2 =~ ^[0-9]+$ ]] || hub gh api -X POST "repos/$(early_slug)/actions/runs/$2/cancel" >/dev/null 2>&1 || true
+  hub git push -q "$REMOTE" ":refs/heads/early/$3" ":refs/heads/early-base/$3" >/dev/null 2>&1 || true
+  say "early next train: dropped the early CI run on $3's train ($4)"
+  retro_log "early train · $label · discarded · $4"
+}
+# <the top to keep it on> <why>: this landing's early run stacked on any other top goes (a red, a train built again).
+early_drop() {
+  local top b at fb onto riders id
+  read -r top b at fb onto riders 2>/dev/null <"$state/early" && [ "$fb" = "$branch" ] && [ "$onto" != "$1" ] || return 0
+  rm -f "$state/early"
+  id=$(hub gh api "repos/$(early_slug)/actions/runs?head_sha=$top&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | select(.status != \"completed\") | .id" 2>/dev/null) || id=''
+  early_cancel "$top" "$id" "$b" "$2"
+}
+# 0 when this landing has an early run stacked on its train's top.
+early_kept() { local top b at fb onto; read -r top b at fb onto _ 2>/dev/null <"$state/early" && [ "$fb" = "$branch" ] && [ "$onto" = "$tip" ]; }
+# The gate on the train's top, with the next train's early run started beside it; a red ahead drops it, and the train
+# built again (train_suspects) stacks a new one on its new top. rc as gate's.
+top_gate() {
+  local x
+  early_drop "$tip" "the train ahead was built again"
+  rm -f "$state/early-stop.$$"
+  if ! early_kept; then
+    early_next </dev/null &
+    early_pid=$!
+  fi
+  rc=0
+  gate "$tip" || rc=$?
+  [ "$rc" = 0 ] || : >"$state/early-stop.$$" # no green: it pushes nothing more, and goes
+  [ -z "$early_pid" ] || wait "$early_pid" || { x=$?; say "early next train: it stopped part way (exit $x), so the next ship's CI waits for its turn"; }
+  early_pid=''
+  rm -f "$state/early-stop.$$"
+  [ "$rc" != 1 ] || early_drop '' "the train ahead went red"
+  return "$rc"
+}
+# On the way out: an early_next still going pushes nothing more, and is waited for (it may hold a scratch worktree).
+early_end() {
+  [ -n "$early_pid" ] || return 0
+  : >"$state/early-stop.$$"
+  wait "$early_pid" 2>/dev/null || true
+  rm -f "$state/early-stop.$$"
+}
+# At this landing's gate, with its train built: an early run on it counts (early_ahead: how long ago it started; its
+# scratch branches, early_top, are the first gate's run), and any other early run is cancelled.
 early_gate() {
-  local top b at fb slug run id st w
-  read -r top b at fb 2>/dev/null <"$state/early" || return 0
+  local top b at fb onto riders slug run id st w
+  train_only=''
+  read -r top b at fb onto riders 2>/dev/null <"$state/early" || return 0
+  [ "$fb" != "$branch" ] || return 0 # this landing's own, from a stopped gate it starts again: top_gate's to keep or drop
   rm -f "$state/early"
   [[ $at =~ ^[0-9]+$ ]] && slug=$(early_slug) || return 0
   run=$(hub gh api "repos/$slug/actions/runs?head_sha=$top&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$CI_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\"] | @tsv" 2>/dev/null) || run=''
   read -r id st w _ <<<"$run" || true
   if [ "$b" = "$branch" ] && [ "$top" = "$tip" ] && [[ $id =~ ^[0-9]+$ ]] && { [ "$st" != completed ] || [ "$w" = success ]; }; then
-    early_ahead=$(($(date +%s) - at))
-    say "early next train: CI started on this train at $(date -d "@$at" +%H:%M) while $fb's deployed, and it came out the same, so that run is its CI ($early_ahead s head start)"
+    early_ahead=$(($(date +%s) - at)) early_top=$top
+    say "early next train: CI started on this train at $(date -d "@$at" +%H:%M) beside $fb's, and it came out the same, so that run is its CI ($early_ahead s head start)"
     retro_log "early train · $label · counted · ${early_ahead}s head start"
     return 0
   fi
@@ -1541,11 +1610,8 @@ early_gate() {
   elif [ "$top" != "$tip" ]; then w="its train came out different from the one stacked early"
   elif [[ $id =~ ^[0-9]+$ ]]; then w="the early run failed, so it runs again" # as for a run on the same commit from a landing started again
   else w="GitHub has no run of it"; fi
-  [[ ! $id =~ ^[0-9]+$ ]] || [ "$st" = completed ] || hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
-  # Its scratch branch goes too, so a push of the same commit later starts a fresh run.
-  hub git push -q "$REMOTE" ":refs/heads/land/$b" ":refs/heads/land-base/$b" >/dev/null 2>&1 || true
-  say "early next train: dropped the early CI run on $b's train ($w)"
-  retro_log "early train · $label · discarded · $w"
+  [ "$st" != completed ] || id=''
+  early_cancel "$top" "$id" "$b" "$w"
 }
 # <member>: the train's commit through that ship (0: this one's own, 1 on: its riders).
 train_at() { if [ "$1" = 0 ]; then echo "$own"; else echo "${train_tip[$(($1 - 1))]}"; fi; }
@@ -1571,6 +1637,7 @@ train_build() {
     tried[${t##*/}]=1
     read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused ]] && continue # still on the train before this one, or refused by this one
     [ -z "${early_memo:-}" ] || [ "$x" != riding ] || continue # early_next: on the train before this one
+    [ -z "$train_only" ] || [[ $train_only == *" ${t##*/} "* ]] || continue # early_look: the riders its early run has
     [[ $train_refused != *" ${t##*/} "* ]] || continue # refused as a suspect, though its rider already read the verdict
     [[ $train_held != *" ${t##*/} "* ]] || continue    # held off the train on a guess until the train without it has a verdict (#1403)
     [ "${l[1]:-}" = 0 ] && [ "${l[5]:-}" = train ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] || continue
@@ -1657,7 +1724,10 @@ train_guards() {
 gate() {
   local rc=0
   ci_done
-  [ -z "$early_ahead" ] || ci_pushed=1 # the early run's scratch branch is this landing's to delete, however it ends
+  CI_REF=land/$branch CI_BASE_REF=land-base/$branch
+  # A counted early run is the first gate's, on its own scratch branches, which are this landing's to delete however it ends.
+  [ "$1" != "$early_top" ] || CI_REF=early/$branch CI_BASE_REF=early-base/$branch ci_pushed=1
+  early_top=''
   tip=$1 short=$(git rev-parse --short "$1") failed='' reran='' burn_red=''
   ci_gate || rc=$?
   # One fresh run, never more, for a red of flakes only (#769). The scratch branch goes first so the push starts a new
@@ -1666,7 +1736,8 @@ gate() {
   # won't go, there is no fresh run: it stays a red, rather than a wait for a run never started read as CI being down.
   # A run cut off before any test failed (#1377) gets the same one fresh run; cut off again, it is no answer. A red of
   # known flakes only (#1419: known_flakes) needs no fresh run: it is a green.
-  local cut=''
+  local cut='' early_ref=''
+  [[ $CI_REF != early/* ]] || early_ref=1
   if [ "$rc" = 1 ]; then
     ci_failed
     if [ -n "$burn_red" ]; then
@@ -1682,7 +1753,7 @@ gate() {
     fi
     if [ -z "$cut$reran" ]; then
       :
-    elif ! hub git push -q "$REMOTE" ":refs/heads/$CI_REF" 2>"$state/ci.err"; then
+    elif ! hub git push -q "$REMOTE" ":refs/heads/$CI_REF" ${early_ref:+":refs/heads/$CI_BASE_REF"} 2>"$state/ci.err"; then
       if [ -n "$cut" ]; then
         why="the CI run was cut off before any test failed ($cut), and deleting $CI_REF on GitHub to start a fresh run failed$(ci_said)"
         retro_log "cut-off rerun · $branch · $cut · not started"
@@ -1695,7 +1766,7 @@ gate() {
     else
       if [ -n "$cut" ]; then say "the CI run on $short was cut off before any test failed ($cut), so it says nothing about this commit: running CI once more"
       else say "failed in the full run but passed alone ($reran); running CI once more on $short, the land needs a fully green run"; fi
-      ci_id='' ci_pushed=''
+      ci_id='' ci_pushed='' CI_REF=land/$branch CI_BASE_REF=land-base/$branch # a counted early run's fresh run goes with the lands'
       rc=0
       ci_gate || rc=$?
       if [ "$rc" = 1 ]; then
@@ -2075,7 +2146,7 @@ train_suspects() {
       [[ " ${train_n[*]} " != *" $t "* ]] && [[ $train_held != *" $t "* ]] && read -r v _ 2>/dev/null <"$train_dir/$t" && [ "$v" = riding ] && rm -f "$train_dir/$t"
     done
     rc=0
-    gate "$tip" || rc=$?
+    top_gate || rc=$?
     busy_gate
     [ "$rc" = 1 ] && [ ${#train_n[@]} -gt 0 ] && continue
     case $rc in
@@ -2135,7 +2206,7 @@ train_bisect() {
 }
 
 # The line and the lock go before the clean-up on GitHub (#553 M14): a hung gh or push held the lock up to 60 s more.
-trap 'land_rc=$?; train_release; train_drop; top_done; land_timing $land_rc || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done' EXIT
+trap 'land_rc=$?; train_release; train_drop; top_done; land_timing $land_rc || true; queue_done; exec 9>&- 7>&- 6>&-; ci_done; early_end' EXIT
 fellback=
 rc=0
 failed=''
@@ -2157,11 +2228,13 @@ else
       gate "$at" || rc=$?
     done
   }
-  train_build
+  early_look
+  # shellcheck disable=SC2086 # ticket numbers
+  train_build $train_only
   train_guards
   top_say
   early_gate
-  gate "$tip" || rc=$?
+  top_gate || rc=$?
   # A train keeps its riders while it waits (#1361): they go back only once the gate gives up for good, to run here.
   busy_gate
   [ "$rc" != 1 ] || train_main_red || [ ${#train_n[@]} = 0 ] || train_suspects || [ ${#train_n[@]} = 0 ] || train_bisect
@@ -2329,7 +2402,8 @@ if [ ${#train_n[@]} -gt 0 ]; then
   [ -z "$late" ] || say "ship train:$late didn't move to its train commit within 10 s, so the release row may leave it out"
 fi
 # In the background, so set -e still holds inside it, but a slip there can't stop this deploy with main moved.
-early_next </dev/null & wait $! || say "early next train: it stopped part way (exit $?), so the next ship's CI waits for its turn"
+early_drop "$tip" "the train ahead changed after its run started"
+early_kept || { early_next 'this one deploys' </dev/null & wait $!; } || say "early next train: it stopped part way (exit $?), so the next ship's CI waits for its turn"
 queue_phase "deploying"
 land_mark deploy deploy
 

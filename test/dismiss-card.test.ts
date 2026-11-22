@@ -51,14 +51,18 @@ before(async () => {
 
 test('a person dismisses an open question card: it settles as dismissed and the minion is told', async () => {
   const { id } = await ask('Which layout?');
+  const other = await ask('Which colour?', { not_duplicate: true });
   const before = turns().length;
   await dismiss(id);
   assert.deepEqual((await data('question')).find((q) => q.id === id).settled.dismissed, true);
   assert.equal((await data('question_result')).at(-1).settled.by, 'Cara');
   assert.match(await lastPrompt(before), /^\[Cara\]: Cara dismissed your card "Which layout\?" as no longer relevant\./);
   await idle();
+  // The other open card still waits.
+  assert.equal((await data('question')).find((q) => q.id === other.id).settled, undefined);
   // Settled: not open again, and neither dismissed nor answered twice.
-  await assert.rejects(dismiss(id), /404/);
+  await assert.rejects(dismiss(id), /409 Cara dismissed this card/);
+  await assert.rejects(dismiss('no-such-card'), /404/);
   await assert.rejects(call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['A'], other: '' }] } }), /409 Cara dismissed this card/);
 });
 

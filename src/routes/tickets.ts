@@ -823,7 +823,13 @@ export const ticketRoutes: Route[] = [
       // to dismiss a card that is no longer relevant"). Whoever may answer it may dismiss it ('person' is the rule /answer uses).
       const want = String((await readJson(req)).cardId ?? '');
       const event = store.openCardsOf(id).find((e) => JSON.parse(e.data).id === want);
-      if (!event) throw new HttpError(404, 'No such open card: it was answered, settled or dismissed already');
+      if (!event) {
+        // Told how it ended, so two people racing read why theirs didn't count.
+        const done = store.eventsOfKinds(id, ['question', 'plan']).map((e) => JSON.parse(e.data)).find((d) => d.id === want);
+        if (!done) throw new HttpError(404, 'No such card');
+        const by = done.settled?.by ?? done.by;
+        throw new HttpError(409, done.settled?.dismissed || done.status === 'dismissed' ? `${by} dismissed this card` : `This card was already ${done.status ?? (by ? 'handled by ' + by : 'answered or settled')}`);
+      }
       const card = JSON.parse(event.data);
       // Ship and merge go cards keep their own buttons; a job's go, a notice's Got it and a memory tidy have their own way out.
       if (card.kind || card.job || card.kitSync || card.notice || card.memory) throw new HttpError(409, 'This card is answered with its own buttons, not dismissed');
@@ -839,7 +845,7 @@ export const ticketRoutes: Route[] = [
       // The minion hears it as it hears an answer (a Taskmaster's card for everyone: its asker), so one waiting only on this card moves on.
       const asker = card.asker != null ? store.getTicket(card.asker) : undefined;
       const to = asker && asker.status !== 'closed' ? asker.id : id;
-      deliverAnswer(app, to, session.name, `${session.name} dismissed your card "${cardLabel(event.kind, card)}" as no longer relevant. Nothing was answered: move on without it.`, {});
+      deliverAnswer(app, to, session.name, `${session.name} dismissed your card "${cardLabel(event.kind, card)}" as no longer relevant. Nothing was answered and this is not a go.`, {});
       runner.broadcastTicket(id);
       personWrote(ctx);
       return json(res, 200, ticketView(app, id));

@@ -162,6 +162,21 @@ test("a person's Taskmaster asks for everyone: the card sits with the Overlord, 
   assert.equal(again.status, 409, 'one answer settles it for everyone');
 });
 
+test("dismissing a Taskmaster's card for everyone tells the Taskmaster that asked, not the Overlord (#1593)", async () => {
+  const ownJosh = db.coordinatorFor(Shared.id, Josh.id)!;
+  const posted = await fetch(`${srv.base}/api/tickets/${ownJosh.id}/questions`, {
+    method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, ownJosh.id)}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questions: [{ question: 'Pause the nightly sweep?', options: [{ label: 'Yes', recommended: true }, { label: 'No' }] }], for_everyone: true }),
+  });
+  const { id } = (await posted.json()) as { id: string };
+  const res = await fetch(`${srv.base}/api/tickets/${overlord.id}/dismiss`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ cardId: id }) });
+  assert.equal(res.status, 200);
+  const told = await until("the dismissal for Josh's Taskmaster", () => { const t = events(ownJosh.id).filter((e) => e.kind === 'user_message').map((e) => String(e.data.text)).filter((x) => x.includes('dismissed your card')); return t.length && t; });
+  assert.ok(told.some((t) => t.includes('"Pause the nightly sweep?"')), told.join('\n'));
+  assert.ok(!events(overlord.id).some((e) => e.kind === 'user_message' && String(e.data.text).includes('dismissed your card')), 'the Overlord, where the card is, gets no note');
+  assert.equal(cards(overlord.id).find((c) => c.id === id).settled.dismissed, true);
+});
+
 test("an Overlord turn runs for whoever started it, else the scheme's owner, never its last person (Cara's R4)", () => {
   const s = new Store(join(root, 'r4.db'));
   const cara = s.createUser({ name: 'Cara', login: 'cara', admin: true });

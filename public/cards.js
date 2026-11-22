@@ -186,7 +186,7 @@ function dismissButton(ticketId, card, shut, reopen) {
       key: `card:${card.id}`,
       apply: () => { unanswer = answerNow(ticketId, card.id); shut(); },
       send: () => api(`api/tickets/${ticketId}/dismiss`, { method: 'POST', body: { cardId: card.id } }),
-      undo: () => { unanswer(); reopen(); },
+      undo: () => { if (reopen() !== false) unanswer(); }, // a card the server already settled stays shut
       label: 'dismiss the card',
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
   });
@@ -295,7 +295,7 @@ export function planCard(ticketId, card, opts = {}) {
     status.textContent = `Dismissed by ${me}`;
   }, () => {
     deciding = false;
-    if (rank) return;
+    if (rank) return false;
     el.classList.remove('answered');
     approve.hidden = revise.hidden = false;
     drop.hidden = !ins;
@@ -641,9 +641,8 @@ export function questionCard(ticketId, card, opts = {}) {
     lock(true);
     dismiss.hidden = true;
     status.textContent = `Dismissed by ${me}`;
-    head.done('dismissed');
   }, () => {
-    if (confirmed) return;
+    if (confirmed) return false;
     lock(false);
     dismiss.hidden = false;
     status.textContent = '';

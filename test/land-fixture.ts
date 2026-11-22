@@ -131,14 +131,24 @@ echo "$*" >>"${calls}"
 case "$*" in
   *"/actions/runs?head_sha="*)
     sha=\${2#*head_sha=} sha=\${sha%%&*}
-    # FAKE_CHECK_OLD="<branch> <polls>": GitHub as JSON through the caller's --jq: an earlier red check run of <branch> on
-    # every commit, and the run of a land/ or check/ branch at the commit only after <polls> questions about that commit (#1567).
+    # FAKE_CHECK_OLD="<branch> <polls>": an earlier red check run of <branch> on every commit, and the run of a land/ or
+    # check/ branch at the commit only after <polls> questions about that commit (#1567). It answers the callers' three
+    # --jq shapes (the newest run, own-check's floor, own-check's run of its branch above the floor) in bash, since CI's
+    # runners have no jq.
     if [ -n "\${FAKE_CHECK_OLD:-}" ]; then
       q=\$4; read -r ob ol <<<"\$FAKE_CHECK_OLD"
       b=$(git -C "${hub}" for-each-ref --points-at "$sha" --format='%(refname:lstrip=2)' refs/heads/land/ refs/heads/check/ | head -n 1)
-      new=''
-      [ -z "$b" ] || [ "$(grep -c "head_sha=$sha" "${calls}")" -le "$ol" ] || new='{"id":99,"status":"completed","conclusion":"success","html_url":"https://ci/99","path":".github/workflows/tests.yml","head_branch":"'"$b"'"},'
-      echo '{"workflow_runs":['"$new"'{"id":3,"status":"completed","conclusion":"failure","html_url":"https://ci/3","path":".github/workflows/tests.yml","head_branch":"check/'"$ob"'"}]}' | jq -r "$q"
+      runs=''
+      [ -z "$b" ] || [ "$(grep -c "head_sha=$sha" "${calls}")" -le "$ol" ] || runs=$(printf '99\\tcompleted\\tsuccess\\thttps://ci/99\\t%s\\n' "$b")
+      runs=$(printf '%s\\n3\\tcompleted\\tfailure\\thttps://ci/3\\tcheck/%s' "$runs" "$ob" | sed '/^$/d')
+      case $q in
+        *'max // 0'*) cut -f1 <<<"$runs" | sort -n | tail -n 1 ;;
+        *'.head_branch == "'*)
+          hb=$(sed 's/.*\\.head_branch == "\\([^"]*\\)".*/\\1/' <<<"$q") fl=$(sed 's/.*\\.id > \\([0-9]*\\).*/\\1/' <<<"$q")
+          awk -F '\\t' -v hb="$hb" -v fl="$fl" '$5 == hb && $1 > fl { print $1 "\\t" $2 "\\t" $3 "\\t" $4; exit }' <<<"$runs" ;;
+        *'.html_url] | @tsv'*) head -n 1 <<<"$runs" | cut -f1-4 ;;
+        *) head -n 1 <<<"$runs" | cut -f1-3 ;;
+      esac
       exit 0
     fi
     [ -z "\${FAKE_CI_FILE:-}" ] || FAKE_CI=$(cat "\$FAKE_CI_FILE")

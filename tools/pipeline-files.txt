@@ -8,6 +8,7 @@
 tools/land.sh
 tools/land-core.sh
 tools/land.local.sh
+tools/own-check.sh
 tools/ship-numbers.ts
 tools/ship-numbers.attributes
 tools/known-flakes.ts

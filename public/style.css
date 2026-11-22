@@ -6,6 +6,7 @@
   --line: #e2dfd8; /* dividers and card outlines: subtle on purpose */
   --control-line: #8a867f; /* control borders (inputs, selects, bordered buttons): 3.1-3.6:1 on --bg, --panel and --code-bg, WCAG 1.4.11 (#556) */
   --accent: #c2410c;
+  --brand-violet: #9333ea; /* the app icon's violet (#227): the Citadel mark on the splash */
   --running: #2563eb;
   --waiting: #b45309;
   --error: #b91c1c;

@@ -79,10 +79,10 @@ function runFront(opts: FrontOptions & { sock: string }) {
   const answerMs = opts.answerMs ?? READER_ANSWER_MS, stuckMs = opts.stuckMs ?? READER_STUCK_MS;
   const suffix = opts.appsDomain ? `.${opts.appsDomain.toLowerCase()}` : null;
 
-  /** The request's headers for the main thread: the client's x-citadel-* dropped, the connection's own addresses set. */
+  /** The request's headers for the main thread: any client copy of its own two headers dropped, the connection's own addresses set. */
   const mainHeaders = (req: IncomingMessage, keepUpgrade = false) => {
     const h: IncomingHttpHeaders = {};
-    for (const [k, v] of Object.entries(req.headers)) if (!k.startsWith('x-citadel-') && (keepUpgrade || !HOP.has(k))) h[k] = v;
+    for (const [k, v] of Object.entries(req.headers)) if (k !== PEER_HEADER && k !== LOCAL_HEADER && (keepUpgrade || !HOP.has(k))) h[k] = v;
     h[PEER_HEADER] = req.socket.remoteAddress ?? '';
     h[LOCAL_HEADER] = `${req.socket.localAddress ?? ''} ${req.socket.localPort ?? ''}`;
     return h;

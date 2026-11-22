@@ -333,5 +333,12 @@ export function inboxRow(items) {
       isCoordinator(t) ? (from ? 'Taskmaster' : taskmasterLabel(t.project_id)) : [h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     h('span', { class: 'asks' }, [...asks].map(([ask, { n, why }]) => h('span', { class: 'chip', tabindex: 0, 'data-tip': why, 'data-tip-row': t.id }, n > 1 ? `${ask} ×${n}` : ask))),
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.
-    h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))));
+    h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))),
+    // Sleep from here (#1636; Cara picked "Header and Needs you"): only a minion of this scheme with something sleep would quiet.
+    !from && !isCoordinator(t) && items.some((i) => !['approval', 'spend', 'quiet', 'loop', 'mention'].includes(i.kind)) ? sleepButton(t) : '');
+}
+
+function sleepButton(t) {
+  const sleep = (e) => { e.preventDefault(); e.stopPropagation(); import('./thread-head.js').then((m) => m.setAsleep(t, true)); };
+  return h('button', { type: 'button', class: 'inbox-sleep', title: "Put it to sleep: out of Needs you and no keepalives. A message or a card's answer wakes it", 'aria-label': `Put #${t.number ?? t.id} to sleep`, onclick: sleep }, '🌙 Sleep');
 }

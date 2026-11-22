@@ -256,7 +256,7 @@ export function headState(t) {
   const label = isCoordinator(t) && !workingBy(t) ? statusLabel(t) : rowState(t, usage).label;
   // A dismissed minion says when (#1072).
   const when = label === 'Dismissed' ? dismissedWhen(t.closed_at) : null;
-  return (when ? `Dismissed ${when.short}` : label) + (t.queued ? ` · ${t.queued} queued` : '');
+  return (when ? `Dismissed ${when.short}` : label) + (t.asleep && t.status !== 'closed' ? ' · asleep' : '') + (t.queued ? ` · ${t.queued} queued` : '');
 }
 
 /** Whether the running turn's init event has arrived: until then the per-turn state is still the last turn's. */

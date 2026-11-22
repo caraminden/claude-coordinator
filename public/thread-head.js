@@ -1,12 +1,12 @@
 // A minion's head: its branch and pull request, people's note, pins, and the held-message, unpark and status actions.
 import { presenceHead } from './presence.js';
 import { gloss } from './help-words.js';
-import { account, reloadQuietly, ago, api, dismissedWhen, h, icon, isCoordinator, me, threadFullName, threadLabel, threadTitleParts, view } from './base.js';
+import { reloadQuietly, ago, api, dismissedWhen, h, icon, isCoordinator, me, threadFullName, threadLabel, threadTitleParts, view } from './base.js';
 import { stopChat, stoppingIds, catchUpEvents, onTicketPin, threadRefs } from './core.js';
 import { composerPlaceholder, renderModelPicker } from './composer.js';
 import { renderSidebar } from './sidebar.js';
 import { refreshInbox } from './inbox.js';
-import { composerHint, heldLine } from './heldmsg.js';
+import { asleepChat, composerHint, heldLine } from './heldmsg.js';
 import { SHIP, workingBy } from './threadstate.js';
 import { propertyChip } from './properties.js';
 import { onboardingStrip } from './settings.js';
@@ -124,7 +124,7 @@ export function renderTicketHead() {
     if (hint) {
       const text = coord ? null : composerHint(t);
       hint.hidden = !text;
-      hint.replaceChildren(text ? h('span', { 'aria-hidden': 'true' }, '⏸ ') : '', text ?? '');
+      hint.replaceChildren(text ? h('span', { 'aria-hidden': 'true' }, asleepChat(t) && !text.includes('sealed') ? '🌙 ' : '⏸ ') : '', text ?? '');
     }
   }
   const actions = [];
@@ -150,8 +150,8 @@ export function renderTicketHead() {
       location.hash = `#/p/${t.project_id}`;
     }, title: 'Dismiss minion' }, 'Dismiss', h('span', { class: 'wide-only' }, ' minion')));
   }
-  // Out of a minion's touched set (#919): your Taskmaster stops hearing from it until you touch it again.
-  if (!coord && account?.id != null && t.touched?.includes(account.id)) actions.unshift(leaveButton(t));
+  // Sleep (#1636) took Leave's place (Cara, 2026-11-22, "Replace Leave with Sleep"); /leave itself stays for the Taskmaster's routing.
+  if (!coord && t.status !== 'closed') actions.unshift(sleepButton(t));
   actions.unshift(ultraButton(t));
   const state = headState(t);
   // Titled too, since a narrow line may cut it short. While it works (its turn or the server, #727),
@@ -270,18 +270,28 @@ export function adoptTicket(ticketId, ticket) {
   catchUpEvents().catch(() => {});
 }
 
-function leaveButton(t) {
-  const mark = (inIt) => {
-    const now = view.tickets?.get(t.id) ?? t;
-    now.touched = inIt ? [...new Set([...(now.touched ?? []), account.id])] : (now.touched ?? []).filter((id) => id !== account.id);
-    if (view.ticket?.id === t.id) renderTicketHead();
+function sleepButton(t) {
+  return t.asleep
+    ? h('button', { type: 'button', class: 'secondary act-wake', title: 'Wake it: its cards and replies count in Needs you again, and keepalives resume', onclick: () => setAsleep(t, false) }, 'Wake')
+    : h('button', { type: 'button', class: 'secondary act-sleep', title: "Put it to sleep: out of Needs you and no keepalives. Its cards stay answerable here, and a message or a card's answer wakes it", onclick: () => setAsleep(t, true) }, 'Sleep');
+}
+
+/** Sleep or wake (#1636): the head, the list and Needs you change at once; a refusal puts them back with a toast and a retry. */
+export function setAsleep(t, on) {
+  const was = t.asleep ?? null;
+  const show = (v) => {
+    for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && view.ticket])) if (x) x.asleep = v;
+    renderSidebar();
+    if (view?.id === t.id) renderTicketHead();
+    refreshInbox();
   };
-  return h('button', { type: 'button', class: 'secondary act-leave', title: 'Stop hearing from this minion in your Taskmaster. Messaging it or answering its cards brings you back.', onclick: () => optimistic({
-    label: 'leave this minion',
-    apply: () => mark(false),
-    send: () => api(`api/tickets/${t.id}/leave`, { method: 'POST', body: {} }),
-    undo: () => mark(true),
-  }) }, 'Leave');
+  return optimistic({
+    sets: `sleep:${t.id}`,
+    apply: () => show(on ? { at: Date.now(), by: me?.name ?? '' } : null),
+    send: () => api(`api/tickets/${t.id}/sleep`, { method: 'POST', body: { asleep: on } }),
+    undo: () => show(was),
+    label: `${on ? 'put' : 'wake'} ${threadLabel(t)}${on ? ' to sleep' : ''}`,
+  }).catch(() => {});
 }
 
 /** Ask for a Taskmaster's fresh session (#406): the button goes at once, and comes back if the server refuses. */

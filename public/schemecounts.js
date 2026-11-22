@@ -135,7 +135,9 @@ export function itemTicket(view, id) {
  * Nothing else is left out, so the badge never counts what a click doesn't show (#1400: the Overlord's card counted
  * on the rail and vanished from the strip, so the pill popped between the two counts).
  */
-export const stripItems = (view, items, answered = new Set()) => items.filter((i) => itemTicket(view, i.ticketId)?.status !== 'closed' && !answered.has(i.key));
+export const stripItems = (view, items, answered = new Set()) => items.filter((i) => itemTicket(view, i.ticketId)?.status !== 'closed' && !answered.has(i.key) && !sleeping(view, i));
+/** An item an asleep minion (#1636) no longer shows, as src/inbox.ts drops it: its cards and replies, not what a running turn is stuck on. */
+const sleeping = (view, i) => !!itemTicket(view, i.ticketId)?.asleep && !['approval', 'spend', 'quiet', 'loop', 'mention'].includes(i.kind);
 
 /** The items a person just answered on a minion: its card with that id (an item's `card.id` is the question, plan or approval id), or the ones `which` (a function of the item) picks. #1409 drops them from every count at the click. */
 export const answeredItems = (items, ticketId, which) => items.filter((i) => i.ticketId === ticketId && (typeof which === 'function' ? which(i) : i.card?.id === which));

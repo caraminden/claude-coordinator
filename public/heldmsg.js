@@ -19,9 +19,12 @@ export function heldLine(data, eventId, ticket) {
 
 /** The one-line hint over the composer while the open minion is parked (a message waits), or null. */
 export function composerHint(t) {
-  return parkedChat(t) ? "This minion is sealed: messages wait until it's unsealed." : null;
+  if (parkedChat(t)) return "This minion is sealed: messages wait until it's unsealed.";
+  return asleepChat(t) ? "This minion is asleep: a message or a card's answer wakes it." : null;
 }
 
+/** Asleep (#1636): out of Needs you and keepalives until something starts its turn. */
+export const asleepChat = (t) => !!t.asleep && t.kind !== 'coordinator' && t.status !== 'closed';
 const parkedChat = (t) => !!(t.parked_for || t.state === 'parked') && t.kind !== 'coordinator' && t.status !== 'closed' && t.status !== 'running';
 
 /** src/msg-settings.ts NEVER_HOLD_KINDS (test/held-list.test.ts keeps them equal): each `need`, and Citadel's own notes. */

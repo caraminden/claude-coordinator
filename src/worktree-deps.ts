@@ -8,13 +8,16 @@
  * creating it, so the first turn waits for it; a failed or cut-off install leaves the minion held mail saying so.
  * A repo with no lockfile (Citadel's own) is a no-op.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { turnEnv } from './turn-launch.ts';
 
 const run = promisify(execFile);
+let running = 0;
+/** How many installs are under way now: the daily sweep leaves the cache alone while one is. */
+export const installsRunning = () => running;
 
 /** The shared npm cache, under the projects folder. */
 export const npmCacheDir = (dataDir: string) => join(dataDir, 'projects', '.build-cache', 'npm');
@@ -47,7 +50,16 @@ export type DepsResult = { installed: string[]; failed: { dir: string; why: stri
  * `npm` is the command before `ci` (tests swap in a fake); the env is a turn's, without Claude's own variables, since
  * the repo's install scripts run in it.
  */
-export async function installDeps(worktree: string, cacheDir: string, opts: { npm?: string[]; timeoutMs?: number } = {}): Promise<DepsResult> {
+export async function installDeps(worktree: string, cacheDir: string, opts: { npm?: string[]; timeoutMs?: number; graceMs?: number } = {}): Promise<DepsResult> {
+  running++;
+  try {
+    return await install(worktree, cacheDir, opts);
+  } finally {
+    running--;
+  }
+}
+
+async function install(worktree: string, cacheDir: string, opts: { npm?: string[]; timeoutMs?: number; graceMs?: number }): Promise<DepsResult> {
   const out: DepsResult = { installed: [], failed: [] };
   let dirs: string[];
   try {
@@ -67,14 +79,43 @@ export async function installDeps(worktree: string, cacheDir: string, opts: { np
       out.failed.push({ dir, why: 'not tried: the time for installs ran out' });
       continue;
     }
-    try {
-      await run(npm[0], [...npm.slice(1), 'ci', '--prefer-offline', '--no-audit', '--no-fund'], { cwd: join(worktree, dir), env, timeout: left, killSignal: 'SIGTERM', maxBuffer: 16 * 1024 * 1024 });
-      out.installed.push(dir);
-    } catch (err: any) {
-      out.failed.push({ dir, why: err.killed ? `cut off after ${Math.round((opts.timeoutMs ?? INSTALL_MS) / 1000)} s` : firstLine(err) });
-    }
+    const err = await ci(npm, join(worktree, dir), env, left, opts.graceMs ?? 10_000);
+    if (!err) out.installed.push(dir);
+    else out.failed.push({ dir, why: err === 'cut' ? `cut off after ${Math.round((opts.timeoutMs ?? INSTALL_MS) / 1000)} s` : firstLine(err) });
   }
   return out;
+}
+
+/**
+ * One `npm ci` in its own process group: past `ms` the whole group (npm, heavy-unit, the install scripts npm started)
+ * gets SIGTERM, and SIGKILL `graceMs` later, so a script that ignores TERM can't hold the minion's lane.
+ */
+function ci(npm: string[], cwd: string, env: Record<string, string>, ms: number, graceMs: number): Promise<'cut' | Error | null> {
+  return new Promise((resolve) => {
+    let cut = false;
+    let kill: NodeJS.Timeout | undefined;
+    // spawn, not execFile: Node 26's execFile leaves `detached` out, so the child would share the server's group.
+    const child = spawn(npm[0], [...npm.slice(1), 'ci', '--prefer-offline', '--no-audit', '--no-fund'], { cwd, env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (d) => void (stderr = (stderr + d).slice(-64 * 1024)));
+    const group = (sig: NodeJS.Signals) => {
+      try {
+        process.kill(-child.pid!, sig);
+      } catch {} // already gone
+    };
+    const stop = setTimeout(() => {
+      cut = true;
+      group('SIGTERM');
+      kill = setTimeout(() => group('SIGKILL'), graceMs);
+    }, ms);
+    const done = (err: Error | null) => {
+      clearTimeout(stop);
+      clearTimeout(kill);
+      resolve(cut ? 'cut' : err);
+    };
+    child.on('error', (err) => done(Object.assign(err, { stderr })));
+    child.on('close', (code, sig) => done(code === 0 ? null : Object.assign(new Error(`npm ci exited ${code ?? sig}`), { stderr })));
+  });
 }
 
 /** The held-mail note for a minion whose install failed, or null when nothing failed. */

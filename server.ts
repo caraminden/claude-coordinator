@@ -62,7 +62,7 @@ import { waitsFor } from './src/waits-readout.ts';
 import { followOrigins } from './src/scheme-repo.ts';
 import { makeMinion, type NewMinionSpec } from './src/new-minion.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
-import { depsNote, installDeps, NPM_CACHE_CAP, npmCacheDir } from './src/worktree-deps.ts';
+import { depsNote, installDeps, installsRunning, NPM_CACHE_CAP, npmCacheDir } from './src/worktree-deps.ts';
 import { ScheduledRuns } from './src/schedules.ts';
 import { HeldStarts } from './src/held-starts.ts';
 import { curatorTarget } from './src/memory-curator.ts';
@@ -897,11 +897,11 @@ if (!BOOT_CHECK && !PREVIEW) {
     // The shared Gradle build cache (#1153) under its cap.
     const t = await trimCache(gradleCacheDir(DATA_DIR), GRADLE_CACHE_CAP);
     if (t.removed) console.log(`Gradle build cache: removed ${t.removed} least recently used entries (${size(t.freed)}), ${size(t.left)} left.`);
-    // The shared npm cache (#1649): emptied once over its cap; the next install fills it again.
+    // The shared npm cache (#1649): emptied once over its cap, when no install is reading it; the next install fills it again.
     // shortcut: all or nothing, as npm's content store has no oldest-first trim; trim it by its index if refills start to cost.
     const npmCache = npmCacheDir(DATA_DIR);
     const npmSize = await diskUsage([npmCache]); // 0 before the first install made it
-    if (npmSize > NPM_CACHE_CAP) {
+    if (npmSize > NPM_CACHE_CAP && !installsRunning()) {
       await low(['rm', '-rf', '--one-file-system', '--', npmCache]);
       console.log(`npm cache: emptied it at ${size(npmSize)}, over its ${size(NPM_CACHE_CAP)} cap.`);
     }

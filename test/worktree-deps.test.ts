@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { depsNote, installDeps, lockfileDirs } from '../src/worktree-deps.ts';
-import { bootServer } from './helpers.ts';
+import { bootServer, jsonLines } from './helpers.ts';
 import { until } from './wait.ts';
 
 // A new minion's worktree gets its npm dependencies from the lockfile before its first turn (#1649). A fake npm stands in
@@ -22,18 +22,19 @@ fs.appendFileSync(dir + '/calls', JSON.stringify({ cwd: process.cwd(), args: pro
 const mode = fs.existsSync(dir + '/mode') ? fs.readFileSync(dir + '/mode', 'utf8').trim() : 'ok';
 if (mode === 'fail') { console.error('npm error code EBOOM'); console.error('npm error A complete log of this run can be found in: /x'); process.exit(1); }
 if (mode === 'hang') setInterval(() => {}, 1000);
+else if (mode === 'stubborn') {
+  // Ignores TERM, and an install script it started is still running.
+  const kid = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  fs.writeFileSync(dir + '/grandchild', String(kid.pid));
+  process.on('SIGTERM', () => {});
+  setInterval(() => {}, 1000);
+}
 else fs.mkdirSync('node_modules/left-pad', { recursive: true });
 `);
 chmodSync(join(fake, 'bin', 'npm'), 0o755);
 const npm = [join(fake, 'bin', 'npm')];
 const setMode = (m: string) => writeFileSync(join(fake, 'mode'), m);
-const calls = (): { cwd: string; args: string[]; cache: string | null; claude: string[] }[] => {
-  try {
-    return readFileSync(join(fake, 'calls'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  } catch {
-    return [];
-  }
-};
+const calls = (): { cwd: string; args: string[]; cache: string | null; claude: string[] }[] => jsonLines(join(fake, 'calls'));
 const clearCalls = () => rmSync(join(fake, 'calls'), { force: true });
 
 let repos = 0;
@@ -129,6 +130,24 @@ test('a hung install is cut off at the time limit, and what it never reached say
   assert.deepEqual(r.failed[1], { dir: 'b', why: 'not tried: the time for installs ran out' });
 });
 
+test('an install that ignores TERM is killed with its scripts, so the lane is freed', async () => {
+  setMode('stubborn');
+  rmSync(join(fake, 'grandchild'), { force: true });
+  const dir = repo({ '.gitignore': 'node_modules/\n', 'package-lock.json': LOCK });
+  const r = await installDeps(dir, cache, { npm, timeoutMs: 500, graceMs: 200 });
+  assert.match(r.failed[0].why, /^cut off after/);
+  const kid = Number(readFileSync(join(fake, 'grandchild'), 'utf8')); // raw-read-ok: a pid the fake wrote before it hung
+  const alive = () => {
+    try {
+      process.kill(kid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  await until('the install script it started is gone', () => !alive());
+});
+
 // Through the server: the first turn starts after the install, with node_modules there, and a failed install still
 // starts the turn, with held mail saying so. The fake claude logs whether node_modules was there and what it was told.
 test('a new minion\'s first turn waits for the install, and starts when it fails', async () => {
@@ -145,7 +164,7 @@ setInterval(() => {}, 1000);
   chmodSync(claude, 0o755);
   const code = repo({ '.gitignore': 'node_modules/\n', 'package.json': '{}', 'package-lock.json': LOCK });
   const srv = await bootServer({ root: home, env: { HOME: root, CLAUDE_BIN: claude, CITADEL_HEAVY_UNIT: '0', PATH: `${join(fake, 'bin')}:${process.env.PATH}` } });
-  const log = (): any[] => (existsSync(turns) ? readFileSync(turns, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  const log = (): any[] => jsonLines(turns);
   try {
     const scheme = await srv.call('/api/projects', { name: 'Deps', source: 'folder', folder: code });
     assert.equal(scheme.status, 201, JSON.stringify(scheme.data));

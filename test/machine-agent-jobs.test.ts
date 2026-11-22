@@ -286,7 +286,7 @@ test('a job runs, reports, and only what stays inside /out uploads; a symlink ou
   const r = runner();
   const msg = start();
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   const d = join(jobsDir, String(msg.id));
   assert.equal(readFileSync(join(d, 'in', 'clip.wav'), 'utf8'), `audio for ${msg.id}`);
   const run = podmanCalls().find(([cmd, ...a]) => cmd === 'run' && a.includes(`citadel-job-${msg.id}`));
@@ -308,9 +308,9 @@ test('a job runs, reports, and only what stays inside /out uploads; a symlink ou
   writeFileSync(join(out, 'half.part'), 'x');
   writeFileSync(join(out, 'huge.bin'), 'x'.repeat(100));
   writeFileSync(join(d, 'job.log'), '2026-11-17T10:00:00.000000000-08:00 stdout F loading model\n2026-11-17T10:00:01.000000000-08:00 stderr F done\n');
-  await until('a run-time report with GPU numbers', () => statesOf(msg.id).some((s: any) => s.state === 'running' && s.gpu_pct === 42 && s.vram_mb === 5120), 6000, statesTail);
+  await until('a run-time report with GPU numbers', () => statesOf(msg.id).some((s: any) => s.state === 'running' && s.gpu_pct === 42 && s.vram_mb === 5120), undefined, statesTail);
   exitContainer(msg.id, 0);
-  await until('done', () => lastState(msg.id)?.state === 'done', 6000, statesTail);
+  await until('done', () => lastState(msg.id)?.state === 'done', undefined, statesTail);
   const done = lastState(msg.id)!;
   assert.equal(done.exit_code, 0);
   assert.deepEqual([...app.uploads.keys()].filter((k) => k.startsWith(`${msg.id}/`)).sort(), [`${msg.id}/clip.json`, `${msg.id}/parts/one.txt`, `${msg.id}/same.json`]);
@@ -321,7 +321,7 @@ test('a job runs, reports, and only what stays inside /out uploads; a symlink ou
   assert.ok(statesOf(msg.id).some((s) => s.state === 'uploading'));
   assert.equal(container(msg.id).status, 'removed');
   // The app has the report before the runner has its answer, so the job leaves known() a moment after 'done' shows.
-  await until('the runner hears the app took its last report', () => !r.known().some((k: any) => k.id === msg.id), 6000, statesTail);
+  await until('the runner hears the app took its last report', () => !r.known().some((k: any) => k.id === msg.id), undefined, statesTail);
 });
 
 test('a result the app refused is reported with why, and its folder is listed for the owner, never deleted (MA3)', async () => {
@@ -330,14 +330,14 @@ test('a result the app refused is reported with why, and its folder is listed fo
   r.onLeftover = () => told++;
   const msg = start();
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   writeFileSync(join(jobsDir, String(msg.id), 'out', 'huge.bin'), 'x'.repeat(100));
   exitContainer(msg.id, 0);
-  await until('done', () => lastState(msg.id)?.state === 'done', 6000, statesTail);
+  await until('done', () => lastState(msg.id)?.state === 'done', undefined, statesTail);
   const huge = lastState(msg.id)!.outputs!.find((o) => o.path === 'huge.bin') as any;
   assert.equal(huge.uploaded, false);
   assert.match(huge.why ?? '', /413|cap/);
-  await until('the owner is told', () => told > 0, 6000, statesTail);
+  await until('the owner is told', () => told > 0, undefined, statesTail);
   const lines = r.leftover();
   assert.equal(lines.length, 1);
   assert.match(lines[0], new RegExp(`\\b${msg.id}\\b`));
@@ -357,7 +357,7 @@ test('a failed input check fails the job and deletes the file', async () => {
   const msg = start();
   msg.inputs[0].sha256 = 'b'.repeat(64);
   await r.handle(msg);
-  await until('failed', () => lastState(msg.id)?.state === 'failed', 6000, statesTail);
+  await until('failed', () => lastState(msg.id)?.state === 'failed', undefined, statesTail);
   assert.match(lastState(msg.id)!.error!, /doesn't match its sha256/);
   assert.deepEqual(readdirSync(join(jobsDir, String(msg.id), 'in')), []);
   assert.ok(!podmanCalls().some(([cmd, ...a]) => cmd === 'run' && a.includes(`citadel-job-${msg.id}`)));
@@ -367,9 +367,9 @@ test('a non-zero exit fails the job with its code', async () => {
   const r = runner();
   const msg = start();
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   exitContainer(msg.id, 3);
-  await until('failed', () => lastState(msg.id)?.state === 'failed', 6000, statesTail);
+  await until('failed', () => lastState(msg.id)?.state === 'failed', undefined, statesTail);
   assert.equal(lastState(msg.id)!.exit_code, 3);
   assert.match(lastState(msg.id)!.error!, /code 3/);
 });
@@ -378,7 +378,7 @@ test('podman run failing fails the job', async () => {
   const r = runner();
   const msg = start({}, { image: `ghcr.io/example/fail-run@sha256:${'c'.repeat(64)}` });
   await r.handle(msg);
-  await until('failed', () => lastState(msg.id)?.state === 'failed', 6000, statesTail);
+  await until('failed', () => lastState(msg.id)?.state === 'failed', undefined, statesTail);
   assert.match(lastState(msg.id)!.error!, /podman run failed: Error: image not known/);
 });
 
@@ -388,9 +388,9 @@ test('the time limit stops a job, and paused time does not count', async () => {
   const r = runner();
   const msg = start({ limit_s: 1 });
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   await r.handle({ type: 'job.pause', id: msg.id });
-  await until('paused', () => lastState(msg.id)?.state === 'paused', 6000, statesTail);
+  await until('paused', () => lastState(msg.id)?.state === 'paused', undefined, statesTail);
   assert.equal(container(msg.id).status, 'paused');
   assert.equal(lastState(msg.id)!.held_vram_mb, 5120);
   // Paused for well over the whole limit: still paused.
@@ -398,7 +398,7 @@ test('the time limit stops a job, and paused time does not count', async () => {
   assert.equal(lastState(msg.id)!.state, 'paused');
   await r.handle({ type: 'job.resume', id: msg.id });
   assert.equal(container(msg.id).status, 'running');
-  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', 6000, statesTail);
+  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', undefined, statesTail);
   // Its running time reached the limit; the 2.5 s paused would have made it 3 or more.
   const runS = lastState(msg.id)!.run_s;
   assert.ok(runS >= 1 && runS <= 2, `run_s ${runS}`);
@@ -410,34 +410,34 @@ test('a resumable job pauses by stopping, frees its container, and resumes with 
   const r = runner();
   const msg = start({}, { resumable: true });
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   writeFileSync(join(jobsDir, String(msg.id), 'state', 'checkpoint'), '41%');
   await r.handle({ type: 'job.pause', id: msg.id });
-  await until('paused', () => lastState(msg.id)?.state === 'paused', 6000, statesTail);
+  await until('paused', () => lastState(msg.id)?.state === 'paused', undefined, statesTail);
   const name = `citadel-job-${msg.id}`;
   assert.ok(podmanCalls().some((c) => c.join(' ') === `stop -t 1 ${name}`));
   assert.equal(container(msg.id).status, 'removed');
   assert.equal(lastState(msg.id)!.held_vram_mb, undefined);
   await r.handle({ type: 'job.resume', id: msg.id });
-  await until('running again', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running again', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   const runs = podmanCalls().filter(([cmd, ...a]) => cmd === 'run' && a.includes(name));
   assert.equal(runs.length, 2);
   assert.ok(!runs[0].includes('CITADEL_JOB_RESUME=1') && runs[1].includes('CITADEL_JOB_RESUME=1'));
   assert.equal(readFileSync(join(jobsDir, String(msg.id), 'state', 'checkpoint'), 'utf8'), '41%');
   await r.handle({ type: 'job.stop', id: msg.id });
-  await until('stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });
 
 test('a stop while paused ends the job and still uploads /out', async () => {
   const r = runner();
   const msg = start({}, { resumable: true });
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   writeFileSync(join(jobsDir, String(msg.id), 'out', 'partial.txt'), 'so far');
   await r.handle({ type: 'job.pause', id: msg.id });
-  await until('paused', () => lastState(msg.id)?.state === 'paused', 6000, statesTail);
+  await until('paused', () => lastState(msg.id)?.state === 'paused', undefined, statesTail);
   await r.handle({ type: 'job.stop', id: msg.id });
-  await until('stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
   assert.equal(app.uploads.get(`${msg.id}/partial.txt`)?.toString(), 'so far');
 });
 
@@ -445,14 +445,14 @@ test('the app saying it ended the job stops it here', async () => {
   const r = runner();
   const msg = start();
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   app.stateStatus = 409;
   try {
-    await until('removed', () => container(msg.id)?.status === 'removed', 6000, statesTail);
+    await until('removed', () => container(msg.id)?.status === 'removed', undefined, statesTail);
   } finally {
     app.stateStatus = 202;
   }
-  await until('reported stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+  await until('reported stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });
 
 // ---------- restarts ----------
@@ -461,7 +461,7 @@ test('a new agent re-attaches to a running job, and fails one whose container is
   const first = runner();
   const msg = start();
   await first.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   first.close();
   // A job the machine lost while the agent was down.
   const lost = start();
@@ -473,11 +473,11 @@ test('a new agent re-attaches to a running job, and fails one whose container is
   await second.ready;
   assert.deepEqual(second.known().filter((k: any) => [msg.id, lost.id].includes(k.id)).sort((a: any, b: any) => a.id - b.id), [{ id: msg.id, state: 'running' }, { id: lost.id, state: 'running' }]);
   await second.connected();
-  await until('the lost one failed', () => lastState(lost.id)?.state === 'failed', 6000, statesTail);
+  await until('the lost one failed', () => lastState(lost.id)?.state === 'failed', undefined, statesTail);
   assert.match(lastState(lost.id)!.error!, /machine restarted/);
   writeFileSync(join(jobsDir, String(msg.id), 'out', 'after.txt'), 'made while the agent was away');
   exitContainer(msg.id, 0);
-  await until('done', () => lastState(msg.id)?.state === 'done', 6000, statesTail);
+  await until('done', () => lastState(msg.id)?.state === 'done', undefined, statesTail);
   assert.equal(app.uploads.get(`${msg.id}/after.txt`)?.toString(), 'made while the agent was away');
 });
 
@@ -485,12 +485,12 @@ test('a job that ended while the agent was down is finished on connect', async (
   const first = runner();
   const msg = start();
   await first.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   first.close();
   exitContainer(msg.id, 0);
   const second = runner();
   await second.connected();
-  await until('done', () => lastState(msg.id)?.state === 'done', 6000, statesTail);
+  await until('done', () => lastState(msg.id)?.state === 'done', undefined, statesTail);
 });
 
 // ---------- review fixes ----------
@@ -499,15 +499,15 @@ test('a container that will not go keeps the job running and /out unread, then s
   const r = runner();
   const msg = start({ limit_s: 1 });
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   writeFileSync(join(jobsDir, String(msg.id), 'out', 'result.txt'), 'done');
   stickContainer(msg.id, true);
-  await until('rm tried twice', () => podmanCalls().filter((c) => c.join(' ') === `rm -f citadel-job-${msg.id}`).length >= 2, 4000, statesTail);
+  await until('rm tried twice', () => podmanCalls().filter((c) => c.join(' ') === `rm -f citadel-job-${msg.id}`).length >= 2, undefined, statesTail);
   assert.equal(container(msg.id).status, 'running');
   assert.equal(lastState(msg.id)!.state, 'running');
   assert.ok(!app.uploads.has(`${msg.id}/result.txt`), '/out was read while the container was still there');
   stickContainer(msg.id, false);
-  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', 6000, statesTail);
+  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', undefined, statesTail);
   assert.equal(app.uploads.get(`${msg.id}/result.txt`)?.toString(), 'done');
 });
 
@@ -516,14 +516,14 @@ test('a failed pause leaves the job running, and its time limit still counts', a
   const r = runner(block(), (l) => lines.push(l));
   const msg = start({ limit_s: 1 }, { resumable: true });
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   stickContainer(msg.id, true);
   await r.handle({ type: 'job.pause', id: msg.id });
   // Waits for the runner to hear the stop failed, not for the stop in argv.log: the fake logs its argv before it reads
   // the stuck flag, so un-sticking on the log line let a slow stop succeed and really pause the job (#1208).
-  await until('the stop failed', () => lines.some((l) => l.startsWith(`Job ${msg.id}: podman stop failed, still running`)), 6000, statesTail);
+  await until('the stop failed', () => lines.some((l) => l.startsWith(`Job ${msg.id}: podman stop failed, still running`)), undefined, statesTail);
   stickContainer(msg.id, false);
-  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', 4000, statesTail);
+  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', undefined, statesTail);
   assert.match(lastState(msg.id)!.error!, /time limit/);
 });
 
@@ -532,9 +532,9 @@ test('with the block taken away, a running job still ticks and stops at its limi
   const r = runner(block(), (l) => lines.push(l));
   const msg = start({ limit_s: 1 });
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   await r.setBlock(null);
-  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', 6000, statesTail);
+  await until('stopped at the limit', () => lastState(msg.id)?.state === 'failed', undefined, statesTail);
   assert.match(lastState(msg.id)!.error!, /time limit/);
   assert.ok(!lines.some((l) => /Cannot read|TypeError/.test(l)), lines.join('\n'));
 });
@@ -544,9 +544,9 @@ test('a running job that fills the jobs folder past its cap is stopped', async (
   const r = runner(block({ dir, max_disk_gb: 4096 / 1024 ** 3 }));
   const msg = start();
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   writeFileSync(join(dir, String(msg.id), 'out', 'big.bin'), Buffer.alloc(8192));
-  await until('stopped', () => lastState(msg.id)?.state === 'failed', 4000, statesTail);
+  await until('stopped', () => lastState(msg.id)?.state === 'failed', undefined, statesTail);
   assert.match(lastState(msg.id)!.error!, /went over/);
 });
 
@@ -575,19 +575,19 @@ test('an upload the app answers with a 5xx is tried again without a reconnect', 
   const r = runner();
   const msg = start();
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   writeFileSync(join(jobsDir, String(msg.id), 'out', 'result.txt'), 'words');
   app.uploadStatus = 503;
   try {
     exitContainer(msg.id, 0);
-    await until('uploading', () => lastState(msg.id)?.state === 'uploading', 6000, statesTail);
+    await until('uploading', () => lastState(msg.id)?.state === 'uploading', undefined, statesTail);
     const before = app.rejected;
-    await until('a second rejected upload attempt', () => app.rejected >= before + 2, 6000, statesTail);
+    await until('a second rejected upload attempt', () => app.rejected >= before + 2, undefined, statesTail);
     assert.notEqual(lastState(msg.id)!.state, 'done');
   } finally {
     app.uploadStatus = 201;
   }
-  await until('done', () => lastState(msg.id)?.state === 'done', 4000, statesTail);
+  await until('done', () => lastState(msg.id)?.state === 'done', undefined, statesTail);
   assert.equal(app.uploads.get(`${msg.id}/result.txt`)?.toString(), 'words');
 });
 
@@ -598,26 +598,26 @@ test('an input the app answers with a 5xx is fetched again', async () => {
   app.inputs.delete(`${msg.id}/clip.wav`);
   inputFlaky.set(`${msg.id}/clip.wav`, { left: 1, data });
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 8000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   assert.equal(readFileSync(join(jobsDir, String(msg.id), 'in', 'clip.wav')).toString(), data.toString());
   // The GPU slot is free for the next test's runner, which reads the same jobs folder.
   await r.handle({ type: 'job.stop', id: msg.id });
-  await until('stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });
 
 test('podman wait failing while the container still runs does not end the job', async () => {
   const r = runner();
   const msg = start();
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   setBox(msg.id, { status: 'running', waitFails: true });
   // One wait runs at a time and the failing one takes the flag down, so a second wait with the flag down is the new
   // attempt. Clearing the flag from here raced the fake: a wait logs its argv before it reads the flag.
   const waits = () => podmanCalls().filter((c) => c.join(' ') === `wait citadel-job-${msg.id}`).length;
-  await until('another wait attempt after the failed one', () => container(msg.id).waitFails === false && waits() >= 2, 6000, statesTail);
+  await until('another wait attempt after the failed one', () => container(msg.id).waitFails === false && waits() >= 2, undefined, statesTail);
   assert.equal(lastState(msg.id)!.state, 'running');
   exitContainer(msg.id, 0);
-  await until('done', () => lastState(msg.id)?.state === 'done', 6000, statesTail);
+  await until('done', () => lastState(msg.id)?.state === 'done', undefined, statesTail);
 });
 
 test('a pause asked while the job starts pauses it once it runs (MA2)', async () => {
@@ -626,30 +626,30 @@ test('a pause asked while the job starts pauses it once it runs (MA2)', async ()
   const started = r.handle(msg);
   await r.handle({ type: 'job.pause', id: msg.id });
   await started;
-  await until('paused', () => lastState(msg.id)?.state === 'paused', 6000, statesTail);
+  await until('paused', () => lastState(msg.id)?.state === 'paused', undefined, statesTail);
   assert.equal(container(msg.id).status, 'paused');
   await r.handle({ type: 'job.stop', id: msg.id });
-  await until('stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });
 
 test('a resume during a pause\'s grace runs the job again once the pause ends (MA9)', async () => {
   const r = runner();
   const msg = start({}, { resumable: true });
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   await r.handle({ type: 'job.pause', id: msg.id });
   await r.handle({ type: 'job.resume', id: msg.id });
-  await until('paused, then running again', () => statesOf(msg.id).some((s) => s.state === 'paused') && lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('paused, then running again', () => statesOf(msg.id).some((s) => s.state === 'paused') && lastState(msg.id)?.state === 'running', undefined, statesTail);
   assert.equal(container(msg.id).status, 'running');
   await r.handle({ type: 'job.stop', id: msg.id });
-  await until('stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });
 
 test('a failed podman pause is reported to the app, not only logged (MA2)', async () => {
   const r = runner();
   const msg = start();
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   stickContainer(msg.id, true);
   await r.handle({ type: 'job.pause', id: msg.id });
   const said = lastState(msg.id) as any;
@@ -657,18 +657,18 @@ test('a failed podman pause is reported to the app, not only logged (MA2)', asyn
   assert.match(said.pause_failed ?? '', /podman pause failed/);
   stickContainer(msg.id, false);
   await r.handle({ type: 'job.stop', id: msg.id });
-  await until('stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });
 
 test('a final report the app refuses as too big is not marked sent (MA7)', async () => {
   const r = runner();
   const msg = start();
   await r.handle(msg);
-  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await until('running', () => lastState(msg.id)?.state === 'running', undefined, statesTail);
   app.stateStatus = 413;
   try {
     exitContainer(msg.id, 0);
-    await until('the runner tried its final report', () => statesOf(msg.id).filter((s) => s.state === 'done').length >= 2, 6000, statesTail);
+    await until('the runner tried its final report', () => statesOf(msg.id).filter((s) => s.state === 'done').length >= 2, undefined, statesTail);
     const tries = statesOf(msg.id).filter((s) => s.state === 'done');
     assert.equal((tries.at(-1) as any).log_tail, '', 'the second try leaves the log tail out');
     assert.equal(r.jobs.get(String(msg.id))?.final_sent, false);

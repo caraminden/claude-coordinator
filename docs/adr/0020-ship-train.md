@@ -246,7 +246,8 @@ run.
 
 ## The light check, for a ship the busy check runner sends away (#1620)
 
-Cara, 2026-11-22, on #1620's card: "Fill #1567's gap". Replaying Nov 21-22's 229 ships through the own check's gates
+Cara, 2026-11-22, on #1620's card: "Fill #1567's gap"; then, asked whether it may run on her desktop beside a land's run
+and an own check (past the own check's one-check gate), 12:47 PM PST: "Run it, niced". Replaying Nov 21-22's 229 ships through the own check's gates
 with its 775 s run: 91 were alone in line, 42 got a check, and 96 were sent to the line unchecked because the check
 runner was busy. Those 96 are the gap.
 

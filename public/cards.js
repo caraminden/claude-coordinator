@@ -465,6 +465,9 @@ export function questionCard(ticketId, card, opts = {}) {
   atts.onChange = () => refresh();
   const sendBtn = h('button', { type: 'button', class: 'small', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });
+  // How far the picks are, on a card with more than one question: Send stays off until every one has an answer, and
+  // the later ones can be below the fold (a merged 8-question card).
+  const progress = h('span', { class: 'muted progress', 'aria-live': 'polite' });
   // A machine job's go card: the job's card in the chat links here (#859).
   const el = h('div', { class: 'qcard', ...(card.job ? { 'data-go-job': card.job } : {}) });
   let answered = false;
@@ -476,6 +479,8 @@ export function questionCard(ticketId, card, opts = {}) {
       for (const btn of el.querySelectorAll(`[data-q="${i}"] .opt`)) btn.classList.toggle('picked', picks[i].selected.has(btn.dataset.label));
     }
     sendBtn.disabled = answered || !ready();
+    const done = picks.filter((p) => p.selected.size || p.other.trim()).length;
+    progress.textContent = answered || card.questions.length < 2 || atts.items.some((i) => i.data || i.upload?.name) ? '' : done === picks.length ? 'All answered' : `${done} of ${picks.length} answered`;
     if (pictures) refreshViewerBar();
   };
   // Shown as answered at once; the server's echo (markAnswered) confirms it, and a refusal opens the card again with the picks kept.
@@ -565,7 +570,7 @@ export function questionCard(ticketId, card, opts = {}) {
     // A picked option's button unpicks it in place, like a checkbox (Cara, 2026-11-14:
     // "Multi select image cards cant be unselected"); its thumbnail still only looks.
     const pickBtn = (o, thumb) => h('button', {
-      type: 'button', class: `opt${thumb ? ' pic' : ''}`, 'data-label': o.label,
+      type: 'button', class: `opt${thumb ? ' pic' : ''}${o.recommended ? ' suggested' : ''}`, 'data-label': o.label,
       onclick: (e) => {
         if (e.target.closest?.('pre')) return; // a command in the description: Copy and selecting it don't pick
         const unpick = !answered && picks[i].selected.has(o.label);
@@ -592,7 +597,7 @@ export function questionCard(ticketId, card, opts = {}) {
   picker.addEventListener('change', () => { atts.add(picker.files); picker.value = ''; });
   const attach = h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() }, h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach'));
   attach.hidden = !!card.job; // a machine job's go card answers with its pick only
-  const row = h('div', { class: 'row' }, attach, status, h('span', { class: 'spacer' }), sendBtn);
+  const row = h('div', { class: 'row' }, attach, status, h('span', { class: 'spacer' }), progress, sendBtn);
   el.addEventListener('paste', (e) => {
     const files = e.target.closest?.('.other') ? pastedFiles(e.clipboardData) : [];
     if (answered || !files.length) return;

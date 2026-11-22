@@ -20,6 +20,9 @@ test('lets the reads through: files, searches and the read-only Citadel tools', 
   }
   // artifact_data reads a page's saved picks, but given entries it sets them.
   assert.match(sideGuard({ tool_name: 'mcp__thread__artifact_data', tool_input: { path: 'a.html', entries: { k: 1 } } }) ?? '', /read-only/);
+  // ci_runners lists freely, but add and remove change the scheme's runners.
+  assert.equal(sideGuard({ tool_name: 'mcp__thread__ci_runners', tool_input: { op: 'list' } }), null);
+  for (const op of ['add', 'remove']) assert.match(sideGuard({ tool_name: 'mcp__thread__ci_runners', tool_input: { op } }) ?? '', /read-only/);
 });
 
 test('lets an investigation run: git, gh, logs, processes and the database read-only', () => {

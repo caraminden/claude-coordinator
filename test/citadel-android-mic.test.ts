@@ -110,6 +110,19 @@ test('inject streams AudioPackets: the format on the first only, the audio loope
   } finally { await emu.close(); }
 });
 
+test('inject sends whole 16-bit samples at odd rates: every packet an even byte count', async () => {
+  for (const rate of [22050, 11025]) {
+    const emu = await emulator(0);
+    try {
+      const data = Buffer.alloc(rate * 2 / 5); // 0.2 s mono
+      await inject({ rate, channels: 1, data }, 0, emu.port);
+      const sizes = messages(emu.got.body).map((m) => m.get(0x1a)?.length ?? 0);
+      assert.ok(sizes.every((n) => n % 2 === 0), `${rate} Hz sent odd packet sizes: ${sizes.join(',')}`);
+      assert.equal(sizes.reduce((a, b) => a + b, 0), data.length);
+    } finally { await emu.close(); }
+  }
+});
+
 test('inject fails with the emulator\'s reason, or when nothing listens', async () => {
   const emu = await emulator(3);
   try {

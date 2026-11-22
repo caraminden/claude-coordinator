@@ -48,8 +48,8 @@ export function sideGuard(input: { tool_name?: unknown; tool_input?: any }): str
   const tool = typeof input?.tool_name === 'string' ? input.tool_name : '';
   if (READ_TOOLS.has(tool)) return null;
   const mcp = /^mcp__(thread|coordinator)__([a-z_]+)$/.exec(tool);
-  // artifact_data reads, unless it's given entries to set.
-  if (mcp && READ_MCP.has(mcp[2]) && !(mcp[2] === 'artifact_data' && input.tool_input?.entries)) return null;
+  // artifact_data reads, unless it's given entries to set; ci_runners lists, but add and remove change the runners.
+  if (mcp && READ_MCP.has(mcp[2]) && !(mcp[2] === 'artifact_data' && input.tool_input?.entries) && !(mcp[2] === 'ci_runners' && input.tool_input?.op !== 'list')) return null;
   if (tool === 'Bash') {
     const command = typeof input.tool_input?.command === 'string' ? input.tool_input.command : '';
     if (input.tool_input?.run_in_background) return `${READ_ONLY}, and it runs nothing in the background.`;

@@ -95,7 +95,7 @@ export function inject(pcm: Pcm, seconds = 0, port = GRPC_PORT, stop?: AbortSign
     stop?.addEventListener('abort', () => req.close());
     req.on('close', () => done(status === '0' || stop?.aborted ? undefined : new Error(`the emulator refused the audio: grpc-status ${status || 'none'} ${message}`.trim())));
     req.resume();
-    const step = (pcm.rate / 20) * 2 * pcm.channels; // 50 ms, well under the emulator's ~300 ms buffer
+    const step = Math.round(pcm.rate / 20) * 2 * pcm.channels; // 50 ms, well under the emulator's ~300 ms buffer
     const total = seconds > 0 ? Math.round(seconds * pcm.rate) * 2 * pcm.channels : pcm.data.length;
     (async () => {
       for (let sent = 0; sent < total && !stop?.aborted; ) {

@@ -513,6 +513,7 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
       // A run nobody waits for any more is cancelled, so it doesn't keep the one runner from the next landing.
       if (extra.FAKE_CI === 'queued' || extra.FAKE_CI === 'running') assert.match(c.calls(), /-X POST repos\/.*\/actions\/runs\/7\/cancel/);
       if (extra.LAND_CI === '0') assert.equal(c.calls(), '', 'GitHub is never asked');
+      if (extra.FAKE_CI_FAIL_AFTER) assert.match(readFileSync(join(r.live, '.git', 'cc-deploy', 'gh-calls'), 'utf8'), /^\d+ ticket\/1-x api repos\/\S+\/actions\/runs/m, 'each gh call is counted with its landing (#1655)');
     });
   }
 });

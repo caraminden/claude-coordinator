@@ -628,6 +628,9 @@ if [ -z "$resumed" ]; then
       early_check main "waiting in line"
     }
     # A ship's own check (#1567): with others in line and the check runner free, its CI runs first on that runner.
+    # Every gh call of any landing is counted in $state/gh-calls (epoch seconds, the landing's branch and the endpoint, no tokens), so
+    # the next time the 5,000 an hour run out, `cut -d" " -f2 "$state/gh-calls" | sort | uniq -c` says which landing asked how often (#1655).
+    gh_count() { [ "$1" != gh ] || printf '%s %s %s\n' "$(date +%s)" "${branch:-?}" "${2:-} ${3:-}" >>"$state/gh-calls" 2>/dev/null || true; }
     [ "$mode" != land ] || [ ! -f "$tools/own-check.sh" ] || { . "$tools/own-check.sh"; own_check; }
     queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
     unset -f queue_wait_check
@@ -1026,9 +1029,6 @@ CI_RERUN_STEP='rerun failed files alone' CI_RERUN=${LAND_CI_RERUN:-180}
 # flake, a cut-off or a known flake. At CI_LIMIT the run gets the step's time more (CI_BURN at most), once.
 CI_BURN_STEP='burn in new and changed tests' CI_BURN=${LAND_CI_BURN:-180} CI_BASE_REF=land-base/$branch
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
-# Every gh call of this landing is counted in $state/gh-calls (epoch seconds and the endpoint, no tokens), so the next time
-# the 5,000 an hour run out, `cat run/landings/*/gh-calls` says which landing asked how often (#1655).
-gh_count() { [ "$1" != gh ] || printf '%s %s\n' "$(date +%s)" "${2:-} ${3:-}" >>"$state/gh-calls" 2>/dev/null || true; }
 hub() { gh_count "$@"; env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&-; }
 ci_fail_n=0 ci_fail_at=''
 ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why='' burn_red='' burned=''
@@ -1227,7 +1227,7 @@ ci_gate() {
     why='' down=''
     if [ -n "$ci_taken" ]; then
       ran=$((SECONDS - taken_at))
-      if [ "$ran" -ge "$limit" ] && [ "$ci_fail_n" -gt 0 ]; then
+      if [ "$ran" -ge "$limit" ] && [ "$ci_fail_n" -gt 1 ]; then
         why="GitHub didn't answer since $ci_fail_at ($ci_fail_n polls failed in a row)$(ci_said), so it isn't known whether CI finished${ci_url:+ ($ci_url)}" down=1
       elif [ "$ran" -ge "$limit" ]; then
         if [ -z "$burn_wait" ] && ci_burned; then

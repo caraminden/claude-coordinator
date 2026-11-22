@@ -126,9 +126,10 @@ test('every file CLAUDE.md lists as high risk by file is covered by a rule of th
 
 // #1622: replay the map gaps behind the red ship-train runs of Nov 21-22 (reports/why-green-goes-red-2026-11-22.md). Each row:
 // the ship, a path its commits changed, and the test CI then failed. Found from the retro log's "ship train suspects" lines
-// and each ship's commits on main. Only rows a name rule or the boot-check rule can catch are here; the rest of that day's
-// 43 culprit pairs (closed-cleanup from runner.ts, background-jobs from server.ts ...) are coupling no name shows, which
-// an import-graph rule would catch only by picking 320-377 of ~550 tests (ruled out).
+// and each ship's commits on main. Rows a name rule, the boot-check rule or a cheap explicit line catches are here (the report's 15
+// distinct breaks were not listed by the report; this is rebuilt from the retro log). The rest of that day's 43 culprit pairs
+// (judges, one-until, sync-calls, status-page, db-writer, 1522's boot-check from src/desktop-feed.ts ...) are coupling no
+// name or line shows: an import-graph rule would catch them only by picking 320-377 of ~550 tests (ruled out).
 const BREAKS: [ship: string, changed: string, failed: string][] = [
   ['#1532', 'public/base.js', 'test/boot-check.test.ts'],
   ['#1532', 'public/inbox.js', 'test/boot-check.test.ts'],
@@ -137,6 +138,9 @@ const BREAKS: [ship: string, changed: string, failed: string][] = [
   ['#1590', 'src/front.ts', 'test/front.test.ts'],
   ['#1543', 'public/schemes.js', 'test/schemes.test.js'],
   ['#1607', 'src/ci-health.ts', 'test/ci-health.test.ts'],
+  ['#1452', 'src/runner.ts', 'test/closed-cleanup.test.ts'],
+  ['#1464', 'src/runner.ts', 'test/closed-cleanup.test.ts'],
+  ['#1364', 'src/runner.ts', 'test/background-jobs.test.ts'],
 ];
 test('each replayed break picks the test that failed', () => {
   for (const [ship, changed, failed] of BREAKS) assert.ok(lines([changed]).run.some((r) => r.test === failed), `${ship}: ${changed} must pick ${failed}`);

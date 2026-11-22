@@ -33,7 +33,8 @@ src/turn-supervisor.mjs: test/turn-supervisor.test.ts
 src/supervisor-client.ts: test/turn-supervisor.test.ts
 src/turn-run.mjs: test/turn-supervisor.test.ts test/steer.test.ts test/turn-survives.test.ts
 src/turn-wrapper.mjs: test/steer.test.ts test/turn-survives.test.ts test/claude-container.test.ts
-src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts
+# closed-cleanup and background-jobs broke ships #1449-#1464 and #1364-#1383 (#1622); each runs in about 1 s.
+src/runner.ts: test/pinned-mcp.test.ts test/turn-person-env.test.ts test/turn-asker.test.ts test/closed-cleanup.test.ts test/background-jobs.test.ts
 
 # The server boots from server.ts, src/ and public/ alone (tests and previews copy only those).
 server.ts: test/boot-imports.test.ts

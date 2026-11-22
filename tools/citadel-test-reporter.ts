@@ -75,7 +75,7 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
       : `${failed ? '✖' : '✔'} ${counts} in ${((total?.duration_ms ?? 0) / 1000).toFixed(1)} s\n`;
     // tools/citadel-test reads the failed files from here, for its hint on a red (#1650); nothing about the summary changes.
     if (process.env.CITADEL_TEST_FAILED_FILE && !still) {
-      try { appendFileSync(process.env.CITADEL_TEST_FAILED_FILE, [...new Set(failures.map((f) => rel(f.file)))].map((f) => `${f}\n`).join('')); } catch {}
+      try { appendFileSync(process.env.CITADEL_TEST_FAILED_FILE, [...new Set(failures.map((f) => relative(process.env.CITADEL_TEST_ROOT ?? process.cwd(), f.file)))].map((f) => `${f}\n`).join('')); } catch {}
     }
     for (const f of failures.slice(0, DETAILED)) {
       // A file that failed outside any test (it threw while loading, or its process died): what it printed says why.

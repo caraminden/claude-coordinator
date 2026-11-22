@@ -78,7 +78,7 @@ if [[ $conc =~ ^[1-9][0-9]*$ ]]; then
   [ -n "${CITADEL_TEST_CONCURRENCY:-}" ] || [ "$conc" -ge $((($(nproc 2>/dev/null || echo 2) + 1) / 2)) ] || say "memory room is short ($("$root/tools/mem-room" mb) MB free for heavy work): running $conc worker(s) at a time"
 fi
 log=${TMPDIR:-/tmp}/citadel-test.log
-err=$(mktemp) out=$(mktemp) failed=$(mktemp); export CITADEL_TEST_FAILED_FILE=$failed
+err=$(mktemp) out=$(mktemp) failed=$(mktemp); export CITADEL_TEST_FAILED_FILE=$failed CITADEL_TEST_ROOT=$root
 trap 'rm -f "$err" "$out" "$failed"' EXIT
 start=$SECONDS
 load0=$(cut -d' ' -f1 "${CITADEL_TEST_LOADAVG:-/proc/loadavg}" 2>/dev/null)
@@ -125,10 +125,10 @@ echo "full output: $log"
 # box is overloaded, and to rerun it alone once"): tools/known-flakes.ts's answer and the load during the run. Text only: the exit
 # code is the tests' own, and nothing reruns. A broken test (red in 20%+ of recent runs) is said broken, never a flake.
 if [ $status -ne 0 ] && [ $status -ne 124 ] && [ $status -ne 137 ] && [ -s "$failed" ]; then
-  load1=$(cut -d' ' -f1 "${CITADEL_TEST_LOADAVG:-/proc/loadavg}" 2>/dev/null)
   cores=${CITADEL_TEST_CORES:-$(nproc 2>/dev/null || echo 1)}
-  load=$(awk -v a="${load0:-0}" -v b="${load1:-0}" 'BEGIN { print (a > b ? a : b) }')
-  busy=; awk -v l="$load" -v c="$cores" 'BEGIN { exit !(l >= c) }' && busy="load was $load on $cores cores during the run"
+  # The load when the run started: the end's 1-minute average is mostly the run's own workers, which would blame the box for them.
+  load=${load0:-0}
+  busy=; awk -v l="$load" -v c="$cores" 'BEGIN { exit !(l >= c) }' && busy="load was $load on $cores cores when the run started"
   mapfile -t red < <(sort -u "$failed")
   verdicts=$(LAND_FLAKE_DB=${LAND_FLAKE_DB:-$HOME/.local/share/claude-coordinator/coordinator.db} "$root/tools/citadel-node" --no-warnings "$root/tools/known-flakes.ts" "$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" "${red[@]}" 2>/dev/null) || true
   hints=

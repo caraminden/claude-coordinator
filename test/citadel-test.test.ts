@@ -213,7 +213,7 @@ test('a red on a loaded box says the load, with or without a known flake', async
   const f = red();
   const r = await hintRun(f, [], '12.40', '8');
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /: load was 12\.40 on 8 cores during the run\. Rerun this file alone once; a green rerun is needed/);
+  assert.match(r.out, /: load was 12.40 on 8 cores when the run started\. Rerun this file alone once; a green rerun is needed/);
   assert.doesNotMatch(r.out, /known flake/);
 });
 

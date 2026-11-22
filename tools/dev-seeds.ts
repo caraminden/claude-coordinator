@@ -776,7 +776,7 @@ mock.boards('#takes', { boards: [
       o.put('note', { text: 'Cleaned up 4 worktrees today, 504 MiB freed', detail: 'ticket/1001-a  120 MiB\nticket/1002-b  384 MiB', everyone: true });
       o.put('note', { text: '📋 Taskmaster updated the Citadel-wide instructions', everyone: true });
       const opts = [{ label: 'Wait for the desktop', recommended: true }, { label: 'Run on perigee' }];
-      o.put('question', { id: hex(), everyone: true, reply: 'The desktop runner is offline. To bring it back, open Windows PowerShell on the desktop and run:\n\n```powershell\nStart-Service citadel-runner\nGet-Service citadel-runner\n```\n\nThen tell me whether it shows Running.', questions: [{ question: 'Hold lands until the desktop runner is back?', header: 'CI', multiSelect: false, options: opts }] });
+      o.put('question', { id: hex(), everyone: true, reply: 'The desktop runner is offline. It stopped answering after the last Windows update, and the queue behind it has grown to a dozen runs, so every ship now falls back to perigee and waits its turn there. The service is set to start by itself, but the update turned it off. Nothing is lost: the queued runs start again as soon as it answers. To bring it back, open Windows PowerShell on the desktop and run:\n\n```powershell\nStart-Service citadel-runner\nGet-Service citadel-runner\n```\n\nThen tell me whether it shows Running.', questions: [{ question: 'Hold lands until the desktop runner is back?', header: 'CI', multiSelect: false, options: opts }] });
       return `#/p/${c.project.id}`;
     },
   },

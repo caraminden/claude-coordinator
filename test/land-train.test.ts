@@ -215,8 +215,13 @@ test('a red train with two confirmed causes and a failure no ship can be pinned 
 
 test('a refilled train red again on the same test: the guess was wrong, so the held suspect goes back in line unrefused and the bisect finds the ship', async () => {
   // Ship 4 touched the failing test (which passes alone on perigee), but ship 5 is what turns CI red.
-  const l = await line([{}, {}, {}, { change: ['test/real.test.ts', '// x\n'] }, { change: ['red.txt', 'red\n'] }, {}, {}], { FAKE_RED_PATH: 'red.txt', LAND_TRAIN_MAX: '3' });
-  const done = await l.go();
+  // Ship 2's run stays in progress until the next train's early run is pushed beside it (#1568), so the red drops it.
+  const go = join(mkdtempSync(join(tmpdir(), 'early-go-')), 'go');
+  const l = await line([{}, { env: { FAKE_CI_GATE: go } }, {}, { change: ['test/real.test.ts', '// x\n'] }, { change: ['red.txt', 'red\n'] }, {}, {}], { FAKE_RED_PATH: 'red.txt', LAND_TRAIN_MAX: '3' });
+  const all = l.go();
+  await until('the early push beside ship 2\'s run', () => /its CI starts now/.test(l.out[1]));
+  writeFileSync(go, '');
+  const done = await all;
   assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\)/);
   assert.match(done[1].stderr, /#4 goes back in line: the train was red again on test\/real\.test\.ts without it, so the guess was wrong/);
   assert.doesNotMatch(done[3].stderr, /refuse|likely the cause/, 'the innocent suspect is never refused (#1403)');
@@ -229,11 +234,14 @@ test('a refilled train red again on the same test: the guess was wrong, so the h
   // Ship 4, back in line, fronts the next train with ships 6 and 7.
   for (const i of [6, 7]) shipped(l, done[i - 1], i, 4, 3);
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'test/real.test.ts: // x', 'f6.txt: 6', 'f7.txt: 7']);
-  // The next train's early run (#1568) starts beside the red train's once that one runs; the fake's red can come first,
-  // so it was either dropped with the red (the one run it costs) or never pushed. Either way none is left.
-  const dropped = /early next train: dropped the early CI run on ticket\/\d-x's train \(the train ahead went red\)/.test(done[1].stderr);
-  assert.equal(l.runs(), dropped ? 7 : 6, "ship 1's, the red train's, the refilled train's, two for the bisect, the next train's, and any early run dropped with the red");
-  assert.equal(git(l.r.dir + '/hub.git', 'for-each-ref', 'refs/heads/early-base/', 'refs/heads/early/'), '', 'no early branch is left on GitHub');
+  // The next train's early run (#1568) started beside the red train's and was dropped with it; the refilled train stacks
+  // the next one again (dropped too if it was pushed before that train went red), and at the deploy ship 4's train is
+  // stacked once more, and that run counts. Each dropped run is a run the early start cost.
+  assert.match(done[1].stderr, /early next train: dropped the early CI run on ticket\/6-x's train \(the train ahead went red\)/);
+  assert.match(done[1].stderr, /early next train: ticket\/4-x \(with ticket\/6-x ticket\/7-x riding\) is stacked on this train's top and its CI starts now, while this one deploys/);
+  assert.match(done[3].stderr, /early next train: CI started on this train at \d\d:\d\d beside ticket\/2-x's, and it came out the same, so that run is its CI/);
+  const drops = done[1].stderr.match(/dropped the early CI run on \S+ train \(the train ahead went red\)/g)!.length;
+  assert.equal(l.runs(), 6 + drops, "ship 1's, the red train's, the refilled train's, two for the bisect, the next train's (its early run), and each early run dropped with a red");
   l.done();
 });
 

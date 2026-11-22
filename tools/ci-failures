@@ -75,8 +75,8 @@ const runsFor = (query) => api(`actions/runs?per_page=${list ? count : 5}${query
 const newest = (runs) => runs.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
 function branchRuns(branch) {
-  const twin = branch.startsWith('land/') ? branch.slice(5) : `land/${branch}`;
-  return newest([...runsFor(`&branch=${encodeURIComponent(branch)}`), ...runsFor(`&branch=${encodeURIComponent(twin)}`)]);
+  const own = branch.replace(/^(land|early)\//, ''); // a ship's CI copy runs on land/, an early next train's on early/ (#1568)
+  return newest([own, `land/${own}`, `early/${own}`].flatMap((b) => runsFor(`&branch=${encodeURIComponent(b)}`)));
 }
 
 function findRun() {

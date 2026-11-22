@@ -41,7 +41,8 @@ jobs:
     # A land's run takes either Linux runner; any other (the nightly, one started by hand) only the one with the side
     # label, as flake-proof.yml's proofs do, so the other is always free for a land (#1240). Its wait for the lands
     # below holds its runner, which on the lands' runner would keep the land it waits for from starting. A ship's own
-    # check takes only the runner with the check label, never GitHub's own (whatever CI_RUNNER says) nor a land's.
+    # check takes only the runner with the check label, never GitHub's own (whatever CI_RUNNER says) nor a land's. An
+    # early next train's run (early/, #1568) takes a land's runner beside the lands' run, niced, never GitHub's own.
     runs-on: ${{ startsWith(github.ref, 'refs/heads/check/') && fromJSON('["self-hosted", "citadel-ci-linux-check"]') || (startsWith(github.ref, 'refs/heads/early/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || (vars.CI_RUNNER == 'github' && 'ubuntu-latest' || (startsWith(github.ref, 'refs/heads/land/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]')))) }}
     # land.sh gives up on the run 9 minutes after a runner starts it (LAND_CI_TIMEOUT, #1361; 6 until #1606), the clock step's up to 2 min included, or 3 more
     # (LAND_CI_RERUN) for a run rerunning its failed files alone (#1374), plus its burn-in's time (up to 2.5 min, #1443); this only stops one nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits

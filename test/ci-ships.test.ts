@@ -106,3 +106,21 @@ test("while Citadel's own ship runs, only its runners are ships, so another sche
   // What the agents are sent, not just what tick returns.
   assert.deepEqual(sent, [[{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux' }], [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8-heavy' }]]);
 });
+
+test("an early next train's run is squeezed while a ship runs; with none, the oldest early run is the ship, being a train's own counted CI (#1568)", async () => {
+  const repo = 'caraminden/claude-coordinator';
+  const gh = github({
+    [runs(repo)]: { workflow_runs: [
+      { id: 3, head_branch: 'early/ticket/5-x', created_at: '2026-11-22T21:05:00Z' },
+      { id: 1, head_branch: 'land/ticket/3-x', created_at: '2026-11-22T21:00:00Z' },
+      { id: 2, head_branch: 'early/ticket/4-x', created_at: '2026-11-22T21:02:00Z' },
+    ] },
+    [jobs(repo, 1)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-linux' }] },
+    [jobs(repo, 2)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-linux-2' }] },
+    [jobs(repo, 3)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-linux-3' }] },
+  });
+  const { w } = watch(gh, [repo]);
+  assert.deepEqual(await w.tick(0), [{ repo, runner: 'DESKTOP-linux' }], 'the ship run alone: both early runs are squeezed');
+  gh.pages[runs(repo)] = { workflow_runs: gh.pages[runs(repo)].workflow_runs.filter((r: any) => r.id !== 1) };
+  assert.deepEqual(await w.tick(15_000), [{ repo, runner: 'DESKTOP-linux-2' }], "ticket/4-x's early run counted once ticket/3-x shipped: it is the ship, and ticket/5-x's stays squeezed");
+});

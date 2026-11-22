@@ -204,12 +204,34 @@ first, the train came out different, or the early run went red (it runs again, a
 
 - Not while the front's own run goes, though the brief allowed it on a second free runner: two suites at once on Cara's
   desktop flaked (2026-11-11, `tests.yml`), and the lands' runs share one concurrency group, so a second would only wait.
+  Superseded by "While the train ahead's CI runs" below (#1568).
 - It needs a free (online, not busy) `citadel-ci-linux` runner; with none, the next ship waits for its turn as before.
 - Not for a train that changes the pipeline (the next ship runs that train's land.sh), a next ship that isn't a plain
   land, one that would leave a taken-back commit behind, or one whose lane runs no CI.
 - A conflict in the early stack isn't reported there: that ship's own rebase reports it once the train has shipped. A
   fix recorded with conflict prep is replayed in the early stack too.
 - Off: `LAND_EARLY=0`, or `<state>/early-off`.
+
+### While the train ahead's CI runs (#1568)
+
+Cara, 2026-11-21, "Go" on fix F of #1549's report (ship stalls), and 2026-11-22, picked "Low-priority run on a ship
+runner" on #1568's card: the early run starts when the train ahead's own run starts, not once it is green. That reverses
+the "not while the front's own run goes" line above, at low priority so it can't slow the run ahead:
+
+- `top_gate` starts `early_next` in the background beside `gate`. It stacks the next train, waits until the run ahead
+  has a runner (`LAND_EARLY_WAIT`, 600 s) and a second `citadel-ci-linux` runner is free, then pushes to `early/<branch>`
+  and `early-base/<branch>`, not `land/`: `tests.yml` gives those their own concurrency group per branch, niced
+  (`NICENESS` 10 and a niced burn-in), on the ships' runner label, never GitHub's own, with no wait for the lands and no
+  numbers kept. The ship watcher (`src/ci-ships.ts`) squeezes them like any other run while a `land/` run goes; with
+  none going, a repo's oldest `early/` run counts as its ship, since that is a train whose early run was counted.
+- A red ahead stops it (a flag file) or cancels its run (`early_drop`), and the next gate stacks again: a train rebuilt
+  by `train_suspects` in its `top_gate`, else the deploy, which stacks one when none is kept.
+- The next train rides only the riders its early run was stacked with (`<state>/early`'s sixth field, `early_look`), so
+  a ship that joins the line meanwhile waits for the train after rather than changing the train and wasting the run.
+  An early run that already failed, or that GitHub has no record of, holds no one back.
+- A counted run stays on `early/`: `gate` takes it as the train's run, and a flake's or cut-off run's fresh run goes
+  to `land/` as usual. A ship the train refused is never stacked (it is on its way out of the line).
+- Cost: an early run dropped with a red ahead is one more run, on a runner that was free.
 
 ## A ship's own check (#1567)
 

@@ -1699,6 +1699,6 @@ test("the CI page's Running now: each running job with its runner, start and min
 
 test("runMinion: a land's run and a ship's own check (#1567) count for the minion whose branch they test", () => {
   const tickets = [{ number: 1567, branch: 'ticket/1567-x', kind: 'ticket' }] as Parameters<typeof runMinion>[2];
-  for (const b of ['land/ticket/1567-x', 'check/ticket/1567-x', 'ticket/1567-x']) assert.equal(runMinion(b, 'abc', tickets, new Map()), 1567, b);
+  for (const b of ['land/ticket/1567-x', 'check/ticket/1567-x', 'early/ticket/1567-x', 'ticket/1567-x']) assert.equal(runMinion(b, 'abc', tickets, new Map()), 1567, b);
   assert.equal(runMinion('other/ticket/1567-x', 'abc', tickets, new Map()), null);
 });

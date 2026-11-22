@@ -133,7 +133,8 @@ test("the early next train's run goes beside the lands' run, niced, on a ship ru
   const yml = read('.github/workflows/tests.yml');
   assert.match(yml, /group: .*startsWith\(github\.ref, 'refs\/heads\/early\/'\) && format\('citadel-early-\{0\}', github\.ref_name\)/);
   const r = runsOn(yml);
-  assert.ok(r.indexOf("refs/heads/early/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux\"]')") < r.indexOf("vars.CI_RUNNER"), 'before the hosted-runner switch, so it never goes to GitHub');
+  const early = r.indexOf("refs/heads/early/') && fromJSON('[\"self-hosted\", \"citadel-ci-linux\"]')");
+  assert.ok(early >= 0 && early < r.indexOf('vars.CI_RUNNER'), 'on a ship runner, before the hosted-runner switch, so it never goes to GitHub');
   assert.match(yml, /NICENESS: \$\{\{ !startsWith\(github\.ref, 'refs\/heads\/land\/'\) && '10' \|\| '0' \}\}/);
   assert.match(yml, /BURN_IN_NICE: \$\{\{ \(startsWith\(github\.ref, 'refs\/heads\/check\/'\) \|\| startsWith\(github\.ref, 'refs\/heads\/early\/'\)\) && 'nice -n 10'/);
   const wait = yml.slice(yml.indexOf('- name: wait for the lands'), yml.indexOf('- name:', yml.indexOf('- name: wait for the lands') + 1));

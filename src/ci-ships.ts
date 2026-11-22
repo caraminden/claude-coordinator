@@ -14,6 +14,8 @@ const RATE_LIMITED_MS = 5 * 60_000;
 const KEEP_FAILED_MS = 2 * 60_000;
 /** A ship run's branch: what every scheme's land.sh pushes (Cara, 2026-11-20: "No, ship branches only"). */
 export const SHIP_BRANCH = /^land\//;
+/** An early next train's run (#1568, tools/land.sh's early_next): low priority beside a ship's, so squeezed while one runs. */
+const EARLY_BRANCH = /^early\//;
 
 export interface Ship { repo: string; runner: string }
 
@@ -98,8 +100,11 @@ export class ShipWatch {
   private async ships(repo: string, as: GithubEnv, used: Set<string>): Promise<Ship[]> {
     const runs: any[] = (await this.read(`repos/${repo}/actions/runs?status=in_progress&per_page=50`, as, used))?.workflow_runs ?? [];
     const out: Ship[] = [];
-    for (const r of runs) {
-      if (!SHIP_BRANCH.test(String(r?.head_branch ?? '')) || !Number.isInteger(r?.id)) continue;
+    const on = (re: RegExp) => runs.filter((r) => re.test(String(r?.head_branch ?? '')) && Number.isInteger(r?.id));
+    // With no land/ run going, the oldest early one is a train's own CI (its early run counted): the next train's is younger.
+    const early = on(EARLY_BRANCH).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).slice(0, 1);
+    const land = on(SHIP_BRANCH);
+    for (const r of land.length ? land : early) {
       const jobs: any[] = (await this.read(`repos/${repo}/actions/runs/${r.id}/jobs?filter=latest&per_page=100`, as, used))?.jobs ?? [];
       // shortcut: any self-hosted runner counts, as every one is on Cara's desktop today; send each PC only its own ships once another PC has runners.
       for (const j of jobs) if (j?.status === 'in_progress' && typeof j.runner_name === 'string' && j.runner_name && Array.isArray(j.labels) && j.labels.includes('self-hosted')) out.push({ repo, runner: j.runner_name });

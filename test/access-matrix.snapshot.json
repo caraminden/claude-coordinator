@@ -3352,6 +3352,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/sleep": {
+  "anon": "401 Not logged in",
+  "person": "400 asleep must be true or false",
+  "member": "400 asleep must be true or false",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can put a minion to sleep",
+  "tmB": "403 Only a person can put a minion to sleep",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/spend": {
   "anon": "401 Not logged in",
   "person": "403 Only the minion itself can report its spend",
@@ -4179,6 +4189,16 @@
   "outsider": "404 No such minion",
   "tmA": "403 Not available to the Taskmaster",
   "tmB": "403 Not available to the Taskmaster",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/sleep": {
+  "anon": "401 Not logged in",
+  "person": "400 Only a minion can sleep, not a Taskmaster",
+  "member": "400 Only a minion can sleep, not a Taskmaster",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only a person can put a minion to sleep",
+  "tmB": "403 Only a person can put a minion to sleep",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

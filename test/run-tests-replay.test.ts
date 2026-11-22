@@ -24,7 +24,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 test('watch', async () => {
   const f = process.env.CITADEL_TEST_PROGRESS_TO;
   // timing-ok: fixture child in a temp dir, can't import ./wait.ts
-  for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n')); i++) await new Promise((r) => setTimeout(r, 25)); // poll-ok: fixture child, no ./wait.ts
+  for (let i = 0; i < 200 && !(f && existsSync(f) && readFileSync(f, 'utf8').startsWith('1\\n2\\ntest/progress.test.mjs\\n')); i++) await new Promise((r) => setTimeout(r, 25)); // poll-ok: fixture child, no ./wait.ts
   writeFileSync('seen-progress', f && existsSync(f) ? readFileSync(f, 'utf8') : 'none');
 });
 `);
@@ -37,7 +37,7 @@ test('watch', async () => {
     scratch.track(p).stdin?.end();
   });
   assert.equal(code, 0, readFileSync(log, 'utf8'));
-  assert.equal(readFileSync(join(dir, 'seen-progress'), 'utf8'), '1\n2\ntest/progress.test.mjs\n', 'the run wrote its own counts over the stale leftover');
+  assert.equal(readFileSync(join(dir, 'seen-progress'), 'utf8'), '1\n2\ntest/progress.test.mjs\n\n', 'the run wrote its own counts over the stale leftover');
   assert.equal(existsSync(join(dir, 'land-test.progress')), false);
   assert.equal(existsSync(stale), false);
 });

@@ -406,7 +406,7 @@ test('deploy.sh copies the database before a restart, keeps a copy already there
   kept.db.close();
 
   deploySh(['rotate-backups']);
-  const saved = readdirSync(join(dir, 'backups')).filter((f) => f.startsWith('pre-deploy-')).sort(); // opening a copy adds its state.db
+  const saved = readdirSync(join(dir, 'backups')).filter((f) => f.startsWith('pre-deploy-') && f.endsWith('.db')).sort(); // opening a copy adds its state.db and its own chat log, <copy>.events (#1169)
   assert.deepEqual(saved, commits.slice(1).map((c) => `pre-deploy-${c}.db`).sort(), 'the oldest copy goes');
   assert.equal(statSync(join(dir, 'backups', saved[0])).mode & 0o777, 0o600);
   assert.equal(deploySh(['backup-db', commits[0]], join(dir, 'missing.db')), '', 'no database, nothing to copy');

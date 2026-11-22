@@ -13,11 +13,11 @@ export const CHAT = 'chat';
 /** Set once a database's events have moved to events.db: from then on a missing events.db is an error, never an empty chat log. */
 export const MOVED_KEY = 'events_moved';
 
-/** events.db beside coordinator.db, `<name>.events.db` beside any other file (tests keep several in one folder); null in memory. */
+/** events.db beside coordinator.db, `<name>.events` beside any other file (tests keep several in one folder; no .db, so backup globs skip it); null in memory. */
 export function eventsPath(dbPath: string): string | null {
   if (dbPath === ':memory:') return null;
   const name = basename(dbPath);
-  return join(dirname(dbPath), name === 'coordinator.db' ? EVENTS_FILE : `${name}.${EVENTS_FILE}`);
+  return join(dirname(dbPath), name === 'coordinator.db' ? EVENTS_FILE : `${name}.events`);
 }
 
 /**

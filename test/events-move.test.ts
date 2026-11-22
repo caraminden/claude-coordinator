@@ -142,7 +142,7 @@ test('two databases in one folder keep their own chat logs; coordinator.db alone
   assert.equal(ta.id, tb.id);
   assert.deepEqual(b.listEvents(tb.id), []);
   assert.equal(b.eventsPath, join(dir, 'events.db'));
-  assert.equal(a.eventsPath, join(dir, 'a.sqlite.events.db'));
+  assert.equal(a.eventsPath, join(dir, 'a.sqlite.events'));
   a.db.close();
   b.db.close();
 });

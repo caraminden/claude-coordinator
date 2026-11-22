@@ -34,7 +34,7 @@ test('a copy brings events.db along, whole', async () => {
   const src = join(root, 'a');
   live(src);
   await copyDb(join(src, 'coordinator.db'), join(root, 'a-copy.db'));
-  assert.deepEqual(rows(join(root, 'a-copy.db.events.db')).r, ['1:1', '2:2', '1:3']);
+  assert.deepEqual(rows(join(root, 'a-copy.db.events')).r, ['1:1', '2:2', '1:3']);
 });
 
 test("the boot check's copy takes only open minions' chats, with the indexes", async () => {

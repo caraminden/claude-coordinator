@@ -127,6 +127,8 @@ test('stopEvent names each cause from systemd\'s words; only a ship and a stop b
   assert.equal(cause(m('signal', 'killed', 'KILL')), 'killed');
   assert.equal(cause(m('exit-code', 'exited', '1')), 'crash');
   assert.equal(cause(m('core-dump', 'dumped', 'SEGV')), 'crash');
+  assert.deepEqual(stopEvent(m('handover', '', ''), true, 9), { at: 5, cause: 'deploy', detail: 'deploy: handed over to the new server (a warm handover)' }, "a warm handover's own mark is a planned ship");
+  assert.equal(cause(m('handover', '', '')), 'by-hand');
   assert.deepEqual(stopEvent(null, false, 9), { at: 9, cause: 'unknown', detail: 'unknown: no stop was noted: the box restarted, or the stop hook (watchdog.conf) is not installed' });
   assert.equal(stopEvent(m('oom-kill', 'killed', 'KILL'), false, 9).detail, 'out-of-memory: killed for memory, by systemd-oomd or the kernel (systemd: oom-kill, killed, KILL)');
 });

@@ -96,6 +96,11 @@ export const PLANNED: readonly StopCause[] = ['deploy', 'by-hand'];
  * `newCode`: this boot runs other code than the last one did (a ship). `fallbackAt`: when to date a stop with no mark.
  */
 export function stopEvent(mark: StopMark | null, newCode: boolean, fallbackAt: number): { at: number; cause: StopCause; detail: string } {
+  // A warm handover's old server leaves its own mark (server.ts): it never stops under systemd, so ExecStopPost doesn't run.
+  if (mark?.result === 'handover') {
+    const cause: StopCause = newCode ? 'deploy' : 'by-hand';
+    return { at: mark.at, cause, detail: `${cause}: handed over to the new server (a warm handover)` };
+  }
   const how = mark ? ` (systemd: ${[mark.result, mark.code, mark.status].filter(Boolean).join(', ') || 'no result'})` : '';
   const [cause, words]: [StopCause, string] = !mark ? ['unknown', 'no stop was noted: the box restarted, or the stop hook (watchdog.conf) is not installed']
     : mark.result === 'watchdog' ? ['watchdog', "systemd's watchdog stopped the hung server"]

@@ -27,7 +27,7 @@ import { MemoryStorms } from './src/memory-storms.ts';
 import { Reaper, shownCommand } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
 import { startRealtime } from './src/realtime.ts';
-import { restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
+import { markStop, restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { judged, noteWould } from './src/judges.ts';
 import { UltraReviews } from './src/ultrareview.ts';
@@ -2095,6 +2095,7 @@ process.on('SIGUSR2', () => handOver({
     // one also closes "idle" connections, which takes in one just accepted whose request isn't read yet (ECONNRESET).
     if (throughFront) throughFront.release(); // the front thread owns the socket; the main thread's own stays open for it
     else NetServer.prototype.close.call(server);
+    try { markStop({ SERVICE_RESULT: 'handover' }, DATA_DIR); } catch (err) { console.error('Handover: stop mark failed:', err); } // the new server's boot reads it as this server's stop
     passingOn = true;
     agentListener?.close();
     stopAll();

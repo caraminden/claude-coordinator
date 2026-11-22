@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { COLD, handOver, handoverState, standby } from '../src/handover.ts';
 import { SCHEMA_VERSION } from '../src/db.ts';
+import { STOP_MARK } from '../src/sd-watchdog.ts';
 import { bootServer, PASSWORD, SECRET, tempRoot, TEST_ZONE, until } from './helpers.ts';
 
 const REPO = join(import.meta.dirname, '..');
@@ -155,13 +156,16 @@ test('the real server hands over under a request loop with no failed request and
   const notify = fakeNotify(root);
   const held = await heldSocket();
   const log = join(root, 'server.log');
-  const booted = await bootServer({
+  // bootServer spawns before its first await, so the server has its copy of the socket when this process closes its
+  // own, before it ever accepts: listening here too, it took some connections (sign-in among them) and never answered.
+  const booting = bootServer({
     root, log, fds: [held.fd],
     // systemd's way: LISTEN_PID is the server's own pid.
     wrap: ['sh', '-c', 'export LISTEN_PID=$$; exec "$0" "$@"'],
     env: { TURN_UNITS: '0', PORT: String(held.port), LISTEN_FDS: '1', PATH: notify.PATH, NOTIFY_SOCKET: notify.NOTIFY_SOCKET, CITADEL_EXIT_WITH_PARENT: '0' },
   });
   held.server.close();
+  const booted = await booting;
   let newPid = 0;
   after(() => {
     if (newPid) try { process.kill(newPid, 'SIGKILL'); } catch {}
@@ -191,6 +195,7 @@ test('the real server hands over under a request loop with no failed request and
       let body = '';
       res.setEncoding('utf8').on('data', (d) => (body += d)).on('end', () => r({ reused: q.reusedSocket, handover: JSON.parse(body).handover }));
     }).on('error', j);
+    q.on('timeout', () => q.destroy(new Error('the kept-alive request had no answer in 20 s')));
   });
   assert.equal((await onKept()).handover, 'ready');
   proc.kill('SIGUSR2');
@@ -210,6 +215,8 @@ test('the real server hands over under a request loop with no failed request and
   await loop;
   assert.deepEqual(answers.filter((a) => a !== '200'), [], 'every request was answered');
   assert.deepEqual(notify.calls().filter((c) => c.startsWith('MAINPID')), [`MAINPID=${newPid}`]);
+  // The old server noted its own stop, so the new one's boot logs a handover, not "no stop was noted" (an unplanned one).
+  assert.equal(JSON.parse(readFileSync(join(booted.data, STOP_MARK), 'utf8')).result, 'handover');
   // The page's next stream opens on the new server.
   const again = await new Promise<IncomingMessage>((r) => get({ host: '127.0.0.1', port: held.port, path: '/api/stream', agent: false, headers: { Cookie: cookie } }, r));
   assert.equal(again.statusCode, 200);

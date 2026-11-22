@@ -5,7 +5,7 @@ import { execFile, spawn } from 'node:child_process';
 import { oomKilled } from './host-job.ts';
 import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, close, existsSync, fstatSync, open, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
@@ -254,7 +254,24 @@ interface LiveTurn {
   had: Set<string> | null;
   /** Handed to the turn supervisor and its shell not yet running (#1343): starts its wrapper unit, should the supervisor give it back or lose it. */
   restart?: () => void;
+  /**
+   * Its stream.jsonl and its folder, kept open while it's followed (#1562): a tick asks their sizes and times with fstat,
+   * which needs no file-name lookup (the part that blocked in btrfs at load). Closed by unfollow.
+   */
+  streamFd?: number;
+  /** null while its open is under way (dirChanged). */
+  dirFd?: number | null;
+  /** No longer followed: an open that finishes now closes what it opened. */
+  unfollowed?: boolean;
+  /** The folder's mtime at the last look, and whether the next tick looks again (dirChanged). */
+  dirSeen?: number;
+  dirAgain?: boolean;
+  /** exit.json was there at the last look: looked for again each tick, folder change or not (poll). */
+  exitSeen?: boolean;
 }
+
+/** The stream reader's buffer: one for every followed turn, grown only for a line longer than it (readStream). */
+const STREAM_CHUNK = 1 << 20;
 
 /** A minion's context size at its last turn's last API call (tokens), for what switching its payer costs. */
 const contextKey = (ticketId: number) => `context:${ticketId}`;
@@ -917,6 +934,7 @@ export class Runner {
     this.detached = true;
     for (const t of this.turns.values()) {
       clearInterval(t.timer);
+      this.unfollow(t);
       this.clock.clearTimeout(t.stopTimer);
       this.clock.clearTimeout(t.stopGraceTimer);
     }
@@ -1724,6 +1742,7 @@ export class Runner {
       // What it wrote while no server read it reaches the chat before recovery deletes its folder, as poll's does (C8, #1406).
       this.readStream(ticketId, live, true);
       clearInterval(live.timer);
+      this.unfollow(live);
       this.turns.delete(ticketId);
       return false;
     }
@@ -1761,10 +1780,10 @@ export class Runner {
    * that won't start is counted there (start). Armed too after a hand-off that timed out, as the supervisor may have
    * taken the turn after all, leaving the wrapper started meanwhile nothing to run.
    */
-  private rescue(ticketId: number, live: LiveTurn) {
+  private rescue(ticketId: number, live: LiveTurn, started: boolean) {
     if (!live.restart) return;
     const dir = live.dir;
-    if (existsSync(join(dir, 'pid.json'))) {
+    if (started) {
       live.restart = undefined;
       return;
     }
@@ -3410,20 +3429,24 @@ export class Runner {
     const live = this.turns.get(ticketId);
     if (!live) return;
     try {
-      // Checked before reading: once exit.json is there, everything claude wrote is in the stream.
-      const exited = existsSync(join(live.dir, 'exit.json'));
+      // Checked before reading: once exit.json is there, everything claude wrote is in the stream. Only after the folder
+      // changed (dirChanged), so a quiet tick makes no file-name lookup at all (#1562).
+      // Once seen, it is looked for every tick until handled: a tick that failed on it can't leave the turn running.
+      const exited = live.exitSeen = (live.exitSeen || this.dirChanged(live)) && existsSync(join(live.dir, 'exit.json'));
       this.readStream(ticketId, live, exited);
       const exit = exited ? JSON.parse(readFileSync(join(live.dir, 'exit.json'), 'utf8')) : null;
+      // Whether its claude has started (pid.json), looked up only while a stop or a rescue waits on it.
+      const started = !!(live.stopPending || live.restart) && existsSync(join(live.dir, 'pid.json'));
       // stop()'s own exit.json, but claude has started since: the turn ends with its wrapper's, once the signal below lands.
-      if (exit?.stopped && live.stopPending && existsSync(join(live.dir, 'pid.json'))) rmSync(join(live.dir, 'exit.json'), { force: true });
+      if (exit?.stopped && live.stopPending && started) rmSync(join(live.dir, 'exit.json'), { force: true });
       else if (exit) return this.finish(ticketId, live, exit);
       // Stopped while still starting: its claude has a pid now (#468 S03-2). The SIGKILL retry still follows.
-      if (live.stopPending && existsSync(join(live.dir, 'pid.json'))) {
+      if (live.stopPending && started) {
         live.stopPending = false;
         this.stopSignals(live, ticketId);
       }
       if (live.ticks % 40 === 0) this.checkQuiet(ticketId, live);
-      this.rescue(ticketId, live);
+      this.rescue(ticketId, live, started);
       // Gone without a word: killed with its unit (out of memory, say).
       if (++live.ticks % 20 === 0) {
         if (this.gone(live)) {
@@ -3436,24 +3459,74 @@ export class Runner {
     }
   }
 
-  /** Handle the stream's new complete lines, and with `toEnd` a last line without its newline. */
-  private readStream(ticketId: number, live: LiveTurn, toEnd: boolean) {
-    let fd: number;
-    try {
-      fd = openSync(join(live.dir, 'stream.jsonl'), 'r');
-    } catch {
-      return;
+  /**
+   * Whether an entry in the turn's folder was made, renamed or removed since the last look (exit.json, pid.json): its
+   * kept-open folder's mtime, by fstat. A change is looked at on that tick and the next, since a file's times are as
+   * coarse as the kernel's tick and a second file made in the same tick leaves the mtime as it was. Until the folder
+   * is open (opened off the thread), or when it can't be, every tick counts as a change, as every tick looked before.
+   */
+  private dirChanged(live: LiveTurn): boolean {
+    if (live.dirFd === undefined) {
+      live.dirFd = null;
+      open(live.dir, 'r', (err, fd) => {
+        if (err) live.dirFd = undefined; // tried again next tick
+        else if (live.unfollowed) close(fd, () => {});
+        else live.dirFd = fd;
+      });
     }
+    if (live.dirFd === null) return true;
     try {
-      let size = 1 << 20;
+      const at = fstatSync(live.dirFd).mtimeMs;
+      if (at !== live.dirSeen) {
+        live.dirSeen = at;
+        live.dirAgain = true;
+        return true;
+      }
+    } catch {
+      return true;
+    }
+    if (!live.dirAgain) return false;
+    live.dirAgain = false;
+    return true;
+  }
+
+  /** Close what following a turn kept open (#1562): once it's no longer followed. */
+  private unfollow(live: LiveTurn) {
+    live.unfollowed = true;
+    for (const fd of [live.streamFd, live.dirFd]) if (fd != null) close(fd, () => {});
+    live.streamFd = live.dirFd = undefined;
+  }
+
+  /** The shared stream buffer, and whether a read is using it: a line's handling that reads a stream again gets its own. */
+  private streamBuf?: Buffer;
+  private streamBusy = false;
+
+  /**
+   * Handle the stream's new complete lines, and with `toEnd` a last line without its newline. The file stays open
+   * (unfollow closes it) and its size is asked first, so a tick with nothing new reads nothing (#1562).
+   */
+  private readStream(ticketId: number, live: LiveTurn, toEnd: boolean) {
+    if (live.streamFd === undefined) {
+      try {
+        live.streamFd = openSync(join(live.dir, 'stream.jsonl'), 'r');
+      } catch {
+        return;
+      }
+    }
+    const fd = live.streamFd;
+    if (fstatSync(fd).size <= live.offset) return;
+    const busy = this.streamBusy;
+    let buf = busy ? Buffer.allocUnsafe(STREAM_CHUNK) : (this.streamBuf ??= Buffer.allocUnsafe(STREAM_CHUNK));
+    this.streamBusy = true;
+    try {
       for (;;) {
-        const buf = Buffer.alloc(size);
+        const size = buf.length;
         const n = readSync(fd, buf, 0, size, live.offset);
         if (!n) return;
         const atEnd = n < size;
         const end = buf.lastIndexOf(10, n - 1) + 1;
         if (!end && !atEnd) {
-          size *= 2; // one line longer than the buffer
+          buf = Buffer.allocUnsafe(size * 2); // one line longer than the buffer: this read's own, the shared one stays
           continue;
         }
         const take = toEnd && atEnd ? n : end;
@@ -3476,7 +3549,7 @@ export class Runner {
         if (atEnd) return;
       }
     } finally {
-      closeSync(fd);
+      this.streamBusy = busy;
     }
   }
 
@@ -3493,6 +3566,7 @@ export class Runner {
 
   private wrapUp(ticketId: number, live: LiveTurn, exit: { code: number | null; signal: string | null; error?: string } | null) {
     clearInterval(live.timer);
+    this.unfollow(live);
     this.clock.clearTimeout(live.stopTimer);
     this.clock.clearTimeout(live.stopGraceTimer);
     this.turns.delete(ticketId);
@@ -4475,33 +4549,71 @@ export class Runner {
     }
   }
 
-  /** What every turn's scheme-refs snapshot in a scheme shares, read once however many turns run there (#609). */
+  /**
+   * What every turn's scheme-refs snapshot in a scheme shares, read once however many turns run there (#609). The
+   * scheme's open cards come in one query, not one per minion (#1562).
+   */
   refsShared(projectId: number) {
     const tickets = this.store.listTickets(projectId);
-    const links = new Map(tickets.map((t) => [t.id, this.cardLinks(t)]));
+    const openOf = new Map<number, EventRow[]>(tickets.map((t) => [t.id, []]));
+    for (const e of this.store.openCards(projectId)) openOf.get(e.ticket_id)?.push(e);
+    const links = new Map(tickets.map((t) => [t.id, this.cardLinks(t, false, openOf.get(t.id))]));
     const open = new Set([...links.values()].flat().map((c) => c.href));
-    return { project: this.store.getProject(projectId)!, projects: this.store.listProjects(), tickets, links, settled: this.settledCards(projectId, open) };
+    return { project: this.store.getProject(projectId)!, projects: this.store.listProjects(), tickets, openOf, links, settled: this.settledCards(projectId, open) };
   }
 
   /** Write a turn's scheme-refs snapshot (scheme-refs.ts) for `ticket`, with its scheme's cards waiting on people. */
   private writeRefs(file: string, ticket: Ticket, shared = this.refsShared(ticket.project_id)) {
-    const { project, projects, tickets, links, settled } = shared;
+    const { project, projects, tickets, openOf, links, settled } = shared;
     // Only the turn's own cards say where each sits (`placed`).
-    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => t.id === ticket.id ? this.cardLinks(t, true) : links.get(t.id)!) };
+    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => t.id === ticket.id ? this.cardLinks(t, true, openOf.get(t.id)) : links.get(t.id)!) };
     const refs = { ...schemeRefs(project, projects, tickets, cards), settled };
     // Whole or not at all: the link check may read it mid-turn.
     writeFileSync(`${file}.new`, JSON.stringify(refs));
     renameSync(`${file}.new`, file);
   }
 
-  /** A card was posted or settled in `ticketId`'s chat: the running turns of its scheme get it in their snapshot, so the link check knows it. */
+  /** The least time between two refreshes of a scheme's snapshots (refreshRefs). */
+  refsGapMs = 2_000;
+  /** Per scheme: when its snapshots were last refreshed, and the refresh waiting for the gap to pass. */
+  private refsLast = new Map<number, { at: number; due?: ClockTimer }>();
+
+  /**
+   * A card was posted or settled in `ticketId`'s chat: the running turns of its scheme get it in their snapshot, so the
+   * link check knows it. At most once per refsGapMs per scheme (#1562): the first card refreshes at once, and the cards
+   * after it within the gap share one refresh at its end. The card's own minion gets its snapshot at once either way:
+   * its link check may read it before the gap ends, and a missing card there bounces its reply (cardlessChoices).
+   */
   private refreshRefs(ticketId: number) {
     const projectId = this.store.getTicket(ticketId)?.project_id;
+    if (projectId === undefined) return;
+    const last = this.refsLast.get(projectId);
+    const wait = last ? last.at + this.refsGapMs - this.clock.now() : 0;
+    if (!last?.due && wait <= 0) return this.writeSchemeRefs(projectId);
+    this.writeSchemeRefs(projectId, ticketId);
+    if (last?.due) return;
+    const due = this.clock.setTimeout(() => {
+      try {
+        this.writeSchemeRefs(projectId);
+      } catch (err) {
+        console.error(`Scheme ${projectId}: refreshing its turns' snapshots failed:`, err);
+      }
+    }, wait);
+    due.unref();
+    this.refsLast.set(projectId, { at: last!.at, due });
+  }
+
+  /** Rewrite the snapshot of every turn running in `projectId`, or only `only`'s, outside the gap (refreshRefs). */
+  private writeSchemeRefs(projectId: number, only?: number) {
+    // The gap starts only once a refresh read something: a card in a scheme with no turn running costs nothing.
+    if (only === undefined) this.refsLast.delete(projectId);
     let shared: ReturnType<Runner['refsShared']> | undefined;
     for (const [id, turn] of this.turns) {
+      if (only !== undefined && id !== only) continue;
       const t = this.store.getTicket(id);
       const file = join(turn.dir, 'scheme-refs.json');
       if (t?.project_id !== projectId || !existsSync(file)) continue;
+      if (!shared && only === undefined) this.refsLast.set(projectId, { at: this.clock.now() });
       try {
         this.writeRefs(file, t, shared ??= this.refsShared(projectId));
       } catch {

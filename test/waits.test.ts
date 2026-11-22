@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Ship } from '../src/branch.ts';
-import { landPhase, median, moveIn, procAlive, ridingOf, slotHeld, trainLabel, Waits } from '../src/waits.ts';
+import { flockedInodes, landPhase, median, moveIn, procAlive, ridingOf, slotHeld, trainLabel, Waits } from '../src/waits.ts';
 import { tempRoot } from './helpers.ts';
 
 // src/waits.ts (#544): what a minion waits on, read from the land line's and citadel-heavy's files.
@@ -158,6 +158,20 @@ test('median, and a live process told apart from a reused pid', () => {
   assert.ok(procAlive(`${process.pid} ${start}`));
   assert.ok(!procAlive(`${process.pid} 1`));
   assert.ok(!procAlive(''));
+});
+
+test('the lock list counts holders, not waiters or other lock kinds, and none to read trusts every slot (#1562)', () => {
+  const list = [
+    '1: FLOCK  ADVISORY  WRITE 767318 00:23:231177942 0 EOF',
+    '1: -> FLOCK  ADVISORY  WRITE 767400 00:23:555 0 EOF',
+    '2: POSIX  ADVISORY  WRITE 1234 00:23:777 0 EOF',
+    '3: OFDLCK ADVISORY  READ  -1 00:05:888 0 EOF',
+    '4: FLOCK  ADVISORY  READ  99 fd:01:42 0 EOF',
+  ].join('\n');
+  assert.deepEqual([...flockedInodes(list)!].sort(), [231177942, 42].sort());
+  assert.equal(flockedInodes(null), null);
+  assert.equal(slotHeld(join(root, 'no-such-slot'), null), true);
+  assert.equal(slotHeld(join(root, 'no-such-slot'), new Set([1])), false);
 });
 
 test('a heavy slot reads as held only while someone holds its lock', async () => {

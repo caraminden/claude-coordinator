@@ -24,6 +24,7 @@ const OTHER: Record<string, string> = {
   gateCounted: 'a count of the keepalive gates; a restart may count one window again',
   contextSizes: 'set again by the turn\'s next usage line',
   contextShown: 'a broadcast throttle',
+  refsLast: 'a throttle by scheme; every turn writes its own snapshot at its start',
   mainModels: 'the context window keeps its last turn\'s value until the next init event',
   strayWaits: 'a poll on a turn wrapper nothing here follows; liveTurn finds the stray turn folder again after a restart (#1464)',
 };

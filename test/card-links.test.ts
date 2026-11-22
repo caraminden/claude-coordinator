@@ -13,6 +13,7 @@ import { Runner } from '../src/runner.ts';
 import { clockTime } from '../src/pacific.ts';
 import type { SchemeRefs } from '../src/scheme-refs.ts';
 import { testPins } from './helpers.ts';
+import { FakeClock } from './fake-clock.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'card-links-'));
@@ -84,6 +85,8 @@ test('a minion\'s view lists its waiting cards with links, and a card posted mid
   const store = new Store(join(root, 'db.sqlite'));
   store.typedHandlesUpTo = 0;
   const runner = new Runner(store, () => {}, () => ({}), fake);
+  const clock = new FakeClock();
+  runner.clock = clock;
   const p = store.createProject('Citadel', null);
   const minion = store.createTicket({ project_id: p.id, title: 'Asker', permission_mode: 'bypassPermissions', created_by: 'Cara' });
   const tm = store.createTicket({ project_id: p.id, title: 'Watcher', permission_mode: 'bypassPermissions', created_by: 'Cara' });
@@ -107,10 +110,64 @@ test('a minion\'s view lists its waiting cards with links, and a card posted mid
   const hasPlan = () => snap().cards!.some((c) => c.kind === 'plan' && c.minion === minion.number && c.href === `${at}?e=${plan.id}`);
   assert.equal(snap().self, tm.number);
   assert.ok(hasPlan());
-  // A person's answer settles it there too.
+  // A person's answer settles it there too: within 2 s of the last refresh, once the gap has passed (#1562).
   runner.emit(minion.id, 'user_message', { author: 'Cara', text: 'Approved', plan: { planId: 'p1' } });
-  (runner as any).turns.delete(tm.id);
+  assert.ok(hasPlan());
+  clock.advance(1_999);
+  assert.ok(hasPlan());
+  clock.advance(1);
   assert.ok(!hasPlan());
+  (runner as any).turns.delete(tm.id);
+});
+
+test('a scheme\'s snapshots refresh at most once per 2 s, from one open-cards query however many minions it has (#1562)', () => {
+  const fake = join(root, 'claude-1562');
+  writeFileSync(fake, '#!/bin/sh\nexit 0\n');
+  chmodSync(fake, 0o755);
+  const store = new Store(join(root, 'db-1562.sqlite'));
+  store.typedHandlesUpTo = 0;
+  const runner = new Runner(store, () => {}, () => ({}), fake);
+  const clock = new FakeClock();
+  runner.clock = clock;
+  const p = store.createProject('Busy', null);
+  const minions = Array.from({ length: 30 }, (_, i) => store.createTicket({ project_id: p.id, title: `M${i}`, permission_mode: 'bypassPermissions', created_by: 'Cara' }));
+  // Three of them have a turn running, each with a snapshot.
+  const files = minions.slice(0, 3).map((m, i) => {
+    const dir = join(root, `turn-1562-${i}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'scheme-refs.json'), '{}');
+    (runner as any).turns.set(m.id, { dir });
+    return join(dir, 'scheme-refs.json');
+  });
+  let perMinion = 0, perScheme = 0;
+  const { openCardsOf, openCards } = store;
+  store.openCardsOf = (id) => (perMinion++, openCardsOf.call(store, id));
+  store.openCards = (id) => (perScheme++, openCards.call(store, id));
+  const cards = (f: string) => (JSON.parse(readFileSync(f, 'utf8')) as SchemeRefs).cards?.length ?? 0;
+  // The first card reaches every running turn at once, from one query.
+  runner.emit(minions[10].id, 'question', { id: 'a', questions: [{ header: 'A', question: '?' }] });
+  assert.deepEqual(files.map(cards), [1, 1, 1]);
+  assert.deepEqual([perScheme, perMinion], [1, 0]);
+  // Five more within the gap, from minions with no turn running, share one refresh at its end.
+  for (let i = 0; i < 5; i++) runner.emit(minions[11 + i].id, 'question', { id: `b${i}`, questions: [{ header: 'B', question: '?' }] });
+  assert.deepEqual(files.map(cards), [1, 1, 1]);
+  assert.equal(perScheme, 1);
+  assert.deepEqual(clock.pending().map((t) => t.in), [2_000]);
+  // A running minion's own card reaches its own snapshot at once, gap or not: its reply's link check may read it now.
+  clock.advance(1_000);
+  runner.emit(minions[1].id, 'question', { id: 'own', questions: [{ header: 'O', question: '?' }] });
+  assert.deepEqual(files.map(cards), [1, 7, 1]);
+  assert.equal(perScheme, 2);
+  assert.deepEqual(clock.pending().map((t) => t.in), [1_000]);
+  clock.advance(1_000);
+  assert.deepEqual(files.map(cards), [7, 7, 7]);
+  assert.deepEqual([perScheme, perMinion], [3, 0]);
+  // Past the gap, the next card goes at once again.
+  clock.advance(2_000);
+  runner.emit(minions[20].id, 'question', { id: 'c', questions: [{ header: 'C', question: '?' }] });
+  assert.deepEqual(files.map(cards), [8, 8, 8]);
+  assert.deepEqual(clock.pending(), []);
+  for (const m of minions.slice(0, 3)) (runner as any).turns.delete(m.id);
 });
 
 // Direction words (#412; Cara, 2026-11-09: "minion 6 from transdata said "card above" but the card was

@@ -3,7 +3,6 @@
 // land line's ticket files (tools/deploy-queue.sh), citadel-heavy's slot and waiter files, and the ship
 // line's "deploying" stage. CI runs (#546, src/ci-wait.ts) fill the same record: a PR's run, and a landing's CI gate;
 // a test run's file counts (#545, tools/progress-reporter.ts) fill in done and total.
-import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Store } from './db.ts';
@@ -48,7 +47,8 @@ export const median = (xs: number[]): number | null => {
 
 export const ordinal = (n: number) => (n === 1 ? 'next' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);
 const read = (f: string) => { try { return readFileSync(f, 'utf8'); } catch { return null; } };
-const mtime = (f: string) => { try { return statSync(f).mtimeMs; } catch { return null; } };
+const stat = (f: string) => { try { return statSync(f); } catch { return null; } };
+const mtime = (f: string) => stat(f)?.mtimeMs ?? null;
 const files = (dir: string) => { try { return readdirSync(dir); } catch { return []; } };
 
 /** "<pid> <start time>" as tools/deploy-queue.sh's queue_proc writes it, when that process still runs. */
@@ -252,11 +252,28 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
 
 export interface HeavyJob { who: string; what: string; since: number; reason?: string; slot?: number; tests?: TestCounts | null }
 
+/**
+ * The inodes holding a flock(1) lock, from the kernel's list (/proc/locks: "1: FLOCK  ADVISORY  WRITE <pid> <maj>:<min>:<inode> 0 EOF");
+ * a waiter's line ("1: -> FLOCK …") holds nothing. Null when there's no list to read. Read in the server, so the `waits` job
+ * starts no process (#1562; it ran `flock -n` per held slot every 2 s). Only the inode is matched: btrfs names a
+ * different device here than stat does, and a stale .who on a slot whose inode another filesystem has locked is all a clash costs.
+ */
+export function flockedInodes(text = read('/proc/locks')): Set<number> | null {
+  if (text == null) return null;
+  return new Set([...text.matchAll(/^\d+:\s+FLOCK\s+\S+\s+\S+\s+\S+\s+[0-9a-f]+:[0-9a-f]+:(\d+)\s/gm)].map((m) => Number(m[1])));
+}
+
 /** Whether a heavy slot's lock is held: a holder killed past its trap leaves its .who behind, but not the lock. */
-export function slotHeld(file: string): boolean {
-  // The probe holds a free slot for a moment, so a job taking it then waits one more poll (2 s) at most.
-  const r = spawnSync('flock', ['-n', '-E', '75', file, 'true'], { timeout: 2000 });
-  return r.status !== 0; // 75: held; no flock at all: trust the file
+export function slotHeld(file: string, locked = flockedInodes()): boolean {
+  if (!locked) return true; // no lock list at all: trust the file
+  const ino = stat(file)?.ino;
+  return ino !== undefined && locked.has(ino); // no lock file: nobody holds its lock
+}
+
+/** slotHeld for one look at the heavy folder: the lock list is read once, and only if a slot has a .who. */
+export function heldSlots(): (file: string) => boolean {
+  let locked: Set<number> | null | undefined;
+  return (file) => slotHeld(file, locked === undefined ? (locked = flockedInodes()) : locked);
 }
 
 const STALE_WAITER_MS = 60_000; // citadel-heavy freshens a waiter's file at least every 20 s
@@ -266,7 +283,7 @@ const STALE_WAITER_MS = 60_000; // citadel-heavy freshens a waiter's file at lea
  * waiters (wait-<pid>-<random>: who, what, since s, reason; freshened while it waits). A holder running a Node test
  * suite gets its counts from slot-N.progress, which citadel-heavy has tools/citadel-node write.
  */
-export function readHeavy(dir: string, now = Date.now(), held = slotHeld): { holders: HeavyJob[]; waiters: HeavyJob[] } {
+export function readHeavy(dir: string, now = Date.now(), held = heldSlots()): { holders: HeavyJob[]; waiters: HeavyJob[] } {
   const holders: HeavyJob[] = [], waiters: HeavyJob[] = [];
   for (const name of files(dir)) {
     const f = join(dir, name);

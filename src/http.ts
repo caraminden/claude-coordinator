@@ -13,6 +13,7 @@ import type { Landings } from './land.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { gzip } from 'node:zlib';
+import { LOCAL_HEADER, PEER_HEADER } from './front.ts';
 // Types only: this module loads nothing of the app's, so any module can import it.
 import type { Auth, Session } from './auth.ts';
 import type { BranchStatus } from './branch.ts';
@@ -215,7 +216,20 @@ export function clientIp(req: IncomingMessage): string {
   // Caddy appends the real client address, so only the right-most entry is trustworthy.
   const fwd = req.headers['x-forwarded-for'];
   const last = typeof fwd === 'string' ? fwd.split(',').pop()!.trim() : '';
-  return last || req.socket.remoteAddress || '?';
+  return last || connection(req).remote || '?';
+}
+
+/** True once the main thread listens behind the front thread (src/front.ts), on a local socket only it can reach. */
+export const front = { on: false };
+
+/**
+ * The client connection's addresses. Behind the front thread the main thread's connection is a local socket with
+ * none, so they come from the front thread's headers, which it always replaces: a client can't set them.
+ */
+export function connection(req: IncomingMessage): { remote?: string; localAddress?: string; localPort?: number } {
+  if (!front.on) return { remote: req.socket.remoteAddress, localAddress: req.socket.localAddress, localPort: req.socket.localPort };
+  const [localAddress, localPort] = String(req.headers[LOCAL_HEADER] ?? '').split(' ');
+  return { remote: String(req.headers[PEER_HEADER] ?? '') || undefined, localAddress: localAddress || undefined, localPort: Number(localPort) || undefined };
 }
 
 export function isSecure(req: IncomingMessage): boolean {

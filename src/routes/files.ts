@@ -16,7 +16,7 @@ import { place } from '../chunked-uploads.ts';
 import { isUploadName, MAX_UPLOAD_BYTES, MAX_UPLOADS, opensInline, saveUpload, uploadFolder } from '../uploads.ts';
 import { projectDir, projectSharedDir } from '../workspace.ts';
 import type { PageItem } from '../ideas.ts';
-import { HttpError, json, ownWrites, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
+import { connection, HttpError, json, ownWrites, readJson, SECURITY_HEADERS, str, type App, type Route, type SharedFile } from '../http.ts';
 import { imageSize } from '../image-size.ts';
 import { MAX_LABEL, MAX_MARKS, marksTitle, parseMarks } from '../../public/ui/marks.js';
 
@@ -692,7 +692,7 @@ export const fileRoutes: Route[] = [
       let previews = docPreviews.get(app.dataDir);
       if (!previews) docPreviews.set(app.dataDir, (previews = new DocPreviews(join(app.dataDir, 'doc-previews'))));
       // The server opens the page on itself, at the address this request came in on.
-      const { localAddress = '127.0.0.1', localPort } = req.socket;
+      const { localAddress = '127.0.0.1', localPort } = connection(req);
       const img = await previews.get(key, () => `http://${localAddress.includes(':') ? `[${localAddress}]` : localAddress}:${localPort}/api/files/${tokened}`);
       if (!img) throw new HttpError(404, 'That page could not be shot');
       res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': 'image/jpeg', 'Content-Length': img.length, 'Cache-Control': 'private, no-cache', ETag: `"${key}"` });

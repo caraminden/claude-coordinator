@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { appFolder, appRoot, MANIFEST, parseManifest } from './app-services.ts';
 import { seal, sealKey, unseal } from './credentials.ts';
 import type { ContraptionRow, Store, User } from './db.ts';
-import { HttpError } from './http.ts';
+import { connection, HttpError } from './http.ts';
 import { inOrder } from '../public/reorder.js';
 
 /** Where the live server's key folders go, unless CITADEL_CONTRAPTIONS_DIR says otherwise; another DATA_DIR keeps its own under it. */
@@ -151,7 +151,7 @@ export class Contraptions {
    * refused before its key is looked at.
    */
   caller(req: IncomingMessage): ContraptionRow {
-    const loopback = /^(127\.|::1$|::ffff:127\.)/.test(req.socket.remoteAddress ?? '');
+    const loopback = /^(127\.|::1$|::ffff:127\.)/.test(connection(req).remote ?? '');
     if (!loopback || req.headers['x-forwarded-for'] !== undefined || req.headers.forwarded !== undefined || /(?:^|;\s*)cc_session=/.test(req.headers.cookie ?? '')) {
       throw new HttpError(403, "Only a contraption's own server may call this, on Citadel's machine, not through the web");
     }

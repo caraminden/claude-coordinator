@@ -36,6 +36,7 @@
  "src/fast-mode.ts": 4,
  "src/fcm.ts": 2,
  "src/flake-fixes.ts": 4,
+ "src/front.ts": 2,
  "src/github-link.ts": 1,
  "src/handoff-tidy.ts": 8,
  "src/history.ts": 1,

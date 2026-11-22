@@ -71,7 +71,8 @@ import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { every, type Job } from './src/every.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, framedWithApps, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
+import { acceptsGzip, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
+import { listenThroughFront } from './src/front.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { jobRoutes } from './src/routes/jobs.ts';
 import { ciStoreRoutes } from './src/routes/ci-store.ts';
@@ -313,7 +314,8 @@ const repoAccess = new RepoAccess(store, githubLink, !BOOT_CHECK);
 const runnerTokens = new RunnerTokens(store, githubLink, !BOOT_CHECK);
 // People's own Claude plans (#213). A dev copy tags its containers so it never shares the live server's.
 const claudeLink = new ClaudeLink(store, credentials, DATA_DIR, process.env.CLAUDE_BIN ?? 'claude', undefined, DATA_DIR === DEFAULT_DATA_DIR ? 'citadel-claude-' : `citadel-claude-${createHash('sha256').update(DATA_DIR).digest('hex').slice(0, 6)}-`);
-// Keep secrets out of the environment that claude and its tools inherit.
+// Keep secrets out of the environment that claude and its tools inherit; the reader threads get the sign-in keys in their start data.
+const signInKeys = { password: process.env.COORDINATOR_PASSWORD ?? '', secret: process.env.SESSION_SECRET ?? '' };
 delete process.env.COORDINATOR_PASSWORD;
 delete process.env.SESSION_SECRET;
 delete process.env.GITHUB_CLIENT_SECRET;
@@ -483,7 +485,8 @@ if (watchdogAt) {
 const clientErrors = new ClientErrors();
 // Semantic memory (#331): llama-server on this box embeds the chats (deploy/citadel-embed.service).
 const EMBED_MODEL = process.env.CITADEL_EMBED_MODEL || 'Qwen3-Embedding-0.6B-Q8_0';
-const embed = llamaEmbed(process.env.CITADEL_EMBED_URL || 'http://127.0.0.1:21434');
+const EMBED_URL = process.env.CITADEL_EMBED_URL || 'http://127.0.0.1:21434';
+const embed = llamaEmbed(EMBED_URL);
 const MEMORY_SCHEMES = process.env.CITADEL_MEMORY_SCHEMES?.split(',').map(Number);
 // Every scheme is indexed (#488); CITADEL_MEMORY_SCHEMES narrows it to some, for tests or a box that can't keep up.
 const memoryScheme = (id: number) => !MEMORY_SCHEMES || MEMORY_SCHEMES.includes(id);
@@ -1856,6 +1859,12 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       const busy = await settled(Math.min(Number(requestUrl(req).searchParams.get('ms')) || 30_000, 120_000));
       return json(res, 200, { busy });
     }
+    // test/front.test.ts: the main thread held busy, as a long timer holds it, to show reader routes still answer.
+    if (SETTLED_ROUTE && req.url?.startsWith('/api/test/block')) {
+      const until = Date.now() + Math.min(Number(requestUrl(req).searchParams.get('ms')) || 0, 5000);
+      while (Date.now() < until);
+      return json(res, 200, {});
+    }
     // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
     if (apps.onAppHost(req)) {
       const path = (req.url ?? '/').split('?')[0];
@@ -1950,14 +1959,35 @@ server.requestTimeout = 30 * 60_000;
 // Once up, a stray error is logged rather than fatal. Not before: a failed start (a port in use, a
 // database that won't open) must still exit non-zero so systemd restarts it.
 server.on('listening', keepServing);
-server.on('listening', () => { boundPort = (server.address() as AddressInfo).port; if (!BOOT_CHECK) answerProbe.start(boundPort, LOCAL_HOST); });
 
 // Under socket activation (deploy/claude-coordinator.socket) systemd holds the listening socket, fd 3,
 // across restarts: requests made while the server restarts wait for the next one instead of failing.
-if (process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.pid)) {
-  server.listen({ fd: 3 }, () => console.log(`${APP_NAME} listening on the socket systemd holds (${HOST}:${PORT})`));
+const SYSTEMD_SOCKET = process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.pid);
+const listened = (port: number) => {
+  boundPort = port;
+  // It asks the port people use, so through the front thread too: /api/health stays on the main thread (#1563).
+  if (!BOOT_CHECK) answerProbe.start(boundPort, LOCAL_HOST);
+  console.log(SYSTEMD_SOCKET ? `${APP_NAME} listening on the socket systemd holds (${HOST}:${PORT})` : `${APP_NAME} listening on http://${HOST}:${boundPort}`);
+};
+// People's read-only page requests answer on reader threads, behind a front thread that owns the port (#1563).
+// CITADEL_FRONT=0 is the off switch: the main thread listens itself, as before.
+if (process.env.CITADEL_FRONT !== '0') {
+  front.on = true;
+  listenThroughFront(server, {
+    ...(SYSTEMD_SOCKET ? { fd: 3 } : { host: HOST, port: PORT }),
+    readers: 2,
+    appsDomain: APPS_DOMAIN,
+    ...(SETTLED_ROUTE ? { answerMs: Number(process.env.CITADEL_READER_ANSWER_MS) || undefined, stuckMs: Number(process.env.CITADEL_READER_STUCK_MS) || undefined } : {}),
+    reader: { testHooks: SETTLED_ROUTE, dbPath: store.path, ...signInKeys, shared: writer?.shared ?? null, embedUrl: EMBED_URL, embedModel: EMBED_MODEL, memorySchemes: MEMORY_SCHEMES ?? null },
+  }, {
+    listening: listened,
+    usage: (args) => (store.usage.used as (...a: unknown[]) => void)(...args),
+    setting: (key, value) => { if (/^plan:\d+:page$/.test(key)) store.setSetting(key, value); },
+  });
+} else if (SYSTEMD_SOCKET) {
+  server.listen({ fd: 3 }, () => listened(PORT));
 } else {
-  server.listen(PORT, HOST, () => console.log(`${APP_NAME} listening on http://${HOST}:${boundPort}`));
+  server.listen(PORT, HOST, () => listened((server.address() as AddressInfo).port));
 }
 // Contraption deploys a restart or crash cut short start again (#847), once: cut short twice, they're left for a person.
 server.on('listening', () => void services.interrupted().then((cut) => {

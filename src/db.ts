@@ -1829,12 +1829,13 @@ export class Store {
   /** The database file; the runner keeps its turn folders beside it. */
   readonly path: string;
 
-  /** `writer`: the write worker's own connection (src/db-writer.ts) to a database the server's Store already set up, so no setup or migrations. */
-  constructor(path: string, opts: { writer?: boolean } = {}) {
+  /** `writer`: the write worker's own connection (src/db-writer.ts) to a database the server's Store already set up, so no setup or migrations.
+   *  `reader`: the same, opened read-only by SQLite, for a reader thread (src/readers.ts): any write throws. */
+  constructor(path: string, opts: { writer?: boolean; reader?: boolean } = {}) {
     this.path = path;
     // Wait out another connection's write (a test's second Store, a backup) instead of failing at once with SQLITE_BUSY.
     // The writer waits longer: it waits on its own thread, and giving up loses the write.
-    this.db = new DatabaseSync(path, { timeout: opts.writer ? 30_000 : 5000 });
+    this.db = new DatabaseSync(path, { timeout: opts.writer ? 30_000 : 5000, readOnly: !!opts.reader });
     // NORMAL: in WAL mode it fsyncs at checkpoints, not on every commit, which a busy disk made cost 150-300 ms
     // each. A power cut can lose the last few seconds of writes; an app crash loses nothing (#470, Cara 2026-11-10).
     this.db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
@@ -1842,12 +1843,12 @@ export class Store {
     // cell's text in the page's free space, so a swept audit row's prompt outlived the sweep (#844, #836). dropAudit
     // turns it fully on, which also zeroes whole freed pages, a cost the 1.3 GB database's other prunes don't need.
     this.db.exec('PRAGMA main.secure_delete = FAST;');
-    if (opts.writer) {
+    if (opts.writer || opts.reader) {
       this.db.prepare('ATTACH DATABASE ? AS state').run(this.statePath);
       this.db.exec('PRAGMA state.synchronous = NORMAL; PRAGMA main.journal_size_limit = 16777216; PRAGMA state.journal_size_limit = 16777216;');
       this.db.prepare(`ATTACH DATABASE ? AS ${CHAT}`).run(this.eventsPath);
       this.db.exec(`PRAGMA ${CHAT}.synchronous = NORMAL; PRAGMA ${CHAT}.journal_size_limit = 16777216;`);
-      if (eventsHome(this.db) === CHAT) this.db.exec(cardFatesTrigger(CHAT)); // a TEMP trigger is this connection's own
+      if (!opts.reader && eventsHome(this.db) === CHAT) this.db.exec(cardFatesTrigger(CHAT)); // a TEMP trigger is this connection's own
       this.props = new Registry(this.db);
       this.schedules = new Schedules(this.db);
       this.reviews = new ReviewSet(this.db);

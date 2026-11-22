@@ -71,6 +71,8 @@ export type Writer = {
   queued(): number;
   /** Stop the worker: writes run on the store's connection again. */
   stop(): Promise<number>;
+  /** [0]: the last write run, [1]: the worker's state, [2]: the last write sent. Reader threads wait on it (src/reader.ts). */
+  shared: BigInt64Array;
 };
 
 /**
@@ -83,8 +85,8 @@ export type Writer = {
 export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, drainMs = DRAIN_MS } = {}): Writer | null {
   if (!store.statePath) return null;
   const db = store.db;
-  // [0]: the last write run, [1]: 1 once the worker is ready, -1 once it is gone.
-  const shared = new BigInt64Array(new SharedArrayBuffer(16));
+  // [0]: the last write run, [1]: 1 once the worker is ready, -1 once it is gone, [2]: the last write sent.
+  const shared = new BigInt64Array(new SharedArrayBuffer(24));
   const worker = new Worker(new URL(import.meta.url), { workerData: { writer: { path: store.path, shared, delayMs } } });
   worker.on('error', (err) => console.error(`DB write worker failed: ${err?.stack ?? err}`));
   // Its start is a few ms of opening the file; waiting here keeps the boot's own writes in order.
@@ -221,6 +223,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
         return f.apply(this, args);
       }
       seq = n;
+      Atomics.store(shared, 2, BigInt(n));
       const req = writes.request.getStore();
       if (req && !req.done) req.seq = n;
       if (name === 'setSetting') unwritten.set(args[0], { seq: n, json: JSON.stringify(args[1]) });
@@ -252,6 +255,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     unwritten.clear();
     const lost = seq - applied();
     seq = applied();
+    Atomics.store(shared, 2, BigInt(seq));
     for (const p of pending.values()) p.reject(new Error('the DB write worker stopped'));
     pending.clear();
     for (const w of waiters) w.done();
@@ -269,7 +273,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   });
   worker.unref(); // after the listeners: adding one refs the worker again
   console.log(`DB writes run on a worker thread (started in ${readyMs - (until - Date.now())} ms).`);
-  return { drain, queued: () => seq - applied(), stop: () => worker.terminate() };
+  return { drain, queued: () => seq - applied(), stop: () => worker.terminate(), shared };
 }
 
 if (!isMainThread && workerData?.writer) {

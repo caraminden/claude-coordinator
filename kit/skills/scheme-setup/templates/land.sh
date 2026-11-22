@@ -248,6 +248,13 @@ park() { say "$*"; exit 75; }
 #   land_under <commit> <branch>  plain landings, at the early checks and again before each rebase: prints the newest
 #                                 commit under <commit> (the branch) whose own commits came off $BRANCH (a deploy
 #                                 rolled them back), so the rebase replays only the branch's commits above it. Nothing printed: the usual fork point (header at under_of).
+#   land_suspect <main> <commit>...  batches only: CI is red on the last <commit>, a member of a batch whose members'
+#                                 commits are the ones given, from the one on <main> up; reads the failure ids
+#                                 (land_failures') on stdin and prints the commit of the member it guesses turned it
+#                                 red (Citadel's: the one whose change touched the failing test or what it imports,
+#                                 run alone on the members' commits to confirm). The red batch's bisect then runs CI
+#                                 on the member just below it, then on it, before halving (header at suspect_of).
+#                                 Nothing printed, a failure or a commit not given: the bisect halves as always.
 #   land_merge <side> <base> <ours> <theirs> <path>  the "hook" rule of MERGES: merges the file, leaving the result in
 #                                 <ours>; <side> names which of ours and theirs is $BRANCH's. Exit 0 clean, else
 #                                 it stops the rebase as a clash does. With LAND_MERGE_DIFF3=1 (the path has append or
@@ -1633,6 +1640,7 @@ ci_ask() {
         queue_phase "waiting for CI on ${tip:0:12} again since $(date +%H:%M)"
         return 0
       fi
+      suspect_of
       ci_red "CI is red on ${tip:0:12}"
       return 0 ;;
     4)
@@ -1913,12 +1921,49 @@ batch_look() {
   SHIP_M=$B_N
 }
 
+# land.local.sh's land_suspect (the header): this one's CI is red and members of its batch sit below it, so the hook
+# guesses which member turned it red, from the failure ids in $cilog. Its answer goes in <state>/land-suspect/<tip>
+# (a day's are kept), where every member's batch_mid reads it. A failure or an answer that isn't a member's commit is
+# said, and the bisect halves as always: a guess never refuses a landing.
+suspect_of() {
+  local i rc=0 out c d=$state/land-suspect
+  local -a m=()
+  declare -F land_suspect >/dev/null && [ -n "$BATCH" ] && [ "${B_I:-1}" -gt 1 ] && [ "${B_SHA[B_I]:-}" = "$tip" ] || return 0
+  for ((i = 1; i <= B_I; i++)); do m+=("${B_SHA[i]}"); done
+  out=$(mktemp) || return 0
+  (cd "$here" && land_suspect "${B_BASE[1]}" "${m[@]}") < <(land_failures <"$cilog" | sed "s|^$here/||" | sort -u) >"$out" 9>&- 6>&- 7>&- &
+  wait $! || rc=$?
+  c=$(tail -n 1 "$out")
+  rm -f "$out"
+  [ "$rc" = 0 ] || { say "land.local.sh's land_suspect failed (exit $rc), so the red batch's bisect halves"; return 0; }
+  [ -n "$c" ] || return 0
+  for ((i = 1; i <= B_I; i++)); do
+    [ "${B_SHA[i]}" = "$c" ] || continue
+    mkdir -p "$d" && find "$d" -type f -mmin +1440 -delete 2>/dev/null
+    echo "$c" >"$d/$tip.$$" && mv -f "$d/$tip.$$" "$d/$tip"
+    say "land_suspect guesses ${B_LABEL[i]} (${c:0:12}) turned CI red, so the bisect tries it first"
+    return 0
+  done
+  say "land.local.sh's land_suspect printed \"$c\", which is not the commit of a member of this batch, so the red batch's bisect halves"
+}
+
 # Which member of a red batch runs CI next: halfway between the deepest green one (0: main) and the shallowest red one.
+# With land_suspect's guess k for the shallowest red one (suspect_of), first the member just below k, then k itself:
+# each lies strictly between the two, so the search still ends, and a wrong guess only costs those runs.
 batch_mid() {
-  local i hi='' lo=0
+  local i hi='' lo=0 s p
   for ((i = 1; i < ${#B_VER[@]}; i++)); do [ "${B_VER[i]}" != red ] || { hi=$i; break; }; done
   [ -n "$hi" ] || return 0
   for ((i = 1; i < hi; i++)); do [ "${B_VER[i]}" != green ] || lo=$i; done
+  if [ -s "$state/land-suspect/${B_SHA[hi]}" ] && s=$(cat "$state/land-suspect/${B_SHA[hi]}"); then
+    for ((i = lo + 1; i <= hi; i++)); do
+      [ "${B_SHA[i]}" = "$s" ] || continue
+      p=$((i - 1))
+      [ "$p" -gt "$lo" ] || p=$i
+      [ "$p" -ge "$hi" ] || { echo "$p"; return 0; }
+      break
+    done
+  fi
   [ $((hi - lo)) -le 1 ] || echo $(((lo + hi) / 2))
 }
 

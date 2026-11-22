@@ -1,6 +1,6 @@
 // The scheme-setup template land.sh: the last of Citadel's own land.sh extras as core hooks and settings (#1571, one
 // ship batching step 3b, ADR 0026): FLAKE_RUNS, PARK_RETRIES, land_ci_more, land_main_red, land_recover, land_under,
-// a MERGES hook beside append rules, and CONFLICT_PREP. Each is off by default, which the template's other tests pin
+// land_suspect, a MERGES hook beside append rules, and CONFLICT_PREP. Each is off by default, which the template's other tests pin
 // by passing unchanged.
 import assert from 'node:assert/strict';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -141,6 +141,54 @@ test('land_under: asked again right before the rebase, so a roll back after the 
   assert.equal(ok.status, 0, ok.stderr);
   assert.ok(readFileSync(asked, 'utf8').split('\n').length > 2, 'asked more than once');
   assert.deepEqual(git(r.main, 'log', '--format=%s', 'main').split('\n'), ['b.txt: b', 'm.txt: main', 'base']);
+});
+
+// land_suspect (Cara, 2026-11-22, "Port it as a hook"): a red batch tries the member the hook guesses first, the one
+// below it, then it, before halving. Four members, the top red: halving would push the 2nd; the guess (the top) pushes the 3rd.
+const gated = 'until [ -e "$GATE" ]; do sleep 0.05; done';
+const suspectHook = `land_suspect() { { echo "$*"; cat; } >>"$CI_DIR/suspect.log"; [ ! -e "$CI_DIR/guess" ] || cat "$CI_DIR/guess"; }\n`;
+test('land_suspect: a red batch runs CI on the member below the guess, then refuses the guess with no halving', async () => {
+  const c = ciSetup(4, { stack: '1', batch: '4', check: gated, local: suspectHook });
+  try {
+    const [a, b, d, e] = await c.lands(1, 2, 3, 4);
+    const base = c.mainAt();
+    c.open();
+    const te = await c.tip(e);
+    const td = c.parent(te), tb = c.parent(td), ta = c.parent(tb);
+    const full = git(c.main, 'rev-parse', te);
+    writeFileSync(join(c.ci, 'guess'), `${full}\n`);
+    c.verdict(te, RED);
+    assert.equal(await c.tip(d), td, 'the member just below the guess pushes, not the halfway one');
+    assert.match(e.stderr(), /land_suspect guesses ticket\/4-x \([0-9a-f]{12}\) turned CI red, so the bisect tries it first/);
+    const asked = readFileSync(join(c.ci, 'suspect.log'), 'utf8').split('\n')[0].split(' ');
+    assert.deepEqual(asked.map((x) => x.slice(0, 12)), [base, ta, tb, td, te], "main's commit, then each member's");
+    assert.deepEqual([c.sent(a), c.sent(b)], [[], []]);
+    c.verdict(td, GREEN);
+    for (const l of [a, b, d]) assert.equal(await l.exit, 0, l.stderr());
+    assert.equal(await e.exit, 1, e.stderr());
+    assert.match(e.stderr(), /CI is red on [0-9a-f]{12} \(above\), so main is untouched/);
+    assert.deepEqual(c.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3']);
+    assert.equal(c.sent(e).length, 1, 'two CI runs in all, where halving takes three');
+  } finally {
+    c.stop();
+  }
+});
+
+test('land_suspect: an answer that is no member of the batch is said, and the red batch halves as always', async () => {
+  const c = ciSetup(4, { stack: '1', batch: '4', check: gated, local: suspectHook });
+  try {
+    const [a, b, , e] = await c.lands(1, 2, 3, 4);
+    writeFileSync(join(c.ci, 'guess'), `${c.mainAt()}\n`);
+    c.open();
+    const te = await c.tip(e);
+    const tb = c.parent(c.parent(te));
+    c.verdict(te, RED);
+    assert.equal(await c.tip(b), tb, 'the halfway member pushes');
+    assert.match(e.stderr(), /land_suspect printed "[0-9a-f]+", which is not the commit of a member of this batch, so the red batch's bisect halves/);
+    assert.deepEqual(c.sent(a), []);
+  } finally {
+    c.stop();
+  }
 });
 
 // Citadel's src/db.ts: SCHEMA_HISTORY renumbered by its own driver (tools/ship-numbers.ts, the hook) and MIGRATIONS

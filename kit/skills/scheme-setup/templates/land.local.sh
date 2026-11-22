@@ -184,6 +184,17 @@
 #   cat .rolled-back-to 2>/dev/null || true # the deploy's roll back writes the newest commit it took off main
 # }
 
+# A red batch's guess at the member that turned CI red, from the failure ids on stdin (land_failures'): print that
+# member's commit, one of those given (from the one on main up), and the bisect runs CI just below it, then on it,
+# before halving. Nothing: halving as always. This one guesses the lowest member whose change touched a failing file.
+# land_suspect() { # <main's commit> <member's commit>...
+#   local ids m prev=$1; ids=$(cut -d: -f1 | sort -u); shift
+#   for m in "$@"; do
+#     git diff --name-only "$prev" "$m" | grep -qxFf <(printf '%s\n' "$ids") && { echo "$m"; return; }
+#     prev=$m
+#   done
+# }
+
 # MERGES's hook rule: merge <path>, leaving the result in <ours>. <side> says which of ours and theirs is main's
 # (ours in a rebase). Exit 0 clean; anything else stops the rebase as a clash does. With append or sum lines for the
 # same path, it runs with LAND_MERGE_DIFF3=1 and leaves its clashes as diff3 markers (size 31, main/base/branch) for

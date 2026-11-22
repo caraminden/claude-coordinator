@@ -36,7 +36,11 @@ the top, ship up to the deepest green commit, bisect the prefixes when the top i
   first"), each off by default: `FLAKE_RUNS` (several fresh runs for a flaky CI red), `PARK_RETRIES` (ask CI again in
   place before parking), `CONFLICT_PREP` (rerere on, the `prep:` line, a recorded fix retries the build),
   `land_ci_more` (more time past `CI_LIMIT`, once per reason), `land_main_red` (waive failures red on main's tip
-  too), `land_recover` (put right what a half-done deploy left) and `land_under` (rebase from a rolled-back commit).
+  too), `land_recover` (put right what a half-done deploy left), `land_under` (rebase from a rolled-back commit)
+  and `land_suspect` (a red batch's guess at the ship that broke it, from the failing tests: its bisect runs CI just
+  below the guess, then on it, before halving; Cara picked "Port it as a hook" over dropping Citadel's suspect search
+  for the halving bisect, 2026-11-22, on #1571's card). Citadel's local pin (run the failing test alone on the
+  ships' commits) moves into its hook's body; the core still asks CI before it refuses anyone.
   A `MERGES` `hook` line may now sit beside `append` / `sum` lines for the same file (Citadel's `src/db.ts`): the
   hook leaves its clashes as the core's diff3 markers and the rules take them.
 - **Batching is on by default** (Cara, 2026-11-20: "On, up to 4"). A scheme that sets nothing batches up to 4;

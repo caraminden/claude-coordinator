@@ -12,6 +12,7 @@ import {
   changedParts, countGate, fingerprint, inWindow, KEEPALIVE_AFTER_MS, KEEPALIVE_GATES_KEY, KEEPALIVE_OFF_KEY, KEEPALIVE_REPORT_KEY, KEEPALIVE_TEXT, keepaliveKey, missed, prefixParts, SERIES_CAP_MS,
   tooManyMisses, WEEK_MS, weekReport, type KeepaliveSeries, type KeepaliveRow,
 } from '../src/keepalive.ts';
+import { sleepKey } from '../src/needs.ts';
 import { Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
 import { jsonLines, lines, stopTurns, testPins, until } from './helpers.ts';
@@ -385,6 +386,26 @@ test('a deploy that goes live during a keepalive dismisses its pending-deploy mi
     assert.equal(runner.deployLive(id), false, 'not while the ping runs');
   });
   await until('the minion to be dismissed', () => store.getTicket(id)!.status === 'closed');
+});
+
+test('an asleep minion (#1636) gets no keepalive; a message to it starts its turn as normal and wakes it', async () => {
+  const id = minion();
+  const end = pst(13);
+  await realTurn(id, end);
+  store.updateTicket(id, { state: 'ready' });
+  assert.ok(runner.sleep(id, 'Cara', true));
+  assert.equal(runner.sleep(id, 'Cara', true), false, 'already asleep');
+  const before = callCount();
+  runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+  await idle(id);
+  assert.equal(callCount(), before, 'turned away at its gate');
+  assert.ok(store.getSetting(sleepKey(id)), 'still asleep');
+
+  await realTurn(id, end + 2 * KEEPALIVE_AFTER_MS);
+  assert.equal(callCount(), before + 1, 'the message ran a turn');
+  assert.equal(store.getSetting(sleepKey(id)), null, 'the turn woke it');
+  assert.ok(notesOf(id).includes('Cara put this minion to sleep.'));
+  assert.ok(notesOf(id).includes('Awake again: a new turn started.'));
 });
 
 test('no keepalive outside the window or past the 8-hour cap', async () => {

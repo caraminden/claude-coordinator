@@ -5,7 +5,7 @@ on changes that shipped with a defect a later minion had to fix, plus same-size 
 fixed, and has a blind judge say whether each review named the defect (#1505).
 
 ```bash
-citadel-heavy --here node tools/review-escapes/run.ts run --jobs 4   # all arms, all 40 cases
+node tools/review-escapes/run.ts run --jobs 4                        # all arms, all 40 cases (in the background)
 node tools/review-escapes/run.ts report                              # the table, again
 node tools/review-escapes/run.ts check                               # rebuild workspaces, look for leaks
 ```

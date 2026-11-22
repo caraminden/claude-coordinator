@@ -201,8 +201,8 @@ const HELP = `tools/review-escapes: the pre-ship reviewer against defects that r
   node tools/review-escapes/run.ts check [--case <regex>] [--out <dir>]  builds every case's workspace, no model calls
 
   --out defaults to $TMPDIR/review-escapes. --kit defaults to this checkout's kit/, the reviewer under test.
-  Arms are in arms.json; a new arm is a new entry there. Runs on the asker's Claude login: start it with
-  citadel-heavy --here, in the background.`;
+  Arms are in arms.json; a new arm is a new entry there. Runs on the asker's Claude login: start it in the
+  background, not through citadel-heavy (it waits on Claude, not the CPU).`;
 
 async function main() {
   const cmd = argv[0];

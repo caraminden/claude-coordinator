@@ -374,7 +374,7 @@ const HELP = `Prompt evals (#1117): rerun frozen corrections against a prompt ve
   tools/prompt-eval check                every case and brief file parses and its regexes compile
   tools/prompt-eval snapshot <system-prompt.md>   refresh fixture/ from a turn's system prompt
 
-Each run is a real Claude turn on your login: run it through citadel-heavy --here, in the background.`;
+Each run is a real Claude turn on your login: run it in the background, not through citadel-heavy (it waits on Claude, not the CPU).`;
 
 async function main(argv: string[]) {
   const [cmd, ...rest] = argv;

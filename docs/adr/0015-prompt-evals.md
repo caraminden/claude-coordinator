@@ -20,8 +20,9 @@ The grilling round with Josh, 2026-11-19:
 1. **Which moments:** "Citadel's own, mixed": strikes, corrections and rule slips, Citadel's chats only.
 2. **Where:** "In the repo", `tools/prompt-evals/`, versioned with the prompts it tests.
 3. **Who owns the set:** "Taskmaster owns it": the Citadel Taskmaster adds and prunes cases.
-4. **When:** "On ask + big changes": never per edit and never in CI; it runs on perigee through `citadel-heavy` on the
-   asker's login (Josh asked whether it would run on Cara's desktop CI: no).
+4. **When:** "On ask + big changes": never per edit and never in CI; it runs on perigee on the asker's login, outside
+   `citadel-heavy`'s line since #1629, as it waits on Claude, not the CPU (Josh asked whether it would run on Cara's
+   desktop CI: no).
 5. **Tiers:** "Both, small": opening moves on every case, plus whole reruns of a few closed briefs.
 6. **A drop:** "Drop needs a go": a case fell when its passing runs drop by 2 or more; 2 or more fallen cases make a
    prompt change high risk.

@@ -35,7 +35,7 @@ folder, with the shared toolchain (the `citadel:android-app` skill):
 ```bash
 # in a clone of an app that pins the shell, from its Android project:
 sed -i "s|new File('../node_modules/@citadel/android-shell/android')|new File('<this repo>/kit/android-shell/android')|" capacitor.settings.gradle
-citadel-heavy --here ./gradlew :citadel-android-shell:testDebugUnitTest :app:assembleDebug
+citadel-heavy --here --heavy ./gradlew :citadel-android-shell:testDebugUnitTest :app:assembleDebug
 ```
 
 Then delete `android/build/` here. Try it on the shared emulator with a debug build of that clone

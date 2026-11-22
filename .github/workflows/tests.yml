@@ -128,7 +128,8 @@ jobs:
             chmod +x "$dir/chrome-headless-shell-linux64/chrome-headless-shell"
           fi
       # A run that isn't a land's (the nightly) starts once no land's run is queued or running, or after 30 minutes of them.
-      # Only runs from the last 15 minutes count: land.sh stops waiting on one after 6 (9 with reruns alone), and GitHub keeps some abandoned
+      # Only runs from the last 30 minutes count: a ship's run can wait 15 for a busy runner, then land.sh waits up to 9
+      # more (12 with reruns alone, plus the burn-in's up to 3, #1606), and GitHub keeps some abandoned
       # runs "queued" for good (seven from 2026-11-11 evening, their branches long gone, on 2026-11-12).
       - name: wait for the lands
         if: ${{ !startsWith(github.ref, 'refs/heads/land/') }}
@@ -137,7 +138,7 @@ jobs:
         run: |
           for _ in $(seq 60); do
             busy=0
-            since=$(date -u -d '15 minutes ago' +%FT%TZ)
+            since=$(date -u -d '30 minutes ago' +%FT%TZ)
             for status in queued in_progress; do
               n=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/tests.yml/runs?event=push&status=$status&created=%3E$since&per_page=1" \
                 | python3 -c 'import json, sys; print(json.load(sys.stdin)["total_count"])') || n=x

@@ -7,7 +7,7 @@ on numbers with the reason written down."
 ## Context
 
 land.sh waits `LAND_CI_TIMEOUT` for a ship's CI run, counted from the runner's pickup, with the burn-in's time (up to
-`LAND_CI_BURN`) and a rerun window (`LAND_CI_RERUN`, ADR 0022) added on top. Past it the ship falls back to the full
+`LAND_CI_BURN`, 180 s; burn-in.sh itself stops at 150 s) and a rerun window (`LAND_CI_RERUN`, ADR 0022) added on top. Past it the ship falls back to the full
 suite on perigee. It was 360 s (#1361).
 
 What grew, from tests.yml's step timings and logs on land/** (times PST):
@@ -30,6 +30,8 @@ A median under 4 min isn't reachable without cutting tests, which is ruled out.
 - `LAND_CI_TIMEOUT` goes to 540 s: past every green seen, with room for the suite's growth.
 - tests.yml's job limit on land/** goes from 15 to 16 minutes, which test/ci-runner-choice.test.ts asks for
   (limit + rerun window + burn-in + 60 s).
+- tests.yml's wait for the lands (the nightly's) counts land runs from the last 30 minutes, not 15: a ship's run can
+  wait 15 for a busy runner and then up to 15 more.
 - src/ci-land-gate.ts's `LAND_CAP_MS` follows (8 min into the CI wait, as 5 was for 6) and names the 9-min cap.
 
 ## Cost, and what it reverses

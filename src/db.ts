@@ -26,7 +26,7 @@ import { settingQueries } from './db/settings.ts';
 import { viewQueries } from './db/views.ts';
 
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from './db-keys.ts';
-import { inScope, scoped } from './read-scope.ts';
+import { copyRow, inScope, scoped } from './read-scope.ts';
 export { askerKey, buildOwnerKey, pagePlanKey, planKey };
 
 /** The newest event when #812 landed: a card at or below it still counts a typed message as handling it (PERSON_WROTE), or every old card nobody settled would wake up open. */
@@ -2114,7 +2114,7 @@ export class Store {
 
   getProject(id: number): Project | undefined {
     const p = scoped(this.db, `project:${id}`, () => this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as unknown as Project | undefined);
-    return p && { ...p };
+    return copyRow(p);
   }
 
   createProject(name: string, repoUrl: string | null, ownerId: number | null = null): Project {
@@ -2253,13 +2253,13 @@ export class Store {
 
   getUser(id: number): User | undefined {
     const u = scoped(this.db, `user:id:${id}`, () => this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as unknown as User | undefined);
-    return u && { ...u };
+    return copyRow(u);
   }
 
   /** By login, name or open invite, either case: cookies from the shared-password days carry only the name. */
   findUser(field: 'login' | 'name' | 'invite_hash', value: string): User | undefined {
     const u = scoped(this.db, `user:${field}:${value}`, () => this.db.prepare(`SELECT * FROM users WHERE ${field} = ?`).get(value) as unknown as User | undefined);
-    return u && { ...u };
+    return copyRow(u);
   }
 
   /** A new person gets an id no one has ever had: a removed person's cookie names their id (#468 S05-1). */
@@ -2663,7 +2663,7 @@ export class Store {
 
   getEvent(id: number): EventRow | undefined {
     const e = scoped(this.db, `event:${id}`, () => this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as EventRow | undefined);
-    return e && { ...e };
+    return copyRow(e);
   }
 
   /** Replace an event's data, for cards whose status lives in the card (plans). */

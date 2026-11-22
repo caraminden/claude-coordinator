@@ -3,7 +3,7 @@
 import type { Store, Ticket, TicketKind } from '../db.ts';
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from '../db-keys.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
-import { inScope, scoped, warm } from '../read-scope.ts';
+import { copyRow, inScope, scoped, warm } from '../read-scope.ts';
 
 export const minionQueries = {
   /**
@@ -223,7 +223,7 @@ export const minionQueries = {
 
   getTicket(this: Store, id: number): Ticket | undefined {
     const t = scoped(this.db, `ticket:${id}`, () => this.db.prepare('SELECT * FROM tickets WHERE id = ?').get(id) as unknown as Ticket | undefined);
-    return t && { ...t };
+    return copyRow(t);
   },
 
   /** Insert a ticket with no working directory yet; call setTicketDir once it exists. */

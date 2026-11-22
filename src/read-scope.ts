@@ -50,3 +50,8 @@ export function warm(db: DatabaseSync, entries: Iterable<[string, unknown]>) {
   if (!memo) return;
   for (const [k, v] of entries) if (!memo.has(k)) memo.set(k, v);
 }
+
+/** A shallow copy of a remembered row, so one caller's edit can't reach another's; it keeps node:sqlite's null prototype. */
+export function copyRow<T extends object>(row: T | undefined): T | undefined {
+  return row && Object.assign(Object.create(Object.getPrototypeOf(row)), row);
+}

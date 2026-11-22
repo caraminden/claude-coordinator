@@ -42,9 +42,8 @@ const rt = startRealtime({ enabled: () => enabled, log: () => {}, everyMs: 1e9 }
 await rt.tick();
 const w = new Worker('setInterval(() => {}, 1000)', { eval: true });
 await new Promise((r) => w.once('online', r));
-await new Promise((r) => setTimeout(r, 200));
 const child = spawn('sleep', ['5']);
-await new Promise((r) => setTimeout(r, 100));
+await new Promise((r) => child.once('spawn', r));
 await rt.tick();
 const pol = async (pid, tid) => (await readSched(pid, tid))?.policy;
 const threads = readdirSync('/proc/self/task').map(Number);

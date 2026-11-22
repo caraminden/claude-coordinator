@@ -417,3 +417,14 @@ test('an incident lists its five biggest stalls, with their own times and top fr
   assert.match(section[0], /Nov 20, 02:23 PST\*\* to 02:23 PST · 13\.2 s · unclear · waited on D folio_wait_bit_common ×7 · 60% readFileSync \(src\/db\.ts:9\); 20% \(garbage collector\)/);
   assert.match(section[0], /02:23 PST/, 'the stall started at 02:23:05, not 02:23:32 when its line was written');
 });
+
+test('a merged CI line names every runner its reds ran on, with counts', () => {
+  const at = (i: number) => T0 + i * MIN;
+  const run = (i: number, runner: string): CiRun => ({ ...clockRun(i, at(i)), branch: 'b1', runner });
+  const runs = [run(0, 'DESKTOP-linux'), run(1, 'DESKTOP-linux-2'), run(2, 'DESKTOP-linux'), run(3, 'DESKTOP-linux')];
+  const text = render({ from: at(0), last: at(3), why: ['a burst'] }, at(0), at(5), { entries: ciEntries(runs), read: {} }, '/db');
+  assert.match(text, /clock on DESKTOP-linux ×3, DESKTOP-linux-2 ×1 \(b1\) \(×4/);
+  // One runner stays as it was.
+  const one = render({ from: at(0), last: at(1), why: ['x'] }, at(0), at(5), { entries: ciEntries([run(0, 'R'), run(1, 'R')]), read: {} }, '/db');
+  assert.match(one, /clock on R \(b1\) \(×2/);
+});

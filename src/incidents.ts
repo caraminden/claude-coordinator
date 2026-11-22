@@ -159,6 +159,8 @@ export interface Entry {
   url?: string;
   /** The CI run's branch, so a merged line can list every branch it hit. */
   branch?: string;
+  /** The CI run's runner, so a merged line can list every runner it ran on. */
+  runner?: string;
 }
 export interface CiRun {
   id: number;
@@ -198,7 +200,7 @@ export function ciEntries(runs: CiRun[]): Entry[] {
   return runs.map((r) => {
     if (r.conclusion === 'failure') {
       const where = r.failed ? ` at ${r.failed}` : '';
-      return { at: r.updated, source: 'ci' as const, key: `${r.workflow} failed${where}`, url: r.url, branch: r.branch, text: `${r.workflow} failed${where}${r.runner ? ` on ${r.runner}` : ''} (${r.branch})` };
+      return { at: r.updated, source: 'ci' as const, key: `${r.workflow} failed${where}`, url: r.url, branch: r.branch, runner: r.runner ?? undefined, text: `${r.workflow} failed${where}${r.runner ? ` on ${r.runner}` : ''} (${r.branch})` };
     }
     const said = r.conclusion ?? 'still running';
     return { at: r.updated, source: 'ci' as const, key: `${r.workflow} ${said}`, url: r.url, branch: r.branch, text: `${r.workflow} ${said === 'success' ? 'passed' : said} (${r.branch})` };
@@ -278,7 +280,7 @@ export function journalEntries(text: string): Entry[] {
 }
 
 /** One line per (source, key): the first time, how many, and the last time. Sorted by when each began. */
-export interface Group { first: Entry; n: number; last: number; branches: Map<string, number>; /** The different numbers and hashes the merged lines carried (shape() blanks them), so "x ×81" can say they weren't one line repeated. */ variants: Set<string> }
+export interface Group { first: Entry; n: number; last: number; branches: Map<string, number>; runners: Map<string, number>; /** The different numbers and hashes the merged lines carried (shape() blanks them), so "x ×81" can say they weren't one line repeated. */ variants: Set<string> }
 /** The digits and hashes of a line, in order: what shape() takes out. */
 const vars = (s: string) => (s.match(/\b[0-9a-f]{7,40}\b|\d+(?:\.\d+)?/g) ?? []).join(',');
 /** What the numbers in a merged line count: the word before the first one ("Ticket 2869" is tickets), else "numbers". */
@@ -296,7 +298,8 @@ export function group(entries: Entry[]): Group[] {
       g.last = Math.max(g.last, e.at);
       g.variants.add(vars(e.text));
       if (e.branch !== undefined) g.branches.set(e.branch, (g.branches.get(e.branch) ?? 0) + 1);
-    } else groups.set(k, { first: e, n: 1, last: e.at, branches: new Map(e.branch !== undefined ? [[e.branch, 1]] : []), variants: new Set([vars(e.text)]) });
+      if (e.runner !== undefined) g.runners.set(e.runner, (g.runners.get(e.runner) ?? 0) + 1);
+    } else groups.set(k, { first: e, n: 1, last: e.at, branches: new Map(e.branch !== undefined ? [[e.branch, 1]] : []), runners: new Map(e.runner !== undefined ? [[e.runner, 1]] : []), variants: new Set([vars(e.text)]) });
   }
   return [...groups.values()].sort((a, b) => a.first.at - b.first.at);
 }
@@ -364,6 +367,7 @@ export function countWords(g: Group): string {
 }
 /** The group's text, its one branch swapped for the list when several branches hit it. */
 const textWithBranches = (g: Group, text: string) => {
+  if (g.runners.size > 1 && g.first.runner !== undefined) text = text.replace(` on ${g.first.runner}`, ` on ${[...g.runners].sort((a, b) => b[1] - a[1]).map(([r, c]) => `${r} ×${c}`).join(', ')}`);
   const list = branchList(g.branches);
   if (!list) return text;
   const own = g.first.branch !== undefined ? ` (${g.first.branch})` : '';

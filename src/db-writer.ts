@@ -81,9 +81,10 @@ export type Writer = {
  * and return a promise of the write instead of nothing. Reads on the store's connection first wait up to READ_WAIT_MS
  * for writes still queued; writes there (VALUE_WRITES, and SQL run directly) wait for all of them. If the worker can't
  * start or stops, writes run on the store's connection again. Null for an in-memory store. `delayMs` holds every
- * write that long on the worker, for tests of a stalled disk; `drainMs` is how long a write here waits for the queue.
+ * write that long on the worker, for tests of a stalled disk; `drainMs` is how long a write here waits for the queue,
+ * and `readWaitMs` how long a read does (a test of what a read sees when the disk isn't stalled sets its "it hung" deadline: a loaded box takes over 50 ms now and then, #1656).
  */
-export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, drainMs = DRAIN_MS } = {}): Writer | null {
+export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, drainMs = DRAIN_MS, readWaitMs = READ_WAIT_MS } = {}): Writer | null {
   if (!store.statePath) return null;
   const db = store.db;
   // [0]: the last write run, [1]: 1 once the worker is ready, -1 once it is gone, [2]: the last write sent,
@@ -139,7 +140,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     const target = seq;
     if (!alive || applied() >= target) return;
     if (stalled && applied() < stalled) return;
-    stalled = waitFor(target, READ_WAIT_MS) ? 0 : target;
+    stalled = waitFor(target, readWaitMs) ? 0 : target;
   };
   const drain = (ms = drainMs, what = 'a drain') => {
     const t0 = Date.now(), target = seq, took = target - applied();

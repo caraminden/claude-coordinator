@@ -23,11 +23,11 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 let n = 0;
-const open = (delayMs = 0, drainMs?: number) => {
+const open = (delayMs = 0, drainMs?: number, readWaitMs?: number) => {
   const dir = join(root, String(++n));
   execFileSync('mkdir', ['-p', dir]);
   const store = new Store(join(dir, 'coordinator.db'));
-  const w = writeOffThread(store, { delayMs, drainMs })!;
+  const w = writeOffThread(store, { delayMs, drainMs, readWaitMs })!;
   writers.push(w);
   return { store, w };
 };
@@ -61,7 +61,9 @@ test('a write on a stalled disk never holds the event loop; reads go on, stale, 
 });
 
 test('a read right after a write sees it, and writes land in the order they were made', () => {
-  const { store } = open();
+  // The read waits for its write however long a loaded box takes over it: the 50 ms a live read waits is its "the disk
+  // is stalled" line, and a CI runner crossed it (#1656). What a read does past that line is the test above's.
+  const { store } = open(0, undefined, 30_000);
   for (let i = 0; i < 50; i++) {
     store.setSetting('k', i);
     if (i % 3 === 0) store.deleteSetting('k');

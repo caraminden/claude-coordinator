@@ -20,3 +20,7 @@ test('backticks in the middle of a line are not a code block', () => {
 test('a line that opens and closes its backticks is inline code, not a block', () => {
   assert.equal(replyStartsOpen(`${prose}\n\`\`\`x\`\`\` is inline`), false);
 });
+test('a fence inside a quote or a list item counts too', () => {
+  assert.equal(replyStartsOpen(`${prose}\n> \`\`\`\n> cmd\n> \`\`\``), true);
+  assert.equal(replyStartsOpen(`${prose}\n- Run:\n    \`\`\`\n    cmd\n    \`\`\``), true);
+});

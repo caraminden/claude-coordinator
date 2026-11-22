@@ -17,7 +17,17 @@
 #
 # Hook modes read Claude Code's JSON on stdin and exit 2 with the reason on stderr to block.
 # Needs only bash, awk and git (no jq), so it runs the same in Git Bash on Windows.
+#   tools/guard.sh --hook files    PreToolUse on Write|Edit|MultiEdit|NotebookEdit: refuses a listed app's live folder
+#
+# Opt-in live-app check: list the scheme's app names in LIVE_APPS below (or set GUARD_LIVE_APPS,
+# space separated). A path is live when it is ~/apps/<name>, ~/apps/.<name> or under either (Citadel's
+# deploy slots: ~/apps/<name> is a link to ~/apps/.<name>/a or /b), or when it leads there once links
+# are followed and then .. is resolved. Empty (the default), the check does nothing.
 set -uo pipefail
+
+LIVE_APPS=()
+# shellcheck disable=SC2206
+LIVE_APPS+=(${GUARD_LIVE_APPS:-})
 
 root="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 
@@ -27,8 +37,53 @@ block() {
   exit 2
 }
 
+block_live() {
+  printf '[guard] %s is a live app folder (LIVE_APPS in tools/guard.sh). Work in your own checkout and ship through the route in CLAUDE.md.\n' "$1" >&2
+  exit 2
+}
+
 is_protected() {
   case "$1" in main|master) return 0 ;; esac
+  return 1
+}
+
+# 0 when a path (or a command word holding one, as --opt=path or VAR=path) is a listed app's live
+# folder, see LIVE_APPS at the top. ~ and $HOME are expanded; links are followed, then .. resolved.
+# Always 1 while LIVE_APPS is empty.
+is_live() {
+  local p="${1//$'\035'/}" n real target
+  [ "${#LIVE_APPS[@]}" -gt 0 ] || return 1
+  case "$p" in -*=*|[A-Za-z_]*=*) p="${p#*=}" ;; esac
+  case "$p" in [\<\>]*|[0-9\<\>\&]*[\<\>]*) p="${p#"${p%%[!0-9<>&]*}"}" ;; esac # >file, 2>>file: the file
+  case "$p" in
+    '~') p="$HOME" ;;
+    '~/'*) p="$HOME/${p#'~/'}" ;;
+    '$HOME'|'${HOME}') p="$HOME" ;;
+    '$HOME/'*) p="$HOME/${p#'$HOME/'}" ;;
+    '${HOME}/'*) p="$HOME/${p#'${HOME}/'}" ;;
+  esac
+  case "$p" in /*) ;; *) return 1 ;; esac
+  real="$(realpath -m -- "$p" 2>/dev/null || printf '%s' "$p")"
+  for n in "${LIVE_APPS[@]}"; do
+    [ -n "$n" ] || continue
+    target="$(realpath -m -- "$HOME/apps/$n" 2>/dev/null)"
+    case "$p" in "$HOME/apps/$n"|"$HOME/apps/$n/"*|"$HOME/apps/.$n"|"$HOME/apps/.$n/"*) return 0 ;; esac
+    case "$real" in "$HOME/apps/$n"|"$HOME/apps/$n/"*|"$HOME/apps/.$n"|"$HOME/apps/.$n/"*) return 0 ;; esac
+    # The live link may lead anywhere: where it leads counts too (never empty, or "/"* would match all).
+    [ -n "$target" ] && [ "$target" != / ] || continue
+    case "$real" in "$target"|"$target/"*) return 0 ;; esac
+  done
+  return 1
+}
+
+# 0 when a command line has a word that is a live path, nested -c strings included.
+live_command() { # command line, ps flag, depth
+  local word
+  while IFS= read -r word; do
+    case "$word" in $'\034') continue ;; $'\036'*) word="${word#?}"; word="${word//$'\037'/$'\n'}" ;; esac
+    is_live "$word" && return 0
+    case "$word" in *[[:space:]]*) [ "${3:-0}" -lt 3 ] && live_command "$word" "$2" $((${3:-0} + 1)) && return 0 ;; esac
+  done < <(tokenize "$1" "$2")
   return 1
 }
 
@@ -573,6 +628,31 @@ self_test() {
   run 2 github '{"tool_name":"mcp__github__push_files","tool_input":{"branch":"main"}}'
   run 2 github '{"tool_name":"mcp__github__create_or_update_file","tool_input":{"branch":"refs/heads/master"}}'
   run 2 github '{"tool_name":"mcp__github__delete_file","tool_input":{"path":"x"}}'
+  # Live-app check (opt-in): inert while LIVE_APPS is empty, on a made-up home so the host's layout doesn't decide.
+  # Citadel's deploy slots: ~/apps/x is a link to ~/apps/.x/a, with .x/b the other slot.
+  mkdir -p "$tmp/h/apps/.x/a" "$tmp/h/apps/.x/b" "$tmp/h/apps/other" "$tmp/h/srv/live" "$tmp/h2/apps" &&
+    ln -s .x/a "$tmp/h/apps/x" && ln -s ../srv/live "$tmp/h2/apps/x" || exit 1
+  fw() { printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$1"; } # JSON for a file write
+  HOME="$tmp/h" run 0 files "$(fw "$tmp/h/apps/x/file")"
+  HOME="$tmp/h" t 0 Bash topic 'ls ~/apps/x/../x'
+  export GUARD_LIVE_APPS="x"
+  HOME="$tmp/h" run 2 files "$(fw "$tmp/h/apps/x")"
+  HOME="$tmp/h" run 2 files "$(fw "$tmp/h/apps/.x")"
+  HOME="$tmp/h" run 2 files "$(fw "$tmp/h/apps/.x/b/file")"
+  HOME="$tmp/h" run 2 files "$(fw "$tmp/h/apps/x/../x/file")"
+  HOME="$tmp/h" run 2 files "$(fw "$tmp/h/apps/other/../x/file")"
+  HOME="$tmp/h" run 2 files '{"tool_name":"Edit","tool_input":{"file_path":"~/apps/.x/a/f"}}'
+  HOME="$tmp/h2" run 2 files "$(fw "$tmp/h2/srv/live/src/f")" # the link leads elsewhere: where it leads counts
+  HOME="$tmp/h" run 0 files "$(fw "$tmp/h/apps/other/file")"
+  HOME="$tmp/h" run 0 files "$(fw "$tmp/h/apps/.xy/file")"
+  HOME="$tmp/h" run 0 files "$(fw "$tmp/h/apps/x-old/file")"
+  HOME="$tmp/h2" run 0 files "$(fw "$tmp/h2/srv/livex/f")"
+  HOME="$tmp/h" t 2 Bash topic 'cp f ~/apps/.x/b/f'
+  HOME="$tmp/h" t 2 Bash topic 'ls ~/apps/x/../x'
+  HOME="$tmp/h" t 2 Bash topic "bash -c 'cat ~/apps/x/f'"
+  HOME="$tmp/h" t 0 Bash topic 'ls ~/apps/other ~/apps/.xy'
+  HOME="$tmp/h" run 2 bash "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"cwd\":\"$tmp/h/apps/.x/b\"}"
+  unset GUARD_LIVE_APPS
   # The self-test itself, as a git hook runs it: it must pass and leave that hook's repo alone.
   if [ -z "${GUARD_SELF_TEST_NESTED:-}" ]; then
     git init -q "$tmp/real" && git -C "$tmp/real" symbolic-ref HEAD refs/heads/mine
@@ -611,12 +691,26 @@ case "$mode" in
     ;;
   bash)
     input="$(cat)"
-    case "$input" in *push*) ;; *) exit 0 ;; esac
     cmd="$(json_field command)"
     cwd="$(json_field cwd)"
     ps=0
     [ "$(json_field tool_name)" = PowerShell ] && ps=1
+    if [ "${#LIVE_APPS[@]}" -gt 0 ]; then
+      # A shell can't be told reads from writes, so a command naming the live folder is refused.
+      if is_live "$cwd" || live_command "$cmd" "$ps"; then
+        block_live "${cwd:-the command}"
+      fi
+    fi
+    case "$input" in *push*) ;; *) exit 0 ;; esac
     check_command "$cmd" "$ps"
+    exit 0
+    ;;
+  files)
+    input="$(cat)"
+    for k in file_path notebook_path path; do
+      p="$(json_field "$k")"
+      [ -n "$p" ] && is_live "$p" && block_live "$p"
+    done
     exit 0
     ;;
   github)
@@ -633,7 +727,7 @@ case "$mode" in
     exit 0
     ;;
   *)
-    echo "usage: tools/guard.sh --install | --hook bash|github | --self-test" >&2
+    echo "usage: tools/guard.sh --install | --hook bash|github|files | --self-test" >&2
     exit 1
     ;;
 esac

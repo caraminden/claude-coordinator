@@ -165,6 +165,14 @@ copies of `guard.sh`, `pre-push` and `ponytail.md` freely (`land.sh` stays byte 
 when the kit changes one, Citadel's server merges the change into the scheme's copy, keeping the
 scheme's own edits, and ships it on a member's go (Citadel #1100).
 
+Opt-in live-app check: `guard.sh` carries an `is_live` helper that refuses a listed app's live folder
+(`~/apps/<name>`, `~/apps/.<name>`, anything under either, or whatever those links lead to, `..`
+resolved after links). It does nothing until the scheme lists its app: put the name in `LIVE_APPS=(name)`
+near the top of its copy of `guard.sh`. The Bash hook then refuses a command that names the folder
+(reads too, a shell can't be told apart) or runs from it; for Write and Edit, add a `PreToolUse` entry
+with matcher `Write|Edit|MultiEdit|NotebookEdit` running `tools/guard.sh --hook files` to the scheme's
+`.claude/settings.json`. Add self-test lines for it in `self_test` as the template's slot cases do.
+
 When the plan names `tools/land.sh` as the pusher, copy `land.sh` there too (executable), byte
 for byte, and `land.local.sh` to `tools/land.local.sh`. Every setting below goes in `land.local.sh`,
 never in `land.sh`: the core stays the kit's, so a kit fix reaches the scheme as one copy, and

@@ -3146,8 +3146,8 @@ export class Runner {
       const parkedAs = this.parkedAs.get(ticket.id);
       this.parkedAs.delete(ticket.id);
       // Any turn wakes an asleep minion (#1636; Cara picked "Anything that starts a turn", 2026-11-22): a card's answer, a message, a wake it asked for. A keepalive never gets here (its gate).
-      // One delete, not a read first: every turn start runs it (loop-guard.test's settings-read count).
-      if (this.store.deleteSetting(sleepKey(ticket.id))) {
+      if (this.store.getSetting(sleepKey(ticket.id))) {
+        this.store.deleteSetting(sleepKey(ticket.id));
         this.emit(ticket.id, 'note', { text: 'Awake again: a new turn started.' });
       }
       // A trailer is its own turn's: a resume that never started leaves its carried one for nobody.

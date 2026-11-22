@@ -15,7 +15,7 @@ import { READ_WAIT_MS } from './db-writer.ts';
 import { CHAT } from './events-db.ts';
 import { llamaEmbed } from './memory.ts';
 import { apiRoutes } from './routes/all.ts';
-import { READER_ROUTES, applySnap, type Snapshot, type SnapDelta } from './front.ts';
+import { READER_ANSWER_MS, READER_ROUTES, applySnap, type Snapshot, type SnapDelta } from './front.ts';
 import { Runner } from './runner.ts';
 import { MinionQueue } from './minion-queue.ts';
 import { LIMIT_RESUMES, WaitList } from './resumes.ts';
@@ -82,18 +82,20 @@ export const mainOnly = <T extends object>(o: T): T => new Proxy(o, {
   },
 });
 
-/** The steps the main thread has opened (src/db-writer.ts); 0 with no write worker, where it writes in place. */
+/** The steps the main thread has opened (src/db-writer.ts); 0 with no write worker (then readers answer nothing). */
 export const stepsOpened = (shared: BigInt64Array | null) => (shared && Atomics.load(shared, 1) === 1n ? Atomics.load(shared, 4) : 0n);
 
 /**
  * Begin a read transaction on `db` at a whole step of the main thread's (#1628): every write of every step it opened
  * so far has run and none of a later one's has, so a read never sees half of one (a turn's queue taken but the next
- * turn not yet running). Waits at most `ms`; the steps it is at, or null if no whole step came (the main thread answers).
+ * turn not yet running). Waits at most `ms`; the steps it is at, or null if no whole step came or there is no write
+ * worker to count them (the main thread answers).
  */
 export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms = READ_WAIT_MS): bigint | null {
   // One read of each file starts its snapshot: the transaction keeps the three as they were here.
   const pin = () => (db.exec('BEGIN'), db.prepare(`SELECT (SELECT count(*) FROM main.sqlite_master), (SELECT count(*) FROM state.sqlite_master), (SELECT count(*) FROM ${CHAT}.sqlite_master)`).get());
-  if (!shared || Atomics.load(shared, 1) !== 1n) return (pin(), 0n);
+  // With no write worker the main thread writes in place, where a step can't be told from the next: it answers.
+  if (!shared || Atomics.load(shared, 1) !== 1n) return null;
   const until = Date.now() + ms;
   for (;;) {
     const opened = Atomics.load(shared, 4), closed = Atomics.load(shared, 3);
@@ -238,14 +240,24 @@ if (workerData?.reader) {
     }
     const mine = tx;
     mine.refs++;
-    try {
-      return await run();
-    } finally {
+    let held = true;
+    const release = () => {
+      if (!held) return;
+      held = false;
       if (--mine.refs === 0) {
-        tx = null;
+        if (tx === mine) tx = null;
         try { store.db.exec('ROLLBACK'); } catch { /* already ended */ }
         mine.end();
       }
+    };
+    // A slow one (a memory search waits on its embedding) lets go when the front thread has given up on it, so it
+    // doesn't keep everyone else at an old step: its answer, null here, goes to the main thread's.
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([run(), new Promise<null>((r) => (timer = setTimeout(r, READER_ANSWER_MS, null)))]);
+    } finally {
+      clearTimeout(timer);
+      release();
     }
   };
   parentPort!.on('message', async (m: { snap?: SnapDelta; id: number; method: string; url: string; headers: Record<string, string | string[] | undefined> }) => {

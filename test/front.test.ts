@@ -49,16 +49,17 @@ const PATHS = [
   `/api/projects/${A.id}`, `/api/projects/${A.id}?tickets=open`, `/c/api/projects/${A.id}`, `/api/projects/${B.id}`, '/api/projects/999',
   `/api/tickets/${M1.id}`, `/api/tickets/${MB.id}`, '/api/tickets/9999', '/api/status',
   // Slice 3 (#1628): the rest of people's GETs that read only the database and the snapshot.
-  ...['commands', 'ship-risk', 'jobs'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
-  ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history', 'people/1/instructions',
+  ...['commands', 'ship-risk'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
+  ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history',
     'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons',
-    'claims', 'artifacts', 'contraption-turns', 'machines', 'ci-files/latest', 'ci-files/pins',
+    'claims', 'contraption-turns',
   ].flatMap((r) => [`/api/projects/${A.id}/${r}`, `/api/projects/${B.id}/${r}`, `/api/projects/999/${r}`]),
-  '/api/ship-lines', '/c/api/ship-lines', '/api/app/instructions', '/api/app/instructions/history', '/api/artifacts/1',
-  '/api/machines/1/jobs', '/api/ci', '/api/ci-desktop', '/api/contraptions', '/api/reviews/schemes', '/api/units',
+  '/api/ship-lines', '/c/api/ship-lines', '/api/app/instructions', '/api/app/instructions/history', '/api/ci', '/api/ci-desktop', '/api/units',
 ];
 // What differs between two servers' boots (its start time, the answer probe, the machine's load) is compared on one server instead.
-const BOOT_BOUND = new Set(['/api/status', '/api/ship-lines', '/c/api/ship-lines', '/api/ci']);
+const BOOT_BOUND = new Set(['/api/status']);
+// The clock a body carries, the one field that differs between two asks of the same answer.
+const unclocked = (body: string) => body.replace(/"(at|now)":\d+/g, '"$1":0');
 
 test('the readers\' routes are GETs of the main thread\'s table, each asked for by a path here; the rest stay on main', () => {
   assert.deepEqual(readerRoutes().map((r) => r.path).sort(), [...READER_ROUTES].sort());
@@ -70,7 +71,7 @@ test('the readers\' routes are GETs of the main thread\'s table, each asked for 
   const asked = (r: string) => new RegExp(`^(?:/c)?${r.replace(/:\w+/g, '[^/]+')}$`);
   for (const r of READER_ROUTES) assert.ok(PATHS.some((p) => asked(r).test(p.split('?')[0])), `a path asks for ${r}`);
   for (const p of ['/api/tickets/1/x', '/api/tickets/1/events/1/x', '/api/projects/1/tickets', '/api/tickets/1/stream', '/api/projects', '/api/me',
-    '/api/home', '/api/projects/1/ci-files', '/api/projects/1/shared', '/api/tickets/1/facts', '/api/projects/1/schedules', '/api/app/settings', '/api/ship-lines/x']) assert.ok(!READER_PATHS.test(p), p);
+    '/api/home', '/api/projects/1/ci-files', '/api/projects/1/shared', '/api/tickets/1/facts', '/api/projects/1/schedules', '/api/app/settings', '/api/reviews/schemes', '/api/tickets/1/jobs', '/api/ship-lines/x']) assert.ok(!READER_PATHS.test(p), p);
 });
 
 const signIn = async (srv: Booted, name: string, password: string) => {
@@ -132,7 +133,7 @@ test('through the front thread, readers give every caller the same answers and r
   const viaReaders = await answers(srv);
   for (const [key, got] of Object.entries(viaReaders)) {
     const bound = BOOT_BOUND.has(key.split(' ')[1]);
-    assert.deepEqual({ status: got.status, body: bound ? '' : got.body }, { status: viaMain[key].status, body: bound ? '' : viaMain[key].body }, key);
+    assert.deepEqual({ status: got.status, body: bound ? '' : unclocked(got.body) }, { status: viaMain[key].status, body: bound ? '' : unclocked(viaMain[key].body) }, key);
   }
   // All at once, so a route a reader hands back shows with every other.
   assert.deepEqual(Object.entries(viaReaders).filter(([, got]) => !got.reader).map(([key]) => key), [], 'a reader answered them all');

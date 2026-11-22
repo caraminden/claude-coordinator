@@ -158,6 +158,8 @@ let boundPort = PORT;
 // refuses agents, so a leaked token is no use from the public internet.
 /** Contraptions each on their own host, <name>.<APPS_DOMAIN> (src/apps.ts); unset serves them at /apps/<name>/ here. */
 const APPS_DOMAIN = process.env.APPS_DOMAIN?.trim().toLowerCase() || null;
+// Before the front end's files load: their headers are built once, with the policy as it is then (#1628).
+if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
 const MACHINES_URL = process.env.MACHINES_URL ? new URL(process.env.MACHINES_URL) : null;
 const DEFAULT_DATA_DIR = join(homedir(), '.local/share/claude-coordinator');
 const DATA_DIR = process.env.DATA_DIR ?? DEFAULT_DATA_DIR;
@@ -1832,7 +1834,6 @@ services.drain = async (row, stop) => {
 const act = services.act.bind(services);
 services.act = (row, action) => (action === 'start' && apps.restarts.running(row.name), act(row, action));
 apps.onServerError = (row, status, method, path, note) => void safely('error digest', () => errorDigest.httpError(row, status, method, path, note));
-if (APPS_DOMAIN) framedWithApps(APPS_DOMAIN);
 // Installers fetch manifests and icons with no login (#987): read each older app's file paths once its service is up,
 // then again every so often for one that was down or had nobody enabled at the first read (rows already read are skipped).
 const readStatics = () => void safely('static paths', () => apps.backfillStatics())

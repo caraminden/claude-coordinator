@@ -22,21 +22,18 @@ import type { SchemeReleases } from './releases.ts';
 export const READER_ROUTES: readonly string[] = [
   '/api/tickets/:ticket', '/api/tickets/:ticket/events', '/api/tickets/:ticket/events/:event',
   '/api/projects/:project', '/api/projects/:project/memory', '/api/status',
-  // #1628: the rest that answer from the database and the snapshot. Left on the main thread, which a reader hands
-  // back anyway: GETs that read main's memory or the disk, start a process or write (/api/projects, /api/me, /api/home,
-  // costs, releases, people, the me/* logins, machines, catalogue, ideas, recap, shared, spend, ci-files, ci-numbers,
-  // ci-runners, memory-files, instructions/sources, schedules, app/settings, facts, push/key, secrets, contraptions/mine, welcome).
-  '/api/tickets/:ticket/commands', '/api/tickets/:ticket/ship-risk', '/api/tickets/:ticket/jobs', '/api/ship-lines',
-  '/api/app/instructions', '/api/app/instructions/history',
-  '/api/projects/:project/members', '/api/projects/:project/taskmaster-events', '/api/projects/:project/instructions/history',
-  '/api/projects/:project/my-instructions', '/api/projects/:project/my-instructions/history',
-  '/api/projects/:project/people/:person/instructions', '/api/projects/:project/repo-setup', '/api/projects/:project/plugins',
+  // #1628: the rest that answer from the database and the snapshot. The main thread keeps the GETs that read its
+  // memory or the disk, start a process (git), write, or reach a part a reader lacks once there are rows: /api/projects,
+  // /api/me, /api/home, costs, releases, people, the me/* logins, machines, catalogue, ideas, recap, shared, spend,
+  // memory-files, instructions/sources, schedules, app/settings, facts, push/key, secrets, welcome, a minion's jobs,
+  // artifacts, the ci-files, ci-numbers and ci-runners, contraptions, reviews/schemes, and the Taskmaster-only GETs.
+  '/api/tickets/:ticket/commands', '/api/tickets/:ticket/ship-risk', '/api/ship-lines', '/api/app/instructions',
+  '/api/app/instructions/history', '/api/projects/:project/members', '/api/projects/:project/taskmaster-events',
+  '/api/projects/:project/instructions/history', '/api/projects/:project/my-instructions',
+  '/api/projects/:project/my-instructions/history', '/api/projects/:project/repo-setup', '/api/projects/:project/plugins',
   '/api/projects/:project/properties', '/api/projects/:project/views', '/api/projects/:project/search',
-  '/api/projects/:project/past-minions', '/api/projects/:project/schedule-audits',
-  '/api/projects/:project/ship-lessons', '/api/projects/:project/claims', '/api/projects/:project/artifacts', '/api/artifacts/:artifact',
-  '/api/projects/:project/contraption-turns', '/api/projects/:project/machines', '/api/machines/:machine/jobs',
-  '/api/projects/:project/ci-files/latest', '/api/projects/:project/ci-files/pins', '/api/ci', '/api/ci-desktop',
-  '/api/contraptions', '/api/reviews/schemes', '/api/units',
+  '/api/projects/:project/past-minions', '/api/projects/:project/schedule-audits', '/api/projects/:project/ship-lessons',
+  '/api/projects/:project/claims', '/api/projects/:project/contraption-turns', '/api/ci', '/api/ci-desktop', '/api/units',
 ];
 /**
  * Their paths, with or without the front end's /c prefix. A parameter matches any segment: a reader matches the main

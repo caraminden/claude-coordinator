@@ -129,7 +129,10 @@ export class SideAsks {
       this.read(t, exited);
       if (!exited && now - t.run.startedAt > SIDE_LIMIT_MS) {
         this.runner.signal({ dir: t.run.dir, unit: null, container: t.run.container }, 'SIGKILL');
-        this.finish(t, `It took longer than ${SIDE_LIMIT_MS / 60_000} minutes, so it was stopped.`);
+        // The read above may have taken an answer printed in the last moment before the deadline: a whole answer counts,
+        // late as it is, rather than a timeout message in its place.
+        const answered = !!this.found.get(t.run.ask)?.result;
+        this.finish(t, answered ? undefined : `It took longer than ${SIDE_LIMIT_MS / 60_000} minutes, so it was stopped.`);
       } else if (exited) {
         this.finish(t);
       }

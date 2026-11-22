@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { SideAsks } from '../src/side-ask.ts';
+import { SIDE_LIMIT_MS, SideAsks } from '../src/side-ask.ts';
 import { jsonLines, stopTurns, testPins, until } from './helpers.ts';
 testPins();
 
@@ -205,6 +205,22 @@ test("an answer that lands between the tick's two looks is not lost (#1619)", as
   hand.poll();
   hand.poll();
   assert.ok(gaps >= 1, 'the gap was never exercised: a tick no longer reads the stream');
+  const a = answers(m.id).at(-1)!;
+  assert.equal(a.ok, true, a.text);
+  assert.match(a.text, /answer to/);
+});
+
+test('an answer printed just before the deadline counts, not a timeout (#1619)', async () => {
+  const m = await minion();
+  const hand: any = new SideAsks(store, runner, (msg) => sent.push(msg), 60_000); // polled by hand below
+  const ev = hand.ask(m.id, cara.id, 'Cara', 'who is asking?');
+  const run = hand.threads.get(ev.thread).run;
+  await until('the fork to exit', () => existsSync(join(run.dir, 'exit.json')));
+  // The answer is in the stream, but the shell has not written exit.json yet and the ask is past its limit: it is
+  // killed, and the answer it did give is the answer, not "it took longer than 15 minutes".
+  rmSync(join(run.dir, 'exit.json'));
+  run.startedAt = Date.now() - SIDE_LIMIT_MS - 1;
+  hand.poll();
   const a = answers(m.id).at(-1)!;
   assert.equal(a.ok, true, a.text);
   assert.match(a.text, /answer to/);

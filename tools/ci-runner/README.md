@@ -373,7 +373,8 @@ runner on the PC is squeezed; Delve's PR checks are not ships (Cara, "No, ship b
 no ship is running: the 75% cap above is all there is. Citadel's own ships go first (Cara, 2026-11-21, picked
 "Citadel's ship goes first" on #1268's card): while one runs, another scheme's ship is left off the list and squeezed
 like any other runner; on its own, that ship still counts. Before Windows held the squeeze, a Peek ship and a Citadel
-ship running together had the PC over 20 cores in 46% of samples.
+ship running together had the PC over 20 cores in 46% of samples (#1477's
+keeper log, `shared/project/reports/ships-first-windows-squeeze-2026-11-21.md`).
 
 - **Who knows a ship is running.** Citadel (`src/ci-ships.ts`) asks GitHub every 15 seconds which `land/…` runs are
   in progress in each repo with runners here, and which self-hosted runner each running job is on, and sends that list
@@ -392,8 +393,8 @@ ship running together had the PC over 20 cores in 46% of samples.
   (restart, GitHub hiccup, the agent's link down), it lifts after 2 minutes on its own. A repo whose reads keep failing
   keeps its last ships for 2 minutes, then drops them. A rate limit from GitHub lifts the squeeze at once and pauses the
   watch for 5 minutes. A restarted WSL agent clears every runner's quota at start, in case the one before died mid-ship.
-- **Every scheme.** Any repo with a runner on this PC is watched, through its own scheme's GitHub login; nothing is
-  keyed to Citadel's repo. A squeezed build still runs, just slower, and returns to its normal share the moment the
+- **Every scheme.** Any repo with a runner on this PC is watched, through its own scheme's GitHub login. Only the
+  priority is keyed to Citadel's repo (the live checkout's origin): when both run, its ships keep their share. A squeezed build still runs, just slower, and returns to its normal share the moment the
   ship ends.
 
 **Install (Cara, once, after this ships).** Both agents need the new scripts; the lines below reuse each agent's own

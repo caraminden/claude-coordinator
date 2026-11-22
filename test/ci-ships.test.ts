@@ -99,8 +99,10 @@ test("while Citadel's own ship runs, only its runners are ships, so another sche
     [runs('caraminden/peek-auras')]: { workflow_runs: [{ id: 7, head_branch: 'land/peek-9' }] },
     [jobs('caraminden/peek-auras', 7)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-G248IJ8-heavy' }] },
   });
-  const { w } = watch(gh, undefined, undefined, () => 'CaraMinden/Claude-Coordinator');
-  assert.deepEqual(await w.tick(0), [{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux' }]);
+  const { w, sent } = watch(gh, undefined, undefined, () => 'CaraMinden/Claude-Coordinator');
+  await w.tick(0);
   gh.pages[runs('caraminden/claude-coordinator')] = { workflow_runs: [] };
-  assert.deepEqual(await w.tick(15_000), [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8-heavy' }]);
+  await w.tick(15_000);
+  // What the agents are sent, not just what tick returns.
+  assert.deepEqual(sent, [[{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux' }], [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8-heavy' }]]);
 });

@@ -75,7 +75,9 @@ async function subscribe(who: string, name: string) {
 
 /** Pushes that arrived since `from`, as { browser: message }, once `count` have. */
 async function pushes(from: number, count: number) {
-  await until(`${count} pushes`, () => received.length >= from + count);
+  // On a timeout, say what did arrive and what the server said about pushes (a failed send is logged, not retried).
+  await until(`${count} pushes`, () => received.length >= from + count, undefined, () => `got ${received.slice(from).map((r) => r.path).join(', ') || 'none'}; `
+    + `the server's push lines: ${readFileSync(join(root, 'server.log'), 'utf8').split('\n').filter((l) => /push/i.test(l)).slice(-10).join(' | ') || 'none'}`);
   // timing-ok: a settle window for the rest of a burst that arrives with the counted pushes (more can legitimately come; callers assert who got one)
   await new Promise((r) => setTimeout(r, 200));
   return Object.fromEntries(received.slice(from).map((r) => [r.path.slice(1), decrypt(r.path.slice(1), r.body)]));
@@ -99,6 +101,7 @@ before(async () => {
     root,
     // NODE_TLS_REJECT_UNAUTHORIZED: trust the stand-in push service's self-signed certificate.
     env: { CLAUDE_BIN: fakeClaude, NODE_TLS_REJECT_UNAUTHORIZED: '0', NODE_NO_WARNINGS: '1' },
+    log: join(root, 'server.log'),
   });
   base = srv.base;
   cookies.Cara = srv.cookie;
@@ -251,8 +254,9 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
 
   n = received.length;
   await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@josh can you look at this' } });
-  const got = await pushes(n, 1);
-  assert.ok(!Object.keys(got).some((k) => k.startsWith('cara')), 'the sender hears nothing');
+  // A mention is said to its person, so it reaches every device of Josh's: his first test's too.
+  const got = await pushes(n, 2);
+  assert.deepEqual(Object.keys(got).sort(), ['josh', 'josh-m'], 'the sender hears nothing');
   const events = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e: any) => e.kind === 'user_message');
   const msg = events.at(-1);
   // The agent reads the words as typed; the message names who it mentions, for the chip.

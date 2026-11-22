@@ -370,7 +370,10 @@ is going, every other runner there drops to about a third of the PC")". On Nov 1
 builds and the test box took the whole PC and Citadel's ship suite in WSL outran `land.sh`'s 6-minute wait. So while
 any scheme's ship run (a `land/…` branch: Peek's, Mandate's, ToC's, Citadel's) has a job on a runner here, every other
 runner on the PC is squeezed; Delve's PR checks are not ships (Cara, "No, ship branches only"). Nothing changes when
-no ship is running: the 75% cap above is all there is.
+no ship is running: the 75% cap above is all there is. Citadel's own ships go first (Cara, 2026-11-21, picked
+"Citadel's ship goes first" on #1268's card): while one runs, another scheme's ship is left off the list and squeezed
+like any other runner; on its own, that ship still counts. Before Windows held the squeeze, a Peek ship and a Citadel
+ship running together had the PC over 20 cores in 46% of samples.
 
 - **Who knows a ship is running.** Citadel (`src/ci-ships.ts`) asks GitHub every 15 seconds which `land/…` runs are
   in progress in each repo with runners here, and which self-hosted runner each running job is on, and sends that list

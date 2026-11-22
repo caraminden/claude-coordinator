@@ -20,10 +20,10 @@ function github(pages: Record<string, any>) {
 const runs = (repo: string) => `repos/${repo}/actions/runs?status=in_progress&per_page=50`;
 const jobs = (repo: string, id: number) => `repos/${repo}/actions/runs/${id}/jobs?filter=latest&per_page=100`;
 
-function watch(gh: ReturnType<typeof github>, repos = ['caraminden/claude-coordinator', 'caraminden/peek-auras'], as = (_: string): {} | null => ({})) {
+function watch(gh: ReturnType<typeof github>, repos = ['caraminden/claude-coordinator', 'caraminden/peek-auras'], as = (_: string): {} | null => ({}), first?: () => string | null) {
   const sent: Ship[][] = [];
   const logs: string[] = [];
-  const w = new ShipWatch({ repos: () => repos, as: as as any, send: (s) => sent.push(s), get: gh.get as any, log: (l) => logs.push(l) });
+  const w = new ShipWatch({ repos: () => repos, as: as as any, send: (s) => sent.push(s), get: gh.get as any, log: (l) => logs.push(l), first });
   return { w, sent, logs };
 }
 
@@ -90,4 +90,17 @@ test('a rate limit sends an empty list once, then nothing for 5 minutes, then lo
   assert.deepEqual(await w.tick(15_000 + 5 * 60_000), []);
   assert.deepEqual(sent, [[{ repo: 'a/b', runner: 'r1' }], [], []], 'lifted at the limit, not held through the pause');
   assert.match(logs[0], /slow down/);
+});
+
+test("while Citadel's own ship runs, only its runners are ships, so another scheme's ship is squeezed; alone, that ship counts", async () => {
+  const gh = github({
+    [runs('caraminden/claude-coordinator')]: { workflow_runs: [{ id: 1, head_branch: 'land/1268-x' }] },
+    [jobs('caraminden/claude-coordinator', 1)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-G248IJ8-linux' }] },
+    [runs('caraminden/peek-auras')]: { workflow_runs: [{ id: 7, head_branch: 'land/peek-9' }] },
+    [jobs('caraminden/peek-auras', 7)]: { jobs: [{ status: 'in_progress', labels: ['self-hosted'], runner_name: 'DESKTOP-G248IJ8-heavy' }] },
+  });
+  const { w } = watch(gh, undefined, undefined, () => 'CaraMinden/Claude-Coordinator');
+  assert.deepEqual(await w.tick(0), [{ repo: 'caraminden/claude-coordinator', runner: 'DESKTOP-G248IJ8-linux' }]);
+  gh.pages[runs('caraminden/claude-coordinator')] = { workflow_runs: [] };
+  assert.deepEqual(await w.tick(15_000), [{ repo: 'caraminden/peek-auras', runner: 'DESKTOP-G248IJ8-heavy' }]);
 });

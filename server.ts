@@ -1568,6 +1568,7 @@ const shipWatch = new ShipWatch({
     return p ? githubOf(p.repo_dir!) : null;
   },
   send: (ships) => machines.sendShips(ships),
+  first: () => liveSlug,
 });
 if (!BOOT_CHECK) shipWatch.start();
 // A job that ran in the server because systemd-run failed (#519): the first of each cause each day is a Mandate

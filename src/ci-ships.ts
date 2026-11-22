@@ -2,6 +2,8 @@
 // this asks GitHub which ship runs (a `land/…` branch) are going in each repo with runners on a runner agent's PC, and
 // which runner each of their jobs is on, and sends that list to the runner agents. While a list names runners, the
 // agents squeeze every other runner on the PC; a list that stops coming (2 minutes) lifts it (runner-agent.mjs).
+// Citadel's own ships go first (Cara, 2026-11-21, picked "Citadel's ship goes first" on #1268's card): while one runs,
+// other schemes' ships are left off the list, so they are squeezed like any other runner.
 import { type GhGet, ghGet, RateLimited } from './gh-api.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 import { every, type Job } from './every.ts';
@@ -21,6 +23,8 @@ export interface ShipWatchDeps {
   /** The GitHub login that reads a repo: its scheme's; null when no scheme has it, so it isn't read. */
   as: (repo: string) => GithubEnv | null;
   send: (ships: Ship[]) => void;
+  /** owner/name, lowercase, of the repo whose ships go first (Citadel's own); null when unknown. */
+  first?: () => string | null;
   get?: GhGet;
   log?: (line: string) => void;
 }
@@ -72,7 +76,9 @@ export class ShipWatch {
         }
       }
       for (const path of this.cache.keys()) if (!used.has(path)) this.cache.delete(path);
-      const ships = [...this.last.values()].flatMap((l) => l.ships);
+      const all = [...this.last.values()].flatMap((l) => l.ships);
+      const first = this.deps.first?.()?.toLowerCase();
+      const ships = first && all.some((s) => s.repo === first) ? all.filter((s) => s.repo === first) : all;
       this.deps.send(ships);
       if (!failed) this.said = '';
       return ships;

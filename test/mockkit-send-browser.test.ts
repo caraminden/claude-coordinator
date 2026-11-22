@@ -206,7 +206,9 @@ test('a click on a picture, linked to its file or not, opens a modal that closes
     await key('Escape');
     assert.equal(await open(), false, 'Esc closes it');
   }
-  await page.eval('document.querySelector("img[alt=\\"Page link\\"]").addEventListener("click", (e) => { window.linkClicked = !e.defaultPrevented; })');
+  // A link to a page is meant to navigate: no eval may be in flight across the navigation (Chromium fails it with
+  // "Inspected target navigated or closed", #1591), so wait for the new page, which also proves the link stayed a link.
   await click(page, 'img[alt="Page link"]');
-  assert.equal(await open(), false, 'a link to a page stays a link');
+  await waitFor(page, 'the link to open its page', 'location.pathname === "/other.html"');
+  assert.equal(await open(), false, 'a link to a page stays a link and opens no modal');
 });

@@ -18,4 +18,4 @@ on the dev copy it starts and keeps, then `citadel-dev-copy stop`. It is also th
 no port, no dependency).
 
 Every other dev server and browser debugging port follows the ports rule in `citadel:contraption-ui` ("Ports for dev
-servers and browsers"); `freePort()` does it for a script.
+servers and browsers"), picking from 1024-32767; `freePort()` does it for a script.

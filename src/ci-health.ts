@@ -504,7 +504,7 @@ export class CiHealth {
     for (const p of this.store.listProjects()) {
       if (!repoSlug(p.repo_url)) continue;
       const mine = [...(this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []), ...(land?.project === p.id ? land.problems : [])];
-      for (const x of mine) if (!x.quiet) open.push({ scheme: p.name, problem: x, id: p.id });
+      for (const x of mine) if (!x.quiet) open.push({ scheme: p.name, problem: { ...x, onIt: this.onIt(p, x) }, id: p.id });
     }
     // User id → the title their item has.
     const sent = this.store.getSetting<Record<string, string>>('ci-health:alert') ?? {};
@@ -520,6 +520,22 @@ export class CiHealth {
       if (!u || (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, null))) delete sent[uid];
     }
     this.store.setSetting('ci-health:alert', sent);
+  }
+
+  /**
+   * #1659 (Cara, 2026-11-22: when a CI alert rings, "I find it is already being investigated"): who is on a ringing problem,
+   * for its line in the alert, from what was actually sent: its open fix minion, else the Taskmaster its wake reached. Nothing when neither.
+   */
+  private onIt(p: Project, x: Problem): string | undefined {
+    if (x.fixMinion && !x.fixMinion.closed) return `#${x.fixMinion.number} is fixing it`;
+    const woke = (k: string) => this.store.getSetting<string[]>(`ci-health:woke:${k}`) ?? [];
+    // A red's mark is kept only once its wake went through (a send that failed deletes it).
+    const own = x.key.startsWith('red:') || woke(String(p.id)).includes(x.key) || woke('land').includes(x.key);
+    const poss = (n: string) => (n.endsWith('s') ? `${n}'` : `${n}'s`);
+    if (own) return `${poss(p.name)} Taskmaster has been woken`;
+    const home = this.deps.home?.();
+    const shared = x.shared && (woke('shared').includes(x.shared) ? home : woke('shared').includes(`${x.shared}#${p.id}`) ? p : undefined);
+    return shared ? `${poss(shared.name)} Taskmaster has been woken` : undefined;
   }
 
   /** The one alert's problems as the Taskmaster's wake tells them (#869): the land alarm with each fallen-back run's link, failed step and runner. */

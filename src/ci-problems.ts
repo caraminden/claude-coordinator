@@ -24,6 +24,8 @@ export interface Problem {
   why?: string;
   /** What fixes it, and who. */
   fix?: string;
+  /** Who is already on it, for the one alert's words (#1659): set as the alert is made, never kept. */
+  onIt?: string;
   /** Informational: a plain item, never an alarm. */
   quiet?: boolean;
   /** What it's shared by (`host:<computer>`, or `billing`): a problem touching several schemes wakes Citadel's Taskmaster once; one scheme's alone wakes that scheme's (#983). */
@@ -67,7 +69,7 @@ export const WAKE_STEPS = "People's phones ring for this. Start a fix minion now
 
 export const cap = (s: string, n = 500) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 /** A problem's words for an item: what, then why and the fix (Mandate keeps 500 characters). */
-export const itemText = (x: Problem, lead = x.title) => cap([lead.replace(/\.$/, ''), x.why && `Why: ${x.why.replace(/\.$/, '')}`, x.fix && `Fix: ${x.fix.replace(/\.$/, '')}`].filter(Boolean).join('. ') + '.');
+export const itemText = (x: Problem, lead = x.title) => cap([lead.replace(/\.$/, ''), x.onIt && `On it: ${x.onIt.replace(/\.$/, '')}`, x.why && `Why: ${x.why.replace(/\.$/, '')}`, x.fix && `Fix: ${x.fix.replace(/\.$/, '')}`].filter(Boolean).join('. ') + '.');
 
 export const at = (s: string) => Date.parse(s);
 export const short = (sha: string) => sha.slice(0, 7);

@@ -1008,6 +1008,7 @@ test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on 
 
   await health.tick(NOW + RED_FIX_MS);
   assert.match(item('ci.open')!, /^CI, Peek Auras: desktop\.yml failed on main \(run 9001, at windows › Test\): no fix minion started\./, 'an hour with no fix rings');
+  assert.match(item('ci.open')!, /no fix minion started\. On it: Peek Auras' Taskmaster has been woken\. Why:/, 'the ring says who is on it, since the wake went out with the red (#1659)');
   assert.equal(item(), null, 'and the quiet one goes');
 
   // A minion whose brief names the run: quiet again, with its number.

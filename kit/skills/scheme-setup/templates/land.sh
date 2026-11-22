@@ -1832,6 +1832,14 @@ build() {
     refuse "nothing landed and $branch is back where it was. A squash onto a newer $BRANCH keeps the branch's old files, which reverts what landed since (git reset --soft from a branch that started further back). Find the branch's last commit before the squash (git reflog), rebase that onto $BRANCH, and squash only then: git reset --soft \$(git merge-base HEAD $BRANCH). If the undo is meant, add a line \"Undoes: <sha>\" to a commit message for each commit above, then run this again"
   fi
 
+  # Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true reads "#N: ..." as a comment
+  # and drops it. A commit with an empty subject, or none starting "#N" while a sibling has one, is refused by name.
+  subs=$(git log --no-merges --format='%h %s' "$want..HEAD") || subs=
+  if grep -qE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs" || grep -qE '^[0-9a-f]+ *$' <<<"$subs"; then
+    lost=$(grep -vE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs" | head -n 1)
+    [ -z "$lost" ] || refuse "commit ${lost%% *} (\"${lost#* }\") lost its #N: title, which a rebase continued with GIT_EDITOR=true drops, so nothing landed and $branch is back where it was: reword it (git rebase -i, or git commit --amend) to start with #N:, then run this again"
+  fi
+
   # Its lane, over what it changes on $want, and that lane's check.
   lane=full lane_why='' chk=$CHECK
   if [ -n "$LANES" ]; then

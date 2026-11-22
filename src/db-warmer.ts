@@ -50,16 +50,16 @@ export interface Warmer { worker: Worker; stats: () => WarmStats; stop: () => vo
  * Starts the warmer for the store's database. The `db-warmer` setting (false turns it off, no restart: a timer here carries it to the
  * worker every 5 s). Null for an in-memory store.
  */
-export function warmDatabase(store: Store, everyMs = WARM_MS): Warmer | null {
+export function warmDatabase(store: Store, everyMs = WARM_MS, settingMs = 5000): Warmer | null {
   if (!store.statePath) return null;
   // [last pass ms, last pass MB, backoffs]; and one flag, 1 = on.
   const shared = new Float64Array(new SharedArrayBuffer(8 * 3));
   const flag = new Int32Array(new SharedArrayBuffer(4));
-  const worker = new Worker(new URL(import.meta.url), { workerData: { warm: { path: store.path, everyMs, shared, flag } } });
+  const worker = new Worker(new URL(import.meta.url), { workerData: { warm: { path: store.path, everyMs, shared, flag } }, trackUnmanagedFds: false });
   worker.unref();
   const apply = () => { try { Atomics.store(flag, 0, store.getSetting<boolean>(WARMER_SETTING) === false ? 0 : 1); } catch { /* keep the last value */ } };
   apply();
-  const timer = setInterval(apply, 5000);
+  const timer = setInterval(apply, settingMs);
   timer.unref();
   worker.on('error', (err) => console.error(`Database warmer failed: ${err?.message ?? err}`));
   worker.once('exit', () => clearInterval(timer));
@@ -70,6 +70,7 @@ if (!isMainThread && workerData?.warm) {
   const { path, everyMs, shared, flag } = workerData.warm as { path: string; everyMs: number; shared: Float64Array; flag: Int32Array };
   const buf = Buffer.allocUnsafe(CHUNK);
   // The database's own fd is opened once and never closed: closing any fd on a file drops the process's SQLite locks on it (#860).
+  // The Worker is made with trackUnmanagedFds: false, so even this worker's exit leaves it open.
   // The -wal takes none, so it is opened afresh each pass (a checkpoint can restart it).
   let dbFd: number | null = null;
   const pacer = new Pacer();
@@ -79,16 +80,18 @@ if (!isMainThread && workerData?.warm) {
     try {
       dbFd ??= openSync(path, 'r');
       bytes += readThrough(dbFd, buf);
-    } catch { /* the file isn't there yet: next pass */ }
+    } catch (err: any) { if (err?.code !== 'ENOENT') console.error(`Database warmer: reading the database: ${err?.message ?? err}`); }
     try {
       const fd = openSync(`${path}-wal`, 'r');
       try { bytes += readThrough(fd, buf); } finally { closeSync(fd); }
-    } catch { /* no WAL right now */ }
+    } catch (err: any) { if (err?.code !== 'ENOENT') console.error(`Database warmer: reading the WAL: ${err?.message ?? err}`); }
     return { bytes, ms: performance.now() - t0 };
   };
   const loop = () => {
     let wait = everyMs;
-    if (Atomics.load(flag, 0) === 1) {
+    if (Atomics.load(flag, 0) !== 1) {
+      shared[0] = 0; shared[1] = 0; // off: no stale pass for the Status page to show
+    } else {
       const { bytes, ms } = pass();
       const mb = bytes / 1048576;
       const p = pacer.after(mb, ms, everyMs);

@@ -31,14 +31,16 @@ test('a fast pass resets the count, a tiny pass is no evidence, and the wait is 
   assert.equal(p.after(100, 9000).wait, 0, 'a pass longer than the period starts the next at once, never queued');
 });
 
-test('the worker reads the database and its WAL, and stops when the setting says false', async () => {
+test('the worker reads the database and its WAL, and the setting turns it off and on with no restart', async () => {
   const store = new Store(join(dir, 'coordinator.db'));
   writeFileSync(`${store.path}-wal`, Buffer.alloc(3 * 1048576));
-  const w = warmDatabase(store, 50)!;
+  const w = warmDatabase(store, 30, 30)!;
   try {
     const s = await until('the warmer has read a pass', () => w.stats().mb > 0 && w.stats());
     assert.ok(s.mb >= 3, `read ${s.mb} MB, the 3 MB WAL at least`);
-    assert.ok(s.ms >= 0);
     store.setSetting(WARMER_SETTING, false);
+    await until('the warmer is off: no pass is shown', () => w.stats().mb === 0);
+    store.setSetting(WARMER_SETTING, true);
+    await until('the warmer is on again', () => w.stats().mb > 0);
   } finally { w.stop(); }
 });

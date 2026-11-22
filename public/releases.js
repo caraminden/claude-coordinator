@@ -5,7 +5,7 @@
 // chip beside a minion's PR info (take F).
 // Bars follow the spec's rule: by stage, sized by usual time, the current one stopping at 90% (waitBar's cap) and
 // amber past LATE, a wait hatched with its reason, and no estimate while anything ahead waits.
-import { ago, api, fileUrl, h, pacificClock, schemeIcon, view } from './base.js';
+import { ago, api, fileUrl, h, heldWhilePressed, pacificClock, schemeIcon, view } from './base.js';
 import { iconSrc } from './schemes.js';
 import { optimistic } from './ui/optimistic.js';
 import { changeEta, COLUMNS, columnOf, releaseName, segments, shortSpan, stuckFor } from './releasemath.js';
@@ -75,10 +75,20 @@ export function onReleases(msg) {
 const redrawn = new Set();
 export const onReleasesRedraw = (fn) => redrawn.add(fn);
 
+/**
+ * The rail's release rows drawn again. Not while a pointer is pressed in the sidebar (#1548, as #1499 for minion rows): a
+ * release update swapped the pressed row for a new one, the release landed on that, and the click reached neither (Cara,
+ * 2026-11-21: "I have to click on this twice to load the releases page"); it runs once the click has gone through.
+ */
+function swapRailRows() {
+  if (heldWhilePressed(swapRailRows)) return;
+  for (const el of document.querySelectorAll('[data-rel-scheme]')) el.replaceWith(releaseRows(Number(el.dataset.relScheme)));
+}
+
 function redraw() {
   // Not under a row being dragged in the land line: it would drop the row from the finger. Again once it's let go.
   if (pageEl?.querySelector('.rel-changes.reorder-active')) return void setTimeout(redraw, 250);
-  for (const el of document.querySelectorAll('[data-rel-scheme]')) el.replaceWith(releaseRows(Number(el.dataset.relScheme)));
+  swapRailRows();
   if (pageEl?.isConnected) fillPage();
   const slot = view?.branchEl?.querySelector('.rel-chip-slot');
   if (slot) {

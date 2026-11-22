@@ -82,8 +82,8 @@ export function tempRoot(prefix = 'test-'): TempRoot {
   return {
     dir,
     path: (...parts) => join(dir, ...parts),
-    // A server.ts started this way exits with the test (#1546); the variable means nothing to other children.
-    spawn: (cmd, args, opts) => track(spawn(cmd, args, opts?.env ? { ...opts, env: { CITADEL_EXIT_WITH_PARENT: '1', ...opts.env } } : (opts ?? {}))),
+    // A server.ts started this way exits with the test (#1546); other children (a Codex shim forwards CITADEL_* names) don't get the variable.
+    spawn: (cmd, args, opts) => track(spawn(cmd, args, opts?.env && args.some((a) => a.endsWith('server.ts')) ? { ...opts, env: { CITADEL_EXIT_WITH_PARENT: '1', ...opts.env } } : (opts ?? {}))),
     track,
     serve,
     down: () => serve(createNetServer((sock) => sock.destroy())),

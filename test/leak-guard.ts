@@ -2,7 +2,7 @@
 // turn outlived its test (#271). It names and kills this user's processes that started during the run
 // and name a test's scratch folder that is gone, and are the run's own (descended from it, or orphaned by it): on a shared /tmp,
 // another run's or build's live work is left alone (#1223).
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -56,16 +56,22 @@ export function ownedByRun(pid: number, root = process.pid, id = runId): boolean
   return false;
 }
 let before = new Set<number>();
+let sharedScratch = '';
 
 export async function globalSetup() {
   runId = randomUUID();
   process.env[ENV] = runId;
+  // #1623: a run started from a minion's turn or a land holds the scheme's real shared folder, and every land.sh, run-tests.sh
+  // or deploy.sh a test starts would write its retro-log lines (`shipped through main's red · ticket/1-x …`) into the live
+  // log. Every test process inherits this scratch folder instead; a test that wants a folder of its own sets it itself.
+  if (process.env.COORDINATOR_SHARED_DIR) process.env.COORDINATOR_SHARED_DIR = sharedScratch = mkdtempSync(join(tmp, 'test-shared-'));
   before = new Set(scratch().keys());
 }
 
 // Nothing awaited: under --test-force-exit (tools/run-tests.sh) node exits at this function's first await, before
 // anything is killed or thrown, and takes a throw for green unless the exit code is set too.
 export function globalTeardown() {
+  if (sharedScratch) rmSync(sharedScratch, { recursive: true, force: true });
   let left: [number, string][] = [];
   // A process a test has just stopped may take a moment to go.
   for (let i = 0; i < 40; i++) {

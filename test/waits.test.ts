@@ -395,6 +395,7 @@ test('a ship whose CI started early on the train ahead reads "CI · started earl
   const front = waits.wait(f.id)!;
   assert.equal(front.label, 'CI · started early');
   assert.equal(front.chip, 'ship · CI · early');
+  assert.equal(front.brief, 'waiting for that run', 'the row reads "CI · started early · waiting for that run", not the stage twice');
   const held = waits.wait(h.id)!;
   assert.deepEqual([held.stage, held.label, held.chip], ['line', 'Held', 'line · held']);
   assert.match(held.text, /^held: main is broken \(12 min\)/);

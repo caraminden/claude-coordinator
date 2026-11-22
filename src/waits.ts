@@ -234,7 +234,7 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
     if (t.got > 0) {
       const ph = landPhase(t.phase), c = t.tests, e = ph.key === 'ci' && early(t.label);
       const size = riders.length ? `Train of ${members.length} (${members.join(', ')}) · ` : '';
-      const brief = BRIEF[ph.key] ?? (riders.length ? ph.text : undefined);
+      const brief = e ? 'waiting for that run' : BRIEF[ph.key] ?? (riders.length ? ph.text : undefined);
       out.set(t.label, {
         kind: 'land', stage: ph.stage, since: t.mtime, usual: usual(`land:${ph.key}`), label: e ? EARLY_CI.label : ph.label,
         chip: `ship · ${c ? `${c.done}/${c.total}` : e ? EARLY_CI.word : ph.word}`, text: `${size}${c ? `${ph.text}: ${countsText(c)}` : e ? EARLY_CI.text : ph.text}`,

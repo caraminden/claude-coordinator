@@ -27,13 +27,15 @@ function folder(slots?: number, pressure = 5) {
     // No test reads the real box's memory (#1340: test/mem-room.test.ts has the memory wait).
     CITADEL_HEAVY_MEM_NEED: '0', CITADEL_MEM_ROOM_MB: undefined,
     // The slots as they were before #1160's small slot, and never the repo's CI (test/heavy-ci.test.ts has that).
-    CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_PLAIN_SLOTS: '64' };
+    CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_PLAIN_SLOTS: '64',
+    // The line's own tests send every job to the line, as before #1629; judged() below turns the judgment back on.
+    CITADEL_HEAVY_JUDGE: '0', CITADEL_HEAVY_GUESS: undefined, CITADEL_HEAVY_MIN_RUN: undefined, CITADEL_HEAVY_MIN_CPU: undefined };
   return { dir, env, pressureFile };
 }
 type Job = { child: ChildProcess; err: () => string; done: Promise<number | null> };
-function job(env: NodeJS.ProcessEnv, who: string, script: string): Job {
+function job(env: NodeJS.ProcessEnv, who: string, script: string, flags: string[] = []): Job {
   // Its own process group, so a test can kill the wrapper and its command together, as a crash would.
-  const child = spawn(heavy, ['sh', '-c', script], { env: { ...env, CITADEL_HEAVY_WHO: who }, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  const child = spawn(heavy, [...flags, 'sh', '-c', script], { env: { ...env, CITADEL_HEAVY_WHO: who }, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
   let err = '';
   child.stderr!.on('data', (b) => (err += b));
   return { child, err: () => err, done: new Promise((r) => child.on('close', (code) => r(code))) };
@@ -152,7 +154,7 @@ test("a priority waiter's marker that stopped being freshened doesn't hold the l
 test('without a usable lock folder it warns and runs anyway', () => {
   const blocker = join(root, 'a-file');
   writeFileSync(blocker, '');
-  const r = spawnSync(heavy, ['echo', 'ran'], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_DIR: join(blocker, 'locks') }, encoding: 'utf8' });
+  const r = spawnSync(heavy, ['echo', 'ran'], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_JUDGE: '0', CITADEL_HEAVY_DIR: join(blocker, 'locks') }, encoding: 'utf8' });
   assert.equal(r.stdout, 'ran\n');
   assert.match(r.stderr, /without waiting for a slot/);
 });
@@ -333,7 +335,8 @@ test('a job that ran appends one line: start, who, what, on what it waited, wait
   assert.equal(what, 'sh -c sleep 1; printf "a b"; exit 3', 'a tab in the command would split its field');
   assert.deepEqual([on, wait, status, pressure], ['none', '0', '3', '7']);
   assert.ok(Number(run) >= 1 && Number(run) < 10, `ran ${run} s`);
-  assert.equal(lines[0].length, 8);
+  assert.equal(lines[0].length, 9);
+  assert.equal(lines[0][8], '0', 'a sleep spends no CPU seconds');
 });
 
 test('a job that waited on load says load, with its wait and the pressure it started at; a forced one says forced', async () => {
@@ -448,4 +451,130 @@ test('enough memory room starts at once, and a priority job skips the memory wai
   assert.doesNotMatch(ok.err(), /memory/);
   const p = job({ ...env, CITADEL_HEAVY_MEM_NEED: '2000', CITADEL_MEM_ROOM_MB: '1', CITADEL_HEAVY_PRIORITY: '1' }, 'Deploy #3', touch(join(root, 'mem-prio')));
   assert.equal(await p.done, 0);
+});
+
+// Only heavy work waits (#1629): each job is judged light or heavy by its own past runs before it takes a place in line.
+const past = (who: string, what: string, run: number, cpu?: number) =>
+  `2026-11-20T10:00:00-0800\t${who}\t${what}\tnone\t0\t${run}\t0\t5${cpu === undefined ? '' : `\t${cpu}`}\n`;
+// One slot, held by a job until its go file appears; returns the go file and the holder.
+async function holdSlot(env: NodeJS.ProcessEnv) {
+  const up = join(root, `hold-up-${n}`), go = join(root, `hold-go-${n++}`);
+  const holder = job(env, 'Holder #1 (cara)', `${touch(up)}; ${waitFor(go)}`);
+  await until('the holder in its slot', () => existsSync(up));
+  return { go, holder };
+}
+const lastLine = (dir: string) => history(dir).at(-1)!;
+const seed = (dir: string, text: string) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'history'), text); };
+const judged = (env: NodeJS.ProcessEnv) => ({ ...env, CITADEL_HEAVY_JUDGE: undefined });
+
+test('a job whose past runs were short runs at once while the slot is held, and its line says light', async () => {
+  const { dir, env } = folder(1);
+  // Its key skips wrappers and keeps 3 words: these past runs are the same job as `sh -c echo quick`.
+  seed(dir, past('Tiny #2 (cara)', 'timeout -k 30 600 sh -c echo quick', 1, 1) + past('Tiny #3 (cara)', 'mise exec node@24 -- sh -c echo quick now', 2, 1));
+  const { go, holder } = await holdSlot(env);
+  try {
+    const r = spawnSync(heavy, ['sh', '-c', 'echo quick'], { env: { ...judged(env), CITADEL_HEAVY_WHO: 'Tiny #6 (cara)' }, encoding: 'utf8', timeout: 10_000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, 'quick\n');
+    assert.match(r.stderr, /runs at once, without a heavy slot: its last 2 run\(s\) took 1 s/);
+    assert.deepEqual(lastLine(dir).slice(1, 5), ['Tiny #6 (cara)', 'sh -c echo quick', 'light', '0']);
+    assert.equal(lastLine(dir).length, 9, 'with its CPU seconds');
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
+});
+
+test('a Claude-bound job never takes a slot, whatever its past runs say or the caller guesses', async () => {
+  const { dir, env } = folder(1);
+  const bin = join(root, `bin-${n++}`);
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'claude'), '#!/bin/sh\necho "eval $*"\n', { mode: 0o755 });
+  seed(dir, past('Citadel #1 (cara)', `${bin}/claude -p hi`, 3000, 2900).repeat(3));
+  const { go, holder } = await holdSlot(env);
+  try {
+    const r = spawnSync(heavy, ['--heavy', join(bin, 'claude'), '-p', 'hi'], { env: { ...judged(env), CITADEL_HEAVY_WHO: 'Citadel #2 (cara)' }, encoding: 'utf8', timeout: 10_000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, 'eval -p hi\n');
+    assert.match(r.stderr, /without a heavy slot: it runs Claude turns/);
+    assert.equal(lastLine(dir)[3], 'light');
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
+});
+
+test('a long CPU-bound job still queues behind the held slot, with no guess of its own', async () => {
+  const { dir, env } = folder(1);
+  const what = "land.sh's suite for ticket/2-b (CI fallback)";
+  // The branch in the name is past the key's 3 words, so another branch's suite is the same job.
+  seed(dir, past('Citadel #1 (cara)', "land.sh's suite for ticket/1-a (CI fallback)", 600, 2400).repeat(3));
+  const { go, holder } = await holdSlot(env);
+  const up = join(root, `long-up-${n++}`);
+  const c = job({ ...judged(env), CITADEL_HEAVY_WHAT: what }, 'Citadel #2 (cara)', touch(up));
+  try {
+    await until('the long job to wait for the slot', () => /waiting for one/.test(c.err()));
+    assert.ok(!existsSync(up), 'it waits');
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
+  assert.equal(await c.done, 0);
+  assert.ok(existsSync(up));
+});
+
+test('a long but mostly idle job runs at once; a long one from before the CPU column queues', async () => {
+  const { dir, env } = folder(1);
+  seed(dir, past('Idle #1 (cara)', 'sh -c echo idle', 900, 30).repeat(2) + past('Old #1 (cara)', 'sh -c echo old', 900).repeat(2));
+  const { go, holder } = await holdSlot(env);
+  const up = join(root, `old-up-${n++}`);
+  const old = job(judged(env), 'Old #2 (cara)', `echo old; ${touch(up)}`);
+  try {
+    const r = spawnSync(heavy, ['sh', '-c', 'echo idle'], { env: { ...judged(env), CITADEL_HEAVY_WHO: 'Idle #2 (cara)' }, encoding: 'utf8', timeout: 10_000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /without a heavy slot: its last 2 run\(s\) took 900 s \(median\), CPU busy 3% of it/);
+    await until('the old job to wait for the slot', () => /waiting for one/.test(old.err()));
+    assert.ok(!existsSync(up), 'it waits');
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
+  assert.equal(await old.done, 0);
+});
+
+test('a job with no past runs runs at once and never asks for CI, unless the caller guesses --heavy', async () => {
+  const { dir, env } = folder(1);
+  // A fake citadel-node: the CI path's first step (heavy-ci.ts --repo) leaves a mark, then says "no CI here".
+  const bin = join(root, `bin-${n++}`), asked = join(root, `ci-asked-${n}`);
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'citadel-node'), `#!/bin/sh\ntouch '${asked}'\nexit 1\n`, { mode: 0o755 });
+  const fresh = { ...judged(env), CITADEL_HEAVY_HERE: undefined, PATH: `${bin}:${process.env.PATH}` };
+  const { go, holder } = await holdSlot(env);
+  const up = join(root, `guess-up-${n++}`);
+  let guessed: Job | undefined;
+  try {
+    const r = spawnSync(heavy, ['sh', '-c', 'echo new'], { env: { ...fresh, CITADEL_HEAVY_WHO: 'New #1 (cara)' }, encoding: 'utf8', timeout: 10_000 });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /without a heavy slot: no past runs of it/);
+    assert.ok(!existsSync(asked), 'a light job never goes to CI');
+    guessed = job(fresh, 'New #2 (cara)', touch(up), ['--heavy']);
+    await until('the guessed-heavy job to wait for the slot', () => /waiting for one/.test(guessed!.err()));
+    assert.ok(existsSync(asked), 'a heavy job asks for CI first');
+    assert.ok(!existsSync(up), 'it waits');
+  } finally {
+    writeFileSync(go, '');
+  }
+  assert.equal(await holder.done, 0);
+  assert.equal(await guessed!.done, 0);
+  assert.ok(existsSync(up));
+  assert.equal(history(dir).filter((l) => l[1] === 'New #1 (cara)')[0][3], 'light');
+});
+
+test("the history line's last column is the command's CPU seconds, its children's included", () => {
+  const { dir, env } = folder(2);
+  // About 2 s of a busy loop, much of it in the date processes it starts.
+  const r = spawnSync(heavy, ['sh', '-c', 'end=$(($(date +%s) + 2)); while [ "$(date +%s)" -lt $end ]; do :; done'], { env, timeout: 20_000 });
+  assert.equal(r.status, 0);
+  const cpu = Number(lastLine(dir)[8]);
+  assert.ok(cpu >= 1 && cpu <= Number(lastLine(dir)[5]) * 16, `${cpu} CPU s`);
 });

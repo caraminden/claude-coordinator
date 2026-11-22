@@ -53,21 +53,46 @@
 # Long jobs (#1363): `citadel-heavy --long <command...>` doesn't wait. It snapshots the working copy for the scheme's CI,
 # queues the job and prints its id at once (tools/heavy-ci.ts --long). The server starts it at night, from 2am until the
 # job hours of the PC that runs the repo's runners end, and wakes the minion when it ends.
+#
+# Only heavy work waits (#1629, Cara 2026-11-22: "Heavy slot should be for tasks that will be spending CPU for the vast
+# majority of their runtime AND will run for at least several minutes"). Before the line or CI, each job is judged light
+# or heavy, and a light one runs here at once: no slot, no CI, no load or memory wait, still at nice 19.
+# - Claude-bound jobs are always light (prompt-eval, skill-trigger-eval, citadel-replay, review-escapes, claude itself):
+#   Cara: "Our goal is to be able to run many Claudes as efficiently as possible, its the actual heavy work we want to
+#   offload". No limit of their own.
+# - Otherwise by the job's own past runs: history lines of the same scheme (who up to " #" or " (") and the same command
+#   (its first 3 words past env, nice, timeout, time and `mise exec ... --`, paths cut to their last part), the newest 5.
+#   Heavy when their median run is CITADEL_HEAVY_MIN_RUN s (180) or more AND their median CPU time is at least
+#   CITADEL_HEAVY_MIN_CPU % (50) of the run. Lines from before the CPU column count by run time alone: long is heavy.
+# - A job with no past runs is light unless the caller guesses heavy: `citadel-heavy --heavy <command...>` (or
+#   CITADEL_HEAVY_GUESS=heavy), Cara: "Let the minion make an intelligent guess for unknowns". Its own runs decide after.
+# Priority jobs skip the judgment, and CITADEL_HEAVY_JUDGE=0 turns it off. A light job's nested citadel-heavy calls are judged on their own.
+# The history line's last column is the command's CPU time in seconds (its waited-for children, from /proc/$$/stat), so
+# old 8-column lines still parse; CI jobs write - there. A light job's line says light where it waited.
 set -uo pipefail
 
 say() { echo "citadel-heavy: $*" >&2; }
+# The CPU seconds (user + system, in ticks of 1/100 s) of this shell's waited-for children: $$ is this shell's pid in a subshell too.
+cpu_ticks() { local s f; read -r s </proc/$$/stat 2>/dev/null || { echo 0; return; }; read -ra f <<<"${s##*) }"; echo $((${f[13]:-0} + ${f[14]:-0})); }
 # The clock for the history line's wait and run: microseconds, so a difference is the time that passed. Two reads of
 # $SECONDS count the second ticks crossed between them, and a job that took a free slot at once said it waited 1 s
 # whenever its setup ran across a tick (#1367). $SECONDS where bash is older than 5.0, which has no EPOCHREALTIME.
 us() { local t=${EPOCHREALTIME:-}; t=${t//[!0-9]/}; echo "${t:-${SECONDS}000000}"; }
 here=${CITADEL_HEAVY_HERE:-}
-[ "${1:-}" != --here ] || { here=1; shift; }
+guess=${CITADEL_HEAVY_GUESS:-light}
+while :; do
+  case ${1:-} in
+    --here) here=1; shift ;;
+    --heavy) guess=heavy; shift ;;
+    *) break ;;
+  esac
+done
 if [ "${1:-}" = --long ]; then
   [ -z "$here" ] || { say "a long job runs on the scheme's CI only, so --long and --here (or CITADEL_HEAVY_HERE) don't go together"; exit 2; }
   shift
   exec "$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts" --long "$@"
 fi
-[ $# -gt 0 ] || { say "usage: citadel-heavy [--here | --long] <command> [args...]"; exit 2; }
+[ $# -gt 0 ] || { say "usage: citadel-heavy [--here] [--heavy] <command> [args...] | --long <command> [args...]"; exit 2; }
 [ -z "${CITADEL_HEAVY_HELD:-}" ] || exec "$@"
 
 dir=${CITADEL_HEAVY_DIR:-$HOME/.local/share/claude-coordinator/projects/.heavy}
@@ -76,6 +101,73 @@ what=${CITADEL_HEAVY_WHAT:-$*}
 first=${CITADEL_HEAVY_PRIORITY:+1}
 [ ${#what} -le 100 ] || what="${what:0:97}..."
 poll=${CITADEL_HEAVY_POLL:-2}
+
+# Light or heavy (#1629, the header): prints "light <why>" or "heavy <why>".
+judge() {
+  local claude='(^|[ /])(prompt-eval|skill-trigger-eval|skill-evals|citadel-replay|review-escapes|claude)([ /.]|$)'
+  if [[ " $* $what " =~ $claude ]]; then echo "light it runs Claude turns, which wait on Claude, not the CPU"; return; fi
+  local h=$dir/history
+  [ -f "$h" ] || h=/dev/null # a fifo or a missing file would hang or fail the read
+  awk -F'\t' -v who="$who" -v what="$what" -v guess="$guess" -v min_run="${CITADEL_HEAVY_MIN_RUN:-180}" -v min_cpu="${CITADEL_HEAVY_MIN_CPU:-50}" '
+    function scheme(w) { sub(/ [#(].*/, "", w); return w }
+    function key(s,   a, n, i, j, k, out, w) {
+      n = split(s, a, / +/)
+      for (i = 1; i <= n; i++) {
+        w = a[i]
+        if (w ~ /^[A-Za-z_][A-Za-z0-9_]*=/ || w == "env" || w == "time" || w == "command" || w == "--") continue
+        if (w == "nice") { if (a[i + 1] == "-n") i += 2; else if (a[i + 1] ~ /^-/) i++; continue }
+        if (w == "timeout") { while (a[i + 1] ~ /^-/) { i++; if (a[i] ~ /^-[ks]$/) i++ } i++; continue }
+        if ((w == "mise" || w ~ /\/mise$/) && (a[i + 1] == "exec" || a[i + 1] == "x")) {
+          for (j = i + 2; j <= n && a[j] != "--"; j++);
+          i = j <= n ? j : i + 1
+          continue
+        }
+        sub(/.*\//, "", w); sub(/\.ts$/, "", w)
+        out = out (k++ ? " " : "") w
+        if (k == 3) break
+      }
+      return out
+    }
+    function median(v, c,   i, j, t) {
+      for (i = 2; i <= c; i++) for (j = i; j > 1 && v[j - 1] > v[j]; j--) { t = v[j]; v[j] = v[j - 1]; v[j - 1] = t }
+      return c % 2 ? v[(c + 1) / 2] : (v[c / 2] + v[c / 2 + 1]) / 2
+    }
+    BEGIN { mine = scheme(who) "\t" key(what) }
+    $6 ~ /^[0-9]+$/ && scheme($2) "\t" key($3) == mine { seen++; run[seen % 5] = $6 + 0; cpu[seen % 5] = $9 }
+    END {
+      if (!seen) { print guess, "no past runs of it" (guess == "heavy" ? "; the caller guessed heavy" : ""); exit }
+      for (i in run) { r[++c] = run[i]; if (cpu[i] ~ /^[0-9]+$/ && run[i] > 0) s[++m] = 100 * cpu[i] / run[i] }
+      mr = median(r, c)
+      if (mr < min_run) { printf "light its last %d run(s) took %d s (median)\n", c, mr; exit }
+      if (!m) { printf "heavy its last %d run(s) took %d s (median); CPU not measured yet\n", c, mr; exit }
+      ms = median(s, m)
+      printf "%s its last %d run(s) took %d s (median), CPU busy %d%% of it\n", ms >= min_cpu ? "heavy" : "light", c, mr, ms
+    }' "$h" 2>/dev/null
+}
+# Past about 5 MB the job that notices keeps the newest half of the history, whole lines only.
+trim_history() {
+  local h=$dir/history max=${CITADEL_HEAVY_HISTORY_MAX:-5000000} cut
+  [ "$(stat -c %s "$h" 2>/dev/null || echo 0)" -gt "$max" ] || return 0
+  # tail -n +2 drops the line the byte cut lands in. shortcut: lines another job appends during the copy are lost, a few at most once per 2.5 MB.
+  cut="$h.$$-$RANDOM"
+  { tail -c "$((max / 2))" "$h" | tail -n +2 >"$cut" && mv -f "$cut" "$h"; } 2>/dev/null || rm -f "$cut" 2>/dev/null
+}
+# A light job runs here and now, at nice 19, and writes its own history line. CITADEL_HEAVY_JUDGE=0 sends every job to the
+# line, as before #1629 (the line's own tests; an off switch).
+if [ -z "$first" ] && [ "${CITADEL_HEAVY_JUDGE:-}" != 0 ]; then
+  read -r weight why < <(judge "$@")
+  if [ "$weight" = light ]; then
+    say "runs at once, without a heavy slot: $why"
+    started=$(date +%s) t1=$(us) c0=$(cpu_ticks)
+    nicer=(nice -n 19)
+    ! command -v ionice >/dev/null || nicer+=(ionice -c 3)
+    "${nicer[@]}" "$@"
+    status=$?
+    { mkdir -p "$dir" && printf '%s\t%s\t%s\tlight\t0\t%s\t%s\t-\t%s\n' "$(date -d "@$started" +%FT%T%z)" "${who//[$'\t\n']/ }" "${what//[$'\t\n']/ }" "$((($(us) - t1) / 1000000))" "$status" "$((($(cpu_ticks) - c0) / 100))" >>"$dir/history"; } 2>/dev/null
+    trim_history
+    exit "$status"
+  fi
+fi
 
 ci=("$(command -v citadel-node || echo node)" "$(dirname "$0")/heavy-ci.ts")
 if [ -z "$here$first" ] && slug=$("${ci[@]}" --repo); then
@@ -350,7 +442,7 @@ export CITADEL_TEST_PROGRESS=$progress
 # The command runs as a child without the lock's fd, so a daemon it leaves behind (sccache, a build
 # server) can't keep the slot; this shell holds it until the command ends.
 export CITADEL_HEAVY_HELD=1
-t1=$(us)
+t1=$(us) c0=$(cpu_ticks)
 nicer=()
 [ -n "$first" ] || { nicer=(nice -n 19); ! command -v ionice >/dev/null || nicer+=(ionice -c 3); }
 "${nicer[@]}" "$@" 8>&-
@@ -366,12 +458,7 @@ history="$dir/history"
 # pressure, mem-room), which passed 1 s on a starved CI runner and read as a wait on nothing (#1426).
 waited=$(((t1 - t0) / 1000000))
 [ "$reason" != none ] || waited=0
-line="$(date -d "@$started" +%FT%T%z)	${who//[$'\t\n']/ }	${what//[$'\t\n']/ }	$reason	$waited	$((($(us) - t1) / 1000000))	$status	${pressure:--}"
+line="$(date -d "@$started" +%FT%T%z)	${who//[$'\t\n']/ }	${what//[$'\t\n']/ }	$reason	$waited	$((($(us) - t1) / 1000000))	$status	${pressure:--}	$((($(cpu_ticks) - c0) / 100))"
 { printf '%s\n' "$line" >>"$history"; } 2>/dev/null
-max=${CITADEL_HEAVY_HISTORY_MAX:-5000000}
-if [ "$(stat -c %s "$history" 2>/dev/null || echo 0)" -gt "$max" ]; then
-  # tail -n +2 drops the line the byte cut lands in. shortcut: lines another job appends during the copy are lost, a few at most once per 2.5 MB.
-  cut="$history.$$-$RANDOM"
-  { tail -c "$((max / 2))" "$history" | tail -n +2 >"$cut" && mv -f "$cut" "$history"; } 2>/dev/null || rm -f "$cut" 2>/dev/null
-fi
+trim_history
 exit "$status"

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { inOrder, moved } from '../public/reorder.js';
-import { listeningPort, tempRoot } from './helpers.ts';
+import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
 
 // Dragging the schemes shelf or the app rail into your own order (#649): saved per person, followed by the lists.
 const repo = join(import.meta.dirname, '..');
@@ -29,7 +29,7 @@ let caraId = 0;
 before(async () => {
   const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
+      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, tempRoot } from './helpers.ts';
+import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
 
 // Hiding a scheme (#226): each person's own, out of their list's badges, never anyone else's.
 const repo = join(import.meta.dirname, '..');
@@ -26,7 +26,7 @@ let joshId = 0;
 before(async () => {
   const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
+      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],

@@ -1,6 +1,9 @@
 // Times people read are Pacific, labelled PST or PDT (Josh, 2026-11-12). One copy of the formats, for alerts, briefs and notes.
 
-export const ZONE = 'America/Los_Angeles';
+import { FIXED_ZONE } from './host-signals.ts';
+
+// A server a test boots reads its day and hour in the zone the test hands it instead (src/host-signals.ts, #1485, #1536).
+export const ZONE = FIXED_ZONE ?? 'America/Los_Angeles';
 
 /** `ms` as "Nov 14, 06:30 PST" (24-hour). */
 export const pacific = (ms: number) => new Date(ms).toLocaleString('en-US', { timeZone: ZONE, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });

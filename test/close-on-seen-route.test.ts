@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, tempRoot } from './helpers.ts';
+import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
 
 // POST /api/tickets/:id/seen with left:true closes a complete minion the person had open at its last update (#811).
 const repo = join(import.meta.dirname, '..');
@@ -25,7 +25,7 @@ async function call(who: string, path: string, opts: { method?: string; body?: u
 before(async () => {
   const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
+      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],

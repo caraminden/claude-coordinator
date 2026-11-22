@@ -13,6 +13,7 @@ import { until } from './wait.ts';
 import { holds } from './holds.ts';
 import { settled as settledInProcess } from '../src/settled.ts';
 import { isTurnNote } from '../src/codex.ts';
+import { dayZone, knownZone } from '../src/host-signals.ts';
 
 /**
  * The pinned turn files (src/turn-launch.ts) for a test that starts turns or builds their hooks: server.ts
@@ -210,6 +211,16 @@ export const jsonLines = (path: string): any[] => lines(path).map((l) => JSON.pa
 
 /** A turn message's blocks without the [System] note of the minion's own lines that opens it (#878), for tests about the rest. */
 export const withoutTurnNote = (content: any[]): any[] => content.filter((c) => !isTurnNote(c?.text ?? ''));
+/**
+ * The zone a server this test boots reads its day and hour in, in place of Pacific (#1536): one per test process,
+ * picked once (Pacific's date, its clock between 12:00 and 19:59, src/host-signals.ts's dayZone) and handed to every
+ * server as CITADEL_ZONE. A fixture that reads the day or hour to match the server's uses it (`pacificClock(now,
+ * TEST_ZONE)`), so the two never read different days after midnight or different hours across one. CITADEL_ZONE in
+ * the runner's env picks it instead, to run every booted server across a day boundary on purpose.
+ */
+export const TEST_ZONE = knownZone(process.env.CITADEL_ZONE) ? process.env.CITADEL_ZONE : dayZone(Date.now());
+/** A zone's short name at `ms` ("PST", "GMT-4"): what a server in that zone labels its times with. */
+export const zoneLabel = (zone: string, ms = Date.now()) => new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' }).formatToParts(ms).find((p) => p.type === 'timeZoneName')!.value;
 export const PASSWORD = 'test-password-123';
 export const SECRET = 'x'.repeat(40);
 
@@ -249,6 +260,8 @@ export type Booted = {
   root: string;
   data: string;
   proc: ChildProcess;
+  /** The zone it reads its day and hour in: TEST_ZONE unless the test's `env` handed it another CITADEL_ZONE. */
+  zone: string;
   /** The session cookie of a person signed in as `name`. */
   cookie: string;
   /** A JSON call as that person: GET without a body, else `method` (POST by default). */
@@ -306,6 +319,8 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       // test server's indexers (#1301, #1349). A test of the gate passes its own CITADEL_PSI_CPU file (none comes in from
       // the runner's env); test/host-signals.test.ts checks every test that starts server.ts itself sets this too.
       CITADEL_HOST_SIGNALS: 'fixed', CITADEL_PSI_CPU: undefined, CITADEL_PSI_MEMORY: undefined, CITADEL_PSI_IO: undefined,
+      // Its day and hour, in the zone this test's fixtures use too (TEST_ZONE above, #1536).
+      CITADEL_ZONE: TEST_ZONE,
       // GET /api/test/settled, for settled() and stop() below (#1437).
       CITADEL_TEST_SETTLED: '1',
       // Node's compile cache for the server's modules (#1518): a cold boot type-strips and compiles the whole app, about
@@ -373,7 +388,7 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
     return { status: res.status, data };
   };
   const call = as({ cookie });
-  return { base, port, root, data, proc, cookie, call, as, settled, stop };
+  return { base, port, root, data, proc, zone: opts.env?.CITADEL_ZONE ?? TEST_ZONE, cookie, call, as, settled, stop };
 }
 
 /** A stand-in systemctl: logs each call to $FAKE_SYSTEMD/calls and keeps units' states as files there (<unit>.failed: its last run failed). */

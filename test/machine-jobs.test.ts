@@ -10,7 +10,7 @@ import { Store } from '../src/db.ts';
 import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, pacificClock, type JobKind } from '../src/machine-jobs.ts';
 import { writeOffThread } from '../src/db-writer.ts';
 import { projectSharedDir } from '../src/workspace.ts';
-import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, holds, ok, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, holds, ok, zoneLabel, type Booted } from './helpers.ts';
 
 // Jobs on a person's machine (#857, shared/project/specs/desktop-gpu-jobs.md): the real server, a stand-in `claude -p`
 // that records each turn, and a fake machine agent on the real SSE stream that records the job messages it is sent.
@@ -113,7 +113,7 @@ async function answer(who: string, jobId: number, label: string) {
 }
 const hhmm = (min: number) => { const m = ((min % 1440) + 1440) % 1440; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
 const hours = (open: boolean) => {
-  const now = pacificClock(Date.now()).minutes;
+  const now = pacificClock(Date.now(), srv.zone).minutes; // the server's zone, not Pacific's (#1536)
   return call('Josh', `/api/machines/${box.id}/job-settings`, open ? { start: hhmm(now - 60), end: hhmm(now + 120) } : { start: hhmm(now + 120), end: hhmm(now + 180) }, 'PATCH');
 };
 /** Do something that wakes the minion, and wait for that turn to start and end: its token replaces the last one. */
@@ -255,7 +255,7 @@ test('"Always allow" is a standing go for job hours; a changed digest asks again
   await hours(false);
   const waits = await queue({});
   assert.equal(waits.state, 'queued');
-  assert.match(waits.waits, /^outside job hours \(opens \d\d:\d\d P[SD]T\)$/);
+  assert.match(waits.waits, new RegExp(`^outside job hours \\(opens \\d\\d:\\d\\d ${RegExp.escape(zoneLabel(srv.zone))}\\)$`)); // the server's zone (#1536)
   await assert.rejects(queue({ when: 'now' }), /400 when "now" needs a reason/);
   const now = await queue({ when: 'now', reason: 'Cara wants chapter 4 tonight' });
   assert.equal(now.state, 'needs-go');

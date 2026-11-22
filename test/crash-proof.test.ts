@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { request } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, PASSWORD, REPO, SECRET, tempRoot, type Booted } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, tempRoot, TEST_ZONE, type Booted } from './helpers.ts';
 
 let srv: Booted;
 before(async () => {
@@ -57,7 +57,7 @@ test('a server that can\'t start still exits non-zero, so systemd restarts it', 
   try {
     const proc = tmp.spawn(process.execPath, [join(REPO, 'server.ts')], {
       env: {
-        ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', PORT: String(busyPort), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
+        ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: String(busyPort), DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
         CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
       },
       stdio: 'ignore',

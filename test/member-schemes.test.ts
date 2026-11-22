@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { GLOBAL_OWNER } from '../src/properties.ts';
-import { listeningPort, tempRoot } from './helpers.ts';
+import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
 
 // #674 (Cara, 2026-11-14: "I added Alex to the Citadel scheme and now it shows him as if he is in every scheme"):
 // admin reach (the flag, or Citadel membership since #621) still opens every scheme, but GET /api/projects marks
@@ -34,7 +34,7 @@ async function person(name: string, password: string): Promise<number> {
 before(async () => {
   const server = tmp.spawn(process.execPath, [join(repo, 'server.ts')], {
     env: {
-      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
+      ...process.env, MACHINES_URL: undefined, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: join(root, 'data'), CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: 'test-password-123', SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],

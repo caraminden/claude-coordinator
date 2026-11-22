@@ -1,8 +1,9 @@
-// The box's own signals (#1485): CPU, memory and IO pressure, load, memory, CPU counters and cgroups. The server reads
-// them only through here (test/host-signals.test.ts checks), so a server a test boots (CITADEL_HOST_SIGNALS=fixed,
-// bootServer's default) never sees the real box: a busy box paused a test server's indexers (#1301). Pinned, it reads
-// fixed text for the files below and finds no other /proc or /sys file (so no cgroup). Live, every read is the real one.
-// The clock is not here: a test seeds its fixtures from the same real clock, so shifting only the server's broke them (handoffs/test-clock-shared.md).
+// The box's own signals (#1485): CPU, memory and IO pressure, load, memory, CPU counters, cgroups, and the zone that
+// decides which day and hour it is. The server reads them only through here (test/host-signals.test.ts checks), so a
+// server a test boots (CITADEL_HOST_SIGNALS=fixed, bootServer's default) never sees the real box: a busy box paused a
+// test server's indexers (#1301) and a test went red after midnight (#1421). Pinned, it reads fixed text for the files
+// below, finds no other /proc or /sys file (so no cgroup), and reads its day and hour in the zone the test hands it
+// (CITADEL_ZONE, #1536), the same zone the test's own fixtures use (test/helpers.ts's TEST_ZONE). Live, every read is the real one.
 import { readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { cpus, loadavg as realLoadavg } from 'node:os';
@@ -46,3 +47,37 @@ export const hostDir = async (path: string): Promise<string[]> => {
 export const loadavg = (): number[] => (FIXED ? [0, 0, 0] : realLoadavg());
 /** The box's cores, for load. Not `availableParallelism()`: inside the service's CPUQuota that reads the cgroup cap (8 of perigee's 16), while load counts the whole box (#1539). */
 export const cores = (): number => (FIXED ? FIXED_CORES : Math.max(1, cpus().length));
+
+/**
+ * The whole-hour zone (Etc/GMT±N: no daylight saving) on Pacific's date at `ms` whose clock reads as near 12:00 as
+ * Etc's range allows: 12:00 until Pacific's 4 or 5 PM, then up to 19:59. A test's fixtures dated in Pacific see the same
+ * day, and no midnight or 2-9 AM falls in the hours a test runs.
+ */
+export function dayZone(ms: number): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23', timeZoneName: 'shortOffset' }).formatToParts(ms).map((x) => [x.type, x.value])); // pacific-ok: the date the fixed zone keeps
+  const pacificOffset = Number(/GMT([+-]\d+)/.exec(p.timeZoneName)![1]); // -8 or -7
+  const offset = Math.max(-12, pacificOffset + 12 - Number(p.hour)); // Etc reaches 12 hours behind UTC at most
+  return offset === 0 ? 'Etc/GMT' : `Etc/GMT${offset > 0 ? '-' : '+'}${Math.abs(offset)}`; // Etc's sign is POSIX's, the reverse of ISO's
+}
+
+/** Whether Intl knows `zone`. */
+export function knownZone(zone: string | undefined): zone is string {
+  if (!zone) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pinned: the zone src/pacific.ts's ZONE and the local clock use in place of Pacific. It is the one the test hands over
+ * (CITADEL_ZONE), so the server and the test's fixtures read the same day and hour; a spawn that forgot it (the guard
+ * catches those in tests) picks its own afternoon zone. Null live.
+ */
+export const FIXED_ZONE = FIXED ? (knownZone(process.env.CITADEL_ZONE) ? process.env.CITADEL_ZONE : dayZone(Date.now())) : null;
+if (FIXED_ZONE) {
+  process.env.TZ = FIXED_ZONE; // Node re-reads TZ when it is set: getHours, setHours and formatters with no zone follow
+  process.env.CITADEL_ZONE = FIXED_ZONE; // a preview this test server starts reads the same zone
+}

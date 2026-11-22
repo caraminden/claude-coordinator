@@ -161,9 +161,9 @@ export function cleanSettings(old: JobSettings, body: any, now = Date.now()): Jo
   return next;
 }
 
-/** Minutes since midnight Pacific, and the zone's short name (PST or PDT). */
-export function pacificClock(ms: number): { minutes: number; zone: string } {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).formatToParts(new Date(ms));
+/** Minutes since midnight Pacific, and the zone's short name (PST or PDT). `zone`: a test reading a test server's (#1536). */
+export function pacificClock(ms: number, zone = ZONE): { minutes: number; zone: string } {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' }).formatToParts(new Date(ms));
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
   return { minutes: Number(get('hour')) * 60 + Number(get('minute')), zone: get('timeZoneName') };
 }

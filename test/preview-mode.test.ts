@@ -6,7 +6,7 @@ import { createServer as createHttpServer } from 'node:http';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { listeningPort, PASSWORD, tempRoot, until, holds } from './helpers.ts';
+import { listeningPort, PASSWORD, tempRoot, TEST_ZONE, until, holds } from './helpers.ts';
 
 // A preview (PREVIEW=1) serves the app on a copy of the database and must never act on it: no turns
 // (from people's messages or auto-resume), no new minions or schemes, no pushes, no machines.
@@ -59,7 +59,7 @@ before(async () => {
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: data, PREVIEW: '1', CITADEL_RESUME_GAP_MS: '200', CLAUDE_BIN: fakeClaude,
+      PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: data, PREVIEW: '1', CITADEL_RESUME_GAP_MS: '200', CLAUDE_BIN: fakeClaude,
       CLAUDE_CONFIG_DIR: join(root, 'claude-config'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40),
     },
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -113,7 +113,7 @@ test('nothing resumes the copied mid-turn minion, and no claude ever ran', async
 test('a preview exits once the server that started it is gone', async () => {
   const dir = mkdtempSync(join(root, 'orphan-'));
   // A stand-in for the live server: it starts the preview, then dies without cleaning up.
-  const parent = spawn(process.execPath, ['-e', `require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(repo, 'server.ts'))}], { stdio: ['ignore', 'inherit', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: ${JSON.stringify(dir)}, PREVIEW: '1', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(dir, 'claude'))}, COORDINATOR_PASSWORD: '${PASSWORD}', SESSION_SECRET: '${'x'.repeat(40)}' } }); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const parent = spawn(process.execPath, ['-e', `require('node:child_process').spawn(process.execPath, [${JSON.stringify(join(repo, 'server.ts'))}], { stdio: ['ignore', 'inherit', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: ${JSON.stringify(TEST_ZONE)}, PORT: '0', DATA_DIR: ${JSON.stringify(dir)}, PREVIEW: '1', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(dir, 'claude'))}, COORDINATOR_PASSWORD: '${PASSWORD}', SESSION_SECRET: '${'x'.repeat(40)}' } }); setInterval(() => {}, 1000);`], { stdio: ['ignore', 'pipe', 'ignore'] });
   tmp.track(parent);
   // The preview's stdout is the stand-in's, so its listening line says where it is.
   const port = await listeningPort(parent);
@@ -125,7 +125,7 @@ test('a preview exits once the server that started it is gone', async () => {
 
 test('a dev copy exits by itself once nobody has asked it anything for IDLE_EXIT_MS', async () => {
   const dir = mkdtempSync(join(root, 'idle-'));
-  const p = spawn(process.execPath, [join(repo, 'server.ts')], { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: dir, PREVIEW: '1', IDLE_EXIT_MS: '1500', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40) } });
+  const p = spawn(process.execPath, [join(repo, 'server.ts')], { cwd: repo, stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: dir, PREVIEW: '1', IDLE_EXIT_MS: '1500', CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: join(dir, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: 'x'.repeat(40) } });
   tmp.track(p);
   const port = await listeningPort(p);
   assert.equal((await fetch(`http://127.0.0.1:${port}/api/health`)).ok, true);

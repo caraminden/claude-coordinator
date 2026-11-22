@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Previews } from '../src/previews.ts';
-import { listeningPort, PASSWORD, SECRET, tempRoot } from './helpers.ts';
+import { listeningPort, PASSWORD, SECRET, tempRoot, TEST_ZONE } from './helpers.ts';
 import { git } from './git.ts';
 
 // A build's preview (src/previews.ts, build branches): /preview/build/<n>/ serves the tip of build/<n>
@@ -42,7 +42,7 @@ before(async () => {
   const server = spawn(process.execPath, [join(repo, 'server.ts')], {
     cwd: repo,
     env: {
-      PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
+      PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE, PORT: '0', DATA_DIR: data, CLAUDE_BIN: '/bin/false',
       CLAUDE_CONFIG_DIR: join(root, 'claude'), COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET,
     },
     stdio: ['ignore', 'pipe', 'inherit'],

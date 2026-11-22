@@ -70,7 +70,7 @@ import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } fro
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
-import { stateWord } from './needs.ts';
+import { sleepKey, stateWord, type Sleep } from './needs.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -972,7 +972,7 @@ export class Runner {
       const ids = tickets.map((t) => t.id);
       const properties = this.store.props.forTargets('minion', ids);
       const open = tickets.filter((t) => t.status !== 'closed');
-      this.store.warmSettings(tickets.flatMap((t) => [queueKey(t.id), previewKey(t.id), contextKey(t.id), windowKey(t.id), freshKey(t.id)]));
+      this.store.warmSettings(tickets.flatMap((t) => [queueKey(t.id), previewKey(t.id), contextKey(t.id), windowKey(t.id), freshKey(t.id), sleepKey(t.id)]));
       this.store.warmTurnTotals(ids);
       this.store.warmTouches(open);
       this.store.warmEvents(open.flatMap((t) => this.queue.heldMail(t.id).flatMap((m) => m.id ?? [])));
@@ -1076,6 +1076,8 @@ export class Runner {
       // Whose its cards are (#1449: the owner's once its assignee left the scheme), as push and Needs you count it; null for anyone's.
       assignee: ticket.kind === 'ticket' ? nameOf(this.store.minionPerson(ticket, 'assigned', props, hears)) : null,
       preview: !!this.store.getSetting(previewKey(ticket.id)),
+      // Asleep (#1636): when and who, for the header's Wake, the list's Asleep section and list_tickets.
+      asleep: closed ? null : this.store.getSetting<Sleep>(sleepKey(ticket.id)),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
       // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
@@ -2208,6 +2210,20 @@ export class Runner {
   }
 
   /**
+   * Put a minion to sleep or wake it (#1636), as `by` (a person's name): nothing else changes, and it needs no turn. False
+   * for a Taskmaster, a dismissed minion, or one already that way.
+   */
+  sleep(ticketId: number, by: string, asleep: boolean): boolean {
+    const t = this.store.getTicket(ticketId);
+    if (!t || t.kind === 'coordinator' || t.status === 'closed' || !!this.store.getSetting(sleepKey(ticketId)) === asleep) return false;
+    if (asleep) this.store.setSetting(sleepKey(ticketId), { at: this.now(), by } satisfies Sleep);
+    else this.store.deleteSetting(sleepKey(ticketId));
+    this.emit(ticketId, 'note', { text: asleep ? `${by} put this minion to sleep.` : `${by} woke this minion.` });
+    this.broadcastTicket(ticketId);
+    return true;
+  }
+
+  /**
    * Unseal a minion in state sealed (#718): the state clears now, and unless `quiet` (a message wakes it instead) a
    * turn starts that reads what was held for it, with a message from `author` (a person's name runs it as them, as a
    * card's answer does). A chained minion starts with its brief instead (routes/tickets.ts unparkTicket). False when
@@ -2702,6 +2718,7 @@ export class Runner {
     if (this.netWait(t.id)) return 'net wait';
     if (this.killWait(t.id)) return 'kill wait';
     if (this.parked(t)) return 'parked';
+    if (this.store.getSetting(sleepKey(t.id))) return 'asleep';
     if (this.store.getSetting(freshKey(t.id))) return 'fresh';
     // Outside (#1274): a day of gate counts found it turned away 120 of 233 due minions, nearly all in the ship line,
     // and about 30 a day of them were woken cold by their ship's result an hour or more later.
@@ -3128,6 +3145,11 @@ export class Runner {
       // after a resume that never started (a re-run batch, a person's message) keeps it: the minion is still held.
       const parkedAs = this.parkedAs.get(ticket.id);
       this.parkedAs.delete(ticket.id);
+      // Any turn wakes an asleep minion (#1636): a card's answer, a message, a wake it asked for. A keepalive never gets here (its gate).
+      if (this.store.getSetting(sleepKey(ticket.id))) {
+        this.store.deleteSetting(sleepKey(ticket.id));
+        this.emit(ticket.id, 'note', { text: 'Awake again: a new turn started.' });
+      }
       // A trailer is its own turn's: a resume that never started leaves its carried one for nobody.
       if (!resumed) this.statuses.delete(ticket.id);
       if (this.heldFor(ticket.id)) this.parkedAs.set(ticket.id, parkedAs ?? { state: ticket.state, note: ticket.note });

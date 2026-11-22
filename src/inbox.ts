@@ -7,6 +7,7 @@ import { openMentions } from './mentions.ts';
 import { loopHolds } from './minion-relay.ts';
 import { openSpend, type SpendState } from './spend-alert.ts';
 import { pacificDay } from './pacific.ts';
+import { SLEEP_PREFIX } from './needs.ts';
 import { drain, pace } from './breathe.ts';
 
 export interface InboxItem {
@@ -32,7 +33,8 @@ const forPerson = (card: { to?: string }, person: string) => !card.to || card.to
  * Approval cards hold up a running turn, so they come first; the rest newest first. For `person`, only
  * minions assigned to them or to no one (#197); the Taskmaster is no one's. A sealed minion waits on
  * something else by design, so its cards and replies wait too (#344; Josh, 2026-11-05: "Sealed minions
- * shouldnt add to the inbox badge count"); only an approval, which a running turn is stuck on, still shows.
+ * shouldnt add to the inbox badge count"); only an approval, which a running turn is stuck on, still shows. An asleep
+ * minion (#1636) is left out the same way, its cards to one person too; approvals still show.
  */
 export function inboxItems(store: Store, approvals: Approvals, projectId: number, person: string): InboxItem[] {
   const all = store.listTickets(projectId).filter((t) => t.status !== 'closed');
@@ -49,14 +51,15 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     return (r && store.props.personName(r) || r).toLowerCase();
   };
   const ids = new Set(tickets.map((t) => t.id));
-  const awake = new Set(tickets.filter((t) => t.state !== 'parked').map((t) => t.id));
+  const asleep = new Set(store.settingsWithPrefix(SLEEP_PREFIX).map((r) => Number(r.key.slice(SLEEP_PREFIX.length))));
+  const awake = new Set(tickets.filter((t) => t.state !== 'parked' && !asleep.has(t.id)).map((t) => t.id));
   const items: InboxItem[] = [
     ...approvals.pending().filter((a) => ids.has(a.ticketId))
       .map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card, eventId: store.cardEventId(ticketId, 'approval', (card as { id: string }).id) ?? undefined, key: `approval:${(card as { id: string }).id}` })),
     // A new stored card kind only needs adding to Store.openCards.
-    // A card addressed to one person (#687) is theirs alone, whoever the minion is assigned to and even while it's sealed.
+    // A card addressed to one person (#687) is theirs alone, whoever the minion is assigned to and even while it's sealed, but not asleep (#1636).
     ...store.openCards(projectId).map((e) => ({ e, card: JSON.parse(e.data) }))
-      .filter(({ e, card }) => (card.to ? forPerson(card, person) : awake.has(e.ticket_id)))
+      .filter(({ e, card }) => (card.to ? forPerson(card, person) && !asleep.has(e.ticket_id) : awake.has(e.ticket_id)))
       .map(({ e, card }) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card, eventId: e.id, key: `${e.kind}:${e.id}` })),
     // A running turn past a spend stage (#723), until Keep going or the turn's end; the runner keeps a turn's spend in its saved turn.
     ...tickets.filter((t) => t.status === 'running').flatMap((t) => {
@@ -75,7 +78,7 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
       .map((m) => ({ kind: 'mention', ticketId: m.ticketId, at: m.at, card: { by: m.by, text: m.text }, eventId: m.eventId, key: `mention:${m.eventId}` })),
     // Ready, try and complete are for a person to look at, not answers, so they're not here (#1121; Josh, 2026-11-19: "Answers only").
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.
-    ...tickets.filter((t) => t.replies && !['ready', 'complete', 'try', 'parked'].includes(t.state ?? '')).map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at, key: `replies:${t.id}` })),
+    ...tickets.filter((t) => t.replies && awake.has(t.id) && !['ready', 'complete', 'try'].includes(t.state ?? '')).map((t) => ({ kind: 'replies', ticketId: t.id, at: t.updated_at, key: `replies:${t.id}` })),
   ];
   return items.sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval') || b.at - a.at);
 }

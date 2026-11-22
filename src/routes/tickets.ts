@@ -1348,6 +1348,18 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    // Sleep or wake a minion (#1636): { asleep: boolean }. Out of Needs you and keepalives until this, or any turn, wakes it.
+    method: 'POST', path: '/api/tickets/:ticket/sleep', who: ['person'], refuse: 'Only a person can put a minion to sleep',
+    async handler({ req, res, app, session, ticket }) {
+      if (ticket.kind === 'coordinator') throw new HttpError(400, `Only a minion can sleep, not a ${AGENT_NAME}`);
+      if (ticket.status === 'closed') throw new HttpError(409, 'This minion is dismissed');
+      const body = await readJson(req);
+      if (typeof body.asleep !== 'boolean') throw new HttpError(400, 'asleep must be true or false');
+      app.runner.sleep(ticket.id, session.name, body.asleep);
+      return json(res, 200, { asleep: body.asleep });
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/stop', who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, app, ticket, session } = ctx;

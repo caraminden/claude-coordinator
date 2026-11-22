@@ -25,3 +25,11 @@ export function checkNeed(body: { need?: unknown }): { need: Need } | { error: s
 
 /** The word people and agents read for a minion's state: 'parked' (the stored value, unchanged) reads "sealed" (Cara, 2026-11-22). */
 export const stateWord = (s: string | null | undefined): string | null | undefined => (s === 'parked' ? 'sealed' : s);
+
+/**
+ * Asleep (#1636; Cara, 2026-11-22, "inbetween sealed and active"): a setting per minion, { at, by }, beside its state, so a
+ * ready or complete minion keeps its meaning. It drops out of Needs you and keepalives; any turn's start clears it (Runner).
+ */
+export const SLEEP_PREFIX = 'sleep:';
+export const sleepKey = (ticketId: number) => `${SLEEP_PREFIX}${ticketId}`;
+export interface Sleep { at: number; by: string }

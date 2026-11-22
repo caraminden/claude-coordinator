@@ -1406,7 +1406,7 @@ function ticketLine(t: any): string {
     t.effort ? `effort: ${t.effort}` : '',
     t.workflow ? 'workflow: on' : '',
     t.plugin_dirs ? `plugins: ${t.plugin_dirs.split('\n').join(', ')}` : '',
-    `status: ${t.status}${t.state ? `, ${stateWord(t.state)}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
+    `status: ${t.status}${t.state ? `, ${stateWord(t.state)}` : ''}${t.asleep ? `, asleep (${t.asleep.by} put it to sleep; any message wakes it)` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
     t.worktree ? `worktree: ${t.worktree}` : '',

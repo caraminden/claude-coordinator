@@ -8,7 +8,7 @@ const CARD_EVENTS = new Set(['question', 'question_result', 'plan', 'plan_result
 export const cardEvent = (event) => CARD_EVENTS.has(event.kind) || (event.kind === 'user_message' && !!JSON.parse(event.data).answer);
 
 /** A minion moved into or out of ready/complete/try, offered or lost its replies, was dismissed or reopened, changed hands, raised or cleared a spend alert, or had the loop guard hold or release messages (or is new to us). */
-export const countMoved = (before, after) => !before || before.state !== after.state || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')
+export const countMoved = (before, after) => !before || before.state !== after.state || !before.asleep !== !after.asleep || !before.replies?.length !== !after.replies?.length || (before.status === 'closed') !== (after.status === 'closed')
   || before.properties?.assigned !== after.properties?.assigned || before.spend_alert?.event !== after.spend_alert?.event || !before.loop_hold !== !after.loop_hold;
 
 /**

@@ -79,6 +79,13 @@ for (const [where, route] of [['a minion chat', '/t/7'], ["the Taskmaster's chat
   assert.deepEqual(sent[0].answers[1], { selected: ['B2', 'C2'], other: '' });
 });
 
+test('the progress line sits centred on the footer row, level with the buttons', { skip }, async () => {
+  const page = await open();
+  const mid = (sel: string) => page.eval<number>(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return r.top + r.height / 2; })()`);
+  const send = await mid('.qcard .row > button.small:not(.add-image)');
+  assert.ok(Math.abs((await mid('.qcard .progress')) - send) <= 1.5, 'label centre level with Send');
+});
+
 test('a recommended option nobody picked is not styled as picked', { skip }, async () => {
   const page = await open();
   assert.deepEqual(await page.eval(`[...document.querySelectorAll('.qcard .opt.picked')].length`), 0);

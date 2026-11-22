@@ -384,7 +384,7 @@ export interface App {
   readonly assetVersion: string;
   broadcast(msg: object): void;
   notify(ticketId: number, trigger: PushTrigger, except?: string | null): void;
-  newMinion(project: Project, m: { title: string; props: Record<string, unknown>; model?: string | null; effort?: string | null; build?: number | null }, by: string): Promise<{ id: number; number: number; notes: string[] }>;
+  newMinion(project: Project, m: { title: string; props: Record<string, unknown>; model?: string | null; effort?: string | null; build?: number | null }, by: string): Promise<{ id: number; number: number; notes: string[]; cwd: string }>;
   startChained(c: Chain, why: string): Promise<void>;
   ticketBranch(ticketId: number): Promise<BranchStatus | null>;
   /** Build branches' headers (src/builds.ts). */

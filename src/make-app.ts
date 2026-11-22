@@ -93,19 +93,19 @@ async function make(app: App, project: Project, caller: Ticket, by: string, a: {
 
   // The minion first: its branch gets the app as its first commit, before its brief can start a turn.
   const table = pickFor('feature');
-  const { id, number } = await app.newMinion(project, { title: `New app: ${title}`, props: { type: 'feature', assigned: maker.name }, model: table.model, effort: table.effort }, by);
+  const { id, number, cwd } = await app.newMinion(project, { title: `New app: ${title}`, props: { type: 'feature', assigned: maker.name }, model: table.model, effort: table.effort }, by);
   const ticket = store.getTicket(id)!;
   let files: string[];
   try {
-    files = generateApp({ repo: ticket.cwd!, name, title, idea, runner: schemeRunner(project, ticket.cwd!) });
-    await run('git', ['add', '--', ...files], { cwd: ticket.cwd! });
+    files = generateApp({ repo: cwd, name, title, idea, runner: schemeRunner(project, cwd) });
+    await run('git', ['add', '--', ...files], { cwd });
     await run('git', ['commit', '--quiet', '--no-verify', '-m', `New app ${name}: the kit's starter (make_app, #1136)`], {
-      cwd: ticket.cwd!,
+      cwd,
       env: { ...process.env, GIT_AUTHOR_NAME: APP_NAME, GIT_AUTHOR_EMAIL: 'citadel@localhost', GIT_COMMITTER_NAME: APP_NAME, GIT_COMMITTER_EMAIL: 'citadel@localhost' },
     });
   } catch (err) {
     store.deleteTicket(id);
-    await run('git', ['worktree', 'remove', '--force', ticket.cwd!], { cwd: project.repo_dir! }).catch(() => {});
+    await run('git', ['worktree', 'remove', '--force', cwd], { cwd: project.repo_dir! }).catch(() => {});
     if (ticket.branch) await run('git', ['branch', '-D', ticket.branch], { cwd: project.repo_dir! }).catch(() => {});
     throw new HttpError(500, `Could not write the app: ${(err as Error).message}`);
   }

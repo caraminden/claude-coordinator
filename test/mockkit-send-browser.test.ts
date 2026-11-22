@@ -35,6 +35,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 <body class="mk"><main class="mk-page">
   <section data-pick="a" data-title="Take A"><h2>Take A</h2></section>
   <section data-pick="b" data-title="Take B"><h2>Take B</h2><img alt="Header shot" src="/shot.png" width="40" height="40"></section>
+  <p><a href="/shot.png"><img alt="Linked shot" src="/shot.png" width="40" height="40"></a> <a href="/other.html"><img alt="Page link" src="/shot.png" width="40" height="40"></a></p>
 </main>
 <script>mock.picks({ options: [{ v: 'pick', label: 'Pick this', done: 'Picked' }] }); mock.ready.then(() => setTimeout(() => (window.ready = true), 50));</script>`;
 
@@ -168,6 +169,7 @@ test('a picture drawn on shows marked, counts in the dock and goes with Send; ta
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==';
   await page.eval(`window.drawResult = { marked: true, mediaType: 'image/png', data: '${png}' }`);
   await click(page, 'img[alt="Header shot"]');
+  await click(page, '.mk-viewer-draw');
   await waitFor(page, 'the marked copy', 'document.querySelector("img[alt=\\"Header shot\\"]").src.startsWith("data:")');
   assert.deepEqual(await page.eval('window.drawn'), [new URL("/shot.png", base).href]);
   assert.match(await page.eval<string>('document.querySelector(".mk-dock-text").textContent'), /1 picture marked/);
@@ -178,7 +180,32 @@ test('a picture drawn on shows marked, counts in the dock and goes with Send; ta
   // Opened again it asks for the clean picture (Citadel keeps the marks to undo); every mark off puts it back.
   await page.eval('window.drawResult = { marked: false }');
   await click(page, 'img[alt="Header shot"]');
+  await click(page, '.mk-viewer-draw');
   await waitFor(page, 'the clean picture', 'document.querySelector("img[alt=\\"Header shot\\"]").src.endsWith("/shot.png")');
   assert.deepEqual(await page.eval('window.drawn'), [new URL("/shot.png", base).href, new URL("/shot.png", base).href]);
   assert.doesNotMatch(await page.eval<string>('document.querySelector(".mk-dock-text").textContent'), /marked/);
+});
+
+test('a click on a picture, linked to its file or not, opens a modal that closes by X, outside or Esc, and never navigates', { skip }, async () => {
+  const page = await browser.page(base);
+  await waitFor(page, 'the page', 'window.ready');
+  const open = () => page.eval<boolean>('!!document.querySelector("dialog.mk-viewer[open]")');
+  const key = (k: string) => page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: 27 });
+  for (const alt of ['Header shot', 'Linked shot']) {
+    await click(page, `img[alt="${alt}"]`);
+    assert.equal(await open(), true, `${alt} opens the modal`);
+    assert.equal(await page.eval('location.pathname'), '/', `${alt} stays on the page`);
+    await click(page, '.mk-viewer-x');
+    assert.equal(await open(), false, 'X closes it');
+    await click(page, `img[alt="${alt}"]`);
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 3, y: 3, button: 'left', clickCount: 1 });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 3, y: 3, button: 'left', clickCount: 1 });
+    assert.equal(await open(), false, 'a click outside closes it');
+    await click(page, `img[alt="${alt}"]`);
+    await key('Escape');
+    assert.equal(await open(), false, 'Esc closes it');
+  }
+  await page.eval('document.querySelector("img[alt=\\"Page link\\"]").addEventListener("click", (e) => { window.linkClicked = !e.defaultPrevented; })');
+  await click(page, 'img[alt="Page link"]');
+  assert.equal(await open(), false, 'a link to a page stays a link');
 });

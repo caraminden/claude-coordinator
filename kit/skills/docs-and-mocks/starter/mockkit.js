@@ -254,39 +254,67 @@
       },
     };
 
-    // A click on a picture (not one inside a link or a control) opens it in Citadel ready to draw; Done puts the
-    // marked copy in its place on the page, and Send carries it. Marks taken off restore the picture.
+    // Drawing is the modal's "Draw on it" button (below); Done puts the marked copy in its place on the page,
+    // and Send carries it. Marks taken off restore the picture.
     function drawing() {
       document.documentElement.classList.add('mk-draw');
-      document.addEventListener('click', async (e) => {
-        const img = e.target?.closest?.('img');
-        if (!img || e.defaultPrevented || e.button !== 0 || img.closest('a[href], button, .mk-dock, .mk-pickbar')) return;
-        e.preventDefault();
-        const src = img.dataset.mkSrc ?? img.currentSrc ?? img.src;
-        if (!marked.has(src) && marked.size >= MAX_MARKED) return toast(`At most ${MAX_MARKED} marked pictures go with one Send`);
-        let r;
-        try {
-          r = await window.citadel.draw(src);
-        } catch (err) {
-          return toast(`Couldn't open the picture to draw on: ${err.message}`, () => img.click());
-        }
-        if (!r) return;
-        // Every copy of the picture on the page shows the marks.
-        const copies = [...document.querySelectorAll('img')].filter((i) => (i.dataset.mkSrc ?? i.currentSrc ?? i.src) === src);
-        if (r.marked) {
-          const name = img.alt || decodeURIComponent(new URL(src).pathname.split('/').pop() || 'picture');
-          marked.set(src, { name, mediaType: r.mediaType, data: r.data });
-          for (const i of copies) { i.dataset.mkSrc = src; i.src = `data:${r.mediaType};base64,${r.data}`; i.classList.add('mk-marked'); }
-        } else {
-          marked.delete(src);
-          for (const i of copies) { i.src = src; delete i.dataset.mkSrc; i.classList.remove('mk-marked'); }
-        }
-        // New marks are a new answer, even when the picks read the same.
-        lastSent = null;
-        dock.paint();
-      });
+      drawOn = drawImage;
+    }
+    async function drawImage(img) {
+      const src = img.dataset.mkSrc ?? img.currentSrc ?? img.src;
+      if (!marked.has(src) && marked.size >= MAX_MARKED) return toast(`At most ${MAX_MARKED} marked pictures go with one Send`);
+      let r;
+      try {
+        r = await window.citadel.draw(src);
+      } catch (err) {
+        return toast(`Couldn't open the picture to draw on: ${err.message}`, () => drawImage(img));
+      }
+      if (!r) return;
+      // Every copy of the picture on the page shows the marks.
+      const copies = [...document.querySelectorAll('img')].filter((i) => (i.dataset.mkSrc ?? i.currentSrc ?? i.src) === src);
+      if (r.marked) {
+        const name = img.alt || decodeURIComponent(new URL(src).pathname.split('/').pop() || 'picture');
+        marked.set(src, { name, mediaType: r.mediaType, data: r.data });
+        for (const i of copies) { i.dataset.mkSrc = src; i.src = `data:${r.mediaType};base64,${r.data}`; i.classList.add('mk-marked'); }
+      } else {
+        marked.delete(src);
+        for (const i of copies) { i.src = src; delete i.dataset.mkSrc; i.classList.remove('mk-marked'); }
+      }
+      // New marks are a new answer, even when the picks read the same.
+      lastSent = null;
+      dock.paint();
     }
   })();
+
+  // A click on a picture opens it in a modal over the page (dimmed behind, X, click outside or Esc to close),
+  // never the bare image file. A picture in a link to an image file counts; a link to a page stays a link.
+  let drawOn = null; // set once Citadel's viewer can draw on pictures (drawing())
+  function viewer(img) {
+    const src = img.dataset.mkSrc ?? img.currentSrc ?? img.src;
+    const opener = document.activeElement;
+    const dlg = el('dialog', { class: 'mk-viewer', 'aria-label': img.alt || 'Picture' });
+    const big = el('img', { src, alt: img.alt });
+    const close = el('button', { type: 'button', class: 'mk-viewer-x', 'aria-label': 'Close' }, '\u00d7');
+    dlg.append(close, big);
+    if (drawOn) {
+      const d = el('button', { type: 'button', class: 'mk-btn mk-viewer-draw' }, 'Draw on it');
+      d.addEventListener('click', () => { dlg.close(); drawOn(img); });
+      dlg.append(d);
+    }
+    close.addEventListener('click', () => dlg.close());
+    dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
+    dlg.addEventListener('close', () => { dlg.remove(); opener?.focus?.({ preventScroll: true }); });
+    document.body.append(dlg);
+    dlg.showModal();
+  }
+  document.addEventListener('click', (e) => {
+    const img = e.target?.closest?.('img');
+    if (!img || e.defaultPrevented || e.button !== 0 || img.closest('button, .mk-dock, .mk-pickbar, .mk-viewer')) return;
+    const a = img.closest('a[href]');
+    if (a && !/\.(png|jpe?g|gif|webp|avif|svg)([?#].*)?$/i.test(a.pathname) && a.href !== img.src) return;
+    e.preventDefault();
+    viewer(img);
+  });
 
   function summary() {
     const parts = [...sets.map((s) => s.lines()), dock.markedLine()].filter((l) => l.length);

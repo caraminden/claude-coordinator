@@ -317,9 +317,15 @@ h2[data-shape="star"] .mk-glyph { clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68
   /* A focused field scrolls into view above the sticky dock, not under it. */
   html { scroll-padding-bottom: 4.5rem; }
 }
-/* In Citadel's viewer a picture opens to draw on (#946); a marked one keeps an accent ring. */
-.mk-draw img:not(a img, button img) { cursor: crosshair; }
+/* A picture opens in a modal (Draw on it, in Citadel's viewer, #946); a marked one keeps an accent ring. */
+.mk img:not(button img) { cursor: zoom-in; }
 .mk-draw img.mk-marked { outline: 3px solid var(--mk-accent); outline-offset: -3px; }
+/* The picture modal: dimmed page behind, X in the corner. */
+.mk-viewer { border: 0; padding: 0; background: transparent; max-width: 100vw; max-height: 100dvh; width: 100vw; height: 100dvh; overflow: hidden; }
+.mk-viewer::backdrop { background: rgb(0 0 0 / 0.55); }
+.mk-viewer > img { position: absolute; inset: 0; margin: auto; max-width: calc(100% - 2rem); max-height: calc(100% - 5rem); background: var(--mk-panel); border-radius: var(--mk-radius-sm); }
+.mk-viewer-x { position: absolute; top: 0.75rem; right: 0.75rem; width: 2.25rem; height: 2.25rem; padding: 0; line-height: 1; font-size: 1.5rem; border-radius: 999px; border: 0; background: var(--mk-panel); color: var(--mk-ink); cursor: pointer; z-index: 1; }
+.mk-viewer-draw { position: absolute; bottom: 0.9rem; left: 50%; transform: translateX(-50%); }
 /* A Send that failed: what went wrong, and Retry. */
 .mk-toast { position: fixed; z-index: 20; left: 50%; bottom: max(1rem, env(safe-area-inset-bottom)); transform: translateX(-50%);
   width: max-content; max-width: calc(100vw - 2rem); box-sizing: border-box; display: flex; align-items: center; gap: 0.75rem;

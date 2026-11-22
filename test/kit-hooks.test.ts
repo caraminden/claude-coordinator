@@ -515,14 +515,14 @@ test('heavy-nudge: says the citadel-heavy line on covered heavy builds, and noth
     const out = heavyNudgeHook({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: { command } });
     return out ? JSON.parse(out).hookSpecificOutput : null;
   };
-  for (const c of ['cargo build --workspace', 'cargo test --workspace --all-features', 'cargo check --all', 'cargo clippy --workspace -- -D warnings', 'cargo build --release', 'cargo +nightly test --release', 'cargo build --target aarch64-linux-android', 'cd app && cargo test --workspace', 'FOO=1 cargo test --workspace', 'npm test', 'npm run test', 'cd x; npm test 2>&1 | tail -5']) {
+  for (const c of ['cargo build --workspace', 'cargo test --workspace --all-features', 'cargo check --all', 'cargo clippy --workspace -- -D warnings', 'cargo build --release', 'cargo +nightly test --release', 'cargo build --target aarch64-linux-android', 'cd app && cargo test --workspace', 'FOO=1 cargo test --workspace', 'npm test', 'npm run test', 'cd x; npm test 2>&1 | tail -5', 'npm test 2>/dev/null', 'npm test > log.txt', 'nice -n 10 cargo build --release', 'timeout -k 5 600 cargo test --workspace', "sh -c 'cargo test --workspace'", '(cargo clippy --workspace)']) {
     const h = ctx(c);
     assert.ok(h, `${c} is covered`);
     assert.equal(h.hookEventName, 'PreToolUse');
     assert.equal(h.additionalContext, HEAVY_NUDGE);
     assert.equal(h.permissionDecision, undefined, 'it never blocks');
   }
-  for (const c of ['cargo test -p one-crate', 'cargo check', 'cargo build', 'cargo run', 'cargo fmt --all', 'npm test -- test/one.test.ts', 'npm run dev', 'npm run build', 'npm install', 'tools/land.sh', 'citadel-test test/a.test.ts', 'citadel-heavy cargo test --workspace', 'citadel-heavy --here cargo build --release', 'FOO=1 citadel-heavy npm test', 'git commit -m "cargo test --workspace"', 'ls']) assert.equal(ctx(c), null, `${c} is quiet`);
+  for (const c of ['cargo test -p one-crate', 'cargo check', 'cargo build', 'cargo run', 'cargo fmt --all', 'cargo test -- --release', 'npm test -- test/one.test.ts', 'npm run dev', 'npm run build', 'npm install', 'tools/land.sh', 'citadel-test test/a.test.ts', 'citadel-heavy cargo test --workspace', 'citadel-heavy --here cargo build --release', 'FOO=1 citadel-heavy npm test', 'git commit -m "cargo test --workspace"', 'ls']) assert.equal(ctx(c), null, `${c} is quiet`);
   assert.equal(ctx('cargo test --workspace', 'Read'), null);
   const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'heavy-nudge.ts')], { input, encoding: 'utf8' });
   assert.match(run(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'npm test' } })).stdout, /citadel-heavy/);

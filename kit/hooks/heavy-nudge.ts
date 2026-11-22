@@ -1,5 +1,5 @@
 /**
- * The citadel-heavy nudge (PreToolUse on Bash, every Citadel turn): when a command is a heavy build, adds the line on
+ * The citadel-heavy nudge (PreToolUse on Bash, every Citadel turn that loads the kit, Grunts included; the first heavy call in a turn runs bare, since it advises and never blocks): when a command is a heavy build, adds the line on
  * `citadel-heavy` that used to sit in every minion prompt (#1577; the tokens lens T3, #1277, Cara 2026-11-22: "Moving").
  * Covered: a whole-workspace cargo build, test, check or clippy (--workspace or --all), any cargo build, test, check
  * or clippy with --release or --target, and a full `npm test` (no file arguments). Silent for single-crate checks, dev
@@ -15,7 +15,9 @@ export const HEAVY_NUDGE =
 /** Words of each segment of a command (split at ; & | and newlines, quotes kept simple). */
 function segments(command: string): string[][] {
   return command
-    .replace(/\d*>&\d*|&>>?/g, ' ')
+    .replace(/\d*>&\d*|&>>?|\d*>>?\s*\S+|<\s*\S+/g, ' ')
+    .replace(/\b(?:sh|bash|zsh|fish)\s+-c\s+/g, ' ')
+    .replace(/[()'"]/g, ' ')
     .split(/\|\||&&|[;&|\n]/)
     .map((s) => s.trim().split(/\s+/).filter(Boolean))
     .filter((w) => w.length);
@@ -28,7 +30,10 @@ function strip(words: string[]): string[] {
     const w = words[i];
     if (w === undefined) break;
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || w === 'env' || w === 'time' || w === 'command') i++;
-    else if (w === 'nice' || w === 'timeout') i += 2;
+    else if (w === 'nice' || w === 'timeout') {
+      i++;
+      while (words[i] !== undefined && (words[i].startsWith('-') || /^\d+[smhd]?$/.test(words[i]))) i++;
+    }
     else break;
   }
   return words.slice(i);
@@ -41,6 +46,8 @@ function heavy(words: string[]): boolean {
   const w = strip(words);
   if (w[0] === 'cargo') {
     const rest = w.slice(1);
+    const dd = rest.indexOf('--');
+    if (dd >= 0) rest.length = dd;
     if (rest[0]?.startsWith('+')) rest.shift();
     if (!rest[0] || !CARGO_SUBS.has(rest[0])) return false;
     return rest.some((a) => /^(--workspace|--all|--release|-r|--target(=.*)?)$/.test(a));
@@ -49,7 +56,7 @@ function heavy(words: string[]): boolean {
     const rest = w.slice(1);
     const test = (rest[0] === 'run' || rest[0] === 'run-script' ? rest[1] : rest[0]) === 'test' || rest[0] === 't' || rest[0] === 'tst';
     const extra = rest.slice(rest[0] === 'run' || rest[0] === 'run-script' ? 2 : 1);
-    return test && extra.length === 0;
+    return test && extra.every((a) => a.startsWith('-'));
   }
   return false;
 }

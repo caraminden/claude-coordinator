@@ -8,6 +8,7 @@
  * which held 48% of that week's spend (plain 2x: 33%); the wake on 3%, about 33 a week. Medians per scheme or per effort
  * fired on as many, so the usual cost is one per type and model family, every scheme pooled.
  */
+import { median as statsMedian } from './stats.ts';
 import type { Store } from './db.ts';
 
 /** How far back the usual cost looks. */
@@ -40,11 +41,7 @@ export function family(model: string | null | undefined): string | null {
 }
 const familyName = (f: string) => f[0].toUpperCase() + f.slice(1);
 
-export function median(xs: number[]): number {
-  const s = [...xs].sort((a, b) => a - b);
-  const mid = s.length >> 1;
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
+export const median = (xs: number[]): number => statsMedian(xs) ?? NaN;
 
 /** Medians by "type family" and by family alone, from the rows Store.minionCosts gives. */
 export function medians(rows: { type: string | null; model: string | null; cost: number }[]): Map<string, { usd: number; n: number }> {

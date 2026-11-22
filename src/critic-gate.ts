@@ -2,7 +2,7 @@
 // Cara, 2026-11-21, on #1504's card: "Code review can be simultaneous, but critics not". The self-review skill already
 // said to run matching rubrics and was followed in 5 of 172 front-end ships, so the hand-off checks the run record.
 // Every scheme's critics, from its review set's data: nothing here knows Citadel's globs.
-import { execFile } from 'node:child_process';
+import { gitOut } from './git.ts';
 import { posix } from 'node:path';
 import type { ReviewEntry, ReviewSet } from './review-set.ts';
 
@@ -17,7 +17,7 @@ export type Missing = { slug: string; name: string; block: boolean; files: strin
  * resolves or git fails, so a check that can't run never holds a ship.
  */
 export function diffFiles(cwd: string, bases: string[]): Promise<DiffFile[] | null> {
-  const git = (args: string[]) => new Promise<string | null>((done) => execFile('git', args, { cwd, timeout: 15_000, maxBuffer: 8 << 20 }, (err, out) => done(err ? null : out)));
+  const git = (args: string[]) => gitOut(args, cwd, { trim: false, maxBuffer: 8 << 20 });
   return (async () => {
     for (const base of bases) {
       const out = await git(['diff', '--numstat', '--no-renames', `${base}...HEAD`]);

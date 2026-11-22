@@ -3,6 +3,7 @@
 // flake_events row, and the CI page's Test health tab counts them and offers a minion to fix one.
 
 import { execFile } from 'node:child_process';
+import { gitOut } from './git.ts';
 import { pacificStamp } from './pacific.ts';
 
 /** When `file`'s newest commit on main was made (ms), or null when git can't say. A sighting from before it was of the old file (#1219). */
@@ -19,7 +20,7 @@ export function fileChangedAt(repoDir: string, file: string): Promise<number | n
  * git failed). With the reflog gone it falls back to the tip's commit time, which a rebase at ship time keeps close.
  */
 export async function branchShippedAt(repoDir: string, branch: string): Promise<number | null | undefined> {
-  const git = (...args: string[]) => new Promise<string | null>((done) => execFile('git', args, { cwd: repoDir, timeout: 15_000, maxBuffer: 16 << 20 }, (err, out) => done(err ? null : String(out))));
+  const git = (...args: string[]) => gitOut(args, repoDir, { trim: false });
   const tip = (await git('rev-parse', '-q', '--verify', `refs/heads/${branch}^{commit}`))?.trim();
   if (!tip) return undefined;
   const after = await git('rev-list', `${tip}..main`);

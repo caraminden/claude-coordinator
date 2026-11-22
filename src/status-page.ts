@@ -2,6 +2,7 @@
 // it last restarted, stalls, memory and disk, ships, CI, its units, the CI desktop) and each app the viewer can see
 // (deploys, errors, agent turns, who used it, disk), each with a week of daily history. Read-only: it only reads
 // what other parts already record, plus perigee's memory and disk, which HostSampler samples every 5 minutes.
+import { median } from './stats.ts';
 import { statfs } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { cores as hostCores, hostText, loadavg, MEMINFO } from './host-signals.ts';
@@ -73,12 +74,6 @@ export function lastDays(now: number): string[] {
   return Array.from({ length: STATUS_DAYS }, (_, i) => new Date(noon - (STATUS_DAYS - 1 - i) * DAY_MS).toISOString().slice(0, 10));
 }
 
-const median = (xs: number[]) => {
-  if (!xs.length) return null;
-  const s = [...xs].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-};
 
 const worst = (reasons: Reason[]): Verdict => {
   const shown = [...reasons.filter(([t]) => t === 'bad'), ...reasons.filter(([t]) => t === 'warn')];

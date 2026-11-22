@@ -3,6 +3,7 @@
 // land line's ticket files (tools/deploy-queue.sh), citadel-heavy's slot and waiter files, and the ship
 // line's "deploying" stage. CI runs (#546, src/ci-wait.ts) fill the same record: a PR's run, and a landing's CI gate;
 // a test run's file counts (#545, tools/progress-reporter.ts) fill in done and total.
+import { median as statsMedian } from './stats.ts';
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Store } from './db.ts';
@@ -41,10 +42,10 @@ export interface Wait {
 export const TRACK = ['line', 'rebase', 'test', 'deploy', 'restart', 'live'];
 const TYPICAL_LANDING = 300; // tools/deploy-queue.sh's QUEUE_TYPICAL, until landings have been timed
 
+/** The median in whole seconds (an even list's middle pair is rounded); null when empty. */
 export const median = (xs: number[]): number | null => {
-  if (!xs.length) return null;
-  const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
-  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+  const m = statsMedian(xs);
+  return m === null ? null : Math.round(m);
 };
 
 export const ordinal = (n: number) => (n === 1 ? 'next' : n === 2 ? '2nd' : n === 3 ? '3rd' : `${n}th`);

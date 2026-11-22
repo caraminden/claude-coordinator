@@ -2,6 +2,7 @@
 // ship target (Citadel's main, each release target, each app's deploys), per Pacific day as a median and a p90, and each
 // ship's stages for a click-through waterfall. Read from `releases` and `contraption_deploys`; shown on the Status page.
 // The nudge: the day a target's p90 passes SLOW_P90_S its scheme's Taskmaster hears, once per day per target.
+import { median, percentile } from './stats.ts';
 import type { Store } from './db.ts';
 import { pacificDay } from './pacific.ts';
 
@@ -24,17 +25,8 @@ export interface ShipTarget {
 interface Ship extends ShipRow { key: string; title: string; scheme: number | null }
 
 /** Nearest-rank percentile: the smallest value at least `p` of the list is at or below. */
-export function percentile(xs: number[], p: number): number | null {
-  if (!xs.length) return null;
-  const s = [...xs].sort((a, b) => a - b);
-  return s[Math.max(0, Math.ceil(p * s.length) - 1)];
-}
-const med = (xs: number[]) => {
-  if (!xs.length) return null;
-  const s = [...xs].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-};
+export { percentile };
+const med = median;
 
 const parseStages = (json: string): Record<string, number> => {
   try {

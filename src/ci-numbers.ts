@@ -6,6 +6,7 @@
 //
 // A job sends them with its GitHub run token, as a CI store upload does (src/ci-store.ts): the scheme, workflow, run,
 // commit and ref come from the token, the job sends only names, values and units (kit/skills/ci-store/ci-numbers.sh).
+import { median as statsMedian } from './stats.ts';
 import type { CiNumber, CiNumberStep, Project, Store } from './db.ts';
 import type { RunClaims } from './ci-store.ts';
 import { HttpError } from './http.ts';
@@ -28,11 +29,7 @@ export interface Sent {
   unit: string;
 }
 
-export function median(xs: number[]): number {
-  const s = [...xs].sort((a, b) => a - b);
-  const mid = s.length >> 1;
-  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
+export const median = (xs: number[]): number => statsMedian(xs) ?? NaN;
 
 /** A series' values, oldest first: the step up its last `held` runs make over the runs before, or null. */
 export function stepUp(values: number[], rule = STEP): { baseline: number; level: number } | null {

@@ -7,6 +7,7 @@
 // The worker posts one small message a second; the main thread only adds it to a window. `take` closes the window into
 // the JSON stored in host_samples.answer_time. Nothing here names a port or a cgroup: the port is the one the server is
 // bound to, the thread is this process's own.
+import { percentile as statsPercentile } from './stats.ts';
 import { Worker } from 'node:worker_threads';
 
 /** One window as stored (host_samples.answer_time): answer times in ms, the main thread's split in ms, the box's load and running turns. */
@@ -33,10 +34,7 @@ export const ALERT_RUN = 3;
 export const SLOW_OVER_MS = 500;
 
 /** The value at the share `q` (0 to 1) of the sorted times, nearest rank. */
-export function percentile(sorted: number[], q: number): number {
-  if (!sorted.length) return 0;
-  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))];
-}
+export const percentile = (sorted: number[], q: number): number => statsPercentile(sorted, q) ?? 0;
 
 /** One probe's reading from the worker: its time (null when it failed), and the main thread's counters since the last message. */
 export interface ProbeMessage { ms: number | null; run: number; wait: number; samples: number; blocked: number; wallMs: number }

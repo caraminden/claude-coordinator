@@ -55,6 +55,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26 # perigee's
+      # fast-check, the property tests' library (#1657, ADR 0029): Citadel's one devDependency, from the lockfile, no install scripts.
+      - name: devDependencies for the tests
+        run: npm ci --ignore-scripts --no-audit --no-fund
       # Node 26 needs libatomic1, and deploy.sh, backup.sh and prune.sh the sqlite3 CLI. A fresh distro has neither,
       # and a job has no root, so until someone runs `apt-get install -y libatomic1 sqlite3` there as root they are
       # unpacked from their .debs into the runner's home.

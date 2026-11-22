@@ -15,6 +15,11 @@ src/db/*.ts: test/db-areas.test.ts test/db-writer.test.ts
 src/db-view.ts: test/host-check.test.ts
 src/host-check.ts: test/host-check.test.ts
 
+# The property tests (#1657): random orderings of the minion lane and the claim queue, on the real code.
+src/lanes.ts: test/lanes-property.test.ts
+src/claims.ts: test/claims-property.test.ts
+package.json: test/lanes-property.test.ts test/claims-property.test.ts
+
 # The guards (mutation run R11, #1284): the tests that caught a broken guard, which the map missed before.
 src/access.ts: test/access-matrix.test.ts test/access-gaps.test.ts test/people.test.ts test/turn-asker.test.ts test/turn-person-env.test.ts
 src/tripwire.ts: test/tripwire.test.ts test/coordinator-access.test.ts test/codex.test.ts

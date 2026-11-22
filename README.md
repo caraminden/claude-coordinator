@@ -165,7 +165,9 @@ This is the proof-of-concept stage: minions, chat, live output and a board.
   `git worktree add -b ticket/<id>-<slug>` from the default branch.
 
 No dependencies: Node 24+ runs the TypeScript directly (type stripping) and
-uses the built-in `node:sqlite`.
+uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the one devDependency,
+`fast-check`, is for the property tests only (`test/lanes-property.test.ts`, `test/claims-property.test.ts`;
+`docs/adr/0029-fast-check-for-tests-only.md`). A fresh worktree gets it from `npm ci`.
 
 ## Layout
 

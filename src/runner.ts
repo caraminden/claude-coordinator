@@ -3145,7 +3145,7 @@ export class Runner {
       // after a resume that never started (a re-run batch, a person's message) keeps it: the minion is still held.
       const parkedAs = this.parkedAs.get(ticket.id);
       this.parkedAs.delete(ticket.id);
-      // Any turn wakes an asleep minion (#1636): a card's answer, a message, a wake it asked for. A keepalive never gets here (its gate).
+      // Any turn wakes an asleep minion (#1636; Cara picked "Anything that starts a turn", 2026-11-22): a card's answer, a message, a wake it asked for. A keepalive never gets here (its gate).
       if (this.store.getSetting(sleepKey(ticket.id))) {
         this.store.deleteSetting(sleepKey(ticket.id));
         this.emit(ticket.id, 'note', { text: 'Awake again: a new turn started.' });

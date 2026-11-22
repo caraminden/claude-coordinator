@@ -57,7 +57,7 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     ...approvals.pending().filter((a) => ids.has(a.ticketId))
       .map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card, eventId: store.cardEventId(ticketId, 'approval', (card as { id: string }).id) ?? undefined, key: `approval:${(card as { id: string }).id}` })),
     // A new stored card kind only needs adding to Store.openCards.
-    // A card addressed to one person (#687) is theirs alone, whoever the minion is assigned to and even while it's sealed, but not asleep (#1636).
+    // A card addressed to one person (#687) is theirs alone, whoever the minion is assigned to and even while it's sealed, but not asleep (#1636; Cara picked "Hide them too", 2026-11-22).
     ...store.openCards(projectId).map((e) => ({ e, card: JSON.parse(e.data) }))
       .filter(({ e, card }) => (card.to ? forPerson(card, person) && !asleep.has(e.ticket_id) : awake.has(e.ticket_id)))
       .map(({ e, card }) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card, eventId: e.id, key: `${e.kind}:${e.id}` })),

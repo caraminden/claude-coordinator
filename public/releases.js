@@ -277,11 +277,10 @@ function fillPage() {
  * back someone who scrolled away. A page just built isn't in the document yet, and its opening scrolls to the top after it is, so
  * that one waits a frame; one that isn't there yet (the releases still loading) tries again when it draws.
  */
-function bringIntoView(want) {
+function bringIntoView(want, frames = 120) {
   if (want?.shown || (want?.hl == null && want?.target == null)) return;
-  if (!pageEl?.isConnected) { requestAnimationFrame(() => page === want && pageEl?.isConnected && bringIntoView(want)); return; }
-  const cards = pageEl.querySelectorAll('.rel-card.hl, .rel-change.hl');
-  const el = want.hl != null ? cards[0] : pageEl.querySelector(`[data-target="${CSS.escape(`${want.scope}/${want.target}`)}"]`);
+  if (!pageEl?.isConnected) { if (frames > 0) requestAnimationFrame(() => page === want && bringIntoView(want, frames - 1)); return; }
+  const el = want.hl != null ? pageEl.querySelector('.rel-change.hl') ?? pageEl.querySelector('.rel-card.hl') : pageEl.querySelector(`[data-target="${CSS.escape(`${want.scope}/${want.target}`)}"]`);
   if (!el) return;
   want.shown = true;
   el.scrollIntoView({ block: want.hl != null ? 'nearest' : 'start' });
@@ -856,7 +855,7 @@ export function pendingRelease(t) {
     const next = tpl ? `Next ${tpl.replace(/\{n\}/g, '').replace(/\s+/g, ' ').trim().toLowerCase()}` : 'Next release';
     // Still in the line past the one under way: many releases may stand between, so no release is named (the row's subtitle says the place).
     const inLine = c.later && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn));
-    return { name: inLine ? c.train?.label ?? 'In line' : c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, stage: stageName(c.stage), text: c.waitingOn ?? c.text, since: c.since, stuck: stuckFor(c) > 0 };
+    return { name: inLine ? c.train?.label ?? 'In line' : c.later ? next : tv.next.number != null ? releaseName(tv.next) : tv.next.name ?? next, target: tv.target.name, targetId: tv.target.id, stage: stageName(c.stage), text: c.waitingOn ?? c.text, since: c.since, stuck: stuckFor(c) > 0 };
   }
   return null;
 }

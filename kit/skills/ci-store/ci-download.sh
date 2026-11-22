@@ -80,7 +80,8 @@ if [ -n "$list" ]; then
   exit 0
 fi
 
-first=$(printf '%s\n' "$files" | head -n 1)
+# Not printf | head: head can quit before printf writes the next line, and pipefail turns its SIGPIPE into exit 141.
+first=${files%%$'\n'*}
 [ -n "$first" ] || give_up "nothing in the store matches ${query#&} for this job's commit"
 name=$(field "$first" name)
 [ -n "$out" ] || out=$name

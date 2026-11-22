@@ -322,9 +322,10 @@ counts stay; jobs just run slower when it's busy. The PC has 16 cores, 32 thread
 everything started under them, and puts what isn't held yet into the job. The job runs everything in it at below-normal
 priority and caps all of it together at 75% of every core (a hard cap: past it, the job's threads wait for the next
 scheduling interval). A process started by one in the job is in the job from its start, so a step's cargo, MSBuild,
-node or dotnet is held too; the sweep only catches runners that started before it did, and processes that asked to
-break away (one whose parent ended before the next sweep stays out: breakaway is allowed because refusing it makes
-the tool that asks fail to start). A runner already in another job (a session runner's logon task puts it in one) gets a job of its own,
+node or dotnet is held too; the sweep only catches runners that started before it did. Breakaway is refused (#1268,
+Nov 21): Git Bash asks for it whenever a job allows it, so with it allowed every program a `shell: bash` step started
+(Peek's cargo and everything under it) left the job and the ship squeeze; refused, Git Bash starts them in the job as
+usual. A tool that insists on breaking away would now fail to start; none on this PC has been seen to. A runner already in another job (a session runner's logon task puts it in one) gets a job of its own,
 nested in that one, with the same limits (so a busy session runner can take more than the shared 75%, at
 below-normal priority still). In the first 30 minutes after the PC starts, it also starts any `actions.runner.*`
 service that is set to start automatically but is stopped, at most every 5 minutes each (the BIOS reboot of 2026-11-11
@@ -337,7 +338,9 @@ runners capped.
 **Proof.** `keep-runners.ps1 -Prove` runs a throwaway job capped at 50% with two slots in it, as the ship squeeze
 below sets them up: one with no cap of its own and one squeezed to 10% of the PC. Each starts one CPU-burning
 grandchild per core. It reports whether the grandchildren are in their slots and the job, at below-normal priority,
-what share of the PC each slot and the job used, and that the squeezed slot speeds up once its squeeze is lifted. `install-runner-agent.ps1` runs it at its end; it touches no runner. By hand, in an administrator
+what share of the PC each slot and the job used, and that the squeezed slot speeds up once its squeeze is lifted.
+Where Git Bash is installed it also starts a ping through bash in the squeezed slot and checks the ping stayed there
+(with breakaway allowed it doesn't: tried on the test box, Nov 21). `install-runner-agent.ps1` runs it at its end; it touches no runner. By hand, in an administrator
 PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\citadel-runner-agent\keep-runners.ps1 -Prove`.
 
 **WSL** (by hand, once, as Cara). WSL's VM has no job object Windows can cap; `.wslconfig` is what limits it
@@ -409,7 +412,13 @@ Neither restarts a runner or the PC; running jobs keep going and are squeezed fr
 list to both agents (`test/machine-relay.test.ts`), the Linux quotas and the ships file (`test/runner-agent.test.ts`),
 and `keep-runners.ps1`'s share maths, `ships.json` reading and runner naming in pwsh on perigee with the job calls
 faked (`test/keep-runners.test.ts`). Nested job objects themselves only run where `-Prove` runs: on the desktop, at
-the install above.
+the install above, and on the test box, where `-Prove` passed on Nov 21 and its Git Bash check failed with breakaway
+allowed again.
+
+**Why it didn't hold on Windows at first** (#1477's report, `reports/ships-first-windows-squeeze-2026-11-21.md` in
+the shared folder): Peek's `windows` workflow runs its steps in Git Bash, Git Bash asked for breakaway because the
+jobs allowed it, and every cargo it started left the slot for a job of its own (the keeper's "was in another job
+already" lines: cargo, cargo-fmt, rustfmt, sccache) that the squeeze never touched. Refusing breakaway keeps them in.
 
 ## Point the workflows at it
 

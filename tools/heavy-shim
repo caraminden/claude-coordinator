@@ -20,7 +20,20 @@ for d in "${dirs[@]}"; do
   break
 done
 [ -n "$real" ] || { echo "$name: command not found" >&2; exit 127; }
-direct() { exec "$real" "$@"; }
+# mise writes its shims (~/.local/share/mise/shims) as links to the first `mise` on PATH, and not only on `mise reshim`:
+# install, use, upgrade and exec's auto-install reshim too. Seeing pin/bin/heavy/mise, it pointed every shim on the box
+# into a turn folder, which is deleted when the turn ends (#1651). So mise always runs with every folder whose `mise` is
+# this shim (this turn's, an outer turn's) off its PATH; `eval "$(mise env)"` then leaves them off too, a smaller loss.
+if [ "$name" = mise ]; then
+  keep=()
+  for d in "${dirs[@]}"; do
+    case $(readlink -f "${d:-.}/mise") in */heavy-shim) continue ;; esac
+    keep+=("$d")
+  done
+  PATH=$(IFS=:; echo "${keep[*]}")
+  export PATH
+fi
+direct(){ exec "$real" "$@"; }
 case $(</proc/self/cgroup) in */"${CITADEL_HEAVY_SLICE:-citadel-heavy.slice}"/*) direct "$@" ;; esac
 mode=()
 case $name in

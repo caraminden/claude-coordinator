@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -30,7 +30,8 @@ for (const c of ['node', 'make']) tool(real, c, report(c));
 // A cargo that runs $THEN when it's set, as a build script runs make.
 tool(real, 'cargo', `${report('cargo')}[ -z "$THEN" ] || $THEN\n`);
 // mise exec puts its own installs first on PATH, past the shims, as the real one does.
-tool(real, 'mise', `#!/bin/sh\n[ "$1" = exec ] || { echo "mise $*"; exit 0; }\nshift; while [ "$1" != -- ]; do shift; done; shift\nPATH="${miseDir}:$PATH" exec "$@"\n`);
+// reshim and install link a shim to the first mise on PATH, as the real one does (`which mise`, #1651).
+tool(real, 'mise', `#!/bin/sh\ncase $1 in reshim|install) ln -sfn "$(command -v mise)" "$MISE_SHIMS_DIR/node"; exit 0 ;; esac\n[ "$1" = exec ] || { echo "mise $*"; exit 0; }\nshift; while [ "$1" != -- ]; do shift; done; shift\nPATH="${miseDir}:$PATH" exec "$@"\n`);
 tool(miseDir, 'cargo', report('mise-cargo'));
 const PATH = `${join(bin, 'heavy')}:${bin}:${real}:${process.env.PATH}`;
 const run = (cmd: string, env: Record<string, string> = {}) => spawnSync('sh', ['-c', cmd], { env: scriptEnv({ PATH, ...env }), encoding: 'utf8' });
@@ -91,4 +92,21 @@ test("another turn's shims further down PATH are passed over, not handed the com
   const r = spawnSync('sh', ['-c', 'node hook.js && cargo build'], { env, encoding: 'utf8', timeout: 60_000 });
   assert.equal(r.signal, null, 'the shims looped');
   assert.deepEqual(lines(r.stdout).map((l) => l[0]), ['node', 'cargo']);
+});
+
+test('mise reshim or install in a turn links the shims to the real mise, never into the turn folder (#1651)', () => {
+  // A turn started inside a turn: both turns' shim folders sit before the real mise.
+  const outer = join(root, 'outer-mise', 'heavy');
+  mkdirSync(outer, { recursive: true });
+  symlinkSync(join(tools, 'heavy-shim'), join(outer, 'mise'));
+  const shims = join(root, 'mise-shims');
+  mkdirSync(shims);
+  const env = { CITADEL_HEAVY_UNIT: '0', MISE_SHIMS_DIR: shims, PATH: `${join(bin, 'heavy')}:${bin}:${outer}:${real}:${process.env.PATH}` };
+  for (const cmd of ['mise reshim', 'mise install node@24']) {
+    rmSync(join(shims, 'node'), { force: true });
+    assert.equal(run(cmd, env).status, 0, cmd);
+    assert.equal(readlinkSync(join(shims, 'node')), join(real, 'mise'), cmd);
+  }
+  // What mise runs keeps the rest of the turn's PATH.
+  assert.match(run('mise exec -- sh -c \'echo "$PATH"\'', env).stdout, new RegExp(`^${miseDir}:${bin}:${real}:`));
 });

@@ -47,6 +47,7 @@ import { describesIn } from './src/review-describe.ts';
 import { pinTurnFiles, turnEnv } from './src/turn-launch.ts';
 import { probeThp } from './src/unit-thp.ts';
 import { fillPinSpares } from './src/pin-spares.ts';
+import { exitWithParent } from './src/exit-with-parent.ts';
 import { buildPreviewPath, Previews, previewPath } from './src/previews.ts';
 import { AppProxy } from './src/apps.ts';
 import { ChunkedUploads, DISK_FLOOR } from './src/chunked-uploads.ts';
@@ -226,6 +227,8 @@ const SHOWN_NAME = PREVIEW ? `${APP_NAME} preview` : APP_NAME;
 // A preview goes with the server that started it, however that one goes (it is reparented then).
 const PARENT = process.ppid;
 if (PREVIEW) every('preview parent check', 2000, () => process.ppid !== PARENT && process.exit(0));
+// A server a test started goes with the test too, and takes its turns and supervisors along (#1546); never the live data folder's.
+if (DATA_DIR !== DEFAULT_DATA_DIR) exitWithParent(DATA_DIR, every, PARENT);
 // Stalls of the event loop are named in the journal (#526), the start's own synchronous work included, with the code that ran (#609).
 // A long one names who else has the databases open: a lock they hold, or a copy loading the disk (#622).
 // The post-deploy watch (#724), made once the store and waiters are: stalls before then are the boot's own.

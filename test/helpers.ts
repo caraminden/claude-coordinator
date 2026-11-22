@@ -82,7 +82,8 @@ export function tempRoot(prefix = 'test-'): TempRoot {
   return {
     dir,
     path: (...parts) => join(dir, ...parts),
-    spawn: (cmd, args, opts) => track(spawn(cmd, args, opts ?? {})),
+    // A server.ts started this way exits with the test (#1546); the variable means nothing to other children.
+    spawn: (cmd, args, opts) => track(spawn(cmd, args, opts?.env ? { ...opts, env: { CITADEL_EXIT_WITH_PARENT: '1', ...opts.env } } : (opts ?? {}))),
     track,
     serve,
     down: () => serve(createNetServer((sock) => sock.destroy())),
@@ -302,7 +303,7 @@ function compileCache(): { NODE_COMPILE_CACHE?: string } {
   return compileCacheDir ? { NODE_COMPILE_CACHE: compileCacheDir } : {};
 }
 
-export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string; wrap?: string[]; log?: string } = {}): Promise<Booted> {
+export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string; wrap?: string[]; log?: string; portMs?: number } = {}): Promise<Booted> {
   const root = opts.root ?? mkdtempSync(join(resolve(tmpdir()), 'boot-'));
   const data = join(root, 'data');
   // `wrap`: a command the server runs under, that execs it (systemd-run --scope for a CPU limit); `log`: a file its stdout and stderr are appended to.
@@ -320,6 +321,8 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       // The box's pressure, load, memory and cgroups are fixed (src/host-signals.ts, #1485): a busy box paused a
       // test server's indexers (#1301, #1349). A test of the gate passes its own CITADEL_PSI_CPU file (none comes in from
       // the runner's env); test/host-signals.test.ts checks every test that starts server.ts itself sets this too.
+      // It exits, and stops its turns and supervisors, when the test's process does, however that ends (#1546).
+      CITADEL_EXIT_WITH_PARENT: '1',
       CITADEL_HOST_SIGNALS: 'fixed', CITADEL_PSI_CPU: undefined, CITADEL_PSI_MEMORY: undefined, CITADEL_PSI_IO: undefined,
       // Its day and hour, in the zone this test's fixtures use too (TEST_ZONE above, #1536).
       CITADEL_ZONE: TEST_ZONE,
@@ -362,7 +365,7 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
   };
   if (opts.stdout) proc.stdout!.pipe(process.stdout);
   if (opts.log) proc.stdout!.pipe(createWriteStream(opts.log, { flags: 'a' }));
-  const port = await listeningPort(proc).catch(async (err) => {
+  const port = await listeningPort(proc, opts.portMs).catch(async (err) => {
     await stop();
     throw err;
   });

@@ -22,9 +22,8 @@ concurrency:
 # actions: read for the wait for the lands' runs (below).
 permissions:
   contents: read
-  id-token: write # the test steps' counts for the Releases page (tools/ci-progress.ts, #1368): the run's own token, no secret
   actions: read
-  id-token: write # tools/ci-numbers.sh's run token (the citadel:ci-store skill)
+  id-token: write # the run's own token, no secret: tools/ci-numbers.sh's (the citadel:ci-store skill) and the test steps' counts for the Releases page (tools/ci-progress.ts, #1368)
 
 jobs:
   test:

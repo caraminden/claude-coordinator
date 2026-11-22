@@ -629,8 +629,8 @@ function githubCard() {
     // GitHub hands the install link's state to the App's Setup URL, which brings the person back to this scheme (#670).
     // The one install link, in every state that doesn't already show it as step 1 of the two steps (#1557).
     const installBlock = install_url ? h('div', { class: 'link-install' },
-      h('a', { class: 'button small secondary', href: `${install_url}?state=${view.projectId}`, target: '_blank', rel: 'noopener' }, 'Install the GitHub app on a repo'),
-      h('p', { class: 'muted small' }, 'Pick your account, choose "Only select repositories" and pick the repo. If the app is already installed, the same page opens its settings, where you add more repos. Only a repo\'s owner (or an org admin) can install it on that repo. Installing alone doesn\'t link you.')) : '';
+      h('a', { class: 'button small secondary install-app', href: `${install_url}?state=${view.projectId}`, target: '_blank', rel: 'noopener' }, 'Install the GitHub app on a repo ↗'),
+      h('p', { class: 'muted small' }, 'On GitHub pick your account, choose "Only select repositories" and pick the repo. If the app is already installed, the same page opens its settings, where you add repos. Only a repo\'s owner (or an org admin) can install it there. Installing alone doesn\'t link you.')) : '';
     const kinds = h('ul', { class: 'muted small link-kinds' },
       full ? h('li', {}, h('b', {}, 'Full access'), ': Citadel can act on every repo your GitHub account can reach.') : '',
       limited ? h('li', {}, h('b', {}, 'Limited'), ': Citadel can act only on repos where the repo\'s owner ', install, ' and you already have access. Nothing else in your account.') : '');

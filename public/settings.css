@@ -306,5 +306,6 @@ a.settings-page-link .settings-row-title { display: inline-flex; align-items: ce
 .help-words dt { font-weight: 700; }
 .help-words dd { margin: 0; }
 @media (max-width: 800px) { .help-words { grid-template-columns: 1fr; gap: 0.1rem; } .help-words dd { margin-bottom: 0.5rem; } }
-.account-card .link-install { display: flex; flex-direction: column; align-items: flex-start; gap: 0.4rem; }
+.account-card .link-install { display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem; margin: 0.5rem 0; }
+.account-card .link-install .install-app { color: var(--accent); font-weight: 600; border-color: color-mix(in srgb, var(--accent) 55%, var(--control-line)); background: color-mix(in srgb, var(--accent) 9%, transparent); }
 .account-card .link-install p { margin: 0; }

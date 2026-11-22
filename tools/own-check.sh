@@ -55,7 +55,7 @@ own_check() {
     [[ $secs =~ ^[0-9]+$ ]] || secs=420
     left=$((start + secs - $(date +%s)))
     if [ "$left" -gt "$wait" ]; then
-      say "own check: ${b:-another ship}'s check has about $(((left + 59) / 60)) min to go, more than the ${wait} s a ship waits for it, so this joins the line unchecked"
+      say "own check: ${b:-another ship}'s check has about $(((left + 59) / 60)) min to go, more than the ${wait} s a ship waits for it, so this one skips its own check"
       retro_log "own check · $label · skipped: the check runner was busy for ${left}s more"
       exec 5>&-
       light_check "$slug" || refuse "$own_refusal" # #1620: its own tests on the side runner instead
@@ -63,7 +63,7 @@ own_check() {
     fi
     say "own check: waiting up to ${wait} s for ${b:-another ship}'s check to end, then this one's runs"
     if ! flock -w "$wait" 5; then
-      say "own check: ${b:-another ship}'s check didn't end within ${wait} s, so this joins the line unchecked"
+      say "own check: ${b:-another ship}'s check didn't end within ${wait} s, so this one skips its own check"
       retro_log "own check · $label · skipped: the check runner stayed busy past ${wait}s"
       exec 5>&-
       light_check "$slug" || refuse "$own_refusal"

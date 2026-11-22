@@ -1214,7 +1214,8 @@ test('own check: a check runner busy for longer than a ship waits sends it to th
     await until('the check lock is held', () => spawnSync('flock', ['-n', join(l.state, 'own-check.lock'), 'true']).status === 1);
     const done = await l.go();
     done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
-    assert.match(done[1].stderr, /own check: ticket\/9-x's check has about 17 min to go, more than the 120 s a ship waits for it, so this joins the line unchecked/);
+    assert.match(done[1].stderr, /own check: ticket\/9-x's check has about 17 min to go, more than the 120 s a ship waits for it, so this one skips its own check/);
+    assert.match(done[1].stderr, /light check: CI's side runner isn't free, so this joins the line unchecked/);
     assert.doesNotMatch(done[1].stderr, /check runner, on/);
     l.done();
   } finally {

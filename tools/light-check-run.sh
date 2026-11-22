@@ -7,6 +7,7 @@
 #   light check: red: <file>, <file>       failed in the run, failed again alone here, and pass alone on main (or main
 #                                          hasn't got them): the ship's own
 #   light check: no verdict: <why>         flakes, main's own red, a run cut off, a setup that failed
+# Niced, as the own check's run is: at peaks it shares Cara's desktop with a land's run and an own check.
 # It always exits 0 once it has a verdict, so heavy-ci.ts's own status means only "it didn't run".
 # LIGHT_CHECK_LIMIT (240 s) is the affected run's limit, LIGHT_CHECK_BUDGET (600 s) the whole run's (no file is pinned
 # past it), LIGHT_CHECK_FILES (4) the most files pinned. LIGHT_CHECK_TEST and LIGHT_CHECK_NODE stand in for
@@ -20,7 +21,7 @@ git cat-file -e "$base^{commit}" 2>/dev/null || verdict "no verdict: main's comm
 out=$(mktemp) main=''
 trap 'rm -f "$out" "$out.alone"; [ -z "$main" ] || git worktree remove --force "$main" >/dev/null 2>&1' EXIT
 rc=0
-"$ct" --affected --base "$base" --timeout "${LIGHT_CHECK_LIMIT:-240}" >"$out" 2>&1 </dev/null || rc=$?
+nice -n 10 "$ct" --affected --base "$base" --timeout "${LIGHT_CHECK_LIMIT:-240}" >"$out" 2>&1 </dev/null || rc=$?
 tail -n 60 "$out"
 case $rc in
   0) verdict green ;;
@@ -33,7 +34,7 @@ mapfile -t failed < <(sed -n 's/^✖ \(test\/[^ :]*\.test\.[a-z]*\).*/\1/p' "$ou
 # <dir> <file>: 0 passes alone, 1 fails, else no answer.
 alone() {
   [ -e "$1/$2" ] || return 0
-  (cd "$1" && timeout -k 10 "$pin" "$node" --test --test-force-exit --test-timeout=60000 "$2") >>"$out.alone" 2>&1 </dev/null
+  (cd "$1" && timeout -k 10 "$pin" nice -n 10 "$node" --test --test-force-exit --test-timeout=60000 "$2") >>"$out.alone" 2>&1 </dev/null
   local s=$?
   [ $s = 0 ] && return 0
   [ $s = 124 ] || [ $s = 137 ] && return 2

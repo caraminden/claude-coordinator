@@ -21,6 +21,7 @@ light_check() {
   # Online, and not busy with a heavy job or a run of its own.
   n=$(own_hub gh api "repos/$slug/actions/runners?per_page=100" --jq "[.runners[] | select(.status == \"online\" and .busy == false and any(.labels[]; .name == \"$LIGHT_CHECK_LABEL\"))] | length" 2>/dev/null) || n=''
   if ! [[ $n =~ ^[1-9][0-9]*$ ]]; then
+    say "light check: CI's side runner isn't free, so this joins the line unchecked"
     [ "$n" != 0 ] || retro_log "light check · $label · skipped: no idle side runner"
     return 0
   fi

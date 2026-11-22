@@ -57,6 +57,7 @@ test/land-train.test.ts
 test/land-known-flakes.test.ts
 test/land-burn-in.test.ts
 test/burn-in.test.ts
+test/light-check-run.test.ts
 test/land-deploy.test.ts
 test/land-recover.test.ts
 test/land-boot-check.test.ts

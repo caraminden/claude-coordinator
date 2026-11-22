@@ -24,7 +24,7 @@ test('rebases onto main, tests, fast-forwards main, and deploys holding the lock
 test("a rebase that changes land.sh hands over to the rebased copy, which keeps the lock and lands (#500)", () => {
   const r = setup();
   // The worktree runs its own tools/land.sh, as a minion does; main's newer one says it is the one running.
-  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['land.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real land.sh');
   git(r.wt, 'rebase', '-q', 'main');

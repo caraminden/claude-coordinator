@@ -246,7 +246,7 @@ esac
 // as the real server does).
 export async function withRealDeploy(body: (r: ReturnType<typeof setup>, run: (script: string, cwd: string, extra?: Record<string, string>, args?: string[]) => Promise<{ stderr: string }>, runs: () => string[]) => Promise<void>, health: (hup: boolean) => Record<string, unknown> = () => ({})) {
   const r = setup();
-  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real deploy.sh');

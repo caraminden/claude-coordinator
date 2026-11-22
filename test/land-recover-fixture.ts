@@ -33,7 +33,7 @@ export async function pipe(t: { after: (fn: () => void) => void }, worktrees: nu
   mkdirSync(join(source, 'tools'), { recursive: true });
   mkdirSync(join(source, 'test'));
   git(source, 'init', '-q', '-b', 'main');
-  for (const f of ['land.sh', 'deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(tools, f), join(source, 'tools', f));
+  for (const f of ['land.sh', 'deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs', 'citadel-heavy']) copyFileSync(join(tools, f), join(source, 'tools', f));
   // TEST_MARK gets a line per run; TEST_GATE holds a run until that file is there; TEST_FAIL makes it red.
   writeFileSync(join(source, 'test', 'ok.test.mjs'), `import { appendFileSync, existsSync } from 'node:fs';
 import { test } from 'node:test';

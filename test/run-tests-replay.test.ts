@@ -17,7 +17,7 @@ test("a stale progress temp file from a killed run does not hide the next run's 
   const dir = join(scratch.dir, 'a');
   mkdirSync(join(dir, 'tools'), { recursive: true });
   mkdirSync(join(dir, 'test'));
-  for (const f of ['run-tests.sh', 'parse-check.ts', 'deploy-queue.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
+  for (const f of ['run-tests.sh', 'parse-check.ts', 'deploy-queue.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
   writeFileSync(join(dir, 'test', 'ok.test.mjs'), "import test from 'node:test';\ntest('fine', () => {});\n");
   writeFileSync(join(dir, 'test', 'progress.test.mjs'), `import test from 'node:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';

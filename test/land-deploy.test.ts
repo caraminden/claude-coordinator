@@ -135,7 +135,7 @@ test('deploy.sh told DEPLOY_LOCKED without the lock on fd 9 takes the lock itsel
 // A person pressing Stop, or a Bash time limit, ends the whole run with a signal (#468 S10-5).
 test('a land killed while the deploy tests the live checkout puts the checkout and main back', async () => {
   const r = setup();
-  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   // Run in the live checkout (the deploy's own test run), it says so and waits for the test to write the release file,
   // so a slow box can't finish it before the SIGTERM.
   writeFileSync(join(r.source, 'test', 'slow.test.mjs'), `import { existsSync, realpathSync, writeFileSync } from 'node:fs';
@@ -248,7 +248,7 @@ async function withRealRestart(body: (x: {
   running: () => string; state: string; active: string;
 }) => Promise<void>) {
   const r = setup();
-  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
+  for (const f of ['deploy.sh', 'deploy-queue.sh', 'run-tests.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(import.meta.dirname, '..', 'tools', f), join(r.source, 'tools', f));
   writeFileSync(join(r.source, 'tools', 'boot-check.ts'), "console.log('v1');\n");
   git(r.source, 'add', '-A');
   git(r.source, 'commit', '-qm', 'real deploy.sh');

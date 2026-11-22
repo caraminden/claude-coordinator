@@ -49,9 +49,13 @@ function onTexts(texts: string[], args: (paths: string[]) => string[]) {
     rmSync(dir, { recursive: true, force: true });
   }
 }
-/** git's own three-way merge of the files' texts into `out`: 0 when clean. */
-function mergeFile(out: string, base: string, ours: string, theirs: string): number {
-  const r = onTexts([base, ours, theirs], ([o, a, b]) => ['merge-file', '-p', '-L', 'ours', '-L', 'base', '-L', 'theirs', a, o, b]);
+/** git's own three-way merge of the files' texts into `out`: 0 when clean. With LAND_MERGE_DIFF3=1 (the kit's land.sh,
+ *  when the path has append or sum rules too) clashes keep its markers: diff3, size 31, the side that is main first. */
+function mergeFile(mainSide: string, out: string, base: string, ours: string, theirs: string): number {
+  const r = onTexts([base, ours, theirs], ([o, a, b]) =>
+    process.env.LAND_MERGE_DIFF3 === '1'
+      ? ['merge-file', '-p', '--diff3', '--marker-size=31', '-L', 'main', '-L', 'base', '-L', 'branch', ...(mainSide === 'theirs' ? [b, o, a] : [a, o, b])]
+      : ['merge-file', '-p', '-L', 'ours', '-L', 'base', '-L', 'theirs', a, o, b]);
   if (r.status === null || r.status < 0 || r.status > 127) return 2;
   writeFileSync(out, r.stdout);
   return r.status === 0 ? 0 : 1;
@@ -67,7 +71,7 @@ function addedLines(from: string, to: string): Set<number> {
 
 function merge(mainSide: string, basePath: string, oursPath: string, theirsPath: string): number {
   const [O, A, B] = [basePath, oursPath, theirsPath].map((p) => readFileSync(p, 'utf8'));
-  const plain = () => mergeFile(oursPath, O, A, B);
+  const plain = () => mergeFile(mainSide, oursPath, O, A, B);
   const [o, a, b] = [O, A, B].map(history);
   if (!o || !a || !b) return plain();
   const [keep, move] = mainSide === 'theirs' ? [b, a] : [a, b];
@@ -88,7 +92,7 @@ function merge(mainSide: string, basePath: string, oursPath: string, theirsPath:
   const mine = addedLines(O, moveText);
   const moved = withHistory({ ...move, lines: move.lines.map((l, i) => (!mine.has(i) || !l.includes('schema_version') ? l : l.replace(/\b\d+\b/g, (d) => String(to.get(Number(d)) ?? d)))) });
   const [ours, theirs] = mainSide === 'theirs' ? [moved, withHistory(keep)] : [withHistory(keep), moved];
-  return mergeFile(oursPath, O, ours.join('\n'), theirs.join('\n'));
+  return mergeFile(mainSide, oursPath, O, ours.join('\n'), theirs.join('\n'));
 }
 
 function adr(onto: string, name = onto.replace(/^refs\/heads\//, '')): void {

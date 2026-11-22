@@ -276,7 +276,7 @@ fi
 # A path may have several append and sum lines: each clash tries them in order. main takes the whole file, so it stands
 # alone. hook may come with append and sum lines (Citadel's src/db.ts: renumbered by its hook, appended by rule): the
 # hook runs first with LAND_MERGE_DIFF3=1 set, and where it can't merge cleanly it leaves this script's own clash
-# markers in <ours> (git merge-file -p --diff3 --marker-size=31 -L main -L base -L branch, $BRANCH's side first) and
+# markers in <ours> (git merge-file -p --diff3 --marker-size=31 -L main -L base -L branch: the side that is $BRANCH first) and
 # exits non-zero; the path's other rules then take those clashes, as they would git's.
 # Anything a rule isn't sure of stops the rebase, as a clash in any other file does. <path> is a repo path. git runs
 # this script as the merge driver (tools/land.sh --merge <side> <base> <ours> <theirs> <path>; a copy made as the

@@ -334,7 +334,7 @@ export function inboxRow(items) {
     h('span', { class: 'asks' }, [...asks].map(([ask, { n, why }]) => h('span', { class: 'chip', tabindex: 0, 'data-tip': why, 'data-tip-row': t.id }, n > 1 ? `${ask} ×${n}` : ask))),
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.
     h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))),
-    // Sleep from here (#1636; Cara picked "Header and Needs you"): only a minion of this scheme with something sleep would quiet.
+    // Sleep from here (#1636): only a minion of this scheme with something sleep would quiet.
     !from && !isCoordinator(t) && items.some((i) => !['approval', 'spend', 'quiet', 'loop', 'mention'].includes(i.kind)) ? sleepButton(t) : '');
 }
 

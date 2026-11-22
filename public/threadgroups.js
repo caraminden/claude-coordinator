@@ -20,7 +20,7 @@ import { LOOK } from './threadstate.js';
 /** Resting there: a running, stuck or approval-waiting thread shows where it would otherwise, as does one the server is landing (#727). */
 const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status) && !t.server_work;
 const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
-/** Asleep (#1636; Cara picked "Own Asleep section"): out of its type like a sealed one, and like one it stays in its build. */
+/** Asleep (#1636): out of its type like a sealed one, and like one it stays in its build. */
 const isAsleep = (t) => !!t.asleep && t.status !== 'closed' && resting(t) && !isParked(t);
 /** Deploying: pending-deploy, or dismissed with its change still on its way in a release (#764, `release` from releases.js). */
 const isDeploying = (t) => (t.state === 'pending-deploy' || (t.status === 'closed' && !!t.release)) && resting(t) || onMainDeploying(t);

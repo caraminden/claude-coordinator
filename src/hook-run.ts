@@ -94,6 +94,16 @@ function checks(stdin: string, cfg: HookRunConfig, softUntil: number): Check[] {
           return out ? { stdout: out } : {};
         }),
     });
+    // The kit's citadel-heavy nudge (kit/hooks/heavy-nudge.ts, #1577): a context line on a covered heavy build.
+    list.push({
+      matcher: '^Bash$',
+      run: () =>
+        soft(async () => {
+          const { heavyNudgeHook } = await import(pathToFileURL(join(kit, 'hooks', 'heavy-nudge.ts')).href);
+          const out = heavyNudgeHook(JSON.parse(stdin));
+          return out ? { stdout: out } : {};
+        }),
+    });
   }
   return list;
 }

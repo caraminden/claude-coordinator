@@ -21,9 +21,6 @@ import type { QueuedMessage } from './runner.ts';
 /** The live checkout: the code this server runs, which Citadel's own Taskmaster may read. */
 export const CHECKOUT = join(import.meta.dirname, '..');
 
-/** The minion prompt's line on citadel-heavy. */
-export const HEAVY_LINE = 'Heavy builds and full test suites (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) go through `citadel-heavy <command...>`, as in `citadel-heavy cargo test --workspace`. In a repo with a citadel-heavy workflow it runs your working copy on the scheme\'s CI runners and prints the output when it ends; elsewhere it takes perigee\'s one small slot. Either way it may queue. Its build outputs stay where it ran and the variables you set in your shell do not go along (put them in the command: `citadel-heavy env FOO=1 cargo test`), so use `citadel-heavy --here` for a build whose files you need here (an APK to install, a binary to run), a job that reads data only perigee has, or one that runs Claude. Give it a long timeout or run it in the background. For CI jobs of an hour or more, `citadel-heavy --long <command...>` runs it at night and wakes you with the result: end your turn (state outside). Leave quick single-crate checks, dev servers and watchers out, and don\'t wrap a script that takes its own lock (tools/land.sh) in it.';
-
 /** Messages between two schemes' Taskmasters (both ways) per TASKMASTER_LOOP_WINDOW_MS before the next waits for a person. */
 export const TASKMASTER_LOOP_LIMIT = MSG_DEFAULTS.loopLimit;
 export const TASKMASTER_LOOP_WINDOW_MS = MSG_DEFAULTS.loopMin * 60_000;
@@ -309,7 +306,6 @@ export function promptParts(project: Project, ticket: Ticket & { type?: unknown 
         ...(ticket.kind === 'coordinator' ? [] : [shotLine(project)]),
         'Wait for your own background job inside the turn with `citadel-wait pid <pid>` (or `port <n>`, `file <path>`, `cmd \'<test>\'`) and a Bash timeout of 600000, repeated on exit 124. A Grunt runs in the foreground unless its Agent call passes `run_in_background: true`.',
         'When each lookup only names the next, do every hop in one script that prints only the answer (capped). A Grunt starts fresh at about 15k tokens and hands back its conclusion; each file you read stays in your context, re-read on every later call. So a sweep you need only the conclusion of goes to an `Explore` Grunt on Sonnet; a few targeted reads, or reads you will act on, stay inline (citadel:subagents).',
-        HEAVY_LINE,
         `${deploys ? 'Once your change is live, or deployed and waiting in pending-deploy,' : 'Once your work is finished'} and the Citadel-wide Closing rule says you are done, end the minion in that same turn: ${deploys ? 'pending-deploy after tools/deploy.sh, close_self otherwise' : 'close_self'}.`,
         'Tell or ask another minion of this scheme with `message_minion` (mcp__thread); `list_tickets` and `read_minion` find who owns what. The Taskmaster (`message_coordinator`) is for what only it can do: starting, closing or reopening minions, a decision, another scheme. Wake a minion sealed on you: `message_minion` `unpark: true`. Sealed on one: note its #N. Give each a `need`; don\'t report shipping (it is shown).',
         'Handoffs (written with `citadel:briefing`) go to the Taskmaster by path (message_coordinator, `need: fyi`) and on one multi-select `ask_question` card, one option per handoff. A proposal always ends in a card.',

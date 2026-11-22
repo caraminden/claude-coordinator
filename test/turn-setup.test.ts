@@ -30,7 +30,7 @@ process.env.COORDINATOR_TICKET = '999';
 const { Runner } = await import('../src/runner.ts');
 const { turnEnv } = await import('../src/turn-launch.ts');
 const { KIT, MCP_DIR, MCP_SERVER } = testPins(process.env.DATA_DIR);
-const { CHECKOUT, HEAVY_LINE } = await import('../src/prompts.ts');
+const { CHECKOUT } = await import('../src/prompts.ts');
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -350,9 +350,9 @@ test('every turn finds citadel-heavy first on its PATH, pinned, with the shared 
   const host = runner.hostEnv(store.getTicket(t.id)!, 'token');
   assert.equal(host.CITADEL_HEAVY_DIR, t.env.CITADEL_HEAVY_DIR);
   assert.equal(host.CITADEL_HEAVY_WHO, t.env.CITADEL_HEAVY_WHO);
-  assert.ok(t.system.includes(HEAVY_LINE));
+  // The line on citadel-heavy left the prompt for the kit's heavy-nudge hook (#1577).
+  assert.ok(!t.system.includes('go through `citadel-heavy <command...>`'));
   const tm = await turn('coordinator', 'connected');
-  assert.ok(!tm.system.includes(HEAVY_LINE));
 });
 
 test("the land tool's land.sh on the host gets the scheme's shared folder its minion's turns get, for its retro-log lines", async () => {

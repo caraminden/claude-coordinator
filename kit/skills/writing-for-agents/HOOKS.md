@@ -23,6 +23,7 @@ Prefer a narrow matcher and the end of a turn over every call.
 | | | Thin last message, `<placeholder>` in a command, live-state claim with no read; minions: no or unreadable status line, title still the opening words, ship with no self-review | counts |
 | `grunt-model.ts` | PreToolUse on Agent | A Grunt's model or effort left to chance | sends back |
 | `big-read.ts` | PreToolUse on Read, Bash (runs inside the turn's `hook-run.ts`; not in hooks.json) | A whole read of a big file | sends back |
+| `heavy-nudge.ts` | PreToolUse on Bash (runs inside the turn's `hook-run.ts`; not in hooks.json) | A whole-workspace cargo build/test/check/clippy, a release or cross-target build, a full `npm test`: adds the citadel-heavy line (#1577) | adds context |
 | `test-first.ts` | PostToolUse on edits, Bash (runs inside `run.ts`) | A source edit before any red test run | reminds, once per session |
 | `flail-brake.ts` | PostToolUse on edits, Bash (runs inside `run.ts`) | Same test red three times with no edit | reminds, once per streak |
 | `batch-nudge.ts` | PostToolUse on Read, Grep, Glob, Bash, edits (runs inside flail-brake.ts) | Third single read-only call in a row, even-numbered minions only; a one-week trial (#1278) | reminds, once per run |
@@ -34,7 +35,7 @@ Prefer a narrow matcher and the end of a turn over every call.
 
 | Hook | When | What it does | Mode |
 | --- | --- | --- | --- |
-| `hook-run.ts` | PreToolUse on what its checks read | Runs the side guard, tripwire, wording, scheme-refs and the kit's big-read in one node process, each on its own matcher, in that order (#1296) | as each check; a hard check's crash blocks |
+| `hook-run.ts` | PreToolUse on what its checks read | Runs the side guard, tripwire, wording, scheme-refs and the kit's big-read and heavy-nudge in one node process, each on its own matcher, in that order (#1296) | as each check; a hard check's crash blocks |
 | `tripwire.ts` | PreToolUse on Bash, file tools, Skill (inside `hook-run.ts`) | Writes outside the turn's folders, live data, destructive git, kills by name | refuses (a few go to a person's card) |
 | `link-check.ts` | Stop, minions and Taskmasters | A file link that won't open; a card mentioned without its link (`card-links.ts`); a choice asked in prose with no card; a choices page no card opens | sends back once |
 | `wording.ts` | PreToolUse on messages, cards, shared-folder writes; and in link-check | A retired or misused word ("fold", "merge" for main) | sends back once per sentence |

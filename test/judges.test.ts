@@ -50,6 +50,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'tools/ui-shot.ts': { why: 'stops the dev copy it started', calls: 1 },
   'kit/skills/run-on-windows/scripts/wco/rig.ts': { why: 'stops and pings the rig processes it started', calls: 3 },
   'kit/hooks/run.ts': { why: 'runs the hook scripts', calls: 0 },
+  'kit/hooks/heavy-nudge.ts': { why: 'says the citadel-heavy rule when a heavy build runs (the line moved out of the prompt, #1577); judges no work and never blocks', calls: 0 },
   'kit/hooks/retro-log.ts': { why: 'writes the retro log; decides nothing', calls: 0 },
   'kit/hooks/after-compact.sh': { why: 'prints the branch after a compaction; decides nothing', calls: 0 },
   'kit/hooks/hooks.json': { why: 'the hook list itself: each script it runs is checked on its own', calls: 0 },

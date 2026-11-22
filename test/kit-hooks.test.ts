@@ -9,6 +9,7 @@ import { bashLines, failedTests, logPath, note, refusals } from '../kit/hooks/re
 import { isSourceFile, REMINDER, testFirstHook } from '../kit/hooks/test-first.ts';
 import { flailBrakeHook, FLAIL_LINE } from '../kit/hooks/flail-brake.ts';
 import { bigReadHook } from '../kit/hooks/big-read.ts';
+import { heavyNudgeHook, HEAVY_NUDGE } from '../kit/hooks/heavy-nudge.ts';
 import { gruntModelHook, jobTable } from '../kit/hooks/grunt-model.ts';
 import { BIG_READ_MATCHER } from '../src/hook-matchers.ts';
 import { hookRunMatcher } from '../src/hook-run.ts';
@@ -507,4 +508,25 @@ test('a kit hook runs through bash as Claude Code runs it, cached in CITADEL_HOO
   assert.equal(run({}).stdout, cached.stdout);
   assert.deepEqual(readdirSync(dir), ['pin']);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('heavy-nudge: says the citadel-heavy line on covered heavy builds, and nothing on single-crate checks, servers, land.sh or wrapped commands', () => {
+  const ctx = (command: string, tool = 'Bash') => {
+    const out = heavyNudgeHook({ hook_event_name: 'PreToolUse', tool_name: tool, tool_input: { command } });
+    return out ? JSON.parse(out).hookSpecificOutput : null;
+  };
+  for (const c of ['cargo build --workspace', 'cargo test --workspace --all-features', 'cargo check --all', 'cargo clippy --workspace -- -D warnings', 'cargo build --release', 'cargo +nightly test --release', 'cargo build --target aarch64-linux-android', 'cd app && cargo test --workspace', 'FOO=1 cargo test --workspace', 'npm test', 'npm run test', 'cd x; npm test 2>&1 | tail -5']) {
+    const h = ctx(c);
+    assert.ok(h, `${c} is covered`);
+    assert.equal(h.hookEventName, 'PreToolUse');
+    assert.equal(h.additionalContext, HEAVY_NUDGE);
+    assert.equal(h.permissionDecision, undefined, 'it never blocks');
+  }
+  for (const c of ['cargo test -p one-crate', 'cargo check', 'cargo build', 'cargo run', 'cargo fmt --all', 'npm test -- test/one.test.ts', 'npm run dev', 'npm run build', 'npm install', 'tools/land.sh', 'citadel-test test/a.test.ts', 'citadel-heavy cargo test --workspace', 'citadel-heavy --here cargo build --release', 'FOO=1 citadel-heavy npm test', 'git commit -m "cargo test --workspace"', 'ls']) assert.equal(ctx(c), null, `${c} is quiet`);
+  assert.equal(ctx('cargo test --workspace', 'Read'), null);
+  const run = (input: string) => spawnSync(process.execPath, [join(HOOKS, 'heavy-nudge.ts')], { input, encoding: 'utf8' });
+  assert.match(run(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'npm test' } })).stdout, /citadel-heavy/);
+  assert.equal(run('not json').stdout, '');
+  // It rides the turn's one PreToolUse process, not its own hooks.json entry.
+  assert.ok(!JSON.stringify(JSON.parse(readFileSync(join(HOOKS, 'hooks.json'), 'utf8'))).includes('heavy-nudge.ts'));
 });

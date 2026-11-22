@@ -46,6 +46,11 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     `cat path` / `sed -n 'N,Mp' path` whose output isn't piped or redirected. The reason names the
     size and the cheaper way (grep -n, then offset/limit or a small sed range). `allow_large: true`
     on Read, or `# allow_large` in the command, gets past it; anything it can't read plainly goes through.
+  - `heavy-nudge.ts` (PreToolUse on Bash, every Citadel turn; not in hooks.json: it runs inside the turn's one
+    PreToolUse process like big-read, #1577): adds the line on `citadel-heavy` (what it covers, `--here`, `--long`,
+    variables don't go along) when a command is a whole-workspace cargo build/test/check/clippy, a release or
+    cross-target cargo build, or a full `npm test`. Silent for single-crate checks, dev servers, land.sh and
+    commands already wrapped in citadel-heavy. Never blocks.
   - `grunt-model.ts` (PreToolUse on Agent, every session, Grunts included): sends back an Agent
     call whose Grunt would get no chosen model or effort (neither the call nor the agent's
     definition sets it, or the definition says `inherit`). The reason quotes the job table in

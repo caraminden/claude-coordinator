@@ -191,5 +191,5 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 
 /* The reply an everyone card belongs to, above the card (#1581): a long one starts collapsed. */
 .card-reply { border-left: 3px solid var(--line); padding: 0.45rem 0.75rem; margin: 0.25rem 0; font-size: 0.95em; }
-.card-reply > summary { cursor: pointer; color: var(--muted); padding: 0.1rem 0; }
-.card-reply[open] > summary { margin-bottom: 0.5rem; }
+.card-reply > summary { cursor: pointer; color: var(--text); padding: 0.55rem 0; }
+.card-reply[open] > summary { margin-bottom: 0.25rem; }

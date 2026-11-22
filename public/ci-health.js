@@ -109,7 +109,7 @@ const CAUSE = {
   change: ['danger', 'change', "pinned on a ship's change, or refused at CI"],
   flaky: ['waiting', 'flaky', 'passed alone, a burn-in race or a known flake'],
   main: ['held', "main's red", 'main was red on the same test'],
-  unknown: ['held', 'unknown', 'nothing in the retro log (a time-out)'],
+  unknown: ['muted', 'unknown', 'nothing in the retro log (a time-out)'],
 };
 const pct = (n, of) => (of ? Math.round((100 * n) / of) : 0);
 
@@ -127,12 +127,12 @@ function landRedsBlock(s, lr) {
   // A scheme whose ship script writes no retro log reads every red as unknown: no rate to claim then.
   const unread = lr.causes.unknown * 2 >= lr.red && lr.red > 0;
   const tone = unread ? 'neutral' : own >= 25 ? 'danger' : own > 0 ? 'warn' : 'ok';
-  const hue = { danger: 'danger', warn: 'waiting', ok: 'done', neutral: 'held' }[tone];
+  const hue = { danger: 'danger', warn: 'waiting', ok: 'done', neutral: 'muted' }[tone];
   const causes = Object.keys(CAUSE).filter((c) => lr.causes[c]).map((c) => {
     const [h2, word, why] = CAUSE[c];
     const n = lr.causes[c];
     return hueRow({ hue: h2, lead: String(n), meta: meter(n / lr.red, `${pct(n, lr.red)}% of reds`) }, h('strong', {}, word),
-      h('span', { class: 'ci-detail-line muted' }, why, c === 'change' && lr.riders ? ` · ${lr.riders} by another ship on the train` : ''));
+      h('span', { class: 'ci-detail-line muted' }, why), c === 'change' && lr.riders ? h('span', { class: 'ci-detail-line muted' }, `${lr.riders} by another ship on the train`) : null);
   });
   const reds = [...lr.reds].reverse().map((r) => {
     const [h2, word] = CAUSE[r.cause] ?? CAUSE.unknown;
@@ -142,8 +142,8 @@ function landRedsBlock(s, lr) {
       h('span', { class: 'ci-detail-line muted' }, `${when(Date.parse(r.at))} · ${r.why}${r.rider ? ' (another ship on its train)' : ''}`));
   });
   const [row] = settingsRow({ key, icon: 'chart', hue: lr.red ? hue : 'done', title,
-    summary: done ? [toneChip(tone, unread ? `${lr.causes.unknown} reds unread` : `${own}% from a change`), `${raw}% red · ${lr.red} of ${done} runs`] : [toneChip('neutral', 'None'), 'no land runs finished'] },
-  done ? statTiles([String(lr.runs), 'land runs', 'running'], [`${raw}%`, 'red', lr.red ? 'waiting' : 'done'], [unread ? '–' : `${own}%`, unread ? 'reds unread' : "red from a ship's change", hue]) : null,
+    summary: done ? [toneChip(tone, unread ? `${lr.causes.unknown} reds unread` : `${own}% from a change`), `${raw}% of ${done} red`] : [toneChip('neutral', 'None'), 'no land runs finished'] },
+  done ? statTiles([String(done), lr.other ? `finished runs · ${lr.other} going or cancelled` : 'finished runs', 'running'], [`${raw}%`, 'red', lr.red ? 'waiting' : 'done'], [unread ? '–' : `${own}%`, unread ? 'reds unread' : "red from a ship's change", hue]) : null,
   causes.length ? h('div', { class: 'hue-rows' }, ...causes) : null,
   reds.length ? showFirst({ key, items: reds, n: 5, noun: 'red runs' })
     : emptyCard(done ? 'No red land runs' : 'No land runs', done ? 'Every ship that finished its CI run went green.' : 'No ship ran its tests on GitHub in the last 24 hours.'),

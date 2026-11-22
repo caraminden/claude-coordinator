@@ -1,5 +1,5 @@
 // Shared test plumbing: boot the real server.ts on a scratch data dir and the port it picks.
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import type { Server } from 'node:http';
 import { createServer as createNetServer, type AddressInfo, type Server as NetServer } from 'node:net';
 import { chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -274,6 +274,19 @@ export type Booted = {
  * caller's to delete) and sign in as `name`. Turns can't run (CLAUDE_BIN is /bin/false) unless `env`
  * says otherwise; `env` entries override the defaults, and an undefined one removes it.
  */
+let compileCacheDir: string | null | undefined;
+/** NODE_COMPILE_CACHE for booted servers: `<git dir>/compile-cache`, or nothing outside a git checkout. */
+function compileCache(): { NODE_COMPILE_CACHE?: string } {
+  if (compileCacheDir === undefined) {
+    try {
+      compileCacheDir = resolve(REPO, execFileSync('git', ['-C', REPO, 'rev-parse', '--git-path', 'compile-cache'], { encoding: 'utf8', timeout: 10_000 }).trim());
+    } catch {
+      compileCacheDir = null;
+    }
+  }
+  return compileCacheDir ? { NODE_COMPILE_CACHE: compileCacheDir } : {};
+}
+
 export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string; wrap?: string[]; log?: string } = {}): Promise<Booted> {
   const root = opts.root ?? mkdtempSync(join(resolve(tmpdir()), 'boot-'));
   const data = join(root, 'data');
@@ -296,9 +309,10 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       // GET /api/test/settled, for settled() and stop() below (#1437).
       CITADEL_TEST_SETTLED: '1',
       // Node's compile cache for the server's modules (#1518): a cold boot type-strips and compiles the whole app, about
-      // 4 s of CPU, which a loaded box stretched past listeningPort's 20 s (access-matrix's smoke flake). In the checkout,
-      // gitignored, so a land's smoke boots warm from the minion's own runs; Node rechecks each file's content.
-      NODE_COMPILE_CACHE: join(REPO, '.compile-cache'),
+      // 4 s of CPU, which a loaded box stretched past listeningPort's 20 s (access-matrix's smoke flake). In this checkout's
+      // own git dir, so a land's smoke boots warm from the minion's own runs, yet it adds no ignored files to the checkout
+      // (checkoutMounts won't mount one with over 50) and goes when the worktree does; Node rechecks each file's content.
+      ...compileCache(),
       ...opts.env,
     },
     stdio: ['ignore', 'pipe', err],

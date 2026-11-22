@@ -164,6 +164,9 @@ test('a landing killed while it overlaps the restart ahead leaves main, the chec
       assert.equal(p.restartsDone(), 0, what);
       process.kill(-b.pid, signal);
       await b.done;
+      // Its test run sits under timeout's own process group, which the kill doesn't reach: let it end, or it waits out its
+      // 120 s limit after this file is done (a leak the faster fixture of #1615 left in sight).
+      writeFileSync(gate, '');
       assert.equal((await a.done).status, 0, what);
       assert.deepEqual(await p.restarts(1), ['0'], what);
       assert.equal(git(p.source, 'rev-parse', 'main'), tipA, what);

@@ -52,7 +52,7 @@ function fn(name: string): string {
   return lines.slice(i, end + 1).join('\n');
 }
 // The rules as shipped: land.sh's own LAND_RULES default.
-const shipped = /^LAND_RULES=\$\{LAND_RULES:-([^}]*)\}$/m.exec(land)?.[1];
+const shipped = /^: "\$\{LAND_RULES:=([^}]*)\}"$/m.exec(land)?.[1];
 
 const tools = tmp.path('tools');
 mkdirSync(tools);

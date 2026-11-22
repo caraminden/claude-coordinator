@@ -1675,7 +1675,7 @@ train_imports() {
 # the test files name (run 44869832060: db-writer imports src/db.ts, and the guess held #1369 while #1356 did it).
 # walk: the walk goes on past a file that imports nothing by a relative path; today it stops there with no suspects,
 # before the test's own text is read (run 44886957865: one-pacific names server.ts, which #1415 changed).
-LAND_RULES=${LAND_RULES:-hub=shadow walk=shadow}
+: "${LAND_RULES:=hub=shadow walk=shadow}"
 rule_on() { [[ " $2 " == *" $1=live "* ]]; } # <rule> <rules>
 # <test file>: the train members (0: this one, 1 on: its riders) its failure is pinned on, nearest first. Reads chg.
 # Each shadow rule's other answer goes to the retro log when the caller sets rules_say (train_suspects does).

@@ -1,19 +1,18 @@
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import { bootServer, jsonLines, withoutTurnNote, until, stopProcs, stopTurns, ok, type Booted } from './helpers.ts';
+import { bootServer, jsonLines, withoutTurnNote, until, stopProcs, tempRoot, ok, type Booted } from './helpers.ts';
 
 // Dismiss (#1593): a person takes an open question or plan card that is no longer relevant out of the waiting list; its
 // minion is told, as it is told an answer. Only people can; a ship go keeps its own buttons.
-const root = mkdtempSync(join(tmpdir(), 'dismiss-card-'));
+const tmp = tempRoot('dismiss-card-');
+const root = tmp.dir;
 const procs: ChildProcess[] = [];
 after(async () => {
   await stopProcs(procs);
-  await stopTurns(root);
-  rmSync(root, { recursive: true, force: true });
+  await tmp.teardown(); // ends the detached turns before deleting their folders (#271)
 });
 
 const fakeClaude = join(root, 'claude-fake');

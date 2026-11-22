@@ -54,6 +54,17 @@ const stat = (f: string) => { try { return statSync(f); } catch { return null; }
 const mtime = (f: string) => stat(f)?.mtimeMs ?? null;
 const files = (dir: string) => { try { return readdirSync(dir); } catch { return []; } };
 
+/** A line ticket's minion by its label: a branch, or "<scheme> #N" (a ship from another scheme's line). */
+export function labelTicket(store: Store, label: string) {
+  let t = label.includes('/') && label !== 'tools/deploy.sh' ? store.ticketByBranch(label) : undefined;
+  const m = !t && label.match(/^(.+?) #(\d+)(?: \(.*\))?$/);
+  if (m) {
+    const p = store.listProjects().find((x) => x.name === m[1]);
+    t = p && store.getTicketByNumber(p.id, Number(m[2]));
+  }
+  return t;
+}
+
 /** "<pid> <start time>" as tools/deploy-queue.sh's queue_proc writes it, when that process still runs. */
 export function procAlive(pidStart: string): boolean {
   const [pid, start] = pidStart.split(' ');
@@ -501,13 +512,7 @@ export class Waits {
   private byLabel = new Map<string, number>();
   ticketFor(label: string): number | null {
     if (!this.byLabel.has(label)) {
-      const { store } = this.d;
-      let t = label.includes('/') && label !== 'tools/deploy.sh' ? store.ticketByBranch(label) : undefined;
-      const m = !t && label.match(/^(.+?) #(\d+)(?: \(.*\))?$/);
-      if (m) {
-        const p = store.listProjects().find((x) => x.name === m[1]);
-        t = p && store.getTicketByNumber(p.id, Number(m[2]));
-      }
+      const t = labelTicket(this.d.store, label);
       if (t) this.byLabel.set(label, t.id);
     }
     return this.byLabel.get(label) ?? null;

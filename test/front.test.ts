@@ -9,9 +9,9 @@ import { connect } from 'node:net';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { READER_PATHS } from '../src/front.ts';
+import { READER_PATHS, READER_ROUTES } from '../src/front.ts';
 import { SHELL_OFF_FILE } from '../src/shell.ts';
-import { readerRoutes } from '../src/reader.ts';
+import { mainOnly, readerRoutes } from '../src/reader.ts';
 import { agentToken, bootServer, PASSWORD, tempRoot, type Booted } from './helpers.ts';
 import { until } from './wait.ts';
 
@@ -48,17 +48,29 @@ const PATHS = [
   // Slice 2 (#1590): the minions list, a minion's page and the Status page.
   `/api/projects/${A.id}`, `/api/projects/${A.id}?tickets=open`, `/c/api/projects/${A.id}`, `/api/projects/${B.id}`, '/api/projects/999',
   `/api/tickets/${M1.id}`, `/api/tickets/${MB.id}`, '/api/tickets/9999', '/api/status',
+  // Slice 3 (#1628): the rest of people's GETs that read only the database and the snapshot.
+  ...['commands', 'ship-risk', 'jobs'].flatMap((r) => [`/api/tickets/${M1.id}/${r}`, `/api/tickets/${MB.id}/${r}`, `/api/tickets/9999/${r}`]),
+  ...['members', 'taskmaster-events', 'instructions/history', 'my-instructions', 'my-instructions/history', 'people/1/instructions',
+    'repo-setup', 'plugins', 'properties', 'views', 'search?q=one', 'past-minions', 'schedule-audits', 'ship-lessons',
+    'claims', 'artifacts', 'contraption-turns', 'machines', 'ci-files/latest', 'ci-files/pins',
+  ].flatMap((r) => [`/api/projects/${A.id}/${r}`, `/api/projects/${B.id}/${r}`, `/api/projects/999/${r}`]),
+  '/api/ship-lines', '/c/api/ship-lines', '/api/app/instructions', '/api/app/instructions/history', '/api/artifacts/1',
+  '/api/machines/1/jobs', '/api/ci', '/api/ci-desktop', '/api/contraptions', '/api/reviews/schemes', '/api/units',
 ];
 // What differs between two servers' boots (its start time, the answer probe, the machine's load) is compared on one server instead.
-const BOOT_BOUND = new Set(['/api/status']);
+const BOOT_BOUND = new Set(['/api/status', '/api/ship-lines', '/c/api/ship-lines', '/api/ci']);
 
-test('the slice is the routes its paths name: history pages, single events, memory search, the list, a minion, Status, all GETs', () => {
-  assert.deepEqual(readerRoutes().map((r) => `${r.method} ${r.path}`).sort(), [
-    'GET /api/projects/:project', 'GET /api/projects/:project/memory', 'GET /api/status',
-    'GET /api/tickets/:ticket', 'GET /api/tickets/:ticket/events', 'GET /api/tickets/:ticket/events/:event',
-  ]);
+test('the readers\' routes are GETs of the main thread\'s table, each asked for by a path here; the rest stay on main', () => {
+  assert.deepEqual(readerRoutes().map((r) => r.path).sort(), [...READER_ROUTES].sort());
+  assert.ok(readerRoutes().every((r) => [r.method].flat().includes('GET')));
   for (const p of PATHS) assert.ok(READER_PATHS.test(p.split('?')[0]), p);
-  for (const p of ['/api/tickets/1/x', '/api/tickets/1/events/1/x', '/api/projects/1/tickets', '/api/tickets/1/stream']) assert.ok(!READER_PATHS.test(p), p);
+  // A route that reaches for a part of the app a reader lacks throws, so the main thread answers it.
+  assert.equal(mainOnly({ store: 1 }).store, 1);
+  assert.throws(() => (mainOnly({}) as { runner?: unknown }).runner, /app\.runner is the main thread's/);
+  const asked = (r: string) => new RegExp(`^(?:/c)?${r.replace(/:\w+/g, '[^/]+')}$`);
+  for (const r of READER_ROUTES) assert.ok(PATHS.some((p) => asked(r).test(p.split('?')[0])), `a path asks for ${r}`);
+  for (const p of ['/api/tickets/1/x', '/api/tickets/1/events/1/x', '/api/projects/1/tickets', '/api/tickets/1/stream', '/api/projects', '/api/me',
+    '/api/home', '/api/projects/1/ci-files', '/api/projects/1/shared', '/api/tickets/1/facts', '/api/projects/1/schedules', '/api/app/settings', '/api/ship-lines/x']) assert.ok(!READER_PATHS.test(p), p);
 });
 
 const signIn = async (srv: Booted, name: string, password: string) => {
@@ -121,8 +133,9 @@ test('through the front thread, readers give every caller the same answers and r
   for (const [key, got] of Object.entries(viaReaders)) {
     const bound = BOOT_BOUND.has(key.split(' ')[1]);
     assert.deepEqual({ status: got.status, body: bound ? '' : got.body }, { status: viaMain[key].status, body: bound ? '' : viaMain[key].body }, key);
-    assert.ok(got.reader, `a reader answered ${key}`);
   }
+  // All at once, so a route a reader hands back shows with every other.
+  assert.deepEqual(Object.entries(viaReaders).filter(([, got]) => !got.reader).map(([key]) => key), [], 'a reader answered them all');
   // Agents' calls stay on the main thread, where their nonces are.
   const bearer = await fetch(srv.base + PATHS[0], { headers: { Authorization: 'Bearer nope' } });
   assert.equal(bearer.headers.get('x-citadel-answered'), null);

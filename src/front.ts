@@ -12,12 +12,37 @@ import { gzip } from 'node:zlib';
 import { shellOff } from './shell.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SchemeReleases } from './releases.ts';
 
 /**
- * The paths readers answer, with or without the front end's /c prefix: a minion's history pages and single events,
- * memory search (#1563), and a scheme's minions list, a minion's own page and the Status page (#1590).
+ * The people's GETs readers answer, as their routes' paths: a minion's history pages and single events, memory search
+ * (#1563), a scheme's minions list, a minion's own page and the Status page (#1590), and the rest of the page reads
+ * (#1628). A route goes here once nothing it runs reads the main thread's memory or does more than read the database.
  */
-export const READER_PATHS = /^\/(?:c\/)?api\/(?:tickets\/\d+(?:\/events(?:\/\d+)?)?|projects\/\d+(?:\/memory)?|status)$/;
+export const READER_ROUTES: readonly string[] = [
+  '/api/tickets/:ticket', '/api/tickets/:ticket/events', '/api/tickets/:ticket/events/:event',
+  '/api/projects/:project', '/api/projects/:project/memory', '/api/status',
+  // #1628: the rest that answer from the database and the snapshot. Left on the main thread, which a reader hands
+  // back anyway: GETs that read main's memory or the disk, start a process or write (/api/projects, /api/me, /api/home,
+  // costs, releases, people, the me/* logins, machines, catalogue, ideas, recap, shared, spend, ci-files, ci-numbers,
+  // ci-runners, memory-files, instructions/sources, schedules, app/settings, facts, push/key, secrets, contraptions/mine, welcome).
+  '/api/tickets/:ticket/commands', '/api/tickets/:ticket/ship-risk', '/api/tickets/:ticket/jobs', '/api/ship-lines',
+  '/api/app/instructions', '/api/app/instructions/history',
+  '/api/projects/:project/members', '/api/projects/:project/taskmaster-events', '/api/projects/:project/instructions/history',
+  '/api/projects/:project/my-instructions', '/api/projects/:project/my-instructions/history',
+  '/api/projects/:project/people/:person/instructions', '/api/projects/:project/repo-setup', '/api/projects/:project/plugins',
+  '/api/projects/:project/properties', '/api/projects/:project/views', '/api/projects/:project/search',
+  '/api/projects/:project/past-minions', '/api/projects/:project/schedule-audits',
+  '/api/projects/:project/ship-lessons', '/api/projects/:project/claims', '/api/projects/:project/artifacts', '/api/artifacts/:artifact',
+  '/api/projects/:project/contraption-turns', '/api/projects/:project/machines', '/api/machines/:machine/jobs',
+  '/api/projects/:project/ci-files/latest', '/api/projects/:project/ci-files/pins', '/api/ci', '/api/ci-desktop',
+  '/api/contraptions', '/api/reviews/schemes', '/api/units',
+];
+/**
+ * Their paths, with or without the front end's /c prefix. A parameter matches any segment: a reader matches the main
+ * thread's whole table (src/routes/all.ts) and hands back any path whose route isn't one of these.
+ */
+export const READER_PATHS = new RegExp(`^(?:/c)?(?:${READER_ROUTES.map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/:\w+/g, '[^/]+')).join('|')})$`);
 /** Headers the front thread sets on every request it passes to the main thread; a client's own copies are dropped. */
 export const PEER_HEADER = 'x-citadel-peer';
 export const LOCAL_HEADER = 'x-citadel-local';
@@ -120,9 +145,11 @@ export const upgrades = (req: IncomingMessage, appsDomain: string | null) => (re
  * scheme. Main posts what changed (publish); the front thread keeps the whole and passes each change on to the readers.
  * `ready`: main has posted every minion once, so a minion missing from `live` is new and its page is main's to answer.
  */
-export type Snapshot = { ready: boolean; live: Record<number, unknown>; status: Record<string, any> | null; builds: Record<number, unknown>; ownScheme: number | null; previews: boolean };
-export type SnapDelta = { ready?: true; live?: Record<number, unknown>; status?: Record<string, unknown>; builds?: Record<number, unknown>; ownScheme?: number | null; previews?: boolean };
-export const emptySnapshot = (): Snapshot => ({ ready: false, live: {}, status: null, builds: {}, ownScheme: null, previews: false });
+/** `ships`: the ship lines' inputs main keeps in memory (#1628): the Citadel line's queue folder and every scheme's releases. */
+export type Ships = { queue: string | null; releases: SchemeReleases[] };
+export type Snapshot = { ready: boolean; live: Record<number, unknown>; status: Record<string, any> | null; builds: Record<number, unknown>; ownScheme: number | null; previews: boolean; ships: Ships | null };
+export type SnapDelta = { ready?: true; live?: Record<number, unknown>; status?: Record<string, unknown>; builds?: Record<number, unknown>; ownScheme?: number | null; previews?: boolean; ships?: Ships };
+export const emptySnapshot = (): Snapshot => ({ ready: false, live: {}, status: null, builds: {}, ownScheme: null, previews: false, ships: null });
 export function applySnap(s: Snapshot, d: SnapDelta) {
   if (d.ready) s.ready = true;
   if (d.live) Object.assign(s.live, d.live);
@@ -130,6 +157,7 @@ export function applySnap(s: Snapshot, d: SnapDelta) {
   if (d.builds) Object.assign(s.builds, d.builds);
   if (d.ownScheme !== undefined) s.ownScheme = d.ownScheme;
   if (d.previews !== undefined) s.previews = d.previews;
+  if (d.ships) s.ships = d.ships;
 }
 
 type Answer = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };

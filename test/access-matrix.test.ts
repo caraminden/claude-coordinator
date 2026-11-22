@@ -111,7 +111,9 @@ const EXTRA: Probe[] = [
 
 /** Every route server.ts hands to router(), read from its source: importing it would boot the server. */
 async function mountedRoutes(): Promise<Route[]> {
-  const names = [...readFileSync(join(import.meta.dirname, '..', 'server.ts'), 'utf8').matchAll(/\brouter\(([^)]*)\)/g)].flatMap((m) => m[1].match(/\w+Routes\b/g) ?? []);
+  const routeNames = (file: string, call: RegExp) => [...readFileSync(join(import.meta.dirname, '..', file), 'utf8').matchAll(call)].flatMap((m) => m[1].match(/\w+Routes\b/g) ?? []);
+  // apiRoutes is src/routes/all.ts's one table of them, which the readers match too (#1628).
+  const names = routeNames('server.ts', /\brouter\(([^)]*)\)/g).flatMap((n) => (n === 'apiRoutes' ? routeNames('src/routes/all.ts', /apiRoutes = \[([^\]]*)\]/g) : [n]));
   const exported: Record<string, Route[]> = {};
   for (const f of readdirSync(join(import.meta.dirname, '..', 'src', 'routes'))) Object.assign(exported, await import(`../src/routes/${f}`));
   assert.ok(names.length >= 9, `server.ts should hand its route arrays to router(); found ${names.join(', ') || 'none'}`);

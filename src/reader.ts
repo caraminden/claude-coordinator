@@ -3,24 +3,26 @@
 // who sees what has one copy. What those pages show from the main thread's memory (a turn's steps, its approval
 // cards, the ship line, the Status page's live numbers) comes from main's snapshot (#1590, src/reader-live.ts). Anything it can't answer the same way the main thread would (a request it doesn't
 // know, a failure, writes it can't wait out) it hands back, and the front thread asks the main thread instead.
+// First, so every module after it already sees a reader thread's guards (src/only-reads.ts).
+import { refusals, refusal } from './only-reads.ts';
 import { parentPort, workerData } from 'node:worker_threads';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Store } from './db.ts';
 import { Auth } from './auth.ts';
-import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, type App } from './http.ts';
+import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, type App, type Route } from './http.ts';
 import type { DatabaseSync } from 'node:sqlite';
 import { READ_WAIT_MS } from './db-writer.ts';
 import { CHAT } from './events-db.ts';
 import { llamaEmbed } from './memory.ts';
-import { ticketRoutes } from './routes/tickets.ts';
-import { projectRoutes } from './routes/projects.ts';
-import { machineRoutes } from './routes/machines.ts';
-import { READER_PATHS, applySnap, type Snapshot, type SnapDelta } from './front.ts';
+import { apiRoutes } from './routes/all.ts';
+import { READER_ROUTES, applySnap, type Snapshot, type SnapDelta } from './front.ts';
 import { Runner } from './runner.ts';
 import { MinionQueue } from './minion-queue.ts';
 import { LIMIT_RESUMES, WaitList } from './resumes.ts';
 import { StatusPage } from './status-page.ts';
 import { CiHealth } from './ci-health.ts';
+import { RepoAccess } from './repo-access.ts';
+import { labelTicket } from './waits.ts';
 import type { Ticket } from './db.ts';
 
 export type ReaderData = {
@@ -34,8 +36,12 @@ export type ReaderData = {
   testHooks?: boolean;
 };
 
-/** The routes readers answer: every GET whose path is one of READER_PATHS. */
-export const readerRoutes = () => [...ticketRoutes, ...projectRoutes, ...machineRoutes].filter((r) => r.method === 'GET' && READER_PATHS.test(r.path.replace(/:\w+/g, '1')));
+// Only the GETs: the front thread sends no other method here, and answer() hands any back.
+const taken = (r: Route) => [r.method].flat().includes('GET') && READER_ROUTES.includes(r.path);
+/** The routes readers answer: the GETs READER_ROUTES names. */
+export const readerRoutes = () => apiRoutes.filter(taken);
+/** The main thread's table with every other route's handler handing the request back, so a path is never answered by a route main wouldn't run. */
+const readerTable = () => router(apiRoutes.map((r) => (taken(r) ? r : { ...r, handler: () => { throw new Error('The main thread answers this one'); } })));
 
 /**
  * The Runner a reader's views run on: the real view() and views(), their database reads on this thread's connection,
@@ -67,6 +73,14 @@ export function readerStatus(store: Store, snap: Snapshot, dataDir: string): () 
     answer: s().probing ? { probe: { get lastMs() { return s().lastMs; }, get readerMs() { return s().readerMs; }, take: () => null }, turns: () => 0 } : undefined,
   }));
 }
+
+/** `o`, but reading a part it lacks throws (the request goes to the main thread) instead of giving undefined. */
+export const mainOnly = <T extends object>(o: T): T => new Proxy(o, {
+  get: (t, k, r) => {
+    if (typeof k === 'string' && !(k in t)) throw new Error(`app.${k} is the main thread's`);
+    return Reflect.get(t, k, r);
+  },
+});
 
 /** The steps the main thread has opened (src/db-writer.ts); 0 with no write worker, where it writes in place. */
 export const stepsOpened = (shared: BigInt64Array | null) => (shared && Atomics.load(shared, 1) === 1n ? Atomics.load(shared, 4) : 0n);
@@ -136,6 +150,7 @@ export async function answer(app: App, auth: Auth, routes: ReturnType<typeof rou
   const collect = new Collect(resolve);
   const res = collect as unknown as ServerResponse;
   if (/\bgzip\b/.test(String(m.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
+  const refused = refusals();
   try {
     const session = auth.session(req);
     const renewed = auth.renewal(session, isSecure(req));
@@ -151,7 +166,8 @@ export async function answer(app: App, auth: Auth, routes: ReturnType<typeof rou
   let timer: NodeJS.Timeout | undefined;
   const a = await Promise.race([answered, new Promise<null>((r) => (timer = setTimeout(r, 1500, null)))]);
   clearTimeout(timer);
-  return a && a.status < 500 ? a : null;
+  // A refusal while it ran, caught or not (one in a request beside it too), sends it to the main thread.
+  return a && a.status < 500 && refusals() === refused ? a : null;
 }
 
 if (workerData?.reader) {
@@ -163,7 +179,7 @@ if (workerData?.reader) {
   store.usage.used = (...args: unknown[]) => void usage.push(args);
   store.setSetting = (key: string, value: unknown) => {
     // Only history's page-plan cache (pagePlanKey, src/db-keys.ts); any other write is the main thread's.
-    if (!/^plan:\d+:page$/.test(key)) throw new Error(`A reader can't write setting ${key}`);
+    if (!/^plan:\d+:page$/.test(key)) throw refusal(`write setting ${key}`);
     parentPort!.postMessage({ setting: [key, value] });
   };
   setInterval(() => {
@@ -173,12 +189,22 @@ if (workerData?.reader) {
   const schemes = data.memorySchemes;
   const snap = workerData.snap as Snapshot;
   const status = readerStatus(store, snap, data.dataDir);
+  const ships = () => { if (!snap.ships) throw new Error('No ship lines snapshot yet'); return snap.ships; };
   // No dataDir on purpose: a scheme's first open makes its Taskmaster's folder and row (ensureCoordinator), which throws here and the main thread does.
-  const app = {
+  // Any other part of the main thread's App throws too (mainOnly), so a route never quietly takes another branch here.
+  const app = mainOnly({
     store,
     runner: readerRunner(store, snap),
     memory: { embed: llamaEmbed(data.embedUrl), model: data.embedModel, indexed: (id: number) => !schemes || schemes.includes(id) },
     builds: { get: (id: number) => snap.builds[id] ?? [] },
+    // The ship lines' (/api/ship-lines): main's queue folder and releases, the queue's files read here.
+    releases: { view: (visible: (id: number) => boolean) => ships().releases.filter((s) => visible(s.projectId)) },
+    waits: { get queue() { return ships().queue; }, ticketFor: (label: string) => labelTicket(store, label)?.id ?? null },
+    // The Members page's: a member's repo invite, from the database.
+    repoAccess: { view: (projectId: number, userId: number) => RepoAccess.prototype.view.call({ store } as unknown as RepoAccess, projectId, userId) },
+    // The CI page's (/api/ci, /api/ci-desktop): CI health is in the database, the desktops' load in the Status snapshot.
+    ciHealth: { snapshot: (canSee: (id: number) => boolean) => CiHealth.prototype.snapshot.call({ store } as unknown as CiHealth, canSee) },
+    ciLoad: { views: () => { if (!snap.status) throw new Error('No Status snapshot yet'); return snap.status.desktops; } },
     // None in a preview server, as main has none there.
     previews: { buildScheme: () => (!snap.previews || snap.ownScheme == null ? null : { id: snap.ownScheme }) },
     // None yet: main answers (its own would never be missing).
@@ -187,8 +213,8 @@ if (workerData?.reader) {
       if (!page) throw new Error('No Status snapshot yet');
       return page;
     },
-  } as unknown as App;
-  const routes = router(readerRoutes());
+  }) as unknown as App;
+  const routes = readerTable();
   // A history page or one event reads only the minion's row, which the route loads through view(): the row as it is
   // stands in, so these answer before main's first snapshot, as they did in slice 1.
   const rowOnly = Object.assign(Object.create(app), { runner: { view: (t: Ticket) => t } }) as App;

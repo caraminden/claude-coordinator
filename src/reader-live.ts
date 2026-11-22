@@ -5,7 +5,7 @@
 // page's inputs that live in memory. Only what changed is posted.
 import type { Store, ContraptionRow } from './db.ts';
 import type { Runner } from './runner.ts';
-import type { SnapDelta } from './front.ts';
+import type { SnapDelta, Ships } from './front.ts';
 import type { StatusPage } from './status-page.ts';
 import type { DiskUse } from './app-services.ts';
 import { jobList } from './every.ts';
@@ -27,6 +27,8 @@ export type LiveDeps = {
   previews: boolean;
   status: StatusPage;
   /** The Status page's in-memory inputs, as server.ts gives them to its StatusPage. */
+  /** The ship lines' inputs (Ships in src/front.ts), for /api/ship-lines. */
+  ships: () => Ships;
   statusInputs: { bootAt: number; commit: string; probing: boolean; lastMs: () => number | null; readerMs: () => number | null; storms: () => unknown; desktops: () => unknown; diskUse: (row: ContraptionRow) => DiskUse | null };
   sweepMs?: number;
 };
@@ -65,7 +67,7 @@ export function publishLive(d: LiveDeps) {
       disk: Object.fromEntries(store.listContraptions().map((r) => [r.name, s.diskUse(r)])), units: units.rows, jobs: jobList(),
     };
     const projects = store.listProjects();
-    const delta: SnapDelta = { status, builds: Object.fromEntries(projects.map((p) => [p.id, d.builds(p.id)])), ownScheme: d.ownScheme(), previews: d.previews };
+    const delta: SnapDelta = { status, ships: d.ships(), builds: Object.fromEntries(projects.map((p) => [p.id, d.builds(p.id)])), ownScheme: d.ownScheme(), previews: d.previews };
     const json = JSON.stringify(delta);
     if (json !== lastOther) d.publish(delta);
     lastOther = json;

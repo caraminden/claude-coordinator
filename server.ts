@@ -75,19 +75,12 @@ import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { publishLive } from './src/reader-live.ts';
 import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, upgrades, type Statics } from './src/front.ts';
-import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
-import { jobRoutes } from './src/routes/jobs.ts';
-import { ciStoreRoutes } from './src/routes/ci-store.ts';
+import { agentRoutes } from './src/routes/machines.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
-import { desktopRoutes } from './src/routes/desktop.ts';
 import { ciPublisher, DesktopFeeds } from './src/desktop-feed.ts';
 import { Launchers } from './src/desktop-launcher.ts';
 import { CiStore } from './src/ci-store.ts';
 import { CiMirror, ghDownload } from './src/ci-mirror.ts';
-import { appRoutes } from './src/routes/app.ts';
-import { pushRoutes } from './src/routes/push.ts';
-import { peopleRoutes } from './src/routes/people.ts';
-import { unitRoutes } from './src/routes/units.ts';
 import { DEPLOY_DIR } from './src/routes/units.ts';
 import { checkUnits, problemKeys, summary as unitSummary } from './src/unit-drift.ts';
 import { Credentials, sealKey } from './src/credentials.ts';
@@ -97,7 +90,7 @@ import { OutsideSpend } from './src/outside-spend.ts';
 import { Contraptions, DEFAULT_CONTRAPTIONS_DIR } from './src/contraptions.ts';
 import { AlertWakes, type AlertPart } from './src/alert-wakes.ts';
 import { AppServices, folderHolds, manifestOn, serviceOptions, ServiceError } from './src/app-services.ts';
-import { contraptionRoutes, startDeploy } from './src/routes/contraptions.ts';
+import { startDeploy } from './src/routes/contraptions.ts';
 import { AUDIT_DAYS, ContraptionTurns } from './src/contraption-turns.ts';
 import { sweepMedia } from './src/contraption-media.ts';
 import { sweepOrphanTmp } from './src/tmp-sweep.ts';
@@ -118,15 +111,12 @@ import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { TimerAlerts } from './src/timer-alerts.ts';
 import { ErrorDigest } from './src/contraption-errors.ts';
-import { ensureCoordinatorFor, projectRoutes } from './src/routes/projects.ts';
+import { ensureCoordinatorFor } from './src/routes/projects.ts';
 import { KitSync, type KitSyncState } from './src/kit-sync.ts';
-import { reviewRoutes } from './src/routes/reviews.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
 import { MinionIndexer } from './src/minion-index.ts';
-import { setLabels, ticketRoutes } from './src/routes/tickets.ts';
-import { usageRoutes } from './src/routes/usage.ts';
+import { setLabels } from './src/routes/tickets.ts';
 import { usageName } from './src/usage-ledger.ts';
-import { memoryCuratorRoutes } from './src/routes/memory-curator.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
@@ -149,8 +139,7 @@ import { ApkReader, CiPackageReader, ContraptionReader, FileReader, LandsInFligh
 import type { PrSnapshot } from './src/github.ts';
 import { TargetFinder, type Found } from './src/release-targets.ts';
 import { CiRuns } from './src/ci-wait.ts';
-import { fileRoutes } from './src/routes/files.ts';
-import { skillRoutes } from './src/routes/skills.ts';
+import { apiRoutes } from './src/routes/all.ts';
 import { KIT_DIR, listSkills, warmUsage } from './src/skills.ts';
 import { themeCss } from './src/theme.ts';
 import { checkpointOffThread } from './src/checkpoint.ts';
@@ -1813,7 +1802,7 @@ runner.onBudgetWake = (ticketId, text) => {
   const ticket = store.getTicket(ticketId);
   if (ticket) tellTaskmaster(app, ticket, text, false, true, 'ask', true).catch((e) => console.error(`[budget] minion ${ticketId}:`, e));
 };
-const routes = router([...usageRoutes, ...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...desktopRoutes, ...pushRoutes, ...unitRoutes, ...contraptionRoutes, ...skillRoutes]);
+const routes = router(apiRoutes);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.
 const BACKUP_SCHEME = 2;
@@ -2015,6 +2004,7 @@ if (process.env.CITADEL_FRONT !== '0') {
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
   publishLive({
     publish: throughFront.publish, store, runner, builds: (id) => builds.get(id), ownScheme: () => ownScheme()?.id ?? null, previews: !!previews, status,
+    ships: () => ({ queue: waits.queue, releases: releases.view(() => true) }),
     statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, readerMs: () => answerProbe.readerMs, storms: () => memoryStorms.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
     ...(SETTLED_ROUTE && Number(process.env.CITADEL_READER_SWEEP_MS) ? { sweepMs: Number(process.env.CITADEL_READER_SWEEP_MS) } : {}),
   });

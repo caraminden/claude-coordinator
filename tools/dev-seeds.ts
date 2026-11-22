@@ -17,6 +17,7 @@ import { pacificDay } from '../src/pacific.ts';
 import { jobStage, jobView, kindHash, type JobKind } from '../src/machine-jobs.ts';
 import { loopKey, type LoopState } from '../src/minion-relay.ts';
 import { queueKey } from '../src/minion-queue.ts';
+import { sleepKey } from '../src/needs.ts';
 import { CARD_OPTIONS } from '../src/welcome.ts';
 import { memoryFolders, readFolder } from '../src/memory-files.ts';
 import { checkChanges, countLine } from '../src/memory-curator.ts';
@@ -445,6 +446,35 @@ mock.boards('#takes', { boards: [
       const row = c.store.addEvent(t.id, 'user_message', { text: 'Please start with the docs page first.', author: c.who, mail: true, parked: true });
       c.store.setSetting(queueKey(t.id), { held: [{ author: c.who, text: 'Please start with the docs page first.', images: [], id: row.id, parked: '2026-11-17 19:35' }] });
       return route(c, t);
+    },
+  },
+  asleep: {
+    about: 'two minions put to sleep (#1636): one waiting on a question card, one on a plan; plus an awake one with a card, for Needs you',
+    seed(c) {
+      const t = minion(c, 'Badge colours, asleep', { note: 'needs a pick: badge colours' });
+      const w = chat(c, t, 2);
+      w.asked('Fix the unread badges in dark mode.');
+      w.init();
+      w.said('Two ways to fix the contrast; which do you want?');
+      const e = w.put('question', { id: hex(), questions: [{ question: 'How should unread badges look in dark mode?', header: 'Badge style', multiSelect: false, options: [
+        { label: 'Solid accent', description: 'A filled pill: 7.1:1 contrast.', recommended: true },
+        { label: 'Outlined', description: 'A 1px outline: 4.6:1 contrast.' },
+      ] }] });
+      w.done('Asked which badge style to use.');
+      c.store.setSetting(sleepKey(t.id), { at: Date.now() - 3 * 3600_000, by: c.who });
+      const t2 = minion(c, 'Docs page rewrite, asleep', { state: 'ready', note: 'ready to ship' }, 'chore');
+      const w2 = chat(c, t2, 1);
+      w2.asked('Rewrite the docs landing page.');
+      w2.init();
+      w2.done('Rewritten; ready to ship.');
+      c.store.setSetting(sleepKey(t2.id), { at: Date.now() - 26 * 3600_000, by: c.who });
+      const t3 = minion(c, 'Sidebar spacing, awake', { note: 'needs a pick: spacing' });
+      const w3 = chat(c, t3, 1);
+      w3.asked('Tighten the sidebar spacing.');
+      w3.init();
+      w3.put('question', { id: hex(), questions: [{ question: 'How tight?', header: 'Spacing', multiSelect: false, options: [{ label: '4 px', recommended: true }, { label: '6 px' }] }] });
+      w3.done('Asked how tight.');
+      return route(c, t, e);
     },
   },
   'limit-accounts': {

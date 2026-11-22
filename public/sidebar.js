@@ -517,11 +517,12 @@ export function threadRow(t, href = threadHref(t)) {
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
   // Unread (a dot and a bold title) marks a row with something for a person that changed since you last opened it.
-  const yours = !coord && st.rank === 0 ? ' yours' : '';
+  // Asleep (#1636): no tint and grey chips, so its "answer now" stops shouting until someone wakes it.
+  const asleep = !coord && t.status !== 'closed' && !!t.asleep;
+  const yours = !coord && !asleep && st.rank === 0 ? ' yours' : '';
   const unread = !coord && rowUnread(t, st, isSeen(t)) ? ' unread' : '';
   // No one-tap replies on list rows (#130): a stray tap on "Merge it" would ship work nobody opened.
-  const asleep = !coord && t.status !== 'closed' && !!t.asleep;
-  return h('a', { class: `thread-row s-${t.status} f-${st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${spend ? ' spend' : ''}${active ? ' active' : ''}${asleep ? ' asleep' : ''}`, href, title: details, 'data-id': t.id },
+  return h('a', { class: `thread-row s-${t.status} f-${asleep ? 'idle' : st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${spend ? ' spend' : ''}${active ? ' active' : ''}${asleep ? ' asleep' : ''}`, href, title: details, 'data-id': t.id },
     h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), asleep ? wakeMark(t) : '', h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     // Messages the loop guard holds for a person (#1067; Josh, 2026-11-19: "a minion badge for the loop guard"): Continue is in its chat.

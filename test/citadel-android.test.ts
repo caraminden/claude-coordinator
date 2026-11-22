@@ -526,14 +526,16 @@ test('a mic step interrupted while it brings the emulator up lets go of the scre
   // A starter that never answers holds the step inside up(), the window where SIGTERM used to find no trap and
   // leave the screen held for the lease's two minutes (the CI flake: bash's own subshells there named the wav).
   const open: import('node:net').Socket[] = [];
-  let asked = false;
-  const starter = createServer((s) => { asked = true; open.push(s); });
+  let asked = false, gone = false;
+  const starter = createServer((s) => { asked = true; open.push(s); s.on('close', () => (gone = true)).resume(); });
   await tmp.serve(starter);
   try {
     const m = tmp.spawn(helper, ['mic', wav], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'M', CITADEL_ANDROID_STARTER: String((starter.address() as AddressInfo).port) }, stdio: 'ignore' });
     const done = new Promise<number | null>((r) => m.on('exit', r));
     await until('up to ask the starter', async () => asked);
     assert.match(readFileSync(join(locks, 'android.who'), 'utf8'), /^\d+\tM\n$/, 'the step has the screen');
+    // Still asking (poke gives up after 5 s), so the signal lands inside up(), not in a later play.
+    assert.ok(!gone, 'the ask is still in flight');
     m.kill('SIGTERM');
     // The trap runs once the ask in flight ends; ending it here keeps the test from waiting out poke's 5 s.
     for (const s of open) s.destroy();

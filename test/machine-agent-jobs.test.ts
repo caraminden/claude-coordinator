@@ -62,6 +62,16 @@ if (cmd === 'run') {
 `);
 const fakeSmi = join(root, 'nvidia-smi.mjs');
 writeFileSync(fakeSmi, `console.log('42, 5120\\n');`);
+// A GPU sample that takes as long as a test says: it logs its start to the folder it is given, then waits there for a `go` file.
+const slowSmi = join(root, 'slow-smi.mjs');
+writeFileSync(slowSmi, `
+import { appendFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+const dir = process.argv[2];
+appendFileSync(join(dir, 'smi.log'), '"sample"\\n');
+const look = () => (existsSync(join(dir, 'go')) ? console.log('42, 5120') : setTimeout(look, 20));
+look();
+`);
 
 const box = (id: number) => join(fakes, `citadel-job-${id}.json`);
 const container = (id: number) => (existsSync(box(id)) ? JSON.parse(readFileSync(box(id), 'utf8')) : null);
@@ -129,8 +139,8 @@ const block = (over: object = {}) => ({ dir: jobsDir, folders: new Map([['voice'
 
 const runners: any[] = [];
 after(() => runners.forEach((r) => r.close()));
-function runner(b: object | null = block(), log: (line: string) => void = () => {}) {
-  const r = new JobRunner({ block: b, appUrl, token: 'machine-key', podman: [node, fakePodman, fakes], nvidiaSmi: [node, fakeSmi], tickMs: 60, graceS: 1, log });
+function runner(b: object | null = block(), log: (line: string) => void = () => {}, over: object = {}) {
+  const r = new JobRunner({ block: b, appUrl, token: 'machine-key', podman: [node, fakePodman, fakes], nvidiaSmi: [node, fakeSmi], tickMs: 60, graceS: 1, log, ...over });
   runners.push(r);
   return r;
 }
@@ -677,4 +687,35 @@ test('a reply the agent cannot POST is tried again; a 4xx is the answer (MA6)', 
   assert.equal((await sendRetrying(async () => (++n, { status: 410 }), () => {}, [0, 0])).status, 410);
   assert.equal(n, 1);
   await assert.rejects(sendRetrying(async () => { throw new Error('down'); }, () => {}, [0, 0]), /down/);
+});
+
+// ---------- slow ticks (#1550) ----------
+
+test('a tick still waiting for its GPU sample is not joined by the next one', async () => {
+  const dir = mkdtempSync(join(root, 'smi-'));
+  const r = runner(block(), () => {}, { nvidiaSmi: [node, slowSmi, dir], tickMs: 5 });
+  const samples = () => jsonLines(join(dir, 'smi.log')).length;
+  const msg = start();
+  await r.handle(msg);
+  try {
+    await until('the first sample starts', () => samples() >= 1, undefined, statesTail);
+    // The witness: a stop is a podman call, the wait seeing it and three calls to the app, many 5 ms ticks long.
+    await r.handle({ type: 'job.stop', id: msg.id });
+    await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
+    assert.equal(samples(), 1, 'a second nvidia-smi started while the first was still out');
+  } finally {
+    writeFileSync(join(dir, 'go'), '');
+  }
+});
+
+test('a GPU sample that never comes back is given up on, and the ticks go on', async () => {
+  // No go file here: every sample hangs until the runner kills it.
+  const dir = mkdtempSync(join(root, 'smi-'));
+  const r = runner(block(), () => {}, { nvidiaSmi: [node, slowSmi, dir], smiTimeoutMs: 100 });
+  const msg = start();
+  await r.handle(msg);
+  // The first running report is the launch's own; each later one is a tick that got past its sample, with no numbers.
+  await until('two ticks report without GPU numbers', () => statesOf(msg.id).filter((s: any) => s.state === 'running' && s.gpu_pct === null).length >= 3, undefined, statesTail);
+  await r.handle({ type: 'job.stop', id: msg.id });
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
 });

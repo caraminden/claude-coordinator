@@ -1252,13 +1252,19 @@ export function refuseStart(msg, block) {
  * null; `podman` and `nvidiaSmi` are commands as lists (tests hand it fakes). Reports go to the app as they happen.
  */
 export class JobRunner {
-  constructor({ block, appUrl, token, log = () => {}, podman = ['podman'], nvidiaSmi = ['nvidia-smi'], tickMs = 10_000, graceS = 60 }) {
-    Object.assign(this, { appUrl, token, log, podman, nvidiaSmi, tickMs, graceS });
+  constructor({ block, appUrl, token, log = () => {}, podman = ['podman'], nvidiaSmi = ['nvidia-smi'], tickMs = 10_000, graceS = 60, smiTimeoutMs = 30_000 }) {
+    Object.assign(this, { appUrl, token, log, podman, nvidiaSmi, tickMs, graceS, smiTimeoutMs });
     this.jobs = new Map();
     this.children = new Set();
     this.ticks = 0;
     this.lastSample = Date.now();
-    this.timer = setInterval(() => this.tick().catch((err) => this.log(`Jobs: ${err.message}`)), tickMs);
+    // One tick at a time (#1550): a tick that outlasts the interval (a slow nvidia-smi, the app not answering) was joined
+    // by the next, each starting its own nvidia-smi and reports, which under load slowed every later one.
+    this.timer = setInterval(() => {
+      if (this.ticking) return;
+      this.ticking = true;
+      this.tick().catch((err) => this.log(`Jobs: ${err.message}`)).finally(() => (this.ticking = false));
+    }, tickMs);
     this.timer.unref();
     this.block = null;
     this.closed = false;
@@ -1311,12 +1317,12 @@ export class JobRunner {
     for (const c of this.children) c.kill();
   }
 
-  /** A podman (or nvidia-smi) call; resolves with its exit code and output, never rejects. */
-  exec(cmd, args) {
+  /** A podman (or nvidia-smi) call; resolves with its exit code and output, never rejects. Killed after `timeout` ms, if given. */
+  exec(cmd, args, timeout) {
     return new Promise((done) => {
       let stdout = '';
       let out = '';
-      const p = spawn(cmd[0], [...cmd.slice(1), ...args], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const p = spawn(cmd[0], [...cmd.slice(1), ...args], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], timeout });
       this.children.add(p);
       p.stdout.on('data', (d) => ((stdout += d), (out += d)));
       p.stderr.on('data', (d) => (out += d));
@@ -1713,7 +1719,8 @@ export class JobRunner {
 
   /** Whole-GPU use now (nvidia-smi sees Windows' own too), or null without one. */
   async sampleGpu() {
-    const r = await this.exec(this.nvidiaSmi, ['--query-gpu=utilization.gpu,memory.used', '--format=csv,noheader,nounits']);
+    // A hung nvidia-smi is killed: the one tick waits for it, and the time limits with it.
+    const r = await this.exec(this.nvidiaSmi, ['--query-gpu=utilization.gpu,memory.used', '--format=csv,noheader,nounits'], this.smiTimeoutMs);
     const [pct, vram] = (r.code === 0 ? r.stdout.split('\n')[0] : '').split(',').map((v) => Number(v.trim()));
     return Number.isFinite(pct) && Number.isFinite(vram) ? { pct, vram } : null;
   }
@@ -1722,6 +1729,7 @@ export class JobRunner {
   async tick() {
     const live = [...this.jobs.values()].filter((j) => ['starting', 'running', 'paused'].includes(j.state) && !j.final);
     const now = Date.now();
+    // shortcut: a tick longer than two intervals (the app not answering) leaves gpu_busy_s short by the rest of it; count from the tick's end if that number is ever more than a display.
     const dt = Math.min(now - this.lastSample, 2 * this.tickMs) / 1000;
     this.lastSample = now;
     const slow = ++this.ticks % DISK_CHECK_TICKS === 0;

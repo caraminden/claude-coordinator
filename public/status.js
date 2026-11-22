@@ -305,6 +305,7 @@ function citadelTiles(c, days, now, ships, redraw) {
     ...(c.jobs?.length ? [jobsTile(c.jobs, now)] : []),
     ...(c.checks ? [checksTile(c.checks, now)] : []),
     ...(c.host.cpu ? [cpuTile(c.host.cpu, now)] : []),
+    answerTile(c.host.answer, now),
     cacheTile(c.host, now, c.verdict),
     tile('Starved', host?.cpu_psi == null ? 'No reading yet' : `CPU ${host.cpu_psi}% · memory ${host.mem_psi ?? 0}%`, 'How long work waited for a core or for memory over the last minute; background passes pause at 50% CPU or 20% memory',
       hourLine(c.host.series.filter((s) => s[4] != null), 4, { from, to: now, label: 'CPU pressure each hour, at its highest', rule: 50, tip: (v) => `CPU pressure ${v}% at its highest` }),
@@ -332,6 +333,23 @@ function citadelTiles(c, days, now, ships, redraw) {
     backupTile(c.backup, now),
     ...c.slots.map(slot),
   ];
+}
+
+/**
+ * Answer time (#1559): one real GET /api/health a second from a worker thread, closed into a window every 5 minutes. The tile shows the
+ * newest probe, the last window's p95 against the target and the last day's p95 as a line with the target's p95 as its rule.
+ */
+const ms = (v) => (v == null ? '–' : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);
+function answerTile(a, now) {
+  const key = 'answer';
+  if (!a?.probing) return tile('Answer time', 'Not probing here', 'The probe runs in the live server only', null, { key, chart: '' });
+  const l = a.latest, t = a.target;
+  const target = `target: 95% within ${ms(t.p95)}, 99% within ${ms(t.p99)}, none over ${ms(t.max)}, at load up to ${t.load} and ${t.turns} running turns`;
+  const max = Math.max(a.line.p95 * 2, ...a.rows.map((r) => r[2]));
+  return tile('Answer time', a.now == null && !l ? 'No reading yet' : `${ms(a.now)} now`,
+    l ? `Last 5 min: p95 ${ms(l.p95)}, p99 ${ms(l.p99)}, worst ${ms(l.max)} · ${Math.round(l.over * 100)}% over 0.5 s · ${target}` : target,
+    hourLine(a.rows, 2, { from: now - 24 * 3_600_000, to: now, label: 'answer time p95 for each 5 minutes over the last day', max, rule: t.p95, tip: (v) => `p95 ${ms(v)}` }),
+    { tone: a.alert ? 'warn' : null, key, chart: `p95 per 5 min, last day: ${a.rows.slice(-24).map((r) => `${pacificClockBare(r[0])} ${ms(r[2])}`).join(', ')}; alert line p95 ${ms(a.line.p95)}, p99 ${ms(a.line.p99)}` });
 }
 
 /**

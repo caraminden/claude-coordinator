@@ -12,6 +12,7 @@ import type { DiskUse, UnitState } from './app-services.ts';
 import { pacificDay, pacificStamp } from './pacific.ts';
 import { join } from 'node:path';
 import { pressure } from './pressure.ts';
+import { AnswerProbe, parseWindow, alertStep, describe, INTERIM, TARGET, SETTING_P95, SETTING_P99, type AnswerWindow } from './answer-time.ts';
 import { readLedger, ledgerSteps, cpuTable, cpuHours, CPU_GROUPS, type CpuWindow, type CpuHour } from './cpu-ledger.ts';
 import { stopEvent, type StopMark } from './sd-watchdog.ts';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
@@ -193,6 +194,8 @@ export interface StatusDeps {
   disk?: (dir: string) => Promise<{ total: number; free: number }>;
   /** The CPU ledger reading (#1332); the real cgroups unless a test says otherwise. */
   cpuLedger?: () => Promise<unknown>;
+  /** The answer-time probe (#1559) and how many turns are running; left out in a preview or a test that doesn't probe. */
+  answer?: { probe: Pick<AnswerProbe, 'take' | 'lastMs'>; turns: () => number };
   /** The file-cache reading (#1501); the real kernel counters and fincore unless a test says otherwise. */
   cache?: (now: number) => Promise<import('./cache-health.ts').CacheReading>;
   /** The database warmer's last pass (#1560, src/db-warmer.ts); null with no warmer. */
@@ -241,14 +244,38 @@ export class StatusPage {
         disk_total: disk.total, disk_free: disk.free, load1: loadavg()[0], rss: process.memoryUsage.rss(), cpu_psi: psi.cpu, mem_psi: psi.mem,
         io_psi: psi.io, swap_used: Number.isFinite(mem.swap) ? mem.swap : null,
         cpu_ledger: ledger ? JSON.stringify(ledger) : null,
+        answer_time: ((w) => (w ? JSON.stringify(w) : null))(this.deps.answer?.probe.take(loadavg()[0], this.deps.answer.turns())),
       };
       this.deps.store.addHostSample(s);
       this.checkCold(at);
+      this.checkAnswer(at);
       return s;
     } catch (err: any) {
       console.error(`Status sample failed: ${err?.message ?? err}`);
       return null;
     }
+  }
+
+  /** The alert's line: the settings, else the interim line (p95 under 250 ms, p99 under 1 s) until the target is switched on. */
+  answerLine() {
+    const { store } = this.deps;
+    return { p95: store.getSetting<number>(SETTING_P95) ?? INTERIM.p95, p99: store.getSetting<number>(SETTING_P99) ?? INTERIM.p99 };
+  }
+
+  /** #1559: ALERT_RUN windows in a row outside the line wake the Taskmaster once ('answer-slow'); the same count inside clears it ('answer-ok'). */
+  checkAnswer(now: number) {
+    const { store, tell, ownScheme } = this.deps;
+    const windows = store.hostSamples(now - 2 * 3_600_000).flatMap((r) => parseWindow(r.answer_time) ?? []);
+    const last = store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1);
+    const line = this.answerLine();
+    const step = alertStep(windows, line, last?.kind === 'answer-slow');
+    if (step === 'ok') store.addHealthEvent('answer-ok', now, null, 'answer time is back inside the line');
+    if (step !== 'slow') return;
+    const w = windows.at(-1)!;
+    const text = `The server's answer time missed its line three samples in a row (p95 over ${line.p95} ms or p99 over ${line.p99} ms, at a load up to ${TARGET.load} and ${TARGET.turns} running turns). Latest window: ${describe(w)}. The Status page's Answer time tile has the day. This is the one alert until it clears.`;
+    store.addHealthEvent('answer-slow', now, null, describe(w));
+    const own = ownScheme();
+    if (own != null) tell?.(own, text);
   }
 
   /** #1501: the database mostly out of memory while the box has plenty free, for COLD_SAMPLES readings in a row: one 'cache-cold' health event per spell. */
@@ -259,6 +286,12 @@ export class StatusPage {
     if (store.healthEventsSince(['cache-cold'], now - 6 * 3_600_000).length) return;
     const r = rows.at(-1)!;
     store.addHealthEvent('cache-cold', now, null, `${Math.round((r.db_cached ?? 0) / 1048576)} MB of the ${Math.round((r.db_size ?? 0) / 1048576)} MB database in memory for ${COLD_SAMPLES} readings, with ${(r.mem_avail / 1024 ** 3).toFixed(1)} GB available`);
+  }
+
+  /** The Answer time tile's numbers: each window of the last day, the newest probe, the line and the target. */
+  private answerData(samples: HostSample[], now: number) {
+    const rows = samples.filter((r) => r.at >= now - DAY_MS).flatMap((r) => { const w = parseWindow(r.answer_time); return w ? [[r.at, w] as [number, AnswerWindow]] : []; });
+    return { rows: rows.map(([at, w]) => [at, w.p50, w.p95, w.p99, w.max, w.over, w.load, w.turns]), latest: rows.at(-1) ? { at: rows.at(-1)![0], ...rows.at(-1)![1] } : null, now: this.deps.answer?.probe.lastMs ?? null, probing: !!this.deps.answer, line: this.answerLine(), target: TARGET, alert: this.deps.store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1)?.kind === 'answer-slow' };
   }
 
   start() {
@@ -502,6 +535,8 @@ export class StatusPage {
     if (stormS >= STORM_WARN_S) reasons.push(['warn', `${stormS < 90 ? `${Math.round(stormS)} s` : `${Math.round(stormS / 60)} min`} stalled at a memory limit in the last day`, 'memory-limits']);
     const cold = store.healthEventsSince(['cache-cold'], dayAgo).at(-1);
     if (cold) reasons.push(['warn', `the database fell out of memory ${pacificStamp(cold.at)}: ${cold.detail}`, 'cache']);
+    const slow = store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1);
+    if (slow?.kind === 'answer-slow') reasons.push(['warn', `the server's answer time is over its line since ${pacificStamp(slow.at)}: ${slow.detail}`, 'answer']);
     if (latest && latest.mem_avail / latest.mem_total < 0.1) reasons.push(['warn', 'under 10% of memory free', 'memory']);
     if (latest && latest.disk_free / latest.disk_total < 0.1) reasons.push(['warn', 'under 10% of disk free', 'disk']);
     if (cpuHigh) reasons.push(['warn', `load over ${cores * CPU_WARN_PER_CORE} on ${cores} cores for ${CPU_WARN_MS / 60_000} min`, 'cpu']);
@@ -518,7 +553,7 @@ export class StatusPage {
       canInvestigate: ciVisible,
       uptime: { bootAt, commit: this.deps.commit, reason: lastBoot?.detail ?? null, restarts: days.map((d) => restarts[d]), boots: boots.slice(-10).reverse().map((b) => ({ at: b.at, reason: b.detail, commit: b.commit_sha })) },
       stalls: { counts: days.map((d) => stallCount[d]), afterBoot: days.map((d) => stallBoot[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), work: stallWorkOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
-      host: { series, cache: [...cacheHours.values()], latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
+      host: { answer: this.answerData(samples, now), series, cache: [...cacheHours.values()], latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
       // Every periodic job (#1311), for those who see Citadel's scheme.

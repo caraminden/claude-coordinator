@@ -21,6 +21,7 @@ import { size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
+import { AnswerProbe } from './src/answer-time.ts';
 import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
 import { MemoryStorms } from './src/memory-storms.ts';
 import { Reaper, shownCommand } from './src/reaper.ts';
@@ -1738,6 +1739,8 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 // Memory-limit storms (#1280): a Citadel slice or container stalling at its MemoryHigh, read every 15 s, recorded for the Status page.
 const memoryStorms = new MemoryStorms({ record: (at, storm) => store.addHealthEvent('memory-high', at, BOOT_COMMIT ?? null, JSON.stringify(storm)) });
 // The Status page (#1123): perigee's memory and disk every 5 minutes, and this start recorded with why it happened.
+/** One real GET /api/health a second from a worker thread (#1559); starts once the server is bound. */
+const answerProbe = new AnswerProbe();
 const status = new StatusPage({
   warm: () => dbWarmer?.stats() ?? null,
   storms: () => memoryStorms.current(),
@@ -1745,6 +1748,7 @@ const status = new StatusPage({
   ciSnapshot: (canSee) => ciHealth.snapshot(canSee), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row),
   unitStates: PREVIEW ? undefined : (units) => services.unitStates(units),
   tell: (projectId, text) => tellHome(projectId, text),
+  answer: !BOOT_CHECK && !PREVIEW ? { probe: answerProbe, turns: () => runner.runningCount() } : undefined,
 });
 if (!BOOT_CHECK && !PREVIEW) {
   recordBoot(store, BOOT_COMMIT ?? '', BOOT_AT, readStop(DATA_DIR));
@@ -1946,7 +1950,7 @@ server.requestTimeout = 30 * 60_000;
 // Once up, a stray error is logged rather than fatal. Not before: a failed start (a port in use, a
 // database that won't open) must still exit non-zero so systemd restarts it.
 server.on('listening', keepServing);
-server.on('listening', () => (boundPort = (server.address() as AddressInfo).port));
+server.on('listening', () => { boundPort = (server.address() as AddressInfo).port; if (!BOOT_CHECK) answerProbe.start(boundPort); });
 
 // Under socket activation (deploy/claude-coordinator.socket) systemd holds the listening socket, fd 3,
 // across restarts: requests made while the server restarts wait for the next one instead of failing.

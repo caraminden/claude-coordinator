@@ -856,6 +856,11 @@ export class Runner {
     }
   }
 
+  /** Turns running now (the Status page's answer-time window records it). */
+  runningCount(): number {
+    return this.turns.size;
+  }
+
   isRunning(ticketId: number): boolean {
     return this.turns.has(ticketId);
   }

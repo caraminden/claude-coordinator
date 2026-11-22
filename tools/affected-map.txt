@@ -100,3 +100,7 @@ src/ci-health.ts: test/judges.test.ts
 src/ci-numbers.ts: test/judges.test.ts
 src/judges.ts: test/judges.test.ts
 tools/judge-replays/**: test/judges.test.ts
+
+# The answer-time probe and the per-turn cost budget (#1559).
+src/answer-time.ts: test/answer-time.test.ts test/turn-cost.test.ts test/status-page.test.ts
+test/turn-cost.json: test/turn-cost.test.ts

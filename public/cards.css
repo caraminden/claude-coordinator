@@ -71,7 +71,7 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 /* A suggestion is not a pick: a dashed outline and a tag, never the picked fill (Cara, 2026-11-22). */
 .qcard .opt.suggested:not(.picked) { border-style: dashed; border-color: color-mix(in srgb, var(--running) 55%, var(--control-line)); }
 .qcard .opt.suggested:not(.picked) .rec { border: 1px solid color-mix(in srgb, var(--running) 40%, var(--line)); border-radius: 999px; padding: 0 0.4rem; margin-left: 0.2rem; }
-.qcard .progress { font-size: 0.85em; font-variant-numeric: tabular-nums; margin-right: 0.5rem; }
+.qcard .progress { font-variant-numeric: tabular-nums; line-height: 1; }
 .qcard .opt .desc { font-size: 0.85em; color: var(--muted); }
 .qcard .other { margin-top: 0.35rem; font-size: 0.92em; }
 .qcard .row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85em; }

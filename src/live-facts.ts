@@ -73,8 +73,8 @@ export async function newestRun(get: GhGet, slug: string, as: GithubEnv, branche
     conclusion: run.conclusion ?? null,
     url: String(run.html_url ?? ''),
     at: Date.parse(run.run_started_at ?? run.created_at),
-    // A land run is on the branch rebased onto main, so its commit never matches the head: say so rather than guess.
-    onHead: String(run.head_branch ?? '').startsWith('land/') ? null : !!tip && String(run.head_sha ?? '').startsWith(tip),
+    // A land run (or a ship's own check, #1567) is on the branch rebased onto main, so its commit never matches the head: say so rather than guess.
+    onHead: /^(land|check)\//.test(String(run.head_branch ?? '')) ? null : !!tip && String(run.head_sha ?? '').startsWith(tip),
   };
 }
 

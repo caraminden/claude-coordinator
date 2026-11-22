@@ -124,6 +124,9 @@ export function ci(r: ReturnType<typeof setup>) {
   mkdirSync(bin);
   const calls = join(r.dir, 'gh-calls');
   writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash
+# The check runner (#1567, tools/own-check.sh): none, and the question not logged, unless a test sets FAKE_CHECK_RUNNERS,
+# so every other land test is asked exactly what it was before.
+case "$*" in *citadel-ci-linux-check*) [ -n "\${FAKE_CHECK_RUNNERS:-}" ] || { echo 0; exit 0; } ;; esac
 echo "$*" >>"${calls}"
 case "$*" in
   *"/actions/runs?head_sha="*)
@@ -134,7 +137,7 @@ case "$*" in
     [ "\${FAKE_CI:-}" != garbage ] || { echo '<html><body>Bad gateway</body></html>'; exit 0; }
     lag=0
     if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi
-    n=$(grep -c '/actions/runners ' "${calls}") id=$((6 + n)) st=\${FAKE_CI:-green}
+    n=$(grep -c -e '/actions/runners ' -e citadel-ci-linux-check "${calls}") id=$((6 + n)) st=\${FAKE_CI:-green}
     if [ -n "\${FAKE_CI_DOWN_AT:-}" ] && [ ! -e "\$FAKE_CI_UP" ]; then
       grep -qx "$sha" "${calls}.shas" 2>/dev/null || echo "$sha" >>"${calls}.shas"
       [ "$(grep -nx "$sha" "${calls}.shas" | cut -d: -f1)" -lt "\$FAKE_CI_DOWN_AT" ] || exit 1
@@ -163,6 +166,7 @@ case "$*" in
     elif [ "\${FAKE_OLD_RUN%% *}" = "$sha" ]; then
       set -- \$FAKE_OLD_RUN; printf '3\\t%s\\t%s\\thttps://ci/3\\n' "$2" "$3"
     fi ;;
+  *citadel-ci-linux-check*) echo "\$FAKE_CHECK_RUNNERS" ;;
   *"/actions/runners?"*) [ -z "\${FAKE_RUNNERS_WAIT:-}" ] || { echo "\$FAKE_RUNNERS_WAIT"; exit 0; }; [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then cat "\$FAKE_RUNNERS_FILE"; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runners "*) [ "\${FAKE_RUNNERS:-1}" != down ] || exit 1; [ "\${FAKE_RUNNERS:-1}" != garbage ] || { echo '<html>Bad gateway</html>'; exit 0; }; if [ -n "\${FAKE_RUNNERS_FILE:-}" ]; then if [ "$(head -c1 "\$FAKE_RUNNERS_FILE")" = '{' ]; then jq "$4" "\$FAKE_RUNNERS_FILE"; else cat "\$FAKE_RUNNERS_FILE"; fi; else echo "\${FAKE_RUNNERS:-1}"; fi ;;
   *"/actions/runs/"[0-9]*"/jobs "*"rerun failed files alone"*) printf '%b' "\${FAKE_STEPS:-}" ;;

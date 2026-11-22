@@ -9,7 +9,7 @@ import { after, test } from 'node:test';
 import {
   CiHealth, addRunnerWaiter, onlineRunners, runnerWaiters, WAIT_MS, HUNG_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, itemText, neverStarted,
   trackOffline, servers, stuckProblems, hungProblems, redProblem, sharedHost, skippedJobs, verdictPair, type GhAnswer, type Job, type Run,
-  firstTickDelay, START_DELAY_MS, clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, LAND_RING_STREAK, LAND_RING_MS, RED_FIX_MS, type LandState,
+  firstTickDelay, START_DELAY_MS, clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, LAND_RING_STREAK, LAND_RING_MS, RED_FIX_MS, type LandState, runMinion,
 } from '../src/ci-health.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import type { AlertPart } from '../src/alert-wakes.ts';
@@ -1695,4 +1695,10 @@ test("the CI page's Running now: each running job with its runner, start and min
     { labels: ['peek-auras-ci', 'self-hosted'], jobs: 3, runners: 1 },
     { labels: ['ubuntu-latest'], jobs: 1, runners: 0 },
   ], 'labels in any order are one queue; the offline runner is not counted; GitHub\'s own runners are none of the repo\'s');
+});
+
+test("runMinion: a land's run and a ship's own check (#1567) count for the minion whose branch they test", () => {
+  const tickets = [{ number: 1567, branch: 'ticket/1567-x', kind: 'ticket' }] as Parameters<typeof runMinion>[2];
+  for (const b of ['land/ticket/1567-x', 'check/ticket/1567-x', 'ticket/1567-x']) assert.equal(runMinion(b, 'abc', tickets, new Map()), 1567, b);
+  assert.equal(runMinion('other/ticket/1567-x', 'abc', tickets, new Map()), null);
 });

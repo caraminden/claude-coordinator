@@ -2,6 +2,7 @@
 // tests them in one CI run and ships them in one deploy; a red train is bisected, and its first red ship refused.
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -48,7 +49,7 @@ async function line(ships: Ship[], extra: Record<string, string> | ((dir: string
     assert.deepEqual(tickets(state), [], 'every ticket is gone');
     assert.deepEqual(existsSync(join(state, 'train')) ? readdirSync(join(state, 'train')) : [], [], 'no verdict is left');
   };
-  return { r, c, state, wts, was, out, go, runs, deployed, subjects, done };
+  return { r, c, state, env, wts, was, out, go, runs, deployed, subjects, done };
 }
 // A rider's own shipped line: main at its own train commit, which its branch now points at, and how it went live.
 function shipped(l: Awaited<ReturnType<typeof line>>, d: { status: number | null; stderr: string }, i: number, front: number, of: number) {
@@ -1126,4 +1127,91 @@ test('early next train: with no free runner nothing is pushed early, and with LA
     assert.doesNotMatch(offDone.map((d) => d.stderr).join('\n'), /early next train/, how);
     off.done();
   }
+});
+
+// A ship's own check (#1567, tools/own-check.sh; Cara, 2026-11-22, A "Gated, after C and B"): with someone in line and
+// the check runner online, a ship's CI runs on that runner before it joins the line.
+const own = (d: string) => ({ ...shared(d), FAKE_CHECK_RUNNERS: '1', LAND_OWN_CHECK_POLL: '0.05' });
+const pushLog = (r: ReturnType<typeof setup>) => writeFileSync(join(r.dir, 'hub.git', 'hooks', 'post-receive'), `#!/bin/sh\nwhile read -r old new ref; do echo "$new $ref" >>'${join(r.dir, 'pushes')}'; done\n`, { mode: 0o755 });
+const pushes = (dir: string) => (existsSync(join(dir, 'pushes')) ? readFileSync(join(dir, 'pushes'), 'utf8').trim().split('\n') : []);
+// Ship 2, landed while ship 1 holds the line in its deploy; ship 2 is refused before it gets a ticket, so line() can't wait for it.
+async function refusedBehind(change: [string, string], extra: Record<string, string>) {
+  const l = await line([{}], (d) => ({ ...own(d), ...extra }), pushLog);
+  const wt = join(l.r.dir, 'wt2');
+  git(l.r.source, 'worktree', 'add', '-q', '-b', 'ticket/2-x', wt);
+  l.r.commit(wt, ...change);
+  const d = await landAsync(wt, l.env, 150_000, () => {}); // (with no callback it keeps no stderr)
+  const [first] = await l.go();
+  assert.equal(first.status, 0, first.stderr);
+  return { l, d };
+}
+
+test("own check: green on the check runner, it joins the line and that run is its CI there, with no second run; alone in line, no check (#1567)", async () => {
+  const l = await line([{}, {}], own, pushLog);
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.doesNotMatch(done[0].stderr, /own check/, 'nobody was in line ahead of ship 1');
+  assert.match(done[1].stderr, /land: own check: its CI runs now on the check runner, on [0-9a-f]{7,} \(rebased onto main [0-9a-f]{7,}\), before it joins the line/);
+  assert.match(done[1].stderr, /land: own check: green in \d+ s \(https:\/\/ci\/\d+\), so it joins the line/);
+  const p = pushes(l.r.dir);
+  assert.ok(p.some((x) => x.endsWith(' refs/heads/check/ticket/2-x') && !/^0+ /.test(x)), `check/ticket/2-x pushed: ${p.join('; ')}`);
+  assert.ok(!p.some((x) => x.endsWith(' refs/heads/land/ticket/2-x')), `no land run pushed for ship 2: ${p.join('; ')}`);
+  assert.ok(!git(join(l.r.dir, 'hub.git'), 'for-each-ref', 'refs/heads/check/', 'refs/heads/check-base/'), 'no check branch is left on GitHub');
+  assert.equal(l.runs(), 2, "ship 1's run and ship 2's check, which was its CI in line too");
+  assert.deepEqual(retro(l.r.dir, 'own check · ').map((x) => x.replace(/\d+s$/, 'Ns')), ['own check · ticket/2-x · green · Ns']);
+  l.done();
+});
+
+test('own check: a burn-in red is refused before the line, with nobody waiting on it (#1567)', async () => {
+  const { l, d } = await refusedBehind(bad(2).change as [string, string], { FAKE_REAL: realOf(2), FAKE_STEP: 'burn in new and changed tests', FAKE_LOG: 'burn' });
+  assert.equal(d.status, 1, d.stderr);
+  assert.match(d.stderr, /own check: the burn-in of its new and changed tests failed on its commit rebased onto main \(https:\/\/ci\/\d+\): test\/p2\.test\.ts: failed in 3 of 10 copies at once\. A burn-in red is the ship's own, so it didn't join the line/);
+  assert.doesNotMatch(d.stderr, /in line for the deploy lock/);
+  assert.ok(!pushes(l.r.dir).some((x) => x.endsWith(' refs/heads/land/ticket/2-x')), 'it never got a run in line');
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1']);
+  l.done();
+});
+
+test('own check: a file that failed again alone in CI, and here fails with the ship and passes on main, is refused before the line (#1567)', async () => {
+  const { l, d } = await refusedBehind(bad(2).change as [string, string], { FAKE_REAL: realOf(2) });
+  assert.equal(d.status, 1, d.stderr);
+  assert.match(d.stderr, /own check: test\/p2\.test\.ts failed in its own CI run on its commit rebased onto main \(https:\/\/ci\/\d+\), and run alone here fail with this branch and pass on main, so it didn't join the line/);
+  assert.match(d.stderr, /citadel-test test\/p2\.test\.ts/);
+  assert.deepEqual(retro(l.r.dir, 'own check · ').map((x) => x.replace(/\d+s$/, 'Ns')), ['own check · ticket/2-x · red: test/p2.test.ts · Ns']);
+  l.done();
+});
+
+test('own check: a red of flakes alone joins the line, where CI decides (#1567)', async () => {
+  const l = await line([{}, { change: ['flaky.txt', 'x\n'] }], (d) => ({ ...own(d), FAKE_FLAKY_PATH: 'flaky.txt', FAKE_LOG: 'flakes' }));
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[1].stderr, /own check: red, but no test file failed again alone \(https:\/\/ci\/\d+\): flakes or a run cut off, so it joins the line/);
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'flaky.txt: x']);
+  l.done();
+});
+
+test('own check: a check runner busy for longer than a ship waits sends it to the line unchecked; with no check runner nothing is tried (#1567)', async () => {
+  let holder: ReturnType<typeof spawn> | undefined;
+  try {
+    const l = await line([{}, {}], own, (r) => {
+      const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+      mkdirSync(state, { recursive: true });
+      writeFileSync(join(state, 'own-check-run'), `${Math.floor(Date.now() / 1000)} ticket/9-x\n`);
+      writeFileSync(join(state, 'own-check-secs'), '1000\n');
+      holder = spawn('flock', [join(state, 'own-check.lock'), 'cat'], { stdio: ['pipe', 'ignore', 'ignore'] });
+    });
+    await until('the check lock is held', () => spawnSync('flock', ['-n', join(l.state, 'own-check.lock'), 'true']).status === 1);
+    const done = await l.go();
+    done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+    assert.match(done[1].stderr, /own check: ticket\/9-x's check has about 17 min to go, more than the 120 s a ship waits for it, so this joins the line unchecked/);
+    assert.doesNotMatch(done[1].stderr, /check runner, on/);
+    l.done();
+  } finally {
+    holder?.stdin?.end();
+  }
+  const off = await line([{}, {}], (d) => ({ ...own(d), FAKE_CHECK_RUNNERS: '0' }));
+  const done = await off.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.doesNotMatch(done.map((d) => d.stderr).join('\n'), /own check/);
+  off.done();
 });

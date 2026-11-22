@@ -26,6 +26,6 @@ test('the stretch stops at its cap, so the 3-minute backstop still decides a han
 
 test('the default core count is the box\'s, not the service cgroup quota (#1539)', async () => {
   const { cpus } = await import('node:os');
-  const { boxCores } = await import('../src/load-stretch.ts');
-  assert.equal(boxCores(), cpus().length);
+  const { cores } = await import('../src/host-signals.ts');
+  assert.equal(cores(), cpus().length);
 });

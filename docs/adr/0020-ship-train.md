@@ -6,7 +6,7 @@ Status: accepted, 2026-11-20 (#1166, from the idea handoff `handoffs/platform-sh
 Ships waited in line one at a time, and each took its own CI run and its own deploy. With about 15 minions working,
 the last one in line waited for every run ahead of it.
 
-- **Where it lives** (Josh, 2026-11-20: "New, smaller train"): in Citadel's own `tools/land.sh`, not the kit
+- **Where it lives** (superseded by ADR 0026, Cara, 2026-11-20: "We should probably standardize on one solution right?") (Josh, 2026-11-20: "New, smaller train"): in Citadel's own `tools/land.sh`, not the kit
   template's `CI_BATCH`. The template's batch is a different shape (it batches the CI wait of a scheme with no deploy
   lock), and other schemes copy that template, so this change stays out of it.
 - **Who rides** (Josh, 2026-11-20: "Rides like any ship"): any plain ship waiting in line, high-risk ones included. A

@@ -26,7 +26,7 @@ function laneSetup(files: string[], { lanes = LANES, extra = '', builtin = false
   writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) cat "$CI_DIR/runs.tsv" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null || echo 0 ;; esac\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\necho "$# ${1:0:12} ${2:-}" >>"$CI_DIR/status.log"\nread -r code <"$CI_DIR/${1:0:12}" 2>/dev/null || code=3\nexit "$code"\n', { mode: 0o755 });
   const checks = join(q.dir, 'checks');
-  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), CHECKS: checks, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', ...(batch ? { LAND_BATCH: batch } : {}) };
+  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), CHECKS: checks, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_BATCH: batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
   const started: ReturnType<typeof q.land>[] = [];
   const land = (i: number) => started[started.push(q.land(i, ciEnv)) - 1];
   type L = ReturnType<typeof land>;
@@ -78,6 +78,20 @@ test('lanes: --lane prints the lane and the path that decided it, by main\'s map
   assert.equal(lane('HEAD', 'no-such-base'), "full (couldn't diff HEAD against no-such-base)");
   const off = laneSetup(['docs/a.md'], { lanes: '' });
   assert.equal(spawnSync('bash', [join(off.wt, 'tools', 'land.sh'), '--lane'], { cwd: off.wt, encoding: 'utf8', env }).stdout.trim(), 'full (LANES is not set, so every landing is full)');
+});
+
+test('lanes: a path PIPELINE_FILES lists takes the full lane whatever the map says, as the list file itself does', () => {
+  const c = laneSetup(['docs/a.md'], { extra: 'PIPELINE_FILES=tools/pipe.txt\n' });
+  c.commit(c.main, 'tools/pipe.txt', '# the deploy script\ndocs/deploy/\n'); // main's list decides, as with the map
+  const next = (file: string) => {
+    c.commit(c.wt, file, 'x\n');
+    const r = spawnSync('bash', [join(c.main, 'tools', 'land.sh'), '--lane', 'HEAD', 'HEAD~1'], { cwd: c.wt, encoding: 'utf8', env });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim();
+  };
+  assert.equal(next('docs/b.md'), 'light docs/b.md');
+  assert.equal(next('docs/deploy/run.sh'), 'full docs/deploy/run.sh', 'light by the map, but part of the pipeline');
+  assert.equal(next('tools/pipe.txt'), 'full tools/pipe.txt');
 });
 
 test('lanes: a light landing runs no check and no CI and pushes nothing; a partial lane with no workflows runs only its own check', async () => {

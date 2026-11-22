@@ -96,3 +96,14 @@ export function queueSetup(branches: number, check = gated, config: Record<strin
   const landed = () => git(r.main, 'log', '--reverse', '--format=%s', 'main').split('\n').slice(1);
   return { ...r, state, wts, tickets, issued, phase, land, open, landed };
 }
+
+// land_rebased (Peek's ask, 2026-11-20): a file generated from the whole tree, rebuilt on the branch once it sits on
+// today's main, before its check. It logs each call and commits rebased.txt naming the base it was given.
+export const rebasedHook = `land_rebased() {
+  echo "$1 $2" >>"$(git rev-parse --path-format=absolute --git-common-dir)/rebased.log"
+  echo "$1" >rebased.txt
+  git add rebased.txt
+  git commit -qm "rebased on $1"
+}
+`;
+export const rebasedCalls = (main: string) => { try { return readFileSync(join(git(main, 'rev-parse', '--absolute-git-dir'), 'rebased.log'), 'utf8').trim().split('\n'); } catch { return []; } };

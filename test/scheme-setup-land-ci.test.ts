@@ -20,7 +20,7 @@ function ciSetup(branches: number, { stack = '', batch = '', check = 'true', bui
   mkdirSync(bin);
   writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null || echo 0 ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
-  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', ...(batch ? { LAND_BATCH: batch } : {}) };
+  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_BATCH: batch === 'default' ? '' : batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
   const started: ReturnType<typeof q.land>[] = [];
   const land = (i: number, extra: Record<string, string> = {}) => started[started.push(q.land(i, { ...ciEnv, ...extra })) - 1];
   type L = ReturnType<typeof land>;
@@ -936,6 +936,150 @@ test("batches: when the head's push of main fails, each member says so in the un
     }
     assert.equal(c.mainAt(), td, 'main moved locally');
     assert.ok(landLockFree(c));
+  } finally {
+    c.stop();
+  }
+});
+
+test('batches: a scheme that sets no LAND_BATCH batches up to 4 (#1321), and the fifth in line gets the next batch', async () => {
+  const c = ciSetup(5, { stack: '1', batch: 'default', check: gated });
+  try {
+    const all = await c.lands(1, 2, 3, 4, 5);
+    c.open();
+    const t4 = await c.tip(all[3]);
+    assert.deepEqual(c.scratch(), [`land/ticket/4-x ${t4}`], 'one run for the first four');
+    c.verdict(t4, GREEN);
+    for (const [i, l] of all.slice(0, 4).entries()) {
+      assert.equal(await l.exit, 0, l.stderr());
+      assert.match(l.stderr().trimEnd().split('\n').pop()!, new RegExp(`^ship: landed [0-9a-f]{12} batch ${i + 1} of 4 deploy none$`));
+    }
+    assert.equal(c.mainAt(), t4);
+    const t5 = await c.tip(all[4]);
+    c.verdict(t5, GREEN);
+    assert.equal(await all[4].exit, 0, all[4].stderr());
+    assert.equal(all[4].stderr().trimEnd().split('\n').pop(), `ship: landed ${t5} batch 1 of 1 deploy none`);
+    assert.deepEqual(c.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4', 'f5.txt: 5']);
+  } finally {
+    c.stop();
+  }
+});
+
+test("batches: a landing that changes the pipeline (a PIPELINE_FILES path) ships alone, and the ones around it can't batch over it", async () => {
+  const c = ciSetup(3, { batch: 'default', stack: '1', check: gated, files: (i) => (i === 2 ? 'deploy/run.sh' : `f${i}.txt`), local: 'PIPELINE_FILES=pipe.txt\n' });
+  try {
+    c.commit(c.main, 'pipe.txt', '# the deploy script\ndeploy/\n'); // main's list counts: a trailing / covers the folder
+    const all = await c.lands(1, 2, 3);
+    c.open();
+    assert.match(all[1].stderr(), /deploy\/run\.sh is part of the pipeline, so this ships alone, in no batch/);
+    for (const l of all) {
+      const t = await c.tip(l);
+      c.verdict(t, GREEN);
+      assert.equal(await l.exit, 0, l.stderr());
+      assert.equal(l.stderr().trimEnd().split('\n').pop(), `ship: landed ${t} batch 1 of 1 deploy none`);
+      assert.deepEqual(c.sent(l), [t], 'its own run, on its own commit, once');
+    }
+    assert.doesNotMatch(all[0].stderr() + all[2].stderr(), /ships alone|landed in a batch/);
+    assert.deepEqual(c.landed(), ['pipe.txt: # the deploy script deploy/', 'f1.txt: 1', 'deploy/run.sh: 2', 'f3.txt: 3']);
+  } finally {
+    c.stop();
+  }
+});
+
+// land_deploy (#1321): logs its commit and where main's checkout is, waits for deploy.go, fails with deploy.fail.
+const deployHook = `land_deploy() {
+  local c
+  c=$(git rev-parse --path-format=absolute --git-common-dir)
+  echo "$1 $(git rev-parse HEAD)" >>"$c/deploy.log"
+  until [ -e "$c/deploy.go" ]; do sleep 0.05; done
+  [ ! -e "$c/deploy.fail" ] || return 3
+  echo deploying
+  echo live
+}
+`;
+const deploySetup = () => {
+  const c = ciSetup(3, { stack: '1', batch: '3', check: gated, local: deployHook });
+  const deploys = () => { try { return readFileSync(join(c.state, 'deploy.log'), 'utf8').trim().split('\n'); } catch { return []; } };
+  const waiting = () => c.tickets().filter((t) => c.phase(t) === "waiting for its batch's deploy").length;
+  return { ...c, deploys, waiting };
+};
+
+test('batches: with land_deploy the head deploys the batch once, in the main checkout, before main is pushed; the members wait for its word', async () => {
+  const c = deploySetup();
+  try {
+    const before = c.mainAt();
+    const all = await c.lands(1, 2, 3);
+    c.open();
+    const td = await c.tip(all[2]);
+    c.verdict(td, GREEN);
+    await until('the members waiting on the deploy', () => c.waiting() === 2);
+    const full = git(c.main, 'rev-parse', td);
+    assert.deepEqual(c.deploys(), [`${full} ${full}`], 'once, for the deepest commit, with main checked out there');
+    assert.equal(c.mainAt(), td, 'main moved');
+    assert.equal(git(c.origin, 'rev-parse', 'main').slice(0, 12), before, 'and is not pushed while it deploys');
+    assert.deepEqual(all.map((l) => l.child.exitCode), [null, null, null], 'nobody has said it shipped');
+    writeFileSync(join(c.state, 'deploy.go'), '');
+    for (const [i, l] of all.entries()) {
+      assert.equal(await l.exit, 0, l.stderr());
+      assert.match(l.stderr().trimEnd().split('\n').pop()!, new RegExp(`^ship: landed [0-9a-f]{12} batch ${i + 1} of 3 deploy live$`));
+    }
+    assert.match(all[0].stderr(), /main is now at [0-9a-f]+ "f3\.txt: 3"\ndeploying\nlive\nland: land_deploy deployed [0-9a-f]{12} \(live\)/);
+    assert.equal(c.deploys().length, 1, 'the members deployed nothing');
+    assert.equal(git(c.origin, 'rev-parse', 'main').slice(0, 12), td, 'pushed once deployed');
+  } finally {
+    c.stop();
+  }
+});
+
+test('batches: a land_deploy that fails takes main back, and the head and every member say they did not ship', async () => {
+  const c = deploySetup();
+  try {
+    const before = c.mainAt();
+    const all = await c.lands(1, 2, 3);
+    c.open();
+    const td = await c.tip(all[2]);
+    c.verdict(td, GREEN);
+    await until('the members waiting on the deploy', () => c.waiting() === 2);
+    writeFileSync(join(c.state, 'deploy.fail'), '');
+    writeFileSync(join(c.state, 'deploy.go'), '');
+    for (const l of all) {
+      assert.equal(await l.exit, 1, l.stderr());
+      assert.match(l.stderr().trimEnd().split('\n').pop()!, /^ship: refused [0-9a-f]{12} batch \d of \d deploy back$/);
+    }
+    assert.match(all[0].stderr(), new RegExp(`land_deploy failed \\(exit 3\\), so main went back to ${before} and nothing shipped, nor did the others in its batch \\(ticket/2-x, ticket/3-x\\)`));
+    for (const l of all.slice(1)) assert.match(l.stderr(), new RegExp(`didn't ship: its batch's deploy failed, so main went back to ${before} without`));
+    assert.equal(c.mainAt(), before);
+    assert.equal(git(c.origin, 'rev-parse', 'main').slice(0, 12), before, 'never pushed');
+    assert.deepEqual(c.landed(), []);
+    assert.deepEqual(c.tickets(), []);
+    assert.ok(landLockFree(c));
+  } finally {
+    c.stop();
+  }
+});
+
+test('batches: a head killed while deploying leaves the lock free; its members say they did not ship, and the next landing takes main back first', async () => {
+  const c = deploySetup();
+  try {
+    const before = c.mainAt();
+    const all = await c.lands(1, 2, 3);
+    c.open();
+    const td = await c.tip(all[2]);
+    c.verdict(td, GREEN);
+    await until('the members waiting on the deploy', () => c.waiting() === 2);
+    all[0].child.kill('SIGKILL'); // its land_deploy goes on, waiting for deploy.go, and must not hold the lock
+    for (const l of all.slice(1)) {
+      assert.equal(await l.exit, 1, l.stderr());
+      assert.match(l.stderr(), new RegExp(`stopped while deploying [0-9a-f]{40}, which holds [0-9a-f]{12}, so it didn't ship: the next landing takes main back to ${before}`));
+    }
+    assert.equal(c.mainAt(), td, 'main still where the killed head moved it');
+    const again = c.land(2);
+    await until(`the next landing to take main back: ${again.stderr()}`, () => /the landing before this one stopped while deploying/.test(again.stderr()));
+    assert.match(again.stderr(), new RegExp(`stopped while deploying ${td}, so main went back to ${before}, where it found it`));
+    c.verdict(await c.tip(again), GREEN);
+    writeFileSync(join(c.state, 'deploy.go'), '');
+    assert.equal(await again.exit, 0, again.stderr());
+    assert.deepEqual(c.landed(), ['f2.txt: 2'], "the killed batch's commits never shipped");
+    assert.equal(git(c.origin, 'rev-parse', 'main').slice(0, 12), c.mainAt());
   } finally {
     c.stop();
   }

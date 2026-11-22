@@ -43,7 +43,8 @@
 #    main would conflict (git merge-tree), then SMOKE_CMD, the scheme's quick check, if it sets one, then (EARLY_CHECK)
 #    CHECK_LIGHT on the branch rebased onto main, so a red light check is refused before the line too. A fail says
 #    "smoke: …" and exits 1. LAND_SMOKE=0 skips it.
-# 1. Rebases the branch onto the local main. A conflict stops here.
+# 1. Rebases the branch onto the local main. A conflict stops here. Then land.local.sh's land_rebased, if it has one
+#    (just before step 3's check): a commit it makes ships with the branch.
 # 2. Refuses when the branch takes a number main already has (a migration, a version, a ledger id),
 #    as the "Numbered things" line in Project facts names them. No line, or "none": no check.
 #    And refuses a branch that removes what a recent landing added without naming it, such as a squash
@@ -59,7 +60,8 @@
 #    last of a batch pushes, and its run covers the commits of the ones ahead of it in the batch.
 # 5. Fast-forwards main in the scheme's main checkout to the commit; with batches, the head of the
 #    line moves it to the deepest commit of its batch CI passed, which lands every member up to there.
-#    Main only ever moves to a commit CI passed.
+#    Main only ever moves to a commit CI passed. Then land.local.sh's land_deploy, if it has one, once for that commit:
+#    if it fails, main goes back and nothing (none of the batch) ships.
 # 6. Pushes main to origin from the main checkout, never forced (not with PUSH_MAIN=0). A failed push is
 #    reported and main stays moved; the next landing pushes it again.
 # 7. Once main is pushed and the lock and the place in line are free: runs land.local.sh's land_after, if it
@@ -76,7 +78,8 @@
 # how it was run, before the smoke check: uncommitted changes, the wrong branch, a bad setting), is the one Citadel reads:
 #   ship: <landed|refused> <commit> batch <n> of <m> deploy <state|none>
 # <commit>: its own commit, 12 hex digits (the rebased one once it has one); batch: its place in the batch that
-# shipped together (1 of 1 alone; refused: the batch it was last in); deploy: none (this script deploys nothing).
+# shipped together (1 of 1 alone; refused: the batch it was last in); deploy: none (no land_deploy hook), back (it
+# failed and main went back), else the state its hook printed (live, restart; "done" when it printed none).
 # Exit 75 says refused too: the exit code tells a park apart. And a timing line goes to the retro log (TIMING_LOG).
 set -euo pipefail
 
@@ -147,8 +150,13 @@ CHECK_LIGHT=''
 # (below, "The stack"). 1: only the head of the line. Runners that can't carry three runs at once: 2.
 CI_STACK=${LAND_STACK_DEPTH:-3}
 # How many landings share one CI run (below, "Batches"): the stack then counts batches, and only the last
-# of each batch runs CI. 1: every landing runs its own, as above. A deep line on slow CI: 3 or 4.
-CI_BATCH=${LAND_BATCH:-1}
+# of each batch runs CI. 1: every landing runs its own, as above. A batch takes whoever is waiting and never waits
+# to fill. On only with a CI gate; a landing that changes the pipeline (PIPELINE_FILES below) ships alone.
+CI_BATCH=${LAND_BATCH:-4}
+# A file in the repo listing more of the pipeline's own files, besides tools/land.sh, tools/land.local.sh, .github/ and
+# the lanes map: one path a line, '#' comments, a trailing / for a folder ('tools/deploy.sh', 'deploy/'). A landing
+# that changes any of them never shares a batch (it ships alone) and keeps fast mode on the full gate.
+PIPELINE_FILES=${LAND_PIPELINE_FILES:-}
 # 0: main stays in the main checkout and is never pushed (a scheme whose origin isn't its own).
 PUSH_MAIN=1
 # Where each landing's timing line goes ("The timing line" below): <folder>/<UTC day>/land.md. The scheme's retro log
@@ -171,6 +179,17 @@ park() { say "$*"; exit 75; }
 #                                 lock and the place in line already free. The head of a batch runs it for each
 #                                 member it landed, from its own worktree: only the arguments name the landing.
 #                                 A failure (or an exit) in it is only warned about.
+#   land_deploy <commit>          deploys main once it moved to <commit>, in the main checkout, before main is
+#                                 pushed, holding the lock:
+#                                 whoever moves main runs it once (alone, or as the head for its whole batch; the
+#                                 members wait for its word). Its stdout's last line, one word, is the ship line's
+#                                 deploy state (live, restart; else "done"). Failed (exit non-zero, or a command in
+#                                 it failing: set -e holds): main goes back where it was, and the landing and every
+#                                 member of its batch say it didn't ship. None: nothing deploys (deploy none).
+#   land_rebased <base> <branch>  runs on the branch just rebased onto <base>, in its worktree, before its check, in
+#                                 every plain landing (fast mode too, the early check, and --into's merge), not
+#                                 --verify, --build or --full. A commit it makes ships with the branch (a generated
+#                                 map rebuilt on today's main); a failure, or changes left uncommitted, refuses it.
 #   land_failures                 reads a check's or CI's output on stdin and prints the ids of what failed, one a
 #                                 line (known reds and fast mode's ledger match on them): "<file>::<test>" where
 #                                 the output names the test, else "<file>". The one below reads node's test runner
@@ -203,8 +222,15 @@ fi
 
 # Lanes (the header at LANES). lane_of <base> <commit> <map's revision>: prints "<lane> <the path that decided it>"
 # for the paths <commit> changes since it forked from <base>, by the map as that revision has it.
+# The pipeline's paths, one pattern a line (the header at PIPELINE_FILES), its list as of <revision>: they never ride a
+# batch, keep fast mode's full gate, and take the full lane.
+pipeline_pats() {
+  printf '%s\n' tools/land.sh tools/land.local.sh '.github/*' ${LANES:+"$LANES"} ${PIPELINE_FILES:+"$PIPELINE_FILES"}
+  [ -z "$PIPELINE_FILES" ] || { git show "$1:$PIPELINE_FILES" 2>/dev/null || git show "HEAD:$PIPELINE_FILES" 2>/dev/null || true; } |
+    sed -e 's/[[:space:]]*#.*//' -e 's/[[:space:]]*$//' -e '/^$/d' -e 's|/$|/*|'
+}
 lane_of() {
-  local fork files f i l lane=light why='' words lanes=() pats=()
+  local fork files f i l p lane=light why='' words lanes=() pats=() pipe=()
   { fork=$(git merge-base "$1" "$2" 2>/dev/null) && files=$(git diff --no-renames --name-only -z "$fork" "$2" | tr '\0' '\n'); } 2>/dev/null ||
     { echo "full (couldn't diff ${2:0:12} against ${1:0:12})"; return 0; }
   [ -n "$files" ] || { echo "full (no changes)"; return 0; }
@@ -214,9 +240,10 @@ lane_of() {
     [[ $l =~ ^[a-z][a-z0-9_]*$ && $l != wait && $l != limit ]] || l=full # CHECK_WAIT and CHECK_LIMIT are this script's own
     for i in "${words[@]:1}"; do [[ $i != \#* ]] || break; lanes+=("$l") pats+=("$i"); done
   done < <(git show "$3:$LANES" 2>/dev/null)
+  mapfile -t pipe < <(pipeline_pats "$3")
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    case $f in "$LANES" | tools/land.sh | tools/land.local.sh | .github/*) echo "full $f"; return 0 ;; esac
+    for p in "${pipe[@]}"; do case $f in $p) echo "full $f"; return 0 ;; esac; done
     l=full
     for i in "${!pats[@]}"; do
       case $f in ${pats[i]}) l=${lanes[i]}; break ;; esac
@@ -307,7 +334,8 @@ fi
 # red one pushes its commit as it is. Red isn't final until the member's commit sits on main, so nobody marks
 # itself skip for it, and nobody pushes with a red ticket ahead. A newcomer that joins a batch that isn't full is
 # its new top; the old top's run goes on. A ticket with no sixth line is from a land.sh older than batches: it is
-# a batch of its own, never landed by another.
+# a batch of its own, never landed by another. A landing that changes the pipeline (PIPELINE_FILES), a fast one and a build write
+# "old" there too, and so ship alone. With land_deploy, the head deploys the batch once (deploy_run below).
 QUEUE_POLL=${LAND_QUEUE_POLL:-1}
 # How long a batch member waits for the head's push of main before saying it is still to come (KT3).
 BATCH_PUSH_WAIT=${LAND_BATCH_PUSH_WAIT:-90}
@@ -384,7 +412,7 @@ queue_set() { # <line, from 0> <text>: change one line of this landing's ticket
   [ -n "$t" ] && [ -e "$t" ] || return 0
   mapfile -t l 2>/dev/null <"$t" || return 0
   l[$1]=$2
-  [ "$1" != 5 ] || [ "$mode" != build ] || l[5]=old # a build is a batch of its own: no gated landing's batch takes it in
+  [ "$1" != 5 ] || [ "$UNRUN" != old ] || l[5]=old # a build or a pipeline ship is a batch of its own: no gated landing's batch takes it in
   queue_write "$t" "${l[0]:-}" "${l[1]:-0}" "${l[2]:-}" "${l[3]:-}" "${l[4]:--}" "${l[5]:--}" "${l[6]:--}" 2>/dev/null || true
 }
 
@@ -890,18 +918,21 @@ case $mode in
     claims_check "$BRANCH"
     ;;
 esac
-# Fast mode (the header): the first path the branch changes since it forked from main that keeps the full gate.
-fast_full() {
-  local fork f p
+# The first path the branch changes since it forked from main that is the pipeline's own (tools/land.sh,
+# tools/land.local.sh, .github/, the lanes map, PIPELINE_FILES' list from $BRANCH, or the branch's own while main has
+# none) or matches a pattern given (bash case patterns, * matching / too).
+pipeline_change() {
+  local fork f p list=()
   fork=$(git merge-base "refs/heads/$BRANCH" HEAD 2>/dev/null) || { echo "(couldn't find where it forked from $BRANCH)"; return; }
+  mapfile -t list < <(pipeline_pats "refs/heads/$BRANCH")
   while IFS= read -r -d '' f; do
-    case $f in tools/land.sh | tools/land.local.sh | .github/*) echo "$f"; return ;; esac
-    [ -z "$LANES" ] || [ "$f" != "$LANES" ] || { echo "$f"; return; }
-    for p in $FAST_FULL; do
+    for p in "${list[@]}" "$@"; do
       case $f in $p) echo "$f"; return ;; esac
     done
   done < <(git diff --no-renames --name-only -z "$fork" HEAD) # -z: a non-ASCII path as it is, not quoted (Mandate #152)
 }
+# Fast mode (the header): the first such path, or one FAST_FULL names, keeps the full gate.
+fast_full() { pipeline_change $FAST_FULL; }
 FAST='' UNRUN=- # UNRUN: its ticket's verdict before CI has run
 [ "$mode" = land ] || LAND_FAST='' # a whole build takes the full gate, and a merge into one isn't in the line
 if [ "${LAND_FAST:-}" = 1 ]; then
@@ -919,6 +950,12 @@ fi
 # A build lands only as the head of the line, on $BRANCH itself, and alone: its ticket says "old" (queue_set), so no
 # batch takes it in. The ones behind may still stack on it.
 [ "$mode" != build ] || CI_STACK=1 CI_BATCH=1 BATCH='' UNRUN=old
+# A landing that changes the pipeline ships alone the same way: a batch would carry its untested land.sh into the
+# others' landings, and a red in it would take them all down with it.
+if [ -n "$BATCH" ] && [ "$mode" = land ]; then
+  why=$(set -f; pipeline_change)
+  [ -z "$why" ] || { CI_STACK=1 CI_BATCH=1 BATCH='' UNRUN=old; say "$why is part of the pipeline, so this ships alone, in no batch"; }
+fi
 # The main checkout is the first entry of the worktree list.
 MAIN=$(git worktree list --porcelain | sed -n '1s/^worktree //p')
 state=$(git -C "$MAIN" rev-parse --absolute-git-dir)
@@ -958,6 +995,7 @@ g_last='' g_quiet='' # with batches, the head: when it last asked CI about the c
 T_start='' T_lock='' T_build='' T_built='' T_ci='' T_cirun='' T_gate='' at=smoke
 ride() { [ -z "$BATCH" ] || [ -n "$T_ci" ] || T_cirun=${T_lock:-$SECONDS} T_gate=$SECONDS; }
 SHIP_N=1 SHIP_M=1 # its place in its batch, and how many shipped with it (or, refused, were in its batch)
+DEPLOY=none # the ship line's deploy state: none (no land_deploy), back, or what land_deploy printed (below)
 ship_timing() (
   set +eu
   [ -n "$T_start" ] || exit 0 # refused before the line (the smoke check): no timing line, as Citadel's
@@ -980,7 +1018,7 @@ ship_end() {
   [ -z "$landed" ] || what=landed c=$keep
   ship_timing "$1" >/dev/null 2>&1 || true
   c=${c:0:12}
-  echo "ship: $what ${c:--} batch $SHIP_N of $SHIP_M deploy none" >&2
+  echo "ship: $what ${c:--} batch $SHIP_N of $SHIP_M deploy $DEPLOY" >&2
 }
 
 # CI's verdict on [commit] ($tip if none) in [lane] ($ci_lane if none), by the exit codes in the header at CI_STATUS;
@@ -1210,8 +1248,32 @@ ci_ask() {
 
 # The branch as it was, rebased onto <commit> and checked: sets base, and tip when it passed (with the
 # CI gate on, CI then runs on it), or blocked when it can't sit on that commit.
+# land.local.sh's land_rebased <base> <branch>, if it has one: on the branch just rebased onto <base>, before its check,
+# in this worktree; a commit it makes ships with the branch. 1: it failed or left uncommitted changes (dropped here).
+rebased_hook() {
+  declare -F land_rebased >/dev/null || return 0
+  local rc=0 new untracked
+  untracked=$(git ls-files -o --exclude-standard)
+  queue_phase "running land_rebased"
+  # In the background and waited on, so set -e holds inside it.
+  (cd "$here" && land_rebased "$1" "$branch") </dev/null >&2 9>&- 6>&- &
+  wait $! || rc=$?
+  [ ! -e "$gitdir/land-branch" ] || printf '%s\n' "$branch" "$(git rev-parse HEAD)" >"$gitdir/land-branch"
+  if [ "$rc" != 0 ]; then
+    say "land.local.sh's land_rebased failed (exit $rc)"
+  elif [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    say "land.local.sh's land_rebased left changes it didn't commit, which are dropped: it commits what should ship"
+    rc=1
+  elif new=$(comm -13 <(sort <<<"$untracked") <(git ls-files -o --exclude-standard | sort)) && [ -n "$new" ]; then
+    say "land.local.sh's land_rebased made files it didn't commit (${new//$'\n'/, }), so they wouldn't ship: it adds and commits what should ship"
+    rc=1
+  fi
+  [ "$rc" = 0 ] || git reset -q --hard HEAD 9>&- 6>&-
+  return "$rc"
+}
+
 build() {
-  local want=$1 on phase rc=0 clashes fork log chk v
+  local want=$1 on phase rc=0 clashes fork log chk v reuse=''
   [ -z "$pushed" ] || ci_cancel # its run is on a commit that will never land now
   base=$want tip='' blocked='' keep='' green='' retried='' pushed_at='' verdict=-
   T_build=$SECONDS T_built='' T_ci='' T_cirun='' T_gate='' at=rebase
@@ -1277,9 +1339,15 @@ build() {
     case $lane in light) chk=$CHECK_LIGHT ;; full) ;; *) v=CHECK_${lane^^} && chk=${!v-$CHECK} ;; esac
   fi
   ci_lane=$lane
+  if [ -n "$chk" ] && [ -n "$early_on" ] && [ "$want" = "$early_on" ] && [ "$chk" = "$early_cmd" ] && [ "$(git rev-parse 'HEAD^{tree}')" = "$early_tree" ]; then
+    reuse=1 # the early check's commit already holds what land_rebased made
+  elif [ "$mode" = land ] && ! rebased_hook "$want"; then
+    blocked="land.local.sh's land_rebased failed on the rebased branch (above), so $BRANCH is untouched"
+    return 0
+  fi
   if [ -z "$chk" ]; then
     [ -n "$FAST" ] || say "lane $lane runs no check"
-  elif [ -n "$early_on" ] && [ "$want" = "$early_on" ] && [ "$chk" = "$early_cmd" ] && [ "$(git rev-parse 'HEAD^{tree}')" = "$early_tree" ]; then
+  elif [ -n "$reuse" ]; then
     # The early check passed this same rebase onto this same commit: its commit (with any the check made) is the build.
     git checkout -q --detach "$early_tip" 9>&- 6>&-
     printf '%s\n' "$branch" "$early_tip" >"$gitdir/land-branch"
@@ -1401,6 +1469,86 @@ batch_green() {
       return 1 ;;
   esac
   for ((i = 2; i <= GI; i++)); do [ "$(queue_proc "${B_PID[i]%% *}")" = "${B_PID[i]}" ] || return 1; done
+}
+
+# The deploy (land.local.sh's land_deploy): whoever moves main (a lone landing, or the head of a batch) runs it once,
+# for the commit main moved to, holding the lock, before main is pushed. Its word goes in <state>/land-deploy/<commit>:
+# "<state> <when> <the main it moved from> <the head's pid and start>", the state running, back, or the deploy's own
+# word; "running" is written before main moves, so a member that sees its commit on main always finds it, and "back"
+# after main goes back. A head that stops while running it is taken back by the next landing (deploy_stale).
+deploy_mark() { # <commit> <state> <the main it moved from>
+  local d=$state/land-deploy
+  mkdir -p "$d" && echo "$2 $(date +%s) $3 $Q_ME" >"$d/$1.$$" && mv -f "$d/$1.$$" "$d/$1"
+  [ "$2" != running ] || find "$d" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true
+}
+# Runs it for <commit>, main having moved there from <old>. Its stdout's last line, one word (live, restart), is the
+# ship line's deploy state ("done" when it printed none). Failed: main goes back to <old> and nothing ships.
+deploy_run() {
+  local to=$1 old=$2 rc=0 out last
+  at=deploy
+  queue_phase "deploying $(git rev-parse --short=12 "$to")"
+  out=$state/land-deploy/$to.out.$$
+  # In the background and waited on, so set -e holds inside it (an `||` around the call would switch it off).
+  # 9>&-: a server it leaves running must not hold the land lock after this exits.
+  (cd "$MAIN" && land_deploy "$to") >"$out" </dev/null 6>&- 9>&- &
+  wait $! || rc=$?
+  cat "$out" >&2
+  last=$(tail -n 1 "$out")
+  rm -f "$out"
+  if [ "$rc" = 0 ]; then
+    DEPLOY=done
+    [[ ! $last =~ ^[a-z][a-z-]*$ ]] || [ "$last" = running ] || [ "$last" = back ] || DEPLOY=$last
+    deploy_mark "$to" "$DEPLOY" "$old"
+    say "land_deploy deployed $(git rev-parse --short=12 "$to") ($DEPLOY)"
+    return 0
+  fi
+  DEPLOY=back
+  local who=''
+  [ -z "$BATCH" ] || [ "${GI:-1}" = 1 ] || who=$(printf ', %s' "${B_LABEL[@]:2:GI-1}")
+  [ -z "$who" ] || who=", nor did the others in its batch (${who#, })"
+  # Main goes back before the mark says so, so a member reading "back" sees main without its commit.
+  git -C "$MAIN" -c gc.auto=0 reset -q --keep "$old" || {
+    deploy_mark "$to" back "$old"
+    refuse "land.local.sh's land_deploy failed (exit $rc), and $BRANCH couldn't go back to $(git rev-parse --short=12 "$old"): it is at $(git rev-parse --short=12 "$to"), not pushed. Nothing shipped$who; a person needs to look at $MAIN"
+  }
+  deploy_mark "$to" back "$old"
+  refuse "land.local.sh's land_deploy failed (exit $rc), so $BRANCH went back to $(git rev-parse --short=12 "$old") and nothing shipped$who"
+}
+# A member: whether a deploy of a commit holding its own has its word yet (since it got in line). Running: it waits.
+deploy_look() {
+  local f st ep old id
+  for f in "$state"/land-deploy/*; do
+    [[ ${f##*/} =~ ^[0-9a-f]{40,}$ ]] || continue
+    read -r st ep old id <"$f" 2>/dev/null || continue
+    [[ $ep =~ ^[0-9]+$ ]] && [ "$ep" -ge "$D_SINCE" ] || continue
+    git merge-base --is-ancestor "$tip" "${f##*/}" 2>/dev/null || continue
+    while [ "$st" = running ]; do
+      [ "$(queue_proc "${id%% *}")" = "$id" ] ||
+        refuse "the head of its batch stopped while deploying ${f##*/}, which holds ${tip:0:12}, so it didn't ship: the next landing takes $BRANCH back to ${old:0:12}. Run this again"
+      queue_phase "waiting for its batch's deploy"
+      sleep "$QUEUE_POLL"
+      read -r st ep old id <"$f" 2>/dev/null || st=''
+    done
+    case $st in
+      back) DEPLOY=back keep='' && refuse "didn't ship: its batch's deploy failed, so $BRANCH went back to ${old:0:12} without ${tip:0:12}. Run this again once the deploy is fixed" ;;
+      '') refuse "the deploy's word on ${f##*/} went missing while it waited, so whether ${tip:0:12} shipped is unknown: a person needs to look" ;;
+      *) DEPLOY=$st ;;
+    esac
+  done
+}
+# Under the lock, at the front: a head that stopped while deploying left main moved and unpushed, with members told
+# they didn't ship, so main goes back to where that head found it.
+deploy_stale() {
+  local f st ep old id
+  for f in "$state"/land-deploy/*; do
+    [[ ${f##*/} =~ ^[0-9a-f]{40,}$ ]] || continue
+    read -r st ep old id <"$f" 2>/dev/null || continue
+    [ "$st" = running ] && [ "$(queue_proc "${id%% *}")" != "$id" ] || continue
+    if [ "$(git rev-parse "refs/heads/$BRANCH")" = "${f##*/}" ] && git -C "$MAIN" -c gc.auto=0 reset -q --keep "$old"; then
+      say "the landing before this one stopped while deploying $(git rev-parse --short=12 "${f##*/}"), so $BRANCH went back to ${old:0:12}, where it found it (none of that was pushed)"
+    fi
+    deploy_mark "${f##*/}" back "$old"
+  done
 }
 
 # A member whose commit the head landed (its commit is on main now): it says so and leaves as landed, unless a commit
@@ -1536,6 +1684,11 @@ early_check() {
   fi
   rb=$(git rev-parse HEAD)
   printf '%s\n' "$branch" "$rb" >"$gitdir/land-branch"
+  if ! rebased_hook "$want"; then
+    early_back
+    say "smoke: so the check doesn't decide here: getting in line, where it runs again"
+    return 1
+  fi
   log="$state/land-check-${branch//\//-}.log"
   rm -f "$log" # the check makes it as it starts: none afterwards means the check lock never came
   # One early check at a time waits for the check lock, so the head of the line waits behind at most one (EARLY_AHEAD).
@@ -1703,6 +1856,8 @@ if [ "$mode" = into ] || [ "$mode" = full ]; then
     printf 'land: %s\n' "$branch removes what these merged, without naming them:" "$clashes" >&2
     refuse "$build is untouched. If the undo is meant, add a line \"Undoes: <sha>\" to a commit message for each commit above, then run this again"
   fi
+  # A feeder's land_rebased first: its commit is part of what is checked.
+  [ "$mode" != into ] || rebased_hook "$bbase" || refuse "land.local.sh's land_rebased failed on the rebased branch (above), so $build is untouched"
   # The commit the check runs on is the one the build moves to: one made in the worktree while the check runs was
   # never checked (KT5, #1519; Citadel's own land.sh reads its tip here too).
   tip=$(git rev-parse HEAD)
@@ -1741,13 +1896,19 @@ fi
 trap 'ship_end $?' EXIT # until leave takes over
 [ "${LAND_SMOKE:-1}" = 0 ] || smoke
 at=line
+D_SINCE=$(date +%s) # deploy_look: the deploys since it got in line
 queue_join "$state" "$branch"
 T_start=$SECONDS
 trap leave EXIT
 seen_main='' looked='' checked_main=''
 while :; do
   # In a batch, landed by the head: its commit is under the one the head moved main to.
-  if [ -n "$BATCH" ] && [ -n "$tip" ] && git merge-base --is-ancestor "$tip" "refs/heads/$BRANCH" 2>/dev/null; then batch_landed; fi
+  # Or taken back by its deploy, which leaves main without it (deploy_look refuses). Its deploy looked at again once
+  # the commit is on main: the head marks it before main moves.
+  if [ -n "$BATCH" ] && [ -n "$tip" ]; then
+    deploy_look
+    if git merge-base --is-ancestor "$tip" "refs/heads/$BRANCH" 2>/dev/null; then deploy_look; batch_landed; fi
+  fi
   queue_look || exit 1
   # While others are ahead, each time main moves: whether the branch would still rebase onto it. A conflict leaves the
   # line at once, so the minion hears now rather than when it reaches the front.
@@ -1766,6 +1927,7 @@ while :; do
   if [ "$Q_AHEAD" = 0 ]; then
     [ -n "$Q_HELD" ] || continue # queue_look waited on the lock, so this is no busy loop
     if [ -z "$seen_main" ]; then
+      ! declare -F land_deploy >/dev/null || deploy_stale
       # Under the lock: another landing fast-forwarding main there looks like uncommitted changes while it runs.
       [ "$(git -C "$MAIN" branch --show-current)" = "$BRANCH" ] || refuse "$MAIN is not on $BRANCH; a person needs to look"
       [ -z "$(git -C "$MAIN" status --porcelain --untracked-files=no)" ] || refuse "$MAIN has uncommitted changes; a person needs to look"
@@ -1825,10 +1987,13 @@ ride
 { [ "$(git rev-parse HEAD)" = "$tip" ] && [ "$(git rev-parse "refs/heads/$branch")" = "$pre" ]; } || refuse "$branch or this worktree's HEAD moved while the landing waited, so what CI passed is not what is here now and nothing landed. Put any commit made meanwhile on $branch, then run this again"
 to=$tip
 [ -z "$BATCH" ] || to=$G
-git -C "$MAIN" -c gc.auto=0 merge -q --ff-only "$to" || refuse "could not fast-forward $BRANCH to $branch; nothing landed"
+old=$(git rev-parse "refs/heads/$BRANCH") deploy=''
+! declare -F land_deploy >/dev/null || { deploy=1; deploy_mark "$to" running "$old"; }
+git -C "$MAIN" -c gc.auto=0 merge -q --ff-only "$to" || { [ -z "$deploy" ] || deploy_mark "$to" back "$old"; refuse "could not fast-forward $BRANCH to $branch; nothing landed"; }
 [ -z "$BATCH" ] || SHIP_N=1 SHIP_M=$GI
-keep=$tip landed=ok # it landed, so its time counts toward the estimate, whatever the push does
 say "$BRANCH is now at $(git log -1 --format='%h "%s"' "$to")"
+[ -z "$deploy" ] || deploy_run "$to" "$old"
+keep=$tip landed=ok # it landed, so its time counts toward the estimate, whatever the push does
 if [ -n "$BATCH" ] && [ "$GI" != 1 ]; then
   with=$(printf ', %s' "${B_LABEL[@]:2:GI-1}")
   say "landed $(git log -1 --format='%h "%s"' "$tip") in a batch with ${with#, }, on ${B_LABEL[GI]}'s CI run"

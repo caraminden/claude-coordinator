@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { git, setup, landLockFree } from './scheme-setup-land-fixture.ts';
+import { git, setup, landLockFree, rebasedHook, rebasedCalls } from './scheme-setup-land-fixture.ts';
 
 // A land_after that records its arguments, whether the land lock was free, and how many places in line were left.
 const recorder = `land_after() {
@@ -137,4 +137,72 @@ test("a landing whose push failed has its land_after made up by the next landing
   r.commit(r.wt, 'd.txt', 'again\n');
   assert.equal(r.run().status, 0);
   assert.equal(r.after().length, 3);
+});
+
+test("land_rebased runs on the branch rebased onto main, before the check, and the commit it makes ships with it", () => {
+  // The check sees the hook's file: it runs after the hook.
+  const r = setup('test -s rebased.txt', {}, rebasedHook);
+  r.commit(r.main, 'm.txt', 'main moved\n');
+  const base = git(r.main, 'rev-parse', 'main');
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.deepEqual(rebasedCalls(r.main), [`${base} ticket/1-x`]);
+  assert.equal(git(r.main, 'log', '--format=%s', 'main', '-3'), `rebased on ${base}\nb.txt: mine\nm.txt: main moved`);
+  assert.equal(git(r.main, 'show', 'main:rebased.txt'), base);
+  assert.equal(git(r.origin, 'rev-parse', 'main'), git(r.main, 'rev-parse', 'main'), 'what was pushed holds it');
+  const tip = git(r.main, 'rev-parse', 'main').slice(0, 12);
+  assert.equal(res.stderr.trimEnd().split('\n').pop(), `ship: landed ${tip} batch 1 of 1 deploy none`);
+  assert.equal(git(r.wt, 'rev-parse', 'ticket/1-x'), git(r.main, 'rev-parse', 'main'), 'the branch sits on what shipped');
+});
+
+test('a land_rebased that fails, or leaves changes uncommitted, refuses the landing and main stays', () => {
+  for (const body of ['false', 'echo x >>a.txt', 'echo x >new.txt']) {
+    const r = setup('true', {}, `land_rebased() { ${body}; }\n`);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const before = git(r.main, 'rev-parse', 'main');
+    const res = r.run();
+    assert.equal(res.status, 1, `${body}: ${res.stderr}`);
+    assert.match(res.stderr, { false: /land_rebased failed \(exit 1\)/, 'echo x >>a.txt': /land_rebased left changes it didn't commit/, 'echo x >new.txt': /land_rebased made files it didn't commit \(new\.txt\)/ }[body]!, body);
+    assert.match(res.stderr, /land\.local\.sh's land_rebased failed on the rebased branch \(above\), so main is untouched/, body);
+    assert.equal(git(r.main, 'rev-parse', 'main'), before, body);
+    assert.equal(git(r.wt, 'status', '--porcelain', '--untracked-files=no'), '', `${body}: the worktree is left clean`);
+    assert.equal(git(r.wt, 'branch', '--show-current'), 'ticket/1-x', body);
+    assert.ok(landLockFree(r));
+  }
+});
+
+test("land_deploy on a lone landing: its last word is the ship line's deploy state; a failed one takes main back and nothing is pushed", () => {
+  for (const [body, word] of [['echo restart', 'restart'], ['echo "Deployed it."', 'done'], [':', 'done']]) {
+    const r = setup('true', {}, `land_deploy() { echo "$1" >"$(git rev-parse --path-format=absolute --git-common-dir)/deployed"; ${body}; }\n`);
+    r.commit(r.wt, 'b.txt', 'mine\n');
+    const res = r.run();
+    assert.equal(res.status, 0, `${body}: ${res.stderr}`);
+    const tip = git(r.main, 'rev-parse', 'main');
+    assert.equal(readFileSync(join(git(r.main, 'rev-parse', '--absolute-git-dir'), 'deployed'), 'utf8').trim(), tip, body);
+    assert.equal(res.stderr.trimEnd().split('\n').pop(), `ship: landed ${tip.slice(0, 12)} batch 1 of 1 deploy ${word}`, body);
+    assert.equal(git(r.origin, 'rev-parse', 'main'), tip, body);
+  }
+  // A server the deploy leaves running doesn't keep the land lock.
+  const bg = setup('true', {}, `land_deploy() { sleep 30 >/dev/null 2>&1 & echo $! >"$(git rev-parse --path-format=absolute --git-common-dir)/bg.pid"; }\n`);
+  bg.commit(bg.wt, 'b.txt', 'mine\n');
+  const bres = bg.run();
+  const pid = Number(readFileSync(join(git(bg.main, 'rev-parse', '--absolute-git-dir'), 'bg.pid'), 'utf8'));
+  try {
+    assert.equal(bres.status, 0, bres.stderr);
+    assert.ok(landLockFree(bg), 'the lock is free while what it started runs on');
+  } finally {
+    process.kill(pid);
+  }
+  const r = setup('true', {}, 'land_deploy() { false; echo live; }\n'); // set -e holds: the false is the failure
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const before = git(r.main, 'rev-parse', 'main');
+  const res = r.run();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, new RegExp(`land_deploy failed \\(exit 1\\), so main went back to ${before.slice(0, 12)} and nothing shipped\\n`));
+  assert.match(res.stderr.trimEnd().split('\n').pop()!, /^ship: refused [0-9a-f]{12} batch 1 of 1 deploy back$/);
+  assert.equal(git(r.main, 'rev-parse', 'main'), before);
+  assert.equal(git(r.origin, 'rev-parse', 'main'), before, 'never pushed');
+  assert.equal(git(r.main, 'status', '--porcelain', '--untracked-files=no'), '', "main's checkout went back with it");
+  assert.ok(landLockFree(r));
 });

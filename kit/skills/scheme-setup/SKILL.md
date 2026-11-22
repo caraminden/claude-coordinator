@@ -191,12 +191,12 @@ this shape. Citadel's PR watcher expects no checks on a PR when no workflow runs
 a ship pushes its rebased commit to `land/<branch>`, waits for CI on exactly that commit, and
 only then moves main. The shipped commit's runs there are left to finish (a scheme that keeps CI on main can skip
 what they passed); every other run on the scratch branch is cancelled. The first `CI_STACK` ships in line (3) run CI at once, each built on the
-one ahead, so a ship doesn't wait a whole CI round per place in line. `CI_BATCH` (1, off) lets that many share one
-run on the last one's commit: for a line that often runs deep on slow CI, 3 or 4, with `CI_STACK` set to the runs
-the runners carry at once; the header says how a red batch is bisected. A new scheme has no line to measure yet, so
-leave it at 1. In the setup report, name `CI_BATCH` as the knob for a deep line. Raise it once ships come back to back
-for about a CI run each (a line, not a free runner), as in Citadel's `specs/batched-landings.md`. A high share of red
-ship runs (over about 15%) argues for 2, not 4. When much of what ships needs less than the whole check and CI
+one ahead, so a ship doesn't wait a whole CI round per place in line. `CI_BATCH` (4 by default; 1 turns it off) lets up to
+that many share one run on the last one's commit, with `CI_STACK` set to the runs the runners carry at once; a batch
+takes whoever is waiting and never waits to fill, and the header says how a red batch is bisected. A ship that
+changes the pipeline (land.sh, land.local.sh, `.github/`, the lanes map, and `PIPELINE_FILES`' list) ships alone.
+Leave it at the default. A high share of red ship runs (over about 15%) argues for 2. A scheme that deploys what
+ships gives land.local.sh a `land_deploy`: the batch deploys once, and a failed deploy takes main back. When much of what ships needs less than the whole check and CI
 (docs, one app of several), give it lanes: `LANES=tools/lanes` and a map of `<lane> <pattern>...` lines, with
 `CHECK_<LANE>`, `CI_WORKFLOWS_<LANE>` and `CI_SKIPS_<LANE>` in `land.local.sh` (its comments show them). A light
 ship goes through the line with no CI and no push; a lane's run goes to `land/<lane>/<branch>`, so `'land/**'` still

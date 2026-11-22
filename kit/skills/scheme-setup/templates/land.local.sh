@@ -39,8 +39,13 @@
 # How many landings at the front of the line run CI at once. Runners that can't carry three runs at once: 2.
 # CI_STACK=${LAND_STACK_DEPTH:-3}
 
-# How many landings share one CI run (batches). 1: off. A deep line on slow CI: 3 or 4.
-# CI_BATCH=${LAND_BATCH:-1}
+# How many landings share one CI run (batches), with a CI gate. A batch takes whoever is waiting and never waits to
+# fill. 1: off, every landing runs its own. A high share of red ship runs (over about 15%): 2.
+# CI_BATCH=${LAND_BATCH:-4}
+# More of the pipeline's own files, besides tools/land.sh, this file, .github/ and the lanes map: a list in the repo,
+# one path a line, # comments, a trailing / for a folder. A landing that changes one ships alone, in no batch, and
+# keeps fast mode on the full gate.
+# PIPELINE_FILES=tools/pipeline-files.txt
 
 # Lanes: a landing checks, and runs CI for, only the lane of the paths it changes. LANES names the map, read from
 # main's copy, lines of `<lane> <pattern>...` (bash case patterns, * crosses /, first match wins, # comments):
@@ -74,6 +79,24 @@
 # CHECK and CI run behind it on main (tools/land.sh --verify). The paths that keep a land on the full gate besides the
 # pipeline's own files (bash case patterns, split by spaces):
 # FAST_FULL='db/migrations/* src/auth/*'
+
+# Deploy what shipped: run once by whoever moves main (alone, or the head for its whole batch), with main at <commit>,
+# holding the land lock, before main is pushed. Plain shell under set -e: a command that fails is a failed deploy,
+# and main goes back where it was, so the landing (and every member of its batch) didn't ship. Print one word last
+# for the ship line's deploy state (live, restart; else "done"). Keep it under a timeout: it holds the line.
+# land_deploy() { # <commit>
+#   timeout 600 ./deploy/release.sh "$1" >&2
+#   echo live
+# }
+
+# Run on the branch just rebased onto <base> (today's main, or the commit ahead of it in line), in its worktree,
+# before its check: a file generated from the whole tree, rebuilt so it never goes stale or conflicts. Commit what
+# should ship (it ships with the branch); changes left uncommitted, or a failure, refuse the landing.
+# land_rebased() { # <base> <branch>
+#   tools/build-map.sh >tools/affected-map.txt
+#   git add tools/affected-map.txt # add, not commit -a: the first run makes the file
+#   git diff --cached --quiet || git commit -qm "Rebuild the affected map on $1"
+# }
 # The ids of what failed, from a check's or CI's output on stdin, one a line: fast mode's ledger of known reds and
 # LAND_KNOWN_RED match on them. The core's finds test files in node's, pytest's and jest's output and red workflows
 # in CI's (ci:<file>). A scheme whose CI_STATUS prints its own: replace it.

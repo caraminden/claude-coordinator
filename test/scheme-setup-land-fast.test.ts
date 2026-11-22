@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { env, git, queueSetup, setup, until } from './scheme-setup-land-fixture.ts';
+import { env, git, queueSetup, rebasedCalls, rebasedHook, setup, until } from './scheme-setup-land-fixture.ts';
 
 // CI faked as in scheme-setup-land-ci.test.ts: CI_STATUS answers from a file named after the commit ("<code>" and what
 // to print; no file: not started), and a gh first in PATH, so nothing reaches GitHub. asked: every commit it was asked about.
@@ -298,4 +298,33 @@ test('--verify: a CI-only id list asks only CI, and a workflow already red is re
   assert.doesNotMatch(only.stderr, /exit 9|the check/);
   const full = run({});
   assert.equal(full.stdout, 'verify: failing ci:ci.yml\nverify: failing the check\nverify: red\n', 'the check failed with no id, and ci.yml stays red');
+});
+
+test('land_rebased runs in fast mode too, and its commit ships; --verify, on a commit already on main, never calls it', () => {
+  const r = setup('false', { ...CI, SMOKE_CMD: 'true' }, rebasedHook);
+  const ci = fakeCi(r.dir);
+  const base = git(r.main, 'rev-parse', 'main');
+  r.commit(r.wt, 'b.txt', 'b\n');
+  const fast = r.run({ ...ci.env, LAND_FAST: '1' });
+  assert.equal(fast.status, 0, fast.stderr);
+  assert.match(fast.stderr, /fast mode: this lands on the smoke check alone/);
+  assert.deepEqual(rebasedCalls(r.main), [`${base} ticket/1-x`]);
+  assert.equal(git(r.main, 'log', '-1', '--format=%s', 'main'), `rebased on ${base}`);
+  assert.equal(git(r.main, 'show', 'main:rebased.txt'), base);
+
+  const v = join(r.dir, 'verify');
+  git(r.main, 'worktree', 'add', '-q', '--detach', v, 'main');
+  ci.answer(git(v, 'rev-parse', 'HEAD'), 0);
+  const out = spawnSync('bash', [join(v, 'tools', 'land.sh'), '--verify'], { cwd: v, encoding: 'utf8', timeout: 30_000, env: { ...env, ...ci.env } });
+  assert.match(out.stdout, /verify: (red|green)/, out.stderr);
+  assert.deepEqual(rebasedCalls(r.main), [`${base} ticket/1-x`], '--verify called it no more');
+});
+
+test("fast mode: a path in PIPELINE_FILES' list (main's copy) keeps the full gate, as the pipeline's own files do", () => {
+  const r = setup('false', { SMOKE_CMD: 'true' }, 'PIPELINE_FILES=pipe.txt\n');
+  r.commit(r.main, 'pipe.txt', 'deploy/ # the deploy\n');
+  r.commit(r.wt, 'deploy/run.sh', 'x\n');
+  const res = r.run({ LAND_FAST: '1' });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /fast mode is on, but deploy\/run\.sh takes the full gate/);
 });

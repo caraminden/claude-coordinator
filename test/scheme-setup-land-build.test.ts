@@ -5,12 +5,12 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { env, git, queueSetup } from './scheme-setup-land-fixture.ts';
+import { env, git, queueSetup, rebasedCalls, rebasedHook } from './scheme-setup-land-fixture.ts';
 
 // Three worktrees off main: two feeders (f1.txt, f2.txt) and the build minion's (f3.txt), and build/1 made at main
 // the way a build minion makes it. CHECK_FILE_CMD logs each test file a feeder's check ran to $RAN.
-function buildSetup(config: Record<string, string> = {}) {
-  const q = queueSetup(3, 'test ! -e red', { CHECK_FILE_CMD: 'echo {file} >>"$RAN"; test ! -e red', ...config });
+function buildSetup(config: Record<string, string> = {}, local?: string) {
+  const q = queueSetup(3, 'test ! -e red', { CHECK_FILE_CMD: 'echo {file} >>"$RAN"; test ! -e red', ...config }, undefined, local);
   git(q.main, 'branch', 'build/1', 'main');
   const ran = join(q.dir, 'ran');
   writeFileSync(ran, '');
@@ -234,4 +234,18 @@ test('claims (#1159): the template and Citadel\'s land.sh carry the same claims_
   const kit = fn('kit/skills/scheme-setup/templates/land.sh');
   assert.ok(kit);
   assert.equal(kit, fn('tools/land.sh'));
+});
+
+test("land_rebased runs in a feeder's --into, and its commit goes into the build; --into --full and --build never call it", () => {
+  const b = buildSetup({}, rebasedHook);
+  const build = b.at('build/1');
+  assert.equal(b.run(2, '--into', 'build/1', 'f2.txt').status, 0);
+  assert.deepEqual(rebasedCalls(b.main), [`${build} ticket/2-x`]);
+  assert.equal(git(b.main, 'log', '-1', '--format=%s', 'build/1'), `rebased on ${build}`, 'its commit is in the build');
+  git(b.wts[2], 'merge', '-q', '--no-edit', 'build/1'); // the build minion takes the build in, as it does
+  const full = b.run(3, '--into', 'build/1', '--full');
+  assert.equal(full.status, 0, full.stderr);
+  const shipped = b.run(3, '--build');
+  assert.equal(shipped.status, 0, shipped.stderr);
+  assert.deepEqual(rebasedCalls(b.main), [`${build} ticket/2-x`], 'only the feeder called it');
 });

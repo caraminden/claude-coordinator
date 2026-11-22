@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { git, setup } from './scheme-setup-land-fixture.ts';
+import { git, rebasedCalls, rebasedHook, setup } from './scheme-setup-land-fixture.ts';
 
 // Red while a file named "red" is in the tree, saying so last; every run leaves a line in $COUNT.
 const CHECK = 'echo run >>"$COUNT"; test ! -e red || { echo "the check saw red"; exit 1; }';
@@ -139,4 +139,17 @@ test("with lanes, a branch whose lane runs CHECK or CHECK_LIGHT runs CHECK_LIGHT
   const ar = art.run({ COUNT: join(art.dir, 'count') });
   assert.equal(ar.status, 0, ar.stderr);
   assert.doesNotMatch(ar.stderr, /smoke: running/);
+});
+
+test('land_rebased runs before the early check too; with main unmoved at the front its commit lands as checked, and it is not run again', () => {
+  const check = `${CHECK}; test -s rebased.txt`; // the check sees the hook's file: the hook ran first
+  const r = setup(check, on(check), rebasedHook);
+  r.commit(r.wt, 'b.txt', 'b\n');
+  const base = git(r.main, 'rev-parse', 'main');
+  const res = r.run({ COUNT: join(r.dir, 'count') });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /the check passed on this same rebase before the line/);
+  assert.deepEqual(rebasedCalls(r.main), [`${base} ticket/1-x`], 'once, before the early check');
+  assert.equal(count(r.dir), 1, 'the check ran once');
+  assert.equal(git(r.main, 'log', '--format=%s', 'main', '-2'), `rebased on ${base}\nb.txt: b`);
 });

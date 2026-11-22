@@ -25,6 +25,7 @@ import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
 import { MemoryStorms } from './src/memory-storms.ts';
 import { Reaper, shownCommand } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
+import { startRealtime } from './src/realtime.ts';
 import { restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
 import { ClientErrors, DeployWatch, countsAsServerFault, gitCommits } from './src/deploy-watch.ts';
 import { judged, noteWould } from './src/judges.ts';
@@ -256,6 +257,8 @@ await Promise.all([loadAssets(), probeThp()]);
 const eventsMove = await moveEventsOffThread(join(DATA_DIR, 'coordinator.db'));
 if (eventsMove) console.log(eventsMove);
 const store = new Store(join(DATA_DIR, 'coordinator.db'));
+// First in line for a core (#1561): on live by default, off in dev copies and tests unless the realtime_priority setting is true.
+if (!BOOT_CHECK) startRealtime({ enabled: () => store.getSetting<boolean>('realtime_priority') ?? DATA_DIR === DEFAULT_DATA_DIR });
 // Writes on a worker of their own: the first after a checkpoint fsyncs the WAL's header, held up to 14.3 s (#795).
 // Before the checkpoint worker, so its autoCheckpoint(false) reaches both connections.
 // CITADEL_DB_WRITE_DELAY_MS is for tests (#1239): every write waits that long on the worker, as on a starved box, so a test

@@ -96,16 +96,20 @@ test('CI passing on the armed commit posts the card and tells the Taskmaster, wi
   assert.deepEqual(log.relays, ['PR #12 is green']);
   assert.equal(store.getTicket(ticket.id)!.state, null, "a card is people's turn");
   assert.match(store.getTicket(ticket.id)!.note!, /CI passed on \w{7}: card posted/);
+  assert.deepEqual(log.notified.filter((n) => n.kind === 'state'), [], "the card is the ping: no state ping, the state being null");
   assert.equal(await finish(s, pr(sha), 'passed'), null, 'used up');
   assert.equal(log.events.filter(([k]) => k === 'question').length, 1, 'still once');
 });
 
-test('a message alone leaves the minion ready for a person', async () => {
+test('a message alone leaves the minion ready for a person, and pings them with the note it just wrote', async () => {
   const s = setup('msg');
-  const { sha, store, ticket, app } = s;
+  const { sha, store, ticket, app, log } = s;
   await armForCi(app, ticket, { coordinator: { text: 'ready to merge', urgent: false } });
   assert.equal((await finish(s, pr(sha), 'passed'))!.fired, true);
-  assert.equal(store.getTicket(ticket.id)!.state, 'ready');
+  const row = store.getTicket(ticket.id)!;
+  assert.equal(row.state, 'ready');
+  // The ping carries what was written, not a read-back of the row, which a loaded box answers from before the write (#1634).
+  assert.deepEqual(log.notified, [{ kind: 'state', state: 'ready', note: row.note }]);
 });
 
 test("CI failing, CI on another head or a running turn drops what was armed and says so", async () => {

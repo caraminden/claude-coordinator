@@ -185,6 +185,13 @@ const homeFirst = () => { try { return localStorage.getItem(HOME_LINE) === '1'; 
 /** Home's cached answer and whether the shelf showed its line (home.js) are theirs too. */
 const forgetHome = () => { try { localStorage.removeItem('cc-home'); localStorage.removeItem(HOME_LINE); } catch {} };
 
+/** A reload nobody clicked: the next page skips the cold-open splash (Cara, 2026-11-21, "Lets not show the splash screen
+ * when the app refreshes automatically"). One-shot, stamped, read and cleared by login-map-art.js. */
+export function reloadQuietly() {
+  try { sessionStorage.setItem('cc-no-splash', String(Date.now())); } catch {}
+  location.reload();
+}
+
 export function forgetKept() {
   try { localStorage.removeItem(KEPT); } catch {}
 }

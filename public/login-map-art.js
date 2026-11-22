@@ -24,6 +24,10 @@
   // to load and boot-guard.js says so; after 10 s it lifts anyway, so the top bar's ↻ is never out of reach.
   const splash = document.getElementById('splash');
   if (!splash) return;
+  // An automatic reload (base.js reloadQuietly) leaves a stamp: no splash, removed before the first paint.
+  let quiet = 0;
+  try { quiet = Number(sessionStorage.getItem('cc-no-splash')) || 0; sessionStorage.removeItem('cc-no-splash'); } catch {}
+  if (Date.now() - quiet < 15_000) return splash.remove();
   draw(splash.querySelector('.scene'), 'sp-');
   const shown = performance.now();
   let lifting = false;

@@ -1,7 +1,7 @@
 // A minion's chat: its head, history, readout, cards and the working line.
 import { presenceHead } from './presence.js';
 import { gloss } from './help-words.js';
-import { account, ago, api, baseName, clearHighlights, dismissedWhen, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
+import { account, reloadQuietly, ago, api, baseName, clearHighlights, dismissedWhen, h, noAutofill, highlight, icon, isCoordinator, jumpHref, me, threadFullName, threadLabel, threadTitleParts, uploadUrl, view } from './base.js';
 import { mergedView, TM_VIEW } from './mine.js';
 import { toast } from './ui/status.js';
 import { stopChat, stoppingIds, cachedEvents, catchUpEvents, chatScroller, loadEvents, followChat, loadEarlier, markdown, markSeen, onTicketPin, restoreScroll, scrollToBottom, scrollToUnread, sending, setSending, USER_SCROLL, takeJump, threadRefs, usage } from './core.js';
@@ -649,7 +649,7 @@ export function adoptTicket(ticketId, ticket) {
   if (view?.id !== ticketId) return;
   // Your message went to your own Taskmaster instead (#919 makes it, splitting the scheme, on a member's first write):
   // open the scheme again, which now opens yours. shortcut: a whole reload, once per person per scheme; fine at that rate.
-  if (ticket.id !== ticketId && isCoordinator(ticket)) return void location.reload();
+  if (ticket.id !== ticketId && isCoordinator(ticket)) return void reloadQuietly();
   view.ticket = ticket;
   renderTicketHead();
   catchUpEvents().catch(() => {});

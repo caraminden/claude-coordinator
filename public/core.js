@@ -3,7 +3,7 @@
 import { accountLine, combineWindows } from './claudeusage.js';
 import { shouldReload } from './update-when.js';
 import { inMerged } from './mine.js';
-import { KEPT_EVENTS, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, missedNews, newsArrived, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
+import { KEPT_EVENTS, reloadQuietly, ago, api, baseName, fileExt, fileHref, fileKind, fileUrl, h, isLocalPath, keepChat, me, missedNews, newsArrived, replayKept, setAccount, setShowLogin, setView, shortPath, threadHref, threadLabel, view } from './base.js';
 import { mergeOpen, noteTicketChange } from './closedlist.js';
 import { cutEvent } from './eventcut.js';
 import { plainKinds } from './settings-pages.js';
@@ -497,7 +497,7 @@ function unsentWork() {
 }
 
 let reloading = false;
-export async function reloadNow() {
+export async function reloadNow(ev) {
   if (reloading) return; // reloadWhenIdle asks every 2 s while the worker is fetching
   reloading = true;
   // Put the cursor back in the composer if that is where it was.
@@ -509,7 +509,8 @@ export async function reloadNow() {
     await freshShell(reloadPending).catch(() => {});
     if (unsentWork()) return void (reloading = false); // something started while the worker fetched: wait for it (the dim comes off)
   }
-  location.reload();
+  // ↻ passes its click; every other caller (a ship, the next navigation) is automatic and skips the splash.
+  if (ev instanceof Event) location.reload(); else reloadQuietly();
 }
 
 /**

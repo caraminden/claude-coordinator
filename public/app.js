@@ -1,6 +1,6 @@
 // Front end: hash-routed views over the JSON API, live via SSE. This entry starts the app;
 // each view lives in its own module (see base.js for what they share, core.js for the shell).
-import { api, forgetKept, h, keptChat, view } from './base.js';
+import { api, forgetKept, reloadQuietly, h, keptChat, view } from './base.js';
 import { app, goLive, reloadNow, renderInvite, renderUsage, start, startKept, usage } from './core.js';
 import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
@@ -73,7 +73,7 @@ function catchUp(live, login) {
     // Someone else signed in on this device since: start afresh, with nothing of theirs kept.
     if (who.login !== login) {
       forgetKept();
-      return location.reload();
+      return reloadQuietly();
     }
     return goLive(who);
   }).catch((err) => {

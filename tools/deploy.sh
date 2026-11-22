@@ -50,7 +50,7 @@ REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a
 REPORT_RETRY=${DEPLOY_REPORT_RETRY:-60} # and how long to keep trying one that never reached it
 REMOTE=${DEPLOY_REMOTE-origin} # set it empty to skip the push (dev copies)
 BACKUPS=${DEPLOY_BACKUPS:-3} # pre-deploy copies of the database to keep
-# Tests only (test/deploy.test.ts), so its waits take tenths of a second. Nothing but that suite sets these three
+# Tests only (test/deploy.test.ts, test/land-deploy.test.ts, test/land-recover-fixture.ts), so their waits take tenths of a second. Only tests set these
 # (scriptEnv drops every DEPLOY_* a person exports), and the queued restart unit is never handed them.
 HEALTH_TIMEOUT=${DEPLOY_TEST_HEALTH_TIMEOUT:-3} # seconds one /api/health ask waits for its answer
 HEALTH_POLL=${DEPLOY_TEST_HEALTH_POLL:-1} # seconds before each of healthy()'s HEALTHY_WAIT asks

@@ -62,6 +62,6 @@ which would write a second app into `apps/<name>/`. Cara, 2026-11-22: "Yes, star
 and deploys an app that's already in its repo, for members of that scheme). It is a sibling tool, `adopt_app`, not a mode of
 `make_app`: it takes no idea, starts no minion and writes no files. Same one-way-per-part shape: the route checks what
 `make_app` checks (a member's turn, the name), plus a `citadel-app.json` committed on main at the folder, and a `repo` that,
-when given, is the scheme's own; it registers with that subdir, a free port, the manifest's `icon` or `/icon.svg`, switches
+when given, is the scheme's own; it registers with that subdir, a free port, `/icon.svg` when its folder has one (else empty, for the deploy to fill from the web manifest), switches
 the app on for every member (as `make_app` does), and starts the same deploy `deploy_contraption` does. A deploy that can't
 start leaves the registration, and says so. Another scheme's repo stays the admin-only `register_contraption`.

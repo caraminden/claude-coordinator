@@ -1982,7 +1982,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'adopt_app': {
       const a = await call('POST', `/api/projects/${C().PROJECT}/apps/adopt`, { name: args.name, title: args.title, folder: args.folder ?? '', repo: args.repo });
-      const head = `Adopted ${a.name}: registered on port ${a.port}, deployed from ${a.subdir ?? 'the repo root'}, icon ${a.icon}, on for this scheme's members.`;
+      const head = `Adopted ${a.name}: registered on port ${a.port}, deployed from ${a.subdir ?? 'the repo root'}, icon ${a.icon || 'left empty for the deploy to fill'}, on for this scheme's members.`;
       if (a.deployError) return `${head}\nIt did not deploy: ${a.deployError}\nIt stays registered: call deploy_contraption for ${a.name} to try again.`;
       return `${head}\n${await followDeploy(`/api/contraptions/${encodeURIComponent(a.name)}/deploy`)}`;
     }

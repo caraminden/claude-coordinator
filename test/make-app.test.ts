@@ -181,7 +181,8 @@ const commit = (dir: string, file: string, text: string) => {
 };
 
 test('adopt_app: registers an app at the repo root or in a folder, on for the members, with no minion, and reports its deploy', async () => {
-  commit(join(root, 'trips'), 'apps/old-trips/citadel-app.json', JSON.stringify({ start: ['node', 'server.ts'], icon: '/old.svg' }));
+  commit(join(root, 'trips'), 'apps/old-trips/citadel-app.json', JSON.stringify({ start: ['node', 'server.ts'] }));
+  commit(join(root, 'trips'), 'apps/old-trips/public/icon.svg', '<svg/>');
   commit(join(root, 'plain'), 'citadel-app.json', MANIFEST_JSON);
   const s0 = db();
   const before = s0.listTickets(Trips.id).length;
@@ -195,11 +196,11 @@ test('adopt_app: registers an app at the repo root or in a folder, on for the me
   const s = db();
   try {
     const c = s.getContraption('old-trips')!;
-    assert.deepEqual([c.repo, c.branch, c.subdir, c.folder, c.icon, c.home_scheme], ['o/trips', null, 'apps/old-trips', null, '/old.svg', Trips.id]);
+    assert.deepEqual([c.repo, c.branch, c.subdir, c.folder, c.icon, c.home_scheme], ['o/trips', null, 'apps/old-trips', null, '/icon.svg', Trips.id]);
     assert.ok(c.port >= 7350 && c.port <= 7999, String(c.port));
     assert.deepEqual(s.contraptionUsers(c.id).sort(), [cara.id, josh.id].sort());
     const w = s.getContraption('whole-repo')!;
-    assert.deepEqual([w.subdir, w.icon, w.home_scheme, w.repo], [null, '/icon.svg', Plain.id, 'o/plain']);
+    assert.deepEqual([w.subdir, w.icon, w.home_scheme, w.repo], [null, '', Plain.id, 'o/plain']);
     assert.notEqual(w.port, c.port);
     assert.equal(s.listTickets(Trips.id).length, before, 'adopting starts no minion');
   } finally {

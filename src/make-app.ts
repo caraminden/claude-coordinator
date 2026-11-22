@@ -181,18 +181,17 @@ export async function adoptApp(app: App, project: Project, caller: Ticket, body:
   }
   const where = subdir ? `${subdir}/${MANIFEST}` : MANIFEST;
   if (!manifestOn(project.repo_dir, subdir ?? '', 'main')) throw new HttpError(404, `No ${where} on main in ${project.name}'s repo: ship it to main first`);
-  let icon = '/icon.svg';
-  try {
-    const text = (await run('git', ['show', `main:${where}`], { cwd: project.repo_dir })).stdout;
-    parseManifest(text);
-    const named = JSON.parse(text)?.icon;
-    if (typeof named === 'string' && /^\/[\w./-]*$/.test(named)) icon = named;
-  } catch (err) {
-    throw new HttpError(400, `${where} on main isn't a usable manifest: ${(err as Error).message}`);
-  }
   making.names.add(name);
   let port = 0;
   try {
+    try {
+      parseManifest((await run('git', ['show', `main:${where}`], { cwd: project.repo_dir })).stdout);
+    } catch (err) {
+      throw new HttpError(400, `${where} on main isn't a usable manifest: ${(err as Error).message}`);
+    }
+    // /icon.svg only when the folder has one; else empty, and the deploy fills it from the app's web manifest (or says what is missing).
+    const files = (await run('git', ['ls-tree', '-r', '--name-only', 'main', '--', subdir ?? '.'], { cwd: project.repo_dir })).stdout.split('\n');
+    const icon = files.some((f) => f.split('/').pop() === 'icon.svg') ? '/icon.svg' : '';
     port = await freeAppPort(new Set([...store.listContraptions().map((c) => c.port), ...making.ports]));
     making.ports.add(port);
     app.contraptions.register({

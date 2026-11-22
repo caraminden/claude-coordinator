@@ -57,7 +57,7 @@ members and briefs that minion to ship it and build the idea. `set_app_person` (
 An app that already exists in the scheme's own repo (a `citadel-app.json` on main, at the root or in a folder) is
 adopted, not made: the same Taskmaster, on a member's turn, calls `adopt_app` (`name`, `title`, `folder`: `""` or `.` for the
 root; optional `repo`, refused unless it is the scheme's own). It registers the app with that `subdir`, a free port from 7350
-to 7999, the manifest's `icon` or `/icon.svg`, and the scheme as home, switches it on for every member, deploys it and returns
+to 7999, `/icon.svg` when its folder has an `icon.svg` (else empty, which the deploy fills from the web manifest), and the scheme as home, switches it on for every member, deploys it and returns
 the deploy's outcome. No minion, no files written; refused for a taken name, a non-member's turn, no manifest on main or a
 repo that isn't the scheme's.
 
@@ -1095,6 +1095,7 @@ Newest first.
 - **2026-11-19:** Push to a person's phone: `POST /api/contraptions/push` sends a notification and/or
   silent data to their Android app, through the shared shell ("Push to a person's phone"). The fake
   Citadel answers it as well, giving each enabled person one phone, and records the sends in `fake.pushes`.
+- **2026-11-22:** `adopt_app` (`name`, `title`, `folder`) registers, switches on and deploys an app already on its own scheme's repo main, no minion; see the registry section.
 - **2026-11-19:** New apps in one call: a scheme's Taskmaster calls `make_app` and gets a tested,
   signed-in, backed-up app in `apps/<name>/` of its own repo, with a minion to ship it ("The registry
   entry"). An app can live in a folder of a repo (`subdir`); a ship that doesn't touch that folder

@@ -47,6 +47,17 @@ the last one in line waited for every run ahead of it.
   file not rerun included) puts them back in line unrefused, and the bisect runs if a real failure came back (else
   another round). A guessed suspect that is the front itself can't wait off its own train, so the bisect looks.
   So the "accepted" innocent refusal above no longer happens.
+- **Every bad ship in one round** (#1564; Cara, 2026-11-21, C "Go" on #1549's choices page, after "seems like releases
+  are still REALLY hard? ... is the train size wrong?"; Cara, 2026-11-22, "Keep 7, drop G"). On Nov 21 a train with
+  three bad riders took three red runs to shed them: the burn-in stopped at its first red file, and a failing file no
+  ship could be pinned on sent the whole train to the bisect even when other files had confirmed causes. Now the
+  burn-in (`tools/burn-in.sh`) runs every file past a red one and names each racy file, so one red run names every
+  burn-in failure. The suspects judge all of a round's failing files before refusing anyone: each runs alone on the
+  train's prefixes here, `LAND_PIN_JOBS` (3) at a time, and every confirmed cause leaves in that round. A file nobody
+  can be pinned on no longer blocks them: with at least one confirmed cause, it rides on (as do guesses that name the
+  front or more than one ship), the output says "no ship could be pinned on …, so they stay on the train", and only a
+  red again on that file brings the bisect. With no confirmed cause, such a file sends the train to the bisect as
+  before. The cap stays 7.
 - **Red on main too refuses nobody** (#1430, before #1403's run alone on the train; Cara, 2026-11-21, picked on #1427's card after main's own clock test
   refused #1356, #1378, #1414 and #1366 between 00:00 and 01:30 PST). Before the suspects or the bisect, or a red
   ship alone's refusal, each real failure (at most 6 files) runs alone on main's tip here, niced. One that fails there
@@ -111,6 +122,17 @@ rolled back, or with `<state>/train-off`. One ship's perigee fallback run is all
 riders while it waits, for a busy runner or for a quiet perigee (#1361, Cara 2026-11-20, "Wait for a busy desktop"):
 only once the gate gives up for good, to run the suite on perigee, do the riders go back in line, and the front falls
 back alone.
+
+While deploys are refusing (`<state>/refusing`: the deploy's boot check failed), each ship runs that boot check
+before its CI run (#646). Since #1564 (Cara, 2026-11-21, D "Go") a ship that fails it is checked against main too:
+`main_boot` runs main's own boot check on a copy of main, one at a time for every ship, its exit code kept in
+`<state>/boot-main` until main moves or `LAND_HOLD_RECHECK` (900 s) passes. Main passes: the change is the cause and
+the ship is refused, as before. Main fails or hangs too: main or the box is broken, so a plain land keeps its ticket,
+lets go of the lock and holds with the phase "held: main is broken (N min)", a waiter the line passes over (the
+ticket's `yield`) and never a train rider. Every `LAND_HOLD_POLL` (30 s) it looks: the deploy's note cleared or changed,
+main moved, or main's check passing on a recheck (a fixed box) sends it back to its place in line, and it starts over
+from its rebase. A fix for main still passes its own check and ships as usual, and the held ships follow it. Only past
+`LAND_HOLD_MAX` (8 h) is a held ship refused. Merges into a build, `--full` and `--build` runs are refused as before.
 
 A ship refused by the pipeline rather than by its own change (#1360, Cara 2026-11-20, "Refused ships keep their place":
 CI and perigee both busy, perigee's heavy slot taken, or a perigee red of flakes only) keeps its ticket once per

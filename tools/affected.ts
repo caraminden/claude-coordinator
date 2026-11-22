@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export type Rule = { line: number; glob: string; re: RegExp; tests: string[] };
-export type Map = { tests: RegExp[]; fallback: 'always' | 'full'; rules: Rule[] };
+export type Map = { tests: RegExp[]; fallback: 'always' | 'full'; rules: Rule[]; sameName: RegExp[] };
 
 // A glob over a repo path: `*` and `?` stay inside a folder name, `**` crosses folders, `**/` may be no folder at all.
 export function globRe(glob: string): RegExp {
@@ -29,7 +29,7 @@ export function globRe(glob: string): RegExp {
 }
 
 export function parseMap(text: string): Map {
-  const map: Map = { tests: [], fallback: 'always', rules: [] };
+  const map: Map = { tests: [], fallback: 'always', rules: [], sameName: [] };
   const fail = (n: number, why: string): never => { throw new Error(`map line ${n}: ${why}`); };
   text.split('\n').forEach((raw, i) => {
     const n = i + 1;
@@ -39,6 +39,7 @@ export function parseMap(text: string): Map {
     if (line.startsWith('@')) {
       const [name, ...vals] = line.slice(1).split(/\s+/);
       if (name === 'tests') { if (!vals.length) fail(n, '@tests needs a glob'); map.tests.push(...vals.map(globRe)); }
+      else if (name === 'samename') { if (!vals.length) fail(n, '@samename needs a glob'); map.sameName.push(...vals.map(globRe)); }
       else if (name === 'fallback') { if (vals.length !== 1 || !['always', 'full'].includes(vals[0])) fail(n, '@fallback is "always" or "full"'); map.fallback = vals[0] as 'always' | 'full'; }
       else fail(n, `unknown directive @${name}`);
       return;
@@ -81,6 +82,15 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
       for (const t of r.tests) {
         const hits = /[*?]/.test(t) ? tracked.filter((f) => globRe(t).test(f)) : [t];
         for (const h of hits) add(h, `map:${r.line} ${r.glob}`);
+      }
+    }
+    // @samename: a changed source file runs the tracked test files named after it (src/x.ts, public/x.js -> test/x.test.ts, x.test.js).
+    if (!isTest && map.sameName.some((re) => re.test(p))) {
+      const stem = p.slice(p.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '');
+      for (const t of tracked) {
+        if (!map.tests.some((re) => re.test(t))) continue;
+        const b = t.slice(t.lastIndexOf('/') + 1);
+        if (b === `${stem}.test.ts` || b === `${stem}.test.js`) { add(t, `name ${p}`); covered = true; }
       }
     }
     if (!covered) unmapped.push(p);

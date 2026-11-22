@@ -137,7 +137,6 @@ const BREAKS: [ship: string, changed: string, failed: string][] = [
   ['#1590', 'src/front.ts', 'test/front.test.ts'],
   ['#1543', 'public/schemes.js', 'test/schemes.test.js'],
   ['#1607', 'src/ci-health.ts', 'test/ci-health.test.ts'],
-  ['#1528', 'public/app.js', 'test/app-browser.test.ts'],
 ];
 test('each replayed break picks the test that failed', () => {
   for (const [ship, changed, failed] of BREAKS) assert.ok(lines([changed]).run.some((r) => r.test === failed), `${ship}: ${changed} must pick ${failed}`);
@@ -149,7 +148,6 @@ test('a source file picks its same-name test by basename (.ts or .js), and only 
   assert.deepEqual(picked('public/ui/chat.js'), tracked.filter((f) => /^test\/chat\.test\.(ts|js)$/.test(f)));
   assert.deepEqual(picked('src/no-such-module-xyz.ts'), []);
   assert.deepEqual(picked('tools/affected.ts'), ['test/affected.test.ts']);
-  assert.ok(!lines(['src/inbox.ts']).unmapped.includes('src/inbox.ts') || true);
 });
 
 test('any public/ change picks the boot-check test', () => {

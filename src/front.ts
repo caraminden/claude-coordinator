@@ -7,6 +7,9 @@ import { Worker, isMainThread, parentPort, receiveMessageOnPort, workerData } fr
 import { Agent, createServer, request, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect, Server as NetServer, type Socket } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { promisify } from 'node:util';
+import { gzip } from 'node:zlib';
+import { shellOff } from './shell.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -22,6 +25,75 @@ export const LOCAL_HEADER = 'x-citadel-local';
 export const READER_ANSWER_MS = 2000;
 /** A reader whose thread hasn't said it is alive for this long is replaced. */
 export const READER_STUCK_MS = 10_000;
+
+/**
+ * Citadel's own pages live under /c/ (manifest scope and start_url), so its installed app doesn't claim
+ * /apps/ and each contraption installs as its own app (#270: browsers won't install an app inside an
+ * installed one's scope). For a raw request URL: `{ redirect }` from the old root "/" (relative, so a
+ * preview's copy stays under its /preview/N/; browsers keep the #route), `{ url }` with the /c taken off
+ * for anything under /c/, so the front end's relative URLs (api/, app.js) reach the same routes; else null.
+ * A share from the phone's Share sheet (the manifest's share_target, #375) goes to the front end's #/share.
+ */
+export function ownPath(url: string): { redirect: string } | { url: string } | null {
+  const root = /^\/c?(\?.*)?$/.exec(url);
+  if (root) return { redirect: `c/${root[1] ?? ''}` };
+  const share = /^\/c\/share(\?.*)?$/.exec(url);
+  if (share) {
+    // Re-encoded, so the Location header is plain ASCII whatever the share sent.
+    const q = new URLSearchParams(share[1] ?? '').toString();
+    return { redirect: `./#/share${q ? `?${q}` : ''}` };
+  }
+  if (url.startsWith('/c/') && !/^\/c\/(apps|preview)\//.test(url)) return { url: url.slice(2) };
+  return null;
+}
+
+/** Citadel UI's files, which contraptions load from /apps/_citadel/ (on their own hosts too), each with an ETag. */
+export const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|extlinks\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
+/** Bodies smaller than this go out as they are: gzip isn't worth it. */
+export const MIN_GZIP_BYTES = 1400;
+
+/** One front-end file ready to send (#1628): its headers (Vary and X-Front-Hash among them), body and gzipped body. */
+export type StaticFile = { headers: Record<string, string>; body: Uint8Array; gz: Uint8Array | null };
+/**
+ * public/ as the main thread loaded it, which the front thread serves with no hop to the main thread: each file by
+ * name, and the variants a request picks, the dark manifest and the service worker the off switch's flag file asks for.
+ */
+export type Statics = { files: Record<string, StaticFile>; darkManifest: StaticFile; swOff: StaticFile; dataDir: string };
+const gzipped = promisify(gzip);
+export const readyFile = async (headers: Record<string, string>, body: Uint8Array): Promise<StaticFile> =>
+  ({ headers: { Vary: 'Accept-Encoding', ...headers }, body, gz: body.length >= MIN_GZIP_BYTES ? await gzipped(body, { level: 6 }) : null });
+
+/** The front-end file a request's URL names, and whether it was asked for as Citadel UI's (an ETag); null for anything else. */
+export function staticName(url: string, onAppHost: boolean): { name: string; kit: boolean } | null {
+  const kit = (path: string) => (KIT_FILE.test(path) ? { name: path.slice('/apps/_citadel/'.length), kit: true } : null);
+  // A contraption's own host serves only Citadel UI's files of Citadel's.
+  if (onAppHost) return kit(url.split('?')[0]);
+  const own = ownPath(url);
+  if (own && 'redirect' in own) return null;
+  let path: string;
+  try {
+    path = new URL(own?.url ?? url, 'http://localhost').pathname;
+    decodeURIComponent(path);
+  } catch { return null; }
+  return kit(path) ?? (path.startsWith('/api/') || path.startsWith('/apps/') ? null : { name: path === '/' ? 'index.html' : path.slice(1), kit: false });
+}
+
+/** The answer to a GET or HEAD for front-end file `name`, or null when there is no such file. One copy for both threads. */
+export function staticAnswer(s: Statics, name: string, kit: boolean, req: IncomingHttpHeaders): { status: number; headers: Record<string, string>; body: Uint8Array } | null {
+  if (!Object.hasOwn(s.files, name)) return null;
+  let f = s.files[name];
+  if (name === 'sw.js' && shellOff(s.dataDir)) f = s.swOff;
+  if (name === 'manifest.webmanifest' && /dark/.test(String(req['sec-ch-prefers-color-scheme'] ?? ''))) f = s.darkManifest;
+  const headers = { ...f.headers };
+  // Contraptions' pages load these on every page: a 304 until a deploy changes them.
+  if (kit) {
+    headers.ETag = `"${headers['X-Front-Hash']}"`;
+    const asked = String(req['if-none-match'] ?? '').split(',').map((t) => t.trim().replace(/^W\//, ''));
+    if (asked.includes(headers.ETag) || asked.includes('*')) return { status: 304, headers, body: new Uint8Array() };
+  }
+  if (f.gz && /\bgzip\b/.test(String(req['accept-encoding'] ?? ''))) return { status: 200, headers: { ...headers, 'Content-Encoding': 'gzip' }, body: f.gz };
+  return { status: 200, headers, body: f.body };
+}
 
 // Hop-by-hop headers belong to one connection, not the request.
 // Upgrade stays on a request that isn't one (no Connection: upgrade): the main thread answers it as it would have.
@@ -85,7 +157,7 @@ export function socketBase(env = process.env, tmp = tmpdir()) {
  * the real one. `onListening` gets the port the front thread bound. `onUsage`/`onSetting` take the counts and cache
  * writes readers post (the main thread and its writer do every write). The process exits if the front thread dies.
  * `stop()`, for a restart, resolves once the front thread has let go of the port and answered what it took.
- * `publish()` posts a change to the readers' snapshot (Snapshot).
+ * `publish()` posts a change to the readers' snapshot (Snapshot); `statics()` the front end's files, which it serves (Statics).
  */
 export function listenThroughFront(server: Server, opts: FrontOptions, on: { listening: (port: number) => void; usage: (args: unknown[]) => void; setting: (key: string, value: unknown) => void }) {
   // A private folder (0700) for the socket: only this account can reach it, so only the front thread sets the peer header.
@@ -99,17 +171,19 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
   // How many snapshot changes main has posted: the front thread reads what it hasn't applied yet before it asks a reader,
   // so a reader never answers from older state than main had when the request came (a person's own click included).
   const posted = new Int32Array(new SharedArrayBuffer(4));
-  let early: SnapDelta[] | null = [];
-  const post = (d: SnapDelta) => {
-    front!.postMessage({ snap: d });
+  let early: ({ snap: SnapDelta } | { statics: Statics })[] | null = [];
+  const post = (m: { snap: SnapDelta } | { statics: Statics }) => {
+    if (early) return void early.push(m);
+    front!.postMessage(m);
     Atomics.add(posted, 0, 1);
   };
   // The front thread's pooled connections stay open until it closes them, so a reused one is never closed under a request.
   server.keepAliveTimeout = 0;
   server.listen(sock, () => {
     front = new Worker(new URL(import.meta.url), { workerData: { front: { ...opts, sock, posted } } });
-    for (const d of early!) post(d);
+    const held = early!;
     early = null;
+    for (const m of held) post(m);
     front.on('message', (m: { listening?: number; usage?: unknown[][]; setting?: [string, unknown]; stopped?: true }) => {
       if (m.stopped) stopped();
       if (m.listening !== undefined) on.listening(m.listening);
@@ -137,8 +211,11 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
       front?.postMessage('release');
     },
     publish(d: SnapDelta) {
-      if (early) early.push(d);
-      else post(d);
+      post({ snap: d });
+    },
+    /** The front end's files as loaded (at the start and on each SIGHUP): the front thread serves them from then on. */
+    statics(s: Statics) {
+      post({ statics: s });
     },
   };
 }
@@ -201,6 +278,12 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   // The readers' snapshot (Snapshot), whole for a reader that starts, and each change main posts passed on in order.
   const snap = emptySnapshot();
   let applied = 0;
+  let statics: Statics | null = null;
+  // Every change main posted before this request is applied first: false if one is still on its way.
+  const caughtUp = () => {
+    for (let m; Atomics.load(opts.posted, 0) !== applied && (m = receiveMessageOnPort(parentPort!));) fromMain(m.message);
+    return Atomics.load(opts.posted, 0) === applied;
+  };
 
   // Readers: started here, so their answers never wait on the main thread.
   // late: it missed an answer's deadline and gets no more requests until it posts something again.
@@ -252,9 +335,8 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     && READER_PATHS.test((req.url ?? '').split('?')[0]);
 
   const ask = (req: IncomingMessage, res: ServerResponse) => {
-    // Every change main posted before this request is applied first, and so reaches the reader before the request does.
-    for (let m; Atomics.load(opts.posted, 0) !== applied && (m = receiveMessageOnPort(parentPort!));) fromMain(m.message);
-    if (Atomics.load(opts.posted, 0) !== applied) return pass(req, res);
+    // So every change main posted reaches the reader before the request does.
+    if (!caughtUp()) return pass(req, res);
     let best: Reader | null = null;
     for (const r of readers) if (r.ready && !r.late && r.heard !== Infinity && (!best || r.open.size < best.open.size)) best = r;
     if (!best) return pass(req, res);
@@ -271,11 +353,24 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     r.worker.postMessage({ id, method: req.method, url: req.url, headers: req.headers });
   };
 
+  // The front end's files (#1628), as main last loaded them; a test's `citadel-test-reader=main` asks main for the reference.
+  const testHooks = !!opts.reader.testHooks;
+  const serveStatic = (req: IncomingMessage, res: ServerResponse) => {
+    if ((req.method !== 'GET' && req.method !== 'HEAD') || req.headers.upgrade || (testHooks && /[?&]citadel-test-reader=main\b/.test(req.url ?? ''))) return false;
+    const file = staticName(req.url ?? '/', appHost(req, opts.appsDomain) !== null);
+    const a = file && caughtUp() && statics && staticAnswer(statics, file.name, file.kit, req.headers);
+    if (!a) return false;
+    res.writeHead(a.status, { ...a.headers, 'X-Citadel-Answered': 'front' });
+    res.end(a.body);
+    return true;
+  };
+
   let released = false; // a warm handover's: every request goes to the main thread, which passes it on
   const front = createServer({ shouldUpgradeCallback: (req) => upgrades(req, opts.appsDomain) }, (req, res) => {
     try {
-      if (!released && forReader(req)) ask(req, res);
-      else pass(req, res);
+      if (released) pass(req, res);
+      else if (forReader(req)) ask(req, res);
+      else if (!serveStatic(req, res)) pass(req, res);
     } catch (err) {
       console.error(`Front thread: ${(err as Error)?.stack ?? err}`);
       if (!res.headersSent) res.writeHead(500).end();
@@ -300,11 +395,16 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   if (opts.fd !== undefined) front.listen({ fd: opts.fd }, listening);
   else front.listen(opts.port ?? 0, opts.host, listening);
 
-  function fromMain(m: 'stop' | 'release' | { snap: SnapDelta }) {
+  function fromMain(m: 'stop' | 'release' | { snap: SnapDelta } | { statics: Statics }) {
     if (m === 'release') {
       // net's close, not http's, which would also close an idle connection whose request isn't read yet (ECONNRESET).
       released = true;
       NetServer.prototype.close.call(front);
+      return;
+    }
+    if (m !== 'stop' && 'statics' in m) {
+      statics = m.statics;
+      applied++;
       return;
     }
     if (m !== 'stop') {

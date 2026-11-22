@@ -13,7 +13,9 @@ import type { Landings } from './land.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { gzip } from 'node:zlib';
-import { LOCAL_HEADER, PEER_HEADER } from './front.ts';
+import { LOCAL_HEADER, MIN_GZIP_BYTES, PEER_HEADER } from './front.ts';
+// ownPath's one copy is the front thread's, which serves the front end's files by it (#1628).
+export { ownPath } from './front.ts';
 // Types only: this module loads nothing of the app's, so any module can import it.
 import type { Auth, Session } from './auth.ts';
 import type { BranchStatus } from './branch.ts';
@@ -84,7 +86,6 @@ export function framedWithApps(domain: string) {
 // Responses to browsers that accept gzip. Caddy passes bodies through as they are, and a long
 // thread's history is megabytes of JSON that gzips about 4x.
 export const acceptsGzip = new WeakSet<ServerResponse>();
-const MIN_GZIP_BYTES = 1400;
 
 /**
  * The DB writes each request made, for the write worker (src/db-writer.ts, #795): `request` holds the last one's number
@@ -178,27 +179,6 @@ export async function readJson(req: IncomingMessage, maxBytes = 1_000_000): Prom
   // Every route reads fields off it: `null` would be a TypeError there, answered as a 500.
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Expected a JSON object');
   return body;
-}
-
-/**
- * Citadel's own pages live under /c/ (manifest scope and start_url), so its installed app doesn't claim
- * /apps/ and each contraption installs as its own app (#270: browsers won't install an app inside an
- * installed one's scope). For a raw request URL: `{ redirect }` from the old root "/" (relative, so a
- * preview's copy stays under its /preview/N/; browsers keep the #route), `{ url }` with the /c taken off
- * for anything under /c/, so the front end's relative URLs (api/, app.js) reach the same routes; else null.
- * A share from the phone's Share sheet (the manifest's share_target, #375) goes to the front end's #/share.
- */
-export function ownPath(url: string): { redirect: string } | { url: string } | null {
-  const root = /^\/c?(\?.*)?$/.exec(url);
-  if (root) return { redirect: `c/${root[1] ?? ''}` };
-  const share = /^\/c\/share(\?.*)?$/.exec(url);
-  if (share) {
-    // Re-encoded, so the Location header is plain ASCII whatever the share sent.
-    const q = new URLSearchParams(share[1] ?? '').toString();
-    return { redirect: `./#/share${q ? `?${q}` : ''}` };
-  }
-  if (url.startsWith('/c/') && !/^\/c\/(apps|preview)\//.test(url)) return { url: url.slice(2) };
-  return null;
 }
 
 /** A request's URL; a 400 for one that can't be parsed or decoded (`//`, `/%`) rather than a crash. */

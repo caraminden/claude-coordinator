@@ -13,7 +13,7 @@ import { homedir } from 'node:os';
 import { isArtifact } from './src/artifacts.ts';
 import { APP_NAME } from './src/appname.ts';
 import { versionIcons } from './src/icons.ts';
-import { shellOff, shellWorker } from './src/shell.ts';
+import { shellWorker } from './src/shell.ts';
 import { lendsMachine, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnPlace, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from './src/build-cache.ts';
@@ -74,7 +74,7 @@ import { handOver, standby } from './src/handover.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { publishLive } from './src/reader-live.ts';
-import { listenThroughFront, upgrades } from './src/front.ts';
+import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, upgrades, type Statics } from './src/front.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { jobRoutes } from './src/routes/jobs.ts';
 import { ciStoreRoutes } from './src/routes/ci-store.ts';
@@ -197,7 +197,22 @@ let ASSETS = new Map<string, Buffer>();
 let ASSET_VERSION = '';
 // Each file's content hash as served (X-Front-Hash): the service worker re-fetches only the files whose hash changed (#1331).
 let ASSET_HASHES = new Map<string, string>();
-let DARK_MANIFEST = Buffer.alloc(0);
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.ts': 'text/plain; charset=utf-8', // public/ui/*.d.ts, the types apps read
+};
+// Asked of browsers for the manifest's dark variant (darkManifest, below).
+const COLOR_SCHEME_HINT = 'Sec-CH-Prefers-Color-Scheme';
+// The files as sent, headers and gzipped bodies made once (#1628): the front thread serves them, and serveStatic here.
+let STATICS: Statics | null = null;
+// Set once the front thread owns the port (below); declared here because loadAssets posts to it.
+let throughFront: ReturnType<typeof listenThroughFront> | null = null;
 async function loadAssets() {
   const assets = new Map<string, Buffer>();
   // public/ and its ui/ folder (Citadel UI, the modules apps import from /apps/_citadel/ui/).
@@ -215,8 +230,10 @@ async function loadAssets() {
   ASSET_VERSION = createHash('sha256').update([...assets.values()].join('\0')).digest('hex').slice(0, 12);
   // The page knows its own version (#1144): one the service worker kept from before a ship reloads into the new one.
   assets.set('index.html', Buffer.from(assets.get('index.html')!.toString('utf8').replace('%ASSET_VERSION%', ASSET_VERSION)));
-  ASSET_HASHES = new Map([...assets].map(([name, body]) => [name, createHash('sha256').update(body).digest('hex').slice(0, 16)]));
-  DARK_MANIFEST = dark;
+  const hashes = new Map([...assets].map(([name, body]) => [name, createHash('sha256').update(body).digest('hex').slice(0, 16)]));
+  ASSET_HASHES = hashes;
+  STATICS = await staticTable(assets, ASSET_VERSION, hashes, dark);
+  throughFront?.statics(STATICS);
 }
 // The commit this server's code came from, so a deploy can tell whether the change it ships is
 // front end only. null outside a git checkout.
@@ -1687,21 +1704,9 @@ function registryChanged(projectId: number, global: boolean) {
   broadcast({ type: 'properties', projectId: global ? null : projectId });
 }
 
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.webmanifest': 'application/manifest+json',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.ts': 'text/plain; charset=utf-8', // public/ui/*.d.ts, the types apps read
-};
-
 // Android colours an installed app's status and navigation bars from the manifest, which can't vary
 // by light or dark mode yet (color_scheme_dark is still a proposal). Ask the browser for its colour
-// scheme and hand dark-mode devices a manifest with the dark colours, so the app doesn't get a white bar.
-const COLOR_SCHEME_HINT = 'Sec-CH-Prefers-Color-Scheme';
+// scheme (COLOR_SCHEME_HINT) and hand dark-mode devices a manifest with the dark colours, so the app doesn't get a white bar.
 function darkManifest(assets: Map<string, Buffer>) {
   const manifest = JSON.parse(assets.get('manifest.webmanifest')!.toString());
   return Buffer.from(JSON.stringify({ ...manifest, ...manifest.color_scheme_dark }, null, 2));
@@ -1722,28 +1727,27 @@ async function serveRunnerFile(res: ServerResponse, path: string) {
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': body.length });
   res.end(body);
 }
-async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string, etag = false) {
-  const name = path === '/' ? 'index.html' : path.replace(/^\//, '');
-  let body = ASSETS.get(name);
-  if (!body) throw new HttpError(404, 'Not found');
-  if (name === 'sw.js') body = Buffer.from(shellWorker(body.toString('utf8'), ASSET_VERSION, ASSET_HASHES, shellOff(DATA_DIR)));
-  const headers: Record<string, string> = { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(name)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' };
-  // Contraptions' pages load these on every page: a 304 until a deploy changes them.
-  if (etag) {
-    headers.ETag = `"${createHash('sha256').update(body).digest('hex').slice(0, 16)}"`;
-    const asked = String(req.headers['if-none-match'] ?? '').split(',').map((t) => t.trim().replace(/^W\//, ''));
-    if (asked.includes(headers.ETag) || asked.includes('*')) return void res.writeHead(304, headers).end();
-  }
-  // The service worker keeps only files of the version it was made for (public/sw.js); its own copy names that version
-  // and the files, or is the off switch's worker (src/shell.ts).
-  headers['X-Front-Version'] = ASSET_VERSION;
-  headers['X-Front-Hash'] = ASSET_HASHES.get(name) ?? '';
-  if (name === 'index.html') headers['Accept-CH'] = COLOR_SCHEME_HINT;
-  if (name === 'manifest.webmanifest') {
-    if (/dark/.test(String(req.headers[COLOR_SCHEME_HINT.toLowerCase()] ?? ''))) body = DARK_MANIFEST;
-    headers.Vary = `Accept-Encoding, ${COLOR_SCHEME_HINT}`;
-  }
-  send(res, 200, headers, body);
+/** Each front-end file as it is sent: the headers a request doesn't change, its body and gzipped body, and the variants a request picks. */
+async function staticTable(assets: Map<string, Buffer>, version: string, hashes: Map<string, string>, dark: Buffer): Promise<Statics> {
+  const file = (name: string, body: Buffer) => {
+    const headers: Record<string, string> = { ...SECURITY_HEADERS, 'Content-Type': MIME[extname(name)] ?? 'application/octet-stream', 'Cache-Control': 'no-cache' };
+    // The service worker keeps only files of the version it was made for (public/sw.js); its own copy names that version
+    // and the files, or is the off switch's worker (src/shell.ts).
+    headers['X-Front-Version'] = version;
+    headers['X-Front-Hash'] = hashes.get(name) ?? '';
+    if (name === 'index.html') headers['Accept-CH'] = COLOR_SCHEME_HINT;
+    if (name === 'manifest.webmanifest') headers.Vary = `Accept-Encoding, ${COLOR_SCHEME_HINT}`;
+    return readyFile(headers, body);
+  };
+  const sw = (off: boolean) => Buffer.from(shellWorker(assets.get('sw.js')!.toString('utf8'), version, hashes, off));
+  const files = Object.fromEntries(await Promise.all([...assets].map(async ([name, body]) => [name, await file(name, name === 'sw.js' ? sw(false) : body)] as const)));
+  return { files, darkManifest: await file('manifest.webmanifest', dark), swOff: await file('sw.js', sw(true)), dataDir: DATA_DIR };
+}
+/** `kit`: asked for as Citadel UI's, under /apps/_citadel/, which answers with an ETag. */
+async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string, kit = false) {
+  const a = STATICS && staticAnswer(STATICS, path === '/' ? 'index.html' : path.replace(/^\//, ''), kit, req.headers);
+  if (!a) throw new HttpError(404, 'Not found');
+  res.writeHead(a.status, a.headers).end(a.body);
 }
 
 // Memory-limit storms (#1280): a Citadel slice or container stalling at its MemoryHigh, read every 15 s, recorded for the Status page.
@@ -1846,7 +1850,6 @@ const readStatics = () => void safely('static paths', () => apps.backfillStatics
   .finally(() => setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_EVERY_MS ?? 15 * 60_000)).unref());
 setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref();
 // Citadel UI's files for contraptions' pages (public/, src/theme.ts); no contraption can be called _citadel.
-const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|extlinks\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
 
 // Requests not yet answering, for settled() (src/settled.ts). Busy only until its headers go out: send() holds those until
 // the request's own writes land, and a stream (an agent's connect, a page's events) stays open by design once it answers.
@@ -1994,7 +1997,6 @@ const listened = (port: number) => {
 };
 // People's read-only page requests answer on reader threads, behind a front thread that owns the port (#1563).
 // CITADEL_FRONT=0 is the off switch: the main thread listens itself, as before.
-let throughFront: ReturnType<typeof listenThroughFront> | null = null;
 if (process.env.CITADEL_FRONT !== '0') {
   front.on = true;
   throughFront = listenThroughFront(server, {
@@ -2008,6 +2010,7 @@ if (process.env.CITADEL_FRONT !== '0') {
     usage: (args) => (store.usage.used as (...a: unknown[]) => void)(...args),
     setting: (key, value) => { if (/^plan:\d+:page$/.test(key)) store.setSetting(key, value); },
   });
+  if (STATICS) throughFront.statics(STATICS);
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
   publishLive({
     publish: throughFront.publish, store, runner, builds: (id) => builds.get(id), ownScheme: () => ownScheme()?.id ?? null, previews: !!previews, status,

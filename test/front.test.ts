@@ -3,12 +3,14 @@
 // reader that dies or hangs is replaced and its request answered by the main thread; a read never misses a write the
 // writer is still holding. Real servers on one data folder, with the front thread on and off (CITADEL_FRONT=0).
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { connect } from 'node:net';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { READER_PATHS } from '../src/front.ts';
+import { SHELL_OFF_FILE } from '../src/shell.ts';
 import { readerRoutes } from '../src/reader.ts';
 import { agentToken, bootServer, PASSWORD, tempRoot, type Booted } from './helpers.ts';
 import { until } from './wait.ts';
@@ -186,6 +188,61 @@ test('a reader that hangs: its request goes to the main thread, and the thread i
   await until('the hung reader is replaced', () => /Reader thread silent for \d+ s: replacing it/.test(logged()) && readyAgain() === 2);
   const all = await Promise.all(Array.from({ length: 8 }, () => get(srv, PATHS[0], srv.cookie)));
   assert.ok(all.every((g) => g.reader && g.status === 200));
+});
+
+/** One raw answer (no fetch, which would undo the gzip): status, the headers both threads should agree on, the bytes. */
+const raw = (path: string, headers: Record<string, string> = {}, method = 'GET') => new Promise<{ status: number; headers: Record<string, unknown>; body: Buffer; front: boolean }>((resolve, reject) => {
+  const req = request(`${srv.base}${path}`, { method, headers }, (res) => {
+    const parts: Buffer[] = [];
+    res.on('data', (c) => parts.push(c)).on('end', () => {
+      const { date, connection, 'keep-alive': _k, 'x-citadel-answered': by, ...rest } = res.headers;
+      resolve({ status: res.statusCode!, headers: rest, body: Buffer.concat(parts), front: by === 'front' });
+    });
+  });
+  req.on('error', reject).end();
+});
+const viaMainThread = (path: string) => `${path}${path.includes('?') ? '&' : '?'}citadel-test-reader=main`;
+
+test("front-end files come from the front thread, the bytes and headers main sends, and while main is busy", { timeout: 60_000 }, async () => {
+  const kit = await raw(viaMainThread('/apps/_citadel/theme.css'));
+  const cases: [string, Record<string, string>, string?][] = [
+    ['/c/', {}], ['/c/', { 'Accept-Encoding': 'gzip' }], ['/c/app.js', {}], ['/app.js', { 'Accept-Encoding': 'gzip, br' }], ['/app.js', {}], ['/style.css', {}, 'HEAD'],
+    ['/sw.js', {}], ['/manifest.webmanifest', {}], ['/manifest.webmanifest', { 'Sec-CH-Prefers-Color-Scheme': 'dark' }],
+    ['/apps/_citadel/theme.css', {}], ['/apps/_citadel/theme.css', { 'If-None-Match': String(kit.headers.etag) }], ['/apps/_citadel/ui/chat.js', {}],
+  ];
+  for (const [path, headers, method] of cases) {
+    const main = await raw(viaMainThread(path), headers, method), front = await raw(path, headers, method);
+    const key = `${method ?? 'GET'} ${path} ${JSON.stringify(headers)}`;
+    assert.ok(front.front && !main.front, key);
+    assert.deepEqual({ ...front, front: true }, { ...main, front: true }, key);
+  }
+  assert.equal((await raw('/c/', { 'Accept-Encoding': 'gzip' })).headers['content-encoding'], 'gzip');
+  assert.equal((await raw('/apps/_citadel/theme.css', { 'If-None-Match': String(kit.headers.etag) })).status, 304);
+  assert.notDeepEqual((await raw('/manifest.webmanifest', { 'Sec-CH-Prefers-Color-Scheme': 'dark' })).body, (await raw('/manifest.webmanifest')).body);
+  // Not a file, or the redirect to /c/: the main thread answers, as it always did.
+  for (const path of ['/', '/c/share?x=1', '/nope.js', '/api/health', '/backup', '/apps/_citadel/nope.js']) assert.ok(!(await raw(path)).front, path);
+  // The service worker's off switch (src/shell.ts) is read per request, so the front sees it the moment it is set.
+  const on = await raw('/sw.js');
+  writeFileSync(join(srv.data, SHELL_OFF_FILE), '');
+  try {
+    const off = await raw('/sw.js');
+    assert.ok(off.front);
+    assert.deepEqual(off.body, (await raw(viaMainThread('/sw.js'))).body);
+    assert.notDeepEqual(off.body, on.body);
+  } finally { rmSync(join(srv.data, SHELL_OFF_FILE)); }
+  let unblocked = 0;
+  const blocked = fetch(`${srv.base}/api/test/block?ms=1500`).then((r) => ((unblocked = Date.now()), r));
+  // timing-ok: a busy main thread can't say it is busy; 200 ms puts these reads inside its 1.5 s loop
+  await new Promise((r) => setTimeout(r, 200));
+  for (const path of ['/c/', '/app.js', '/apps/_citadel/theme.css']) {
+    const s = Date.now();
+    assert.equal((await raw(path)).status, 200, path);
+    // timing-ok: a file the front holds never waits on the main thread
+    assert.ok(Date.now() - s < 100, `${path} took ${Date.now() - s} ms`);
+  }
+  const read = Date.now();
+  assert.equal((await blocked).status, 200);
+  assert.ok(unblocked > read, 'the main thread was still busy when the files were answered');
 });
 
 test('everything else passes through: a POST, a live stream, the password check', { timeout: 60_000 }, async () => {

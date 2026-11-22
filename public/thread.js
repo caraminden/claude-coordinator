@@ -19,6 +19,7 @@ import { gist, groupTitle, gruntName, gruntOf } from './grunts.js';
 import { stepMark } from './ui/chat.js';
 import { optimistic } from './ui/optimistic.js';
 import { replyChips } from './replies.js';
+import { replyStartsOpen } from './cardreply.js';
 import { releaseChip } from './releases.js';
 import { pushNote, pushRun, pushRunParts, senderTone, shortDuration, shortNote } from './chattext.js';
 import { ultraButton, ultraCard, ultraResult } from './ultrareview.js';
@@ -1357,11 +1358,10 @@ function replyShows(data) {
   return !!data.reply && !!view.part?.mine && data.asker !== view.coordinator?.id;
 }
 
-/** The reply an everyone card was asked in, above the card wherever it shows (#1581); a long one starts collapsed. */
+/** The reply an everyone card was asked in, above the card wherever it shows (#1581); a long one starts collapsed unless it holds a command (#1589). */
 function cardReply(text, ticketId) {
-  const long = text.length > 500 || text.split('\n').length > 8;
   const el = h('details', { class: 'card-reply' }, h('summary', {}, 'The reply this card belongs to'), markdown(text, ticketId));
-  el.open = !long;
+  el.open = replyStartsOpen(text);
   return el;
 }
 

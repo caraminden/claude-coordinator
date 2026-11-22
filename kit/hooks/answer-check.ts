@@ -153,8 +153,8 @@ export function placeholderInCommand(text: string): string | null {
 // The live-claim check (#1113): a sentence stating live state (a minion's, CI's, a deploy's, a person's turn)
 // in a turn that read none of it. The shapes come from the replies struck in the week to 2026-11-19.
 const LIVE_CLAIMS = [
-  // Another minion's state: "#1002 has been live since 20:18", "#993 is parked".
-  /#\d{2,5}\b[^.?!\n]{0,40}?\b(?:is|was|are|has(?: been)?|have(?: been)?|'s|isn't|aren't|hasn't|haven't|never|already|still)\s+(?:now\s+|already\s+|still\s+|not\s+|been\s+)?(?:live|shipped|landed|deployed|merged|parked|running|idle|closed|done|blocked|stuck|waiting|ready|green|red|failed|failing)\b/i,
+  // Another minion's state: "#1002 has been live since 20:18", "#993 is sealed".
+  /#\d{2,5}\b[^.?!\n]{0,40}?\b(?:is|was|are|has(?: been)?|have(?: been)?|'s|isn't|aren't|hasn't|haven't|never|already|still)\s+(?:now\s+|already\s+|still\s+|not\s+|been\s+)?(?:live|shipped|landed|deployed|merged|parked|sealed|running|idle|closed|done|blocked|stuck|waiting|ready|green|red|failed|failing)\b/i,
   // CI, runners, jobs and lands with a result: "the last four lands all failed", "the test job never got a runner".
   /\b(?:CI|runs?|runners?|jobs?|lands?|landings?|workflows?|queue|checks?)\b[^.?!\n]{0,50}?\b(?:failed|fails|failing|passed|passes|passing|green|red|queued|stuck|cancell?ed|never got|timed out|hung|hangs|finished|is busy|are busy|waits? its turn|still running|still in the queue)\b/i,
   /\b(?:flaky|broken|offline|busy)\s+(?:runner|machine|box|CI)\b/i,
@@ -162,7 +162,7 @@ const LIVE_CLAIMS = [
   // Deploys and live-ness: "is live", "live since", "isn't actually taking effect".
   /\b(?:is|are|went|been|isn't|aren't|not|now)\s+live\b|\blive (?:since|now)\b|\btaking effect\b|(?:\b(?:was|were|got|is|are|been|now)\s+|'(?:re|s)\s+(?:now\s+)?)(?:deployed|restarted)\b/i,
   // Someone else's moves: "Josh's Taskmaster started that build", "the Taskmaster closed #12".
-  /(?<!\b(?:the|a|an)\s)\b(?:started|closed|stopped|parked|unparked)\s+(?:#\d+|(?:that|the|this) build|Build \d+)/i,
+  /(?<!\b(?:the|a|an)\s)\b(?:started|closed|stopped|parked|unparked|sealed|unsealed)\s+(?:#\d+|(?:that|the|this) build|Build \d+)/i,
   // A person's turn: "waiting on you", "it needs your go".
   /\b(?:waits?|waiting|blocked)\s+on\s+(?:you\b|your\b|Cara\b|Josh\b)|\bneeds? (?:your|Cara's|Josh's) (?:go|answer|pick|OK)\b/i,
 ];

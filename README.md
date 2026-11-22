@@ -474,7 +474,7 @@ risk label, live or waiting) and dismisses the minion, or sets pending-deploy wh
 restart is still to come. In a scheme that owns contraptions, a clean land on `main`
 first deploys them (#712, through auto-deploy's start, `deployApps` in `src/land.ts`) and
 waits: the shipped line says whether each went live, a failed one wakes the minion with
-its log, and `deploy: false` on the hand-off skips it. Exit 75 parks it until the scheme's runners are back. Any
+its log, and `deploy: false` on the hand-off skips it. Exit 75 seals it until the scheme's runners are back. Any
 other exit, a cut-off run included, wakes the minion with the end of the output. A
 message for the minion while its land waits (a person's or a relay, not a GitHub
 notice) keeps it open: it is told the result instead of dismissed. A build minion's

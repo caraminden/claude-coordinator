@@ -216,7 +216,7 @@ line costs time, never safety; `tools/land.sh --lane` prints the lane a commit w
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
 `CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. Exit 75 means
 CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion
-calls `wake_when_runners_back`, parks, and runs it again once Citadel says the runners are back. Say all of this in the "How a
+calls `wake_when_runners_back`, seals itself, and runs it again once Citadel says the runners are back. Say all of this in the "How a
 change ships" line, and that the worktree sits on a detached commit while a ship waits.
 
 `--install` sets `core.hooksPath` in the repo's shared config, so the main checkout gets the
@@ -346,7 +346,7 @@ Nearly every scheme spent its first week on follow-up minions for these (onboard
 **8b. Contraption: registered and live** (closes TripPresenter #6, about 15 h with nothing live, and Mandate #23). Skip 8a's contraption half and 8b to 8d when the scheme's app is not a contraption (an app Citadel serves under `/apps/<name>/`). The onboarding plan's contraption answer says whether it is one.
 1. Call `deploy_contraption` for the app. A refusal that names the app as unknown means it is not registered.
 2. Not registered: an app that doesn't exist yet is made by your own Taskmaster's `make_app` (a folder of this scheme's repo, registered and on for its members: `citadel:contraption-ui`, `references/api.md`); ask it for that rather than building one by hand. An app that already exists in its own repo: message your own Taskmaster (`message_coordinator`) to get it registered. Registering an existing app is admin-only, done by the Citadel Taskmaster, which your Taskmaster relays to. Give every field `register_contraption` takes: `name` (slug), `title`, `port` (a free one, checked with `ss -ltn`), `icon` (`/icon.svg`), `home_scheme` (this scheme's id), `repo` (owner/name), `branch`, `open_paths`. The registered branch needs a `citadel-app.json` first: ship it before you ask.
-3. Registration waits on the Citadel Taskmaster, and you wait with it: park on the relay, or call `wake_when_live`, and carry on to the first deploy when it answers. Don't close with the deploy open.
+3. Registration waits on the Citadel Taskmaster, and you wait with it: seal on the relay, or call `wake_when_live`, and carry on to the first deploy when it answers. Don't close with the deploy open.
 4. Run `deploy_contraption` until one run went live, clear its **To do** lines, and take a screenshot of the live app for the done note.
 5. In CLAUDE.md, write the deploy line ("deploys with `deploy_contraption`") as fact only once a run went live.
 *Done when* one `deploy_contraption` run went live and its screenshot is in the done note. Only a Taskmaster that can't register it (it says so) lets the note list "registered and first deploy" as open, with the message you sent.

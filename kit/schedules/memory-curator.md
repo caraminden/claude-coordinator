@@ -20,7 +20,7 @@ Look for:
 - a file, tool, function or setting the note names that no longer exists: `edit` it, or `delete` it when nothing is left;
 - two notes that contradict each other: keep the newer word (its date), and `edit` or `delete` the older;
 - MEMORY.md lines over about 150 characters: `index` with a shorter line, under 150 (the date and quote stay in the note); a long line no note owns: `flag` MEMORY.md itself;
-- a note whose main content is a list of minions and their states (open, parked, waiting, owed), a tracker rather than a fact: `flag` it with the reason "live state: make it a pointer". A note that mentions a minion's state in passing is not one;
+- a note whose main content is a list of minions and their states (open, sealed, waiting, owed), a tracker rather than a fact: `flag` it with the reason "live state: make it a pointer". A note that mentions a minion's state in passing is not one;
 - anything you think is wrong but can't settle yourself: `flag` it, with why.
 
 Send the whole tidy as one propose_memory call, one change per note (only `.md` notes and MEMORY.md take changes; name any other file, like an old backup, in the summary you reply with): the action, the note's file, the new text for edit and add (the whole file, frontmatter included), the MEMORY.md line for index and add (an edit may carry one too, which replaces the note's line), and a reason a member can read in one line. Keep the frontmatter as it is, apart from what you mean to change. A delete takes its own MEMORY.md line with it; a link to it in another note (a topic index) needs an `edit` of that note. A delete is never part of a merge silently: list it as its own change, with why. An owed step you can't confirm happened (a read-back, a relay) is a `flag`, not a delete.

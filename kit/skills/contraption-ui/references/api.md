@@ -604,7 +604,7 @@ Authorization: Bearer <contraption.key>
   (bug report or feature ask). Members of the home scheme only (admins count): a non-member gets
   403, since their feature ask is only a proposal. 404 when the home scheme has no minion #N (a
   number from another scheme counts as none); 409 when #N is dismissed, which stays dismissed until
-  a person reopens it. A minion parked on `start_after` answers the ask but keeps its brief held.
+  a person reopens it. A minion sealed on `start_after` answers the ask but keeps its brief held.
   Answers `202 { scheme, minion, member: true, proposal: false, files }`. It shares the bug and
   feature rate limit, and isn't a go to ship: only words a person types in Citadel are.
 - **Data** only files: no message, no wake. It writes a `<time>-ask.json` beside the files holding
@@ -643,7 +643,7 @@ has no home scheme.
 | Field | Meaning |
 |---|---|
 | `status` | `new` (no turn yet), `running` (a turn is under way), `idle`, `error` (its last turn failed) or `closed` (dismissed) |
-| `state` | Where its last turn left things, as the minions list shows it: `ready`, `try`, `parked`, `blocked`, `outside`, `pending-deploy`, `limited` (waiting out a usage limit) or `null`. Cleared when the next turn starts, except `pending-deploy` |
+| `state` | Where its last turn left things, as the minions list shows it: `ready`, `try`, `parked` (the minions list says "sealed"), `blocked`, `outside`, `pending-deploy`, `limited` (waiting out a usage limit) or `null`. Cleared when the next turn starts, except `pending-deploy` |
 | `note` | Its own one-line status (at most 60 characters), or `null` |
 | `line` | The minions list's progress line: `Showing the rune cost… · 1 of 6 done` while running, `Paused at: … · 1 of 6 done`, `Done · 6/6 steps`, `Working… Running commands · 1 of 6 done` (a new turn that hasn't moved its plan yet), `Working… Ran the tests`, `Finished · 14 actions`; `null` before any work |
 | `step` | Its task list: the step under way (`n`, or the count done when none is), the total (`of`), how many are `done`, and the step's `label` (`null` between steps); `null` with no task list |

@@ -72,7 +72,7 @@ export const SCREENS: Screen[] = [
   { name: 'chat-images', hash: `#/p/${S}/t/${T.images}`, before: `await scrollChatTo('.msg img, #log img');`, about: 'A minion chat whose replies show images and file cards.' },
   { name: 'chat-table', hash: `#/p/${S}`, before: `await scrollChatTo('.msg table, table');`, about: 'The Taskmaster chat scrolled to a long markdown table in a reply.' },
   { name: 'chat-failed', hash: '#/p/1/t/111', before: `await scrollChatTo('.note.error');`, about: 'A minion chat (another scheme) where a turn failed with an API error.' },
-  { name: 'chat-ultrareview', hash: `#/p/${S}/t/${T.ultra}`, about: 'A parked minion waiting on ultra review runs.' },
+  { name: 'chat-ultrareview', hash: `#/p/${S}/t/${T.ultra}`, about: 'A sealed minion waiting on ultra review runs.' },
   { name: 'composer-typed', hash: `#/p/${S}/t/${T.plan}`, before: `const b = await until('.composer textarea'); b.focus(); b.value = 'A longer message that wraps onto a few lines so we can see how the composer grows.\\nSecond line\\nThird line'; b.dispatchEvent(new Event('input', { bubbles: true })); await sleep(300);`, about: 'The composer under a chat, focused with a three-line message typed.' },
   { name: 'ultra-review-dialog', hash: `#/p/${S}/t/${T.plan}`, before: `const b = await until(() => [...document.querySelectorAll('button')].find((x) => /^Ultra/.test(x.textContent.trim()))); b.click(); await sleep(500);`, about: 'The Ultra review dialog, opened from a minion chat\'s head.' },
   { name: 'artifacts', hash: `#/p/${S}/artifacts`, about: 'The scheme\'s artifacts browser: files minions linked, with search and filters.' },

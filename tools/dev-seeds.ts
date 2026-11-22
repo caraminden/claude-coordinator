@@ -432,14 +432,14 @@ mock.boards('#takes', { boards: [
     },
   },
   parked: {
-    about: 'a parked minion waiting on another minion going live, with Unpark left of Send (#718, #726)',
+    about: 'a sealed minion waiting on another minion going live, with Unpark left of Send (#718, #726)',
     seed(c) {
       const t = minion(c, 'Follow-up after the deploy', { state: 'parked', note: 'waiting on #700 going live' }, 'feature');
       const w = chat(c, t, 2);
       w.asked('Pick this up once #700 is live.');
       w.init();
-      w.said('Parked until #700 is live; Citadel wakes me then.');
-      // One message already read (no longer held) and one still waiting: the bubble says "Not sent yet" with Unpark and send (#910).
+      w.said('Sealed until #700 is live; Citadel wakes me then.');
+      // One message already read (no longer held) and one still waiting: the bubble says "Not sent yet" with Unseal and send (#910).
       c.store.addEvent(t.id, 'user_message', { text: 'Also keep the old redirect.', author: c.who, mail: true, parked: true });
       const row = c.store.addEvent(t.id, 'user_message', { text: 'Please start with the docs page first.', author: c.who, mail: true, parked: true });
       c.store.setSetting(queueKey(t.id), { held: [{ author: c.who, text: 'Please start with the docs page first.', images: [], id: row.id, parked: '2026-11-17 19:35' }] });
@@ -461,13 +461,13 @@ mock.boards('#takes', { boards: [
     },
   },
   'held-brief': {
-    about: 'a parked minion chained on a leader, holding a long brief and one message left for it (#728)',
+    about: 'a sealed minion chained on a leader, holding a long brief and one message left for it (#728)',
     seed(c) {
       const leader = minion(c, 'Flask and charm auras');
       const t = minion(c, 'Flask timers start on the press', { state: 'parked', note: `starts when #${leader.number} is merged` });
       const brief = ['Make the flask timers start on the press, not on the buff.', '', '**Build**', ...Array.from({ length: 8 }, (_, i) => `- Step ${i + 1}: change the aura \`timer${i + 1}\` so it reads the press, then check it against #${leader.number}'s charm auras.`), '', 'Ship it by the usual route.'].join('\n');
       c.store.setSetting('chained-minions', [...(c.store.getSetting<{ ticket: number }[]>('chained-minions') ?? []), { ticket: t.id, after: leader.id, when: 'merged', message: brief, from: 'Taskmaster', base: null }]);
-      c.store.addEvent(t.id, 'note', { text: `Created by Taskmaster; its brief is held until #${leader.number} ${leader.title}'s work is merged. Messages to it wait for that start; Unpark starts it now.` });
+      c.store.addEvent(t.id, 'note', { text: `Created by Taskmaster; its brief is held until #${leader.number} ${leader.title}'s work is merged. Messages to it wait for that start; Unseal starts it now.` });
       c.store.addEvent(t.id, 'user_message', { text: 'Remember the charm timers too.', author: c.who, mail: true, parked: true });
       return route(c, t);
     },

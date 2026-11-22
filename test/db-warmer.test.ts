@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
+import { until } from './wait.ts';
 import { Store } from '../src/db.ts';
 import { BACKOFF_MS, Pacer, WARMER_SETTING, WARM_MS, warmDatabase } from '../src/db-warmer.ts';
 
@@ -36,8 +36,7 @@ test('the worker reads the database and its WAL, and stops when the setting says
   writeFileSync(`${store.path}-wal`, Buffer.alloc(3 * 1048576));
   const w = warmDatabase(store, 50)!;
   try {
-    let s = w.stats();
-    for (let i = 0; i < 100 && s.mb === 0; i++) { await sleep(50); s = w.stats(); }
+    const s = await until('the warmer has read a pass', () => w.stats().mb > 0 && w.stats());
     assert.ok(s.mb >= 3, `read ${s.mb} MB, the 3 MB WAL at least`);
     assert.ok(s.ms >= 0);
     store.setSetting(WARMER_SETTING, false);

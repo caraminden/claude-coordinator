@@ -9,7 +9,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Approvals } from '../src/approvals.ts';
 import { inboxItems } from '../src/inbox.ts';
-import { cleanMsgSettings, cleanNeverHold, coldToolText, heldToolText, MSG_BOUNDS, MSG_COLUMNS, MSG_DEFAULTS, msgEnv, msgFromEnv, msgSettings, NEVER_HOLD_KINDS, neverHold } from '../src/msg-settings.ts';
+import { cleanMsgSettings, cleanNeverHold, heldToolText, MSG_BOUNDS, MSG_COLUMNS, MSG_DEFAULTS, msgEnv, msgFromEnv, msgSettings, NEVER_HOLD_KINDS, neverHold } from '../src/msg-settings.ts';
 import { Runner } from '../src/runner.ts';
 import { loopKey, minionPairKey } from '../src/minion-relay.ts';
 import { NEVER_HOLD_KINDS as CLIENT_KINDS } from '../public/heldmsg.js';
@@ -84,7 +84,6 @@ test('the settings reach the tool text through the turn env, and no number is ty
   const s = { loopLimit: 4, loopMin: 20, coldMin: 30, holdH: 8 };
   assert.deepEqual(msgFromEnv(msgEnv(s)), s);
   assert.deepEqual(msgFromEnv(undefined), MSG_DEFAULTS);
-  assert.match(coldToolText(s, 'x'), /idle over 30 minutes.*within 8 hours/);
   assert.match(heldToolText(s, 'x'), /\(4 messages in 20 minutes\)/);
   const src = readFileSync(new URL('../src/mcp.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /idle over \d+ minutes|within \d+ hours|After \d+ messages|in \d+ minutes, the next|allows in \d+ minutes/);
@@ -125,27 +124,24 @@ test("two minions' held loop shows in both chats, so dismissing the receiver lea
   assert.equal(loops().length, 0);
 });
 
-test("a scheme's cold time decides who is cold, and the chat's card lists cold mail until Deliver now sends it", async () => {
-  const { project, minion } = scheme({ msg_cold_min: 10 }, 20 * 60_000);
-  assert.equal(runner.cold(minion.id), true, '20 minutes idle is cold at 10, though not at the default 55');
-  assert.equal(runner.relay(minion.id, minion.id, 'Taskmaster', `rebase onto main with ghp_${'a'.repeat(36)}`, false, true, 'ask'), 'cold');
+test("the chat's card lists mail held cold before #1603 until Deliver now sends it", async () => {
+  const { project, minion } = scheme({}, 20 * 60_000);
+  (runner as any).relays.mail(minion.id, 'Taskmaster', `rebase onto main with ghp_${'a'.repeat(36)}`, undefined, true, 'ask');
   const held = runner.view(store.getTicket(minion.id)!).held_mail!;
   assert.equal(held.until, NOW + 3 * 3_600_000, 'cold mail goes by the hold cap at the latest');
   assert.deepEqual(held.items.map((i) => [i.author, i.need, i.note, i.parked, i.text]), [['Taskmaster', 'ask', false, false, 'rebase onto main with [GitHub token hidden]']], 'the card shows the chat\'s copy, its token hidden');
   assert.equal(runner.releaseMail(store.getTicket(minion.id)!, project, 'Cara'), 1);
   await until('the delivered turn', async () => !runner.isRunning(minion.id) && !runner.view(store.getTicket(minion.id)!).held_mail);
-  const other = scheme({}, 20 * 60_000);
-  assert.equal(runner.cold(other.minion.id), false, 'the same idle time is warm in a scheme left at the default');
 });
 
-test("never hold (#1067): a kind the scheme never holds wakes its reader, cold or a fyi; other kinds still wait", async () => {
+test("never hold (#1067): a kind the scheme never holds wakes its reader, even a fyi or wake: false; other kinds still wait", async () => {
   assert.throws(() => cleanNeverHold('fyi'), /list/);
   assert.throws(() => cleanNeverHold(['fyi', 'shout']), /must be a list of/);
   assert.equal(cleanNeverHold(['note', 'fyi', 'fyi']), 'fyi,note');
   assert.deepEqual([...neverHold({ msg_never_hold: 'fyi,bogus' })], ['fyi'], 'an unknown stored kind is ignored');
-  const { project, minion } = scheme({ msg_cold_min: 10 }, 20 * 60_000);
+  const { project, minion } = scheme({}, 20 * 60_000);
   store.setProjectSettings(project.id, { msg_never_hold: 'decision,note' });
-  assert.equal(runner.relay(minion.id, minion.id, 'Taskmaster', 'held still', false, true, 'ask'), 'cold', 'ask is not on the list, so cold mail waits');
+  assert.equal(runner.relay(minion.id, minion.id, 'Taskmaster', 'held still', false, false, 'ask'), 'mail', 'ask is not on the list, so wake: false mail waits');
   assert.equal(runner.relay(minion.id, minion.id, 'Taskmaster', 'pick one', false, false, 'decision'), false, 'a decision wakes it though it was sent with wake: false');
   await until('the woken turn', async () => !runner.isRunning(minion.id));
   const tm = scheme({}).tm;

@@ -424,9 +424,7 @@ const goesKey = (projectId: number) => `merge_goes:${projectId}`;
 const talkedKey = (ticketId: number) => `talked-since-deploy:${ticketId}`;
 /** A turn's end-of-turn session save that hasn't finished yet: the config dir it reads, so a restart redoes it (#259). */
 const savingKey = (ticketId: number) => `saving:${ticketId}`;
-/** Idle this long, a session's prompt cache (1 hour) is about to lapse, so a machine message to it waits (#413). */
-export const COLD_MS = MSG_DEFAULTS.coldMin * 60_000;
-/** The longest a message held for a cold session waits before it wakes the session anyway. */
+/** The longest a message held for a cold session waits before it wakes the session anyway: only mail held before #1603 dropped the cold hold. */
 export const COLD_HOLD_MAX_MS = MSG_DEFAULTS.holdH * 3600_000;
 
 // How a turn ended, and the caps on resuming it, are src/turn-outcome.ts's (#1379); these names stay for the tests.
@@ -823,7 +821,7 @@ export class Runner {
       // The threads list shows which threads are waiting on an approval.
       this.broadcastTicket(ticketId);
     }, { get: (p) => store.getSetting<Go[]>(goesKey(p)) ?? [], set: (p, goes) => store.setSetting(goesKey(p), goes) });
-    this.relays = new Relay({ store, approvals: this.approvals, emit: (id, kind, data, reserved) => this.emit(id, kind, data, reserved), now: () => this.now(), isRunning: (id) => this.isRunning(id), send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer), personOf: () => this.personOf, broadcastTicket: (id) => this.broadcastTicket(id), cold: (id) => this.cold(id), parked: (t) => this.parked(t), hold: (id, msg, coldAt) => this.queue.hold(id, msg, coldAt) });
+    this.relays = new Relay({ store, approvals: this.approvals, emit: (id, kind, data, reserved) => this.emit(id, kind, data, reserved), now: () => this.now(), isRunning: (id) => this.isRunning(id), send: (id, author, text, images, extra, steer) => this.send(id, author, text, images, extra, steer), personOf: () => this.personOf, broadcastTicket: (id) => this.broadcastTicket(id), parked: (t) => this.parked(t), hold: (id, msg, coldAt) => this.queue.hold(id, msg, coldAt) });
     this.coordinatorEnv = coordinatorEnv;
     this.claudeBin = claudeBin;
     // Messages that arrived while a step ran start a turn once the minion's lane is free.
@@ -2160,18 +2158,6 @@ export class Runner {
 
   leaveMail(to: number, author: string, text: string) {
     this.relays.leaveMail(to, author, text);
-  }
-
-  /**
-   * Cold (#413): the session has a prompt cache to lose (a session, no turn running, waiting or queued)
-   * and its last turn ended over COLD_MS ago, so waking it re-writes its whole context. A dismissed
-   * minion never is: a message to one is follow-up work, which reopens it as before.
-   */
-  cold(ticketId: number): boolean {
-    const t = this.store.getTicket(ticketId);
-    if (!t?.session_id || t.status === 'closed' || this.isRunning(ticketId) || this.queued(ticketId) || this.lanes.busy(ticketId) || this.limitWait(ticketId) || this.netWait(ticketId) || this.killWait(ticketId)) return false;
-    const ended = this.store.lastTurnEnd(ticketId);
-    return !!ended && this.now() - ended > this.relays.settings(ticketId).coldMin * 60_000;
   }
 
   /** Sealed (#718): on hold on purpose (state sealed) or waiting on start_after, and not dismissed. A message to it is held. */

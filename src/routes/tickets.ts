@@ -631,7 +631,6 @@ export const ticketRoutes: Route[] = [
       await sendOnce(id, sendId, async () => {
         const files = await messageFiles(app, ticket, body.files);
         // message_ticket with unseal (#718): the Taskmaster unseals it, and this message is what wakes it.
-        // Urgent as well, so a cold minion doesn't take it as held mail.
         // A person's "Send and unseal" does the same: held for nothing, the message is what wakes it.
         const unparks = body.unpark === true && runner.parked(ticket);
         if (unparks) await unparkTicket(app, ticket, session.name, APP_NAME, true);
@@ -1378,7 +1377,7 @@ export const ticketRoutes: Route[] = [
       if (armed) return json(res, 202, { sent: false, armed });
       const held = await tellTaskmaster(app, ticket, text, body.urgent === true, wake, need);
       if (held === true) return json(res, 202, { sent: false, held: true });
-      return json(res, 202, { sent: true, ...(held === 'cold' ? { cold: true } : held === 'mail' ? { mail: true } : {}) });
+      return json(res, 202, { sent: true, ...(held === 'mail' ? { mail: true } : {}) });
     },
   },
   {

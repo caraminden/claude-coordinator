@@ -311,7 +311,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
 
 
   /**
-   * Messages (#1059): the loop guard's count and window, when a silent recipient counts as cold and how long cold mail waits.
+   * Messages (#1059): the loop guard's count and window, and which kinds never wait (the cold hold went in #1603).
    * A number box inside MSG_BOUNDS (the server refuses the rest: src/msg-settings.ts), saved when it changes.
    */
   const number = (meta, help, field, label, unit) => {
@@ -334,17 +334,12 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
     number({ icon: 'spark', hue: 'running', title: 'Loop guard: window' },
       settingsHelp('How long the loop guard counts messages for.', 'A longer window catches slow loops but also holds steady work; a shorter one forgets sooner.'),
       'msg_loop_min', 'Loop guard window', 'minutes'),
-    number({ icon: 'spark', hue: 'running', title: 'Cold after' },
-      settingsHelp('How long a Taskmaster or minion sits idle before a message to it is held as mail instead of waking it.', 'Lower it to hold more mail and save re-reading context; it stops at 55 because past an hour the prompt cache has lapsed, so holding saves nothing.'),
-      'msg_cold_min', 'Cold after', 'minutes'),
-    number({ icon: 'spark', hue: 'running', title: 'Hold at most' },
-      settingsHelp('The longest cold mail waits before it wakes its recipient anyway.', 'Longer saves wakes but news arrives later; shorter delivers sooner, each wake re-reading the whole context.'),
-      'msg_hold_h', 'Cold hold', 'hours'),
+    // Cold after and Hold at most went with the cold hold (#1603): a message meant to wake its reader wakes it.
     neverHold(),
   ];
   /** Never hold (#1067; Josh, 2026-11-19, "this kind of message should not wait"): kinds of mail that wake their reader at once. */
   const neverHold = () => live({ icon: 'spark', hue: 'running', title: 'Never hold' },
-    settingsHelp('Kinds of message that always wake their reader, even a fyi or a cold chat. The held-mail card in a chat sets these too.', 'Each wake re-reads the whole context, so turn on only what can\'t wait. A sealed minion and the loop guard still hold everything.'),
+    settingsHelp('Kinds of message that always wake their reader, even a fyi. The held-mail card in a chat sets these too.', 'Each wake re-reads the whole context, so turn on only what can\'t wait. A sealed minion and the loop guard still hold everything.'),
     (mount) => {
       const on = new Set((stored().msg_never_hold ?? '').split(',').filter(Boolean));
       mount.replaceChildren(h('div', { class: 'rules-seg', role: 'group', 'aria-label': 'Never hold' }, NEVER_HOLD_KINDS.map((k) => h('button', { type: 'button', 'aria-pressed': String(on.has(k)), onclick: () => {

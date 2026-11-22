@@ -8,9 +8,9 @@ export interface MsgSettings {
   loopLimit: number;
   /** The loop guard's window, in minutes. */
   loopMin: number;
-  /** Minutes idle before a recipient is cold and non-urgent mail to it is held. */
+  /** Minutes idle before a recipient counted as cold. Unused since #1603 dropped the cold hold; its column stays. */
   coldMin: number;
-  /** Hours cold mail may wait before it wakes its recipient anyway. */
+  /** Hours cold mail may wait before it wakes its recipient anyway: only mail held before #1603 dropped the cold hold. */
   holdH: number;
 }
 export const MSG_DEFAULTS: MsgSettings = { loopLimit: 6, loopMin: 10, coldMin: 55, holdH: 3 };
@@ -65,5 +65,3 @@ export function cleanNeverHold(v: unknown): string {
 export const loopText = (s: MsgSettings) => `${s.loopLimit} messages in ${s.loopMin} minutes`;
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
 export const heldToolText = (s: MsgSettings, who: string) => `Held, not delivered: ${who} have exchanged as many messages as the loop guard allows (${loopText(s)}), so it waits for a person to continue. Do not resend it.`;
-/** What the sender is told when the recipient is cold. */
-export const coldToolText = (s: MsgSettings, who: string) => `Left as held mail: ${who} has been idle over ${s.coldMin} minutes, so its prompt cache (1 hour) is lapsing and waking it would re-read its whole context. It shows in its chat now and reaches it with its next turn: a person's message, or within ${s.holdH} hours. Do not resend it. If it must act now after all, send a short follow-up with urgent: true, which wakes it with this one too.`;

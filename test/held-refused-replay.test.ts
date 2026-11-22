@@ -34,7 +34,6 @@ runner.now = () => NOW;
 
 test('Deliver now on cold mail whose Claude login is refused returns 0 and keeps the mail and its cold time', async () => {
   const project = store.createProject('Refused', null);
-  store.setProjectSettings(project.id, { msg_cold_min: 10 });
   const t = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara', kind: 'ticket' });
   const cwd = join(root, `t${t.id}`);
   mkdirSync(cwd, { recursive: true });
@@ -44,7 +43,8 @@ test('Deliver now on cold mail whose Claude login is refused returns 0 and keeps
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, '{}\n');
   store.recordTurn(t.id, { session_id: `s${t.id}`, ended_at: NOW - 20 * 60_000, session_cost_usd: 0 });
-  assert.equal(runner.relay(t.id, t.id, 'Taskmaster', 'hold this', false, true, 'ask'), 'cold');
+  // Mail held cold before #1603 dropped the cold hold, as relay() left it then.
+  (runner as any).relays.mail(t.id, 'Taskmaster', 'hold this', undefined, true, 'ask');
   const queue = (runner as any).queue;
   const coldAt = queue.get(t.id).coldAt;
   assert.ok(coldAt, 'the mail is held cold');

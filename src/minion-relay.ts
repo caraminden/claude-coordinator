@@ -65,7 +65,6 @@ export interface RelayDeps {
   send: (ticketId: number, author: string, text: string, images: [], extra: { from?: number; hold?: boolean; need?: string; asker?: number | null }, steer: boolean) => unknown;
   personOf: () => ((author: string, from?: number) => number | null) | undefined;
   broadcastTicket: (ticketId: number) => void;
-  cold: (ticketId: number) => boolean;
   parked: (t: Ticket) => boolean;
   /** Hold a message as mail in the receiver's queue (src/minion-queue.ts); `coldAt` starts the cold cap's clock. */
   hold: (ticketId: number, msg: QueuedMessage, coldAt?: number) => void;
@@ -86,7 +85,9 @@ export class Relay {
    * A message between a minion and its Taskmaster, either way (`to` is the receiving ticket). Up to
    * LOOP_LIMIT per LOOP_WINDOW_MS go through; after that each is held, with a note in both chats asking
    * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
-   * 'cold' as mail for a cold receiver (#413), which `urgent` overrides.
+   * 'mail' when sent with wake: false. A message meant to wake its receiver wakes it, idle or not: the cold hold
+   * (#413) saved about $10-18 a week and stalled half its act-now messages over an hour (#1603). `urgent` is still
+   * accepted, and changes nothing now.
    */
   /** The message settings of the scheme a ticket belongs to. */
   settings(ticketId: number): MsgSettings {
@@ -94,12 +95,12 @@ export class Relay {
     return msgSettings(t && this.d.store.getProject(t.project_id));
   }
 
-  relay(minionId: number, to: number, author: string, text: string, urgent = false, wake = true, need?: string, sender?: number): boolean | 'cold' | 'mail' | 'parked' {
+  relay(minionId: number, to: number, author: string, text: string, _urgent = false, wake = true, need?: string, sender?: number): boolean | 'mail' | 'parked' {
     const minion = this.d.store.getTicket(minionId)!;
     const from = to === minionId ? sender ?? this.d.store.ownerCoordinator(minion)?.id : minionId;
     const cfg = this.settings(minionId);
-    const { held, cold, parked, woke } = this.guard(loopKey(minionId), cfg.loopLimit, cfg.loopMin * 60_000, to, author, text, to === minionId, from, !wake, urgent, need);
-    if (!held) return parked ? 'parked' : cold ? 'cold' : !wake && !woke ? 'mail' : false;
+    const { held, parked, woke } = this.guard(loopKey(minionId), cfg.loopLimit, cfg.loopMin * 60_000, to, author, text, to === minionId, from, !wake, need);
+    if (!held) return parked ? 'parked' : !wake && !woke ? 'mail' : false;
     const what = `${to === minionId ? `the ${AGENT_NAME}'s message to #${minion.number}` : `#${minion.number}'s message to the ${AGENT_NAME}`} ("${clip(text)}")`;
     const note = heldNote(held, `#${minion.number} and the ${AGENT_NAME} have exchanged ${cfg.loopLimit} messages in the last ${cfg.loopMin} minutes`, what);
     for (const id of this.loopChats(minion)) this.d.emit(id, 'loop_paused', { minion: minionId, text: note });
@@ -108,16 +109,16 @@ export class Relay {
 
   /**
    * A message from one minion to another in its scheme (message_minion, #783): the same wake rules as
-   * relay (busy: after its turn; parked: held; cold: mail unless urgent), never steering a running turn.
+   * relay (busy: after its turn; parked: held), never steering a running turn.
    * Each pair shares one count, both ways, apart from the Taskmaster's; a person's Continue in either
    * chat releases it. The caller refuses a dismissed receiver: this would reopen it.
    */
-  relayMinion(from: number, to: number, author: string, text: string, urgent = false, wake = true, unparked = false): boolean | 'cold' | 'mail' | 'parked' {
+  relayMinion(from: number, to: number, author: string, text: string, _urgent = false, wake = true, unparked = false): boolean | 'mail' | 'parked' {
     const cfg = this.settings(from);
-    const { held, cold, parked } = this.guard(minionPairKey(from, to), cfg.loopLimit, cfg.loopMin * 60_000, to, author, text, false, from, !wake, urgent);
+    const { held, parked } = this.guard(minionPairKey(from, to), cfg.loopLimit, cfg.loopMin * 60_000, to, author, text, false, from, !wake);
     if (!held) {
       this.copyToTaskmaster(to, author, text, unparked, from);
-      return parked ? 'parked' : cold ? 'cold' : !wake ? 'mail' : false;
+      return parked ? 'parked' : !wake ? 'mail' : false;
     }
     const [a, b] = [from, to].map((id) => `#${this.d.store.getTicket(id)!.number}`);
     const note = heldNote(held, `${a} and ${b} have exchanged ${cfg.loopLimit} messages in the last ${cfg.loopMin} minutes`, `${a}'s message to ${b} ("${clip(text)}")`);
@@ -143,17 +144,17 @@ export class Relay {
    * runaway exchange within a few turns but not work spread out over an hour. Past that each is held,
    * with a note in both chats, until a person continues in either. `left` is how many more may go now.
    */
-  relayTaskmaster(from: number, to: number, author: string, text: string, wake = true, attached = '', urgent = false, need?: string): { held: boolean; left: number; cold?: true; woke?: true } {
-    // The sender's scheme sets the pair's count, window and cold time (#1059); the Taskmaster defaults are the same numbers.
+  relayTaskmaster(from: number, to: number, author: string, text: string, wake = true, attached = '', _urgent = false, need?: string): { held: boolean; left: number; woke?: true } {
+    // The sender's scheme sets the pair's count and window (#1059); the Taskmaster defaults are the same numbers.
     const cfg = this.settings(from);
-    const { held, left, cold, woke } = this.guard(pairKey(from, to), cfg.loopLimit, cfg.loopMin * 60_000, to, author, asData(author, text) + attached, false, from, !wake, urgent, need);
+    const { held, left, woke } = this.guard(pairKey(from, to), cfg.loopLimit, cfg.loopMin * 60_000, to, author, asData(author, text) + attached, false, from, !wake, need);
     if (held) {
       const [a, b] = [from, to].map((id) => this.d.store.getProject(this.d.store.getTicket(id)!.project_id)!.name);
       const note = heldNote(held, `the ${AGENT_NAME}s of ${a} and ${b} have exchanged ${loopText(cfg)}`, `${a}'s message to ${b} ("${clip(text)}")`);
       // Each chat's note names its own Taskmaster, whose Continue releases all its held exchanges.
       for (const id of [from, to]) this.d.emit(id, 'loop_paused', { minion: id, text: note });
     }
-    return { held: held > 0, left, ...(cold ? { cold: true as const } : {}), ...(woke ? { woke: true as const } : {}) };
+    return { held: held > 0, left, ...(woke ? { woke: true as const } : {}) };
   }
 
   /** Held mail from the app itself (#678: a red scheduled run for a Taskmaster): no loop guard, no turn started. */
@@ -196,7 +197,7 @@ export class Relay {
   }
 
   /** Count a message against the loop at `key`: send it (steering a running turn with `steer`; as held mail with `mail`), or hold it once `limit` went in `windowMs` (or one is held already). `held` is how many wait now (0 if it went), `left` how many more may go. */
-  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number, mail = false, urgent = false, need?: string): { held: number; left: number; cold: boolean; parked?: true; woke?: true } {
+  private guard(key: string, limit: number, windowMs: number, to: number, author: string, text: string, steer: boolean, from?: number, mail = false, need?: string): { held: number; left: number; parked?: true; woke?: true } {
     const { store } = this.d;
     // A kind the receiver's scheme never holds (#1067) wakes it, as wake: true would, cold or not; `woke` says so when it was asked to wait.
     const keep = this.neverHolds(to, need);
@@ -210,21 +211,20 @@ export class Relay {
     const receiver = store.getTicket(to);
     if (!mail && !this.d.isRunning(to) && receiver && this.d.parked(receiver)) {
       this.d.send(to, author, text, [], { from, hold: true, ...(need ? { need } : {}) }, steer);
-      return { held: 0, left: limit - loop.sent.length, cold: false, parked: true };
+      return { held: 0, left: limit - loop.sent.length, parked: true };
     }
     if (!loop.held.length && loop.sent.length < limit) {
       loop.sent.push(now);
       store.setSetting(key, loop);
-      // Every message through here is machine-made, so a cold receiver gets it as mail unless it's urgent (#413).
-      const cold = !mail && !urgent && !keep && this.d.cold(to);
-      if (mail || cold) this.mail(to, author, text, from, cold, need);
+      // Held mail only when the sender chose it (wake: false, fyi): an idle receiver is woken like any other (#1603).
+      if (mail) this.mail(to, author, text, from, false, need);
       else this.d.send(to, author, text, [], { from, hold: true, ...(need ? { need } : {}) }, steer);
-      return { held: 0, left: limit - loop.sent.length, cold, ...woke };
+      return { held: 0, left: limit - loop.sent.length, ...woke };
     }
     loop.held.push({ to, author, text, from, asker: this.d.personOf()?.(author, from) ?? null, ...(mail ? { mail: true as const } : {}), at: now });
     store.setSetting(key, loop);
     // Both rows show the hold's badge, and the Needs-you list counts it (#1067).
     for (const id of new Set([to, from ?? to])) this.d.broadcastTicket(id);
-    return { held: loop.held.length, left: 0, cold: false };
+    return { held: loop.held.length, left: 0 };
   }
 }

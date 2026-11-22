@@ -1780,13 +1780,13 @@ export const projectRoutes: Route[] = [
       // A file (#405) is copied into the receiver's shared inbox/ before anything is sent, so a bad path sends nothing.
       const file = body.file == null || body.file === '' ? null : relayFile(projectSharedDir(app.dataDir, own.id), projectSharedDir(app.dataDir, project.id), own.name, str(body.file, 'File', 1000));
       const attached = file ? `\n${APP_NAME} copied a file it attached into your scheme's shared folder, where your minions can read it too: ${file.path} (${byteSize(file.size)})` : '';
-      const { held, left, cold, woke } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached, body.urgent === true, need);
+      const { held, left, woke } = runner.relayTaskmaster(from.id, to.id, author, text, wake, attached, body.urgent === true, need);
       // A reply from that scheme comes back to this Taskmaster, not to whichever of its scheme's is default (#919).
       if (!held) store.setSetting(replyKey(to.id, own.id), from.id);
       // Citadel may answer for a while once a message of theirs has reached it.
       if (toCitadel && !held) store.setSetting(askedCitadelKey(own.id), Date.now());
-      if (!held) runner.emit(from.id, 'note', { need, text: `${(wake || woke) && !cold ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
-      return json(res, 202, { scheme: project.name, held, left, ...(cold ? { cold } : {}), ...(woke ? { woke } : {}), ...(file ? { file: file.path } : {}) });
+      if (!held) runner.emit(from.id, 'note', { need, text: `${wake || woke ? 'Sent' : 'Left held mail for'} the ${AGENT_NAME} of ${project.name}: ${text.length > 200 ? text.slice(0, 200) + '…' : text}${file ? `\nWith a file, copied to ${file.path}` : ''}` });
+      return json(res, 202, { scheme: project.name, held, left, ...(woke ? { woke } : {}), ...(file ? { file: file.path } : {}) });
     },
   },
 ];

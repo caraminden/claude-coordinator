@@ -11,7 +11,7 @@ import type { PrSnapshot } from '../src/github.ts';
 import type { Want } from '../src/ci-mirror.ts';
 import type { Pin } from '../src/last-green.ts';
 import { ApkReader, buildWait, shipsOnTarget, ROLLBACK_BRANCH, CiPackageReader, ContraptionReader, FileReader, gradleVersion, landProgress, landQueue, LandsInFlight, schemeLine, placeRank, lengths, MainReader, PrsInFlight, TestCopyReader, type Actions, type Artifact } from '../src/release-readers.ts';
-import { BEHIND_OLD, CITADEL_TARGET, named, OLD_LAND, Releases, type TargetView } from '../src/releases.ts';
+import { BEHIND_OLD, CITADEL_TARGET, landedIn, named, OLD_LAND, Releases, type TargetView } from '../src/releases.ts';
 import { buildOf, copySources, detect, jobName, pushPaths, shipsOn, shipsTo, TargetFinder, workdirOf, zipNames, type BuildFile, type Found, type SchemeFacts } from '../src/release-targets.ts';
 import { git, gitAt } from './git.ts';
 import { writeOrder } from '../src/waits.ts';
@@ -920,6 +920,34 @@ function landOne(repo: string, at: number, file: string, branch?: string): strin
   if (branch) git(repo, 'branch', branch, sha);
   return sha;
 }
+
+test("a batch member's ship counts by its refs/shipping name until its own branch moves (#1323)", async () => {
+  const store = new Store(join(root, `c-${++n}.db`));
+  const repo = join(root, `ship-repo-${n}`);
+  mkdirSync(repo);
+  git(repo, 'init', '-q', '-b', 'main');
+  const at = Date.now() + 1000;
+  const base = landOne(repo, at - 5000, 'README.md');
+  const p = store.createProject('Citadel', null);
+  store.setProjectRepoDir(p.id, repo);
+  const minion = (branch: string) => {
+    const t = store.createTicket({ project_id: p.id, title: branch, permission_mode: 'default', created_by: 'Cara' });
+    store.setTicketDir(t.id, root, branch);
+    return t.id;
+  };
+  const [head, member, later] = [minion('ticket/1-head'), minion('ticket/2-member'), minion('ticket/3-later')];
+  // The member's branch still sits where it was before the batch rebased it; land_deploy named its batch commit.
+  git(repo, 'branch', 'ticket/2-member', base);
+  const m = landOne(repo, at, 'b.txt');
+  git(repo, 'update-ref', 'refs/shipping/ticket/2-member', m);
+  landOne(repo, at + 1000, 'a.txt', 'ticket/1-head');
+  // A stale name whose branch's tip is in the range already counts by the branch.
+  landOne(repo, at + 2000, 'c.txt', 'ticket/3-later');
+  git(repo, 'update-ref', 'refs/shipping/ticket/3-later', base);
+  const got = await landedIn(store, store.getProject(p.id)!, base, git(repo, 'rev-parse', 'HEAD'));
+  assert.deepEqual(got!.tickets.map((t) => t.id), [head, member, later]);
+  assert.deepEqual(got!.ticketFiles.get(member), ['b.txt']);
+});
 
 test('a CI package numbered by run: what is on main for it waits for CI, a run carries it as "Build <run>", a red run waits on a fix; the app\'s folder stays off it (#764)', async () => {
   const store = new Store(join(root, `c-${++n}.db`));

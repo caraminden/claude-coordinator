@@ -119,7 +119,8 @@ export function readLandLine(stateDir: string, alive = procAlive): { line: LandT
 
 /**
  * A queue folder's tickets in line order, its gone processes left out: deploy-queue.sh's queue/ (the "order" line is
- * its 5th, `orderAt` 4) or the kit land template's <.git>/land-queue (its 8th, #1007). Both read .order the same way.
+ * its 5th, `orderAt` 4) or the kit land template's <.git>/land-queue (its 8th, #1007). Both read .order the same way. The
+ * core's tickets in deploy-queue.sh's queue/ (Citadel shipping on the core, #1323) keep theirs on the 8th line too.
  */
 export function readQueue(q: string, orderAt: number, alive = procAlive): LandTicket[] {
   const line: LandTicket[] = [];
@@ -132,7 +133,7 @@ export function readQueue(q: string, orderAt: number, alive = procAlive): LandTi
     const l = text.split('\n');
     const [proc = '', got = '0', label = '', phase = ''] = l;
     if (!alive(proc)) continue;
-    line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: l[orderAt] === 'order' });
+    line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: l[orderAt] === 'order' || l[7] === 'order' });
   }
   const old = line.filter((t) => t.got === 0 && !t.orders).map((t) => t.seq);
   const before = (t: LandTicket) => (t.got > 0 ? -1 : old.filter((s) => s < t.seq).length);
@@ -194,6 +195,11 @@ export function landPhase(phase: string): { stage: string; word: string; key: st
   if (/^rerunning \d+ failed test files?$/.test(p)) return { stage: 'test', word: 'reruns', key: 'reruns', text: 'rerunning the failed test files alone on perigee', label: 'Reruns' };
   // The red train's bisect: its trial runs (#1366) and its search.
   if (/^(finding the ship that turned the train red|testing the train again without its likely causes)/.test(p)) return { stage: 'test', word: 'bisect', key: 'bisect', text: p === 'finding the ship that turned the train red' ? 'the train went red in CI: finding the ship that turned it red' : 'the train went red in CI: testing it again without its likely causes', label: 'Bisect' };
+  // The kit core's own phases (Citadel on the core, #1323): its check, CI on a batch, and a member waiting on its head's deploy.
+  if (/^(running the check|waiting to run the check|running the guards|running land_preflight)/.test(p)) return { stage: 'test', word: 'check', key: 'check', text: p, label: 'Check' };
+  if (/^(CI is red|CI passed|checked \S+: CI runs on its batch's top)/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: p, label: 'CI' };
+  if (/^running land_fallback/.test(p)) return { stage: 'test', word: 'tests', key: 'tests', text: 'CI gave no answer: running the full suite on perigee', label: 'Tests on perigee' };
+  if (/^waiting for its batch's deploy/.test(p)) return { stage: 'deploy', word: 'deploy', key: 'deploy', text: p, label: 'Deploy' };
   if (/^deploying/.test(p)) return { stage: 'deploy', word: 'deploy', key: 'deploy', text: p.replace(/^deploying(: )?/, '') || 'deploying', label: 'Deploy' };
   // Before the rebase: the boot check main's refusing deploys earn before a CI run is spent (#1012), and the moment after the lock.
   if (/^boot check before CI/.test(p)) return { stage: 'rebase', word: 'boot check', key: 'rebase', text: "boot check before CI: deploy has been refusing, so main's own check runs first", label: 'Boot check' };

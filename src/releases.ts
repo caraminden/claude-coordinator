@@ -568,13 +568,15 @@ export class CitadelServer implements Reader {
 
 /**
  * The commits in prev..head (sha → commit time, ms), and the scheme's minions whose branch tip is one of them: land.sh
- * rebases a branch and fast-forwards main to it, so a landed branch's tip is on main. A tip committed before its minion
- * started is where a new branch began, not its work. Null when git failed.
+ * rebases a branch and fast-forwards main to it, so a landed branch's tip is on main. A batch member under the kit's
+ * core land.sh moves its branch only once the head's deploy ends, so until then refs/shipping/<branch> names it
+ * (tools/land.local.sh's land_deploy, #1323). A tip committed before its minion started is where a new branch began,
+ * not its work. Null when git failed.
  */
 export async function landedIn(store: Store, p: Project, prev: string, head: string) {
   const [log, refs] = await Promise.all([
     git(['log', '--format=%x01%H %ct', '--name-only', `${prev}..${head}`], p.repo_dir!),
-    git(['for-each-ref', '--format=%(objectname) %(refname:short)', 'refs/heads/'], p.repo_dir!),
+    git(['for-each-ref', '--format=%(objectname) %(refname)', 'refs/heads/', 'refs/shipping/'], p.repo_dir!),
   ]);
   if (log == null || refs == null) return null;
   const commits = new Map<string, number>();
@@ -586,7 +588,10 @@ export async function landedIn(store: Store, p: Project, prev: string, head: str
     commits.set(sha, Number(ct) * 1000);
     files.set(sha, names.filter(Boolean));
   }
-  const tips = new Map(refs.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]).map(([sha, ref]) => [ref, sha]));
+  const lines = refs.split('\n').filter(Boolean).map((l) => l.split(' ') as [string, string]);
+  const tips = new Map(lines.filter(([, ref]) => ref.startsWith('refs/heads/')).map(([sha, ref]) => [ref.slice(11), sha]));
+  // A batch member's refs/shipping name counts while its branch's tip isn't in the range yet.
+  for (const [sha, ref] of lines) if (ref.startsWith('refs/shipping/') && commits.has(sha) && !commits.has(tips.get(ref.slice(14)) ?? '')) tips.set(ref.slice(14), sha);
   const tickets = store.listTickets(p.id)
     .filter((t) => t.kind === 'ticket' && t.branch && commits.has(tips.get(t.branch) ?? '') && commits.get(tips.get(t.branch)!)! >= t.created_at - 1000)
     .sort((a, b) => (a.number ?? a.id) - (b.number ?? b.id));

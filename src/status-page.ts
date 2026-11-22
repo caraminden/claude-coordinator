@@ -190,7 +190,7 @@ export interface StatusDeps {
   /** The CPU ledger reading (#1332); the real cgroups unless a test says otherwise. */
   cpuLedger?: () => Promise<unknown>;
   /** The answer-time probe (#1559) and how many turns are running; left out in a preview or a test that doesn't probe. */
-  answer?: { probe: Pick<AnswerProbe, 'take' | 'lastMs'>; turns: () => number };
+  answer?: { probe: Pick<AnswerProbe, 'take' | 'lastMs' | 'readerMs'>; turns: () => number };
   /** The file-cache reading (#1501); the real kernel counters and fincore unless a test says otherwise. */
   cache?: (now: number) => Promise<import('./cache-health.ts').CacheReading>;
   /** The database warmer's last pass (#1560, src/db-warmer.ts); null with no warmer. */
@@ -289,7 +289,7 @@ export class StatusPage {
   /** The Answer time tile's numbers: each window of the last day, the newest probe, the line and the target. */
   private answerData(samples: HostSample[], now: number) {
     const rows = samples.filter((r) => r.at >= now - DAY_MS).flatMap((r) => { const w = parseWindow(r.answer_time); return w ? [[r.at, w] as [number, AnswerWindow]] : []; });
-    return { rows: rows.map(([at, w]) => [at, w.p50, w.p95, w.p99, w.max, w.over, w.load, w.turns]), latest: rows.at(-1) ? { at: rows.at(-1)![0], ...rows.at(-1)![1] } : null, now: this.deps.answer?.probe.lastMs ?? null, probing: !!this.deps.answer, line: this.answerLine(), target: TARGET, alert: this.deps.store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1)?.kind === 'answer-slow' };
+    return { rows: rows.map(([at, w]) => [at, w.p50, w.p95, w.p99, w.max, w.over, w.load, w.turns]), latest: rows.at(-1) ? { at: rows.at(-1)![0], ...rows.at(-1)![1] } : null, now: this.deps.answer?.probe.lastMs ?? null, reader: this.deps.answer?.probe.readerMs ?? null, probing: !!this.deps.answer, line: this.answerLine(), target: TARGET, alert: this.deps.store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1)?.kind === 'answer-slow' };
   }
 
   start() {

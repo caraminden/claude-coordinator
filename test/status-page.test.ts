@@ -492,7 +492,7 @@ test('answer time (#1559): each sample stores its window; three slow ones in a r
   const told: string[] = [];
   const page = new StatusPage({ store, dataDir: root, bootAt: now, commit: 'abc', ownScheme: () => citadel.id, now: () => now, tell: (_id, text) => told.push(text),
     cpuLedger: async () => null, cache: async () => ({}) as any, mem: async () => ({ total: 8e9, avail: 4e9 }), disk: async () => ({ total: 1e11, free: 5e10 }),
-    answer: { probe: { take: () => win() as any, lastMs: 12 }, turns: () => 4 } });
+    answer: { probe: { take: () => win() as any, lastMs: 12, readerMs: 3 }, turns: () => 4 } });
   const next = async (v: number) => { p95 = v; now += 300_000; await page.sample(); };
   await next(900); await next(900);
   assert.equal(told.length, 0, 'two are not enough');

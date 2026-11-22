@@ -1991,7 +1991,8 @@ const onSocket = handover !== null || (process.env.LISTEN_FDS === '1' && process
 const listened = (port: number) => {
   boundPort = port;
   // It asks the port people use, so through the front thread too: /api/health stays on the main thread (#1563).
-  if (!BOOT_CHECK) answerProbe.start(boundPort, LOCAL_HOST);
+  // Behind the front thread, a reader's answer too: a route of theirs asked signed out, a 401 from a reader (#1628).
+  if (!BOOT_CHECK) answerProbe.start(boundPort, LOCAL_HOST, throughFront ? '/api/status' : undefined);
   console.log(onSocket ? `${APP_NAME} listening on the socket systemd holds (${HOST}:${PORT})` : `${APP_NAME} listening on http://${HOST}:${boundPort}`);
   handover?.live();
 };
@@ -2014,7 +2015,7 @@ if (process.env.CITADEL_FRONT !== '0') {
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
   publishLive({
     publish: throughFront.publish, store, runner, builds: (id) => builds.get(id), ownScheme: () => ownScheme()?.id ?? null, previews: !!previews, status,
-    statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, storms: () => memoryStorms.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
+    statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, readerMs: () => answerProbe.readerMs, storms: () => memoryStorms.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
     ...(SETTLED_ROUTE && Number(process.env.CITADEL_READER_SWEEP_MS) ? { sweepMs: Number(process.env.CITADEL_READER_SWEEP_MS) } : {}),
   });
 } else if (onSocket) {

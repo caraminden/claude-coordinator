@@ -1,5 +1,6 @@
 // How long the server takes to answer (#1559). The server is one thread, so it can't time itself: a worker thread makes
-// one real `GET /api/health` a second on a fresh connection and times it, and a slow answer never delays the next probe
+// one real `GET /api/health` a second (the main thread's answer) and, behind the front thread, one of a reader's route
+// signed out (a reader's 401, #1628) on a fresh connection and times it, and a slow answer never delays the next probe
 // (each probe has its own socket and its own timer; a reused connection queues behind a slow one and reads several times
 // too high, #1537). The same worker looks at the main thread's kernel state every 20 ms and its schedstat every second,
 // so each 5-minute host sample can say where the answer time went: on CPU, waiting for a core, blocked, or idle.
@@ -110,7 +111,7 @@ const WORKER = `
 const { workerData, parentPort } = require('node:worker_threads');
 const fs = require('node:fs/promises');
 const http = require('node:http');
-const { port, host, pid, everyMs, lookMs } = workerData;
+const { port, host, pid, everyMs, lookMs, readerPath } = workerData;
 let samples = 0, blocked = 0, lastSched = null, lastAt = performance.now(), looking = false;
 const sched = async () => {
   try { const p = (await fs.readFile('/proc/' + pid + '/task/' + pid + '/schedstat', 'utf8')).split(' ').map(Number); return { run: p[0] || 0, wait: p[1] || 0 }; } catch { return null; }
@@ -143,6 +144,17 @@ const probe = () => {
   });
   req.on('error', () => end(null));
   req.on('timeout', () => req.destroy());
+  if (!readerPath) return;
+  // A reader's: only its time; null when it failed or the main thread answered (no reader alive).
+  let told = false;
+  const tell = (ms) => { if (!told) { told = true; parentPort.postMessage({ reader: ms }); } };
+  const r = http.get({ host, port, path: readerPath, agent: false, timeout: 60000 }, (res) => {
+    res.resume();
+    res.on('end', () => tell(res.headers['x-citadel-answered'] === 'reader' ? Math.round((performance.now() - t0) * 10) / 10 : null));
+    res.on('error', () => tell(null));
+  });
+  r.on('error', () => tell(null));
+  r.on('timeout', () => r.destroy());
 };
 setInterval(probe, everyMs);
 `;
@@ -153,14 +165,17 @@ export class AnswerProbe {
   private worker: Worker | null = null;
   /** The newest answer time in ms, null before the first or after a failed one. */
   lastMs: number | null = null;
+  /** The same for a reader's answer (#1628); null with no reader probe, before the first, after a failed one, or while no reader answers. */
+  readerMs: number | null = null;
   private opts: { everyMs?: number; lookMs?: number };
   constructor(opts: { everyMs?: number; lookMs?: number } = {}) { this.opts = opts; }
 
-  /** `port` is the one the server is bound to (the socket systemd hands over included). */
-  start(port: number, host = '127.0.0.1') {
+  /** `port` is the one the server is bound to (the socket systemd hands over included); `readerPath` a reader route's, behind the front thread. */
+  start(port: number, host = '127.0.0.1', readerPath?: string) {
     if (this.worker) return;
-    const worker = new Worker(WORKER, { eval: true, workerData: { port, host, pid: process.pid, everyMs: this.opts.everyMs ?? 1000, lookMs: this.opts.lookMs ?? 20 } });
-    worker.on('message', (m: ProbeMessage) => {
+    const worker = new Worker(WORKER, { eval: true, workerData: { port, host, pid: process.pid, everyMs: this.opts.everyMs ?? 1000, lookMs: this.opts.lookMs ?? 20, readerPath } });
+    worker.on('message', (m: ProbeMessage | { reader: number | null }) => {
+      if ('reader' in m) return void (this.readerMs = m.reader);
       this.lastMs = m.ms;
       this.msgs.push(m);
       // A window is read every 5 minutes; this bounds a run that nobody reads.

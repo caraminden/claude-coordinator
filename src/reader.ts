@@ -64,7 +64,7 @@ export function readerStatus(store: Store, snap: Snapshot, dataDir: string): () 
     ciSnapshot: (canSee) => CiHealth.prototype.snapshot.call({ store } as unknown as CiHealth, canSee),
     desktops: () => s().desktops, storms: () => s().storms, diskUse: (row) => s().disk[row.name] ?? null,
     unitsNow: () => s().units, jobs: () => s().jobs,
-    answer: s().probing ? { probe: { get lastMs() { return s().lastMs; }, take: () => null }, turns: () => 0 } : undefined,
+    answer: s().probing ? { probe: { get lastMs() { return s().lastMs; }, get readerMs() { return s().readerMs; }, take: () => null }, turns: () => 0 } : undefined,
   }));
 }
 

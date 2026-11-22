@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { until } from './wait.ts';
 import { AnswerProbe, summarize, alertStep, percentile, parseWindow, type AnswerWindow, type ProbeMessage } from '../src/answer-time.ts';
 
 const msg = (ms: number | null, over: Partial<ProbeMessage> = {}): ProbeMessage => ({ ms, run: 0, wait: 0, samples: 0, blocked: 0, wallMs: 1000, ...over });
@@ -50,4 +51,22 @@ test('the probe makes a real request on a fresh connection each time, and a slow
   assert.equal(sockets.size, hits, 'one connection per probe');
   assert.ok(w.max >= 650, `the slow one is the worst: ${w.max}`);
   assert.ok(w.p50 < 100, `the rest were quick: ${w.p50}`);
+});
+
+test('behind the front thread it also times a reader: its time when a reader answered, null when main did (#1628)', async () => {
+  let reader = true;
+  const server = createServer((req, res) => {
+    if (req.url === '/r' && reader) res.setHeader('X-Citadel-Answered', 'reader');
+    res.writeHead(req.url === '/r' ? 401 : 200).end('ok');
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const probe = new AnswerProbe({ everyMs: 50, lookMs: 20 });
+  try {
+    probe.start((server.address() as { port: number }).port, '127.0.0.1', '/r');
+    await until('a reader reading', () => probe.readerMs != null);
+    assert.ok(probe.readerMs! >= 0);
+    reader = false; // no reader alive: the front passed it to main
+    await until('the reading drops', () => probe.readerMs == null);
+    assert.ok(probe.lastMs != null, 'main is still timed');
+  } finally { probe.stop(); server.close(); server.closeAllConnections(); }
 });

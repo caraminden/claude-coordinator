@@ -8,7 +8,7 @@ import { heldLine, composerHint } from '../public/heldmsg.js';
 test('heldLine: waiting while the chat lists it as held, then a read tag; never held has none', () => {
   assert.equal(heldLine({ mail: true, parked: true }, 7, { held_ids: [7, 9] }).waiting, true);
   const taken = heldLine({ mail: true, parked: true }, 7, { held_ids: [9] });
-  assert.deepEqual([taken.waiting, taken.tag], [false, 'left while parked']);
+  assert.deepEqual([taken.waiting, taken.tag], [false, 'left while sealed']);
   assert.equal(heldLine({ mail: true, cold: true }, 3, { held_ids: [] }).tag, 'held mail');
   assert.equal(heldLine({ text: 'hi' }, 1, { held_ids: [1] }), null);
 });
@@ -21,7 +21,7 @@ test('heldLine: held for a working minion is queued, shown in the log with a tag
 });
 
 test('composerHint: only a parked minion that a person can message', () => {
-  assert.match(composerHint({ state: 'parked', status: 'idle' }), /parked: messages wait until it's unparked/);
+  assert.match(composerHint({ state: 'parked', status: 'idle' }), /sealed: messages wait until it's unsealed/);
   assert.equal(composerHint({ state: 'parked', status: 'running' }), null);
   assert.equal(composerHint({ state: 'parked', status: 'closed' }), null);
   assert.equal(composerHint({ state: null, status: 'idle' }), null);

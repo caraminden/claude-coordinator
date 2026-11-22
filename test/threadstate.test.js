@@ -32,13 +32,13 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
     // Parked until something wakes it by itself is waiting, violet, above grey parked (#718).
     [{ status: 'new', parked_for: 'x', wakes_on: 'x', state: 'parked' }, [3, 'wait', 'waiting']],
     // A chain held because its leader was dismissed unshipped: only Unpark starts it, so it's plain parked.
-    [{ status: 'new', parked_for: 'x, so only Unpark starts you', state: 'parked' }, [4, 'idle', 'parked']],
+    [{ status: 'new', parked_for: 'x, so only Unpark starts you', state: 'parked' }, [4, 'idle', 'sealed']],
     [{ state: 'parked', wakes_on: 'Waiting on #9 going live' }, [3, 'wait', 'waiting']],
     [{ state: 'outside' }, [2, 'wait', 'waiting']],
     [{ state: 'pending-deploy', steps: { done: 6, total: 6 } }, [2, 'wait', 'deploying 6/6']],
     [{ state: 'blocked' }, [2, 'broken', 'blocked']],
     // A card open on a parked or outside minion doesn't make it your move.
-    [{ state: 'parked', pending_card_at: NOW - HOUR }, [4, 'idle', 'parked']],
+    [{ state: 'parked', pending_card_at: NOW - HOUR }, [4, 'idle', 'sealed']],
     [{ status: 'closed', state: 'ready' }, [5, 'idle', 'dismissed']],
     // The server landing it after its turn ended (#727): working, blue, pulsing, whatever the land waits on.
     [{ server_work: { kind: 'land' } }, [1, 'work', 'shipping', 'pulse']],

@@ -550,7 +550,7 @@ function stateChip(t, st) {
   drawn.set(t.id, { t, st });
   whyTips ??= mountTips(document.body, { selector: '.thread-row .state[data-tip-id]', body: (el) => whyBody(Number(el.dataset.tipId)), role: 'dialog', label: 'Why', tapOpens: true, className: 'why-tip' });
   return h('span', { class: `state${st.quiet ? ' quiet' : ''}`, 'data-tip-id': t.id, tabindex: 0, title: '', 'aria-label': `${st.cell}: ${st.label}` },
-    st.pulse ? h('i', { class: 'pulse', style: phase(1600) }) : st.quiet ? h('i', { class: 'still' }) : '', st.cell);
+    st.pulse ? phase(h('i', { class: 'pulse' }), 1600) : st.quiet ? h('i', { class: 'still' }) : '', st.cell);
 }
 
 /**

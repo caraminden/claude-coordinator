@@ -177,7 +177,7 @@ export function schemeCount(p) {
   // The scheme you're in is marked by what this page saw of it (#548), not the server's word, which another tab writes too.
   const { need, busy, working, shipping, fresh, label } = schemePill(openPill(p, view?.projectId, seenHere));
   return h('span', { class: 'scheme-count', 'data-scheme-inbox': p.id, hidden: !need && !busy && !shipping, role: label ? 'img' : null, 'data-tip': label || null, 'aria-label': label || null },
-    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, h('i', { style: phase(900) }), working ? h('b', {}, working) : null) : null,
+    busy ? h('span', { class: 'busy', 'aria-hidden': 'true' }, phase(h('i'), 900), working ? h('b', {}, working) : null) : null,
     shipping ? h('span', { class: 'ship', 'aria-hidden': 'true' }, h('b', {}, shipping), h('i', { style: `--ship-delay: -${Date.now() % 1500}ms` }, h('u', {}, '.'), h('u', {}, '.'), h('u', {}, '.'))) : null,
     need ? h('span', { class: `need${fresh ? ' fresh' : ''}`, 'aria-hidden': 'true' }, need) : null);
 }

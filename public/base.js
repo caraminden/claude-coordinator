@@ -206,8 +206,8 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-/** An inline `animation-delay` that puts a looping animation of `ms` per turn at the page's shared clock, so a redrawn element rejoins its phase instead of restarting (#1532). */
-export const phase = (ms) => `animation-delay: -${Date.now() % ms}ms`;
+/** Puts `el`'s looping animation (`ms` per turn) at the page's shared clock, so a redrawn element rejoins its phase instead of restarting (#1532). Set through the CSSOM: the page's CSP blocks a style attribute. */
+export const phase = (el, ms) => { el.style.animationDelay = `-${Date.now() % ms}ms`; return el; };
 
 /**
  * A redraw of the sidebar (or Home's list, its own page on a phone) while a pointer is pressed in it waits for the release

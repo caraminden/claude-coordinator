@@ -87,7 +87,8 @@ test('a restart waiting on running turns says so to the landing: how many, for h
   const tip = p.commit(p.wts[0], 'b.txt', 'innocent\n');
   writeFileSync(join(p.dir, 'interruptible'), '1');
   t.after(() => writeFileSync(join(p.dir, 'interruptible'), '0')); // a failed test leaves no restart waiting
-  const res = await p.run(land, p.wts[0], { DEPLOY_IDLE_POLL: '0.2', DEPLOY_IDLE_TRIES: '3000' });
+  // The landing watches its whole live limit before it says so: the fixture's 20 s less 9 s of grace (#1615).
+  const res = await p.run(land, p.wts[0], { DEPLOY_IDLE_POLL: '0.2', DEPLOY_IDLE_TRIES: '3000', DEPLOY_TEST_LIVE_GRACE: '1' });
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stderr, /not live yet: the restart is waiting for 1 running turn a restart would cut off to finish \(at most \d+ min more\).*tools\/deploy\.sh --now/);
   assert.match(p.restartLog(), /waiting for 1 running turn a restart would cut off/, 'the restart says so in its own log too');

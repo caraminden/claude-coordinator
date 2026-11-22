@@ -546,8 +546,9 @@ test("when CI can't answer, the fallback says what gh or git said, at once", asy
 test('a refused landing lets go of the deploy lock before it cleans up on GitHub', { timeout: 60_000 }, async () => {
   const r = setup();
   const c = ci(r);
-  // Deleting the scratch branch hangs 8 s.
-  writeFileSync(join(r.dir, 'hub.git', 'hooks', 'pre-receive'), '#!/bin/sh\nwhile read old new ref; do [ "$new" != 0000000000000000000000000000000000000000 ] || sleep 8; done\n', { mode: 0o755 });
+  // Deleting the scratch branch hangs until the test opens the gate, once it has seen the lock free (a fixed 8 s, twice, before #1615).
+  const gate = join(r.dir, 'cleanup-go');
+  writeFileSync(join(r.dir, 'hub.git', 'hooks', 'pre-receive'), `#!/bin/sh\nwhile read old new ref; do [ "$new" != 0000000000000000000000000000000000000000 ] || until [ -e '${gate}' ]; do sleep 0.05; done; done\n`, { mode: 0o755 });
   r.commit(r.wt, 'b.txt', 'mine\n');
   const lock = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy', 'lock');
   let stderr = '';
@@ -556,6 +557,7 @@ test('a refused landing lets go of the deploy lock before it cleans up on GitHub
   await until('the refusal', () => /tests failed on the rebased branch in CI/.test(stderr), 30_000, () => stderr);
   await until('the lock to be free', () => spawnSync('flock', ['-n', lock, 'true']).status === 0, 4_000, () => stderr);
   assert.ok(!ended, 'freed while the cleanup still runs');
+  writeFileSync(gate, '');
   const res = await landing;
   assert.equal(res.status, 1, res.stderr);
   assert.equal(c.refs(), '', 'the scratch branch still goes');

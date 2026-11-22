@@ -18,8 +18,16 @@ test('no schemes: nothing to open', () => {
   assert.equal(startScheme([], 2), null);
 });
 
-test("a scheme's favicon URL carries its version, so a merged new icon is fetched afresh; none without one", () => {
+test("a scheme's favicon comes from one batched request for every version the page lacks; none without an icon (#1543)", async () => {
+  const asked = [];
+  globalThis.document = { querySelectorAll: () => [] };
+  globalThis.fetch = async (url) => { asked.push(url); return { ok: true, json: async () => ({ icons: { '1.5': 'data:a', '2.6': null } }) }; };
   assert.equal(iconSrc({ id: 1, icon: null }), null);
-  assert.equal(iconSrc({ id: 1, icon: 5 }), 'api/projects/1/icon?v=5');
-  assert.notEqual(iconSrc({ id: 1, icon: 6 }), iconSrc({ id: 1, icon: 5 }));
+  assert.equal(iconSrc({ id: 1, icon: 5 }), null); // not here yet: it is asked for
+  assert.equal(iconSrc({ id: 2, icon: 6 }), null);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(asked, ['api/icons?ids=1.5,2.6']);
+  assert.equal(iconSrc({ id: 1, icon: 5 }), 'data:a'); // kept: no second request
+  assert.equal(iconSrc({ id: 2, icon: 6 }), null);
+  assert.equal(asked.length, 1);
 });

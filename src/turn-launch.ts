@@ -776,6 +776,8 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const msg = msgEnv(msgSettings(project));
   if (msg) env.COORDINATOR_MSG = msg;
   if (facts.deploys) env.COORDINATOR_DEPLOYS = '1';
+  // kit/model-tiers.ts leaves Fable out of the tiers citadel:subagents and citadel:briefing show (#1574).
+  if (project.fable_ok === 'off') env.CITADEL_FABLE_OFF = '1';
   if (facts.memory) env.COORDINATOR_MEMORY = '1';
   if (facts.media && ticket.kind !== 'coordinator') env.COORDINATOR_MEDIA = '1';
   if (facts.codexImages && ticket.kind !== 'coordinator') env.COORDINATOR_CODEX_IMAGES = '1';

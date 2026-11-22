@@ -81,13 +81,18 @@ test("the model tiers moved out of every minion's prompt render in citadel:subag
     assert.match(text, /^!`node "\$\{CLAUDE_SKILL_DIR\}\/\.\.\/\.\.\/model-tiers\.ts"`$/m, `${skill} runs the tiers script at load, on a line of its own`);
   }
   // In Citadel's repo the script finds public/; in a turn's kit copy, the table the server put beside it.
-  assert.equal(execFileSync(process.execPath, [join(kit, 'model-tiers.ts')], { encoding: 'utf8' }).trim(), line);
+  const { CITADEL_FABLE_OFF: _, ...env } = process.env;
+  const run = (file: string, extra: Record<string, string> = {}) => execFileSync(process.execPath, [file], { encoding: 'utf8', env: { ...env, ...extra } });
+  assert.equal(run(join(kit, 'model-tiers.ts')).trim(), line);
+  // A scheme with Fable off (its turns carry CITADEL_FABLE_OFF=1, src/turn-launch.ts) sees no Fable tier.
+  assert.equal(run(join(kit, 'model-tiers.ts'), { CITADEL_FABLE_OFF: '1' }).trim(), `Models by kind of work, from the Taskmaster's model table: ${tierSummary(false)}.`);
+  assert.doesNotMatch(run(join(kit, 'model-tiers.ts'), { CITADEL_FABLE_OFF: '1' }), /Fable/);
   const copy = mkdtempSync(join(tmpdir(), 'kit-'));
   try {
     copyFileSync(join(kit, 'model-tiers.ts'), join(copy, 'model-tiers.ts'));
-    assert.match(execFileSync(process.execPath, [join(copy, 'model-tiers.ts')], { encoding: 'utf8' }), /couldn't be read here; ask the Taskmaster/);
+    assert.match(run(join(copy, 'model-tiers.ts')), /couldn't be read here; ask the Taskmaster/);
     copyFileSync(join(kit, '..', 'public', 'model-table.js'), join(copy, 'model-table.js'));
-    assert.equal(execFileSync(process.execPath, [join(copy, 'model-tiers.ts')], { encoding: 'utf8' }).trim(), line);
+    assert.equal(run(join(copy, 'model-tiers.ts')).trim(), line);
   } finally {
     rmSync(copy, { recursive: true, force: true });
   }

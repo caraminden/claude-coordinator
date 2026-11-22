@@ -440,6 +440,13 @@ test('a feature minion\'s first turn opens with the done-lines rule, moved out o
   assert.doesNotMatch((await turn('ticket', 'connected', {}, undefined, undefined, { type: 'bug' })).message, /Done lines/);
 });
 
+test('a scheme with Fable off tells its turns, so the kit\'s tier line leaves Fable out (#1574)', async () => {
+  assert.equal((await turn('ticket', 'connected')).env.CITADEL_FABLE_OFF, undefined);
+  const p = store.createProject(`P${Math.random()}`, null);
+  store.setProjectSettings(p.id, { fable_ok: 'off' });
+  assert.equal((await turn('ticket', 'connected', {}, undefined, p.id)).env.CITADEL_FABLE_OFF, '1');
+});
+
 test("only the scheme whose code this server runs hears about deploys, pending-deploy and previews", async () => {
   const repo = join(root, 'served-repo');
   mkdirSync(repo, { recursive: true });

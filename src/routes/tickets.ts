@@ -276,9 +276,13 @@ export async function unparkTicket(app: App, ticket: Ticket, by: string, author:
     await app.startChained(chained, `${by} unparked it before its leader's work was in`);
     // Its brief is sent: what comes next goes to that turn, not held (the turn clears the state as it starts).
     if (!app.runner.heldFor(ticket.id) && app.store.getTicket(ticket.id)?.state === 'parked') app.store.updateTicket(ticket.id, { state: null });
+    await ownWrites();
     return;
   }
   if (!app.runner.unpark(ticket.id, by, author, quiet)) throw new HttpError(409, `#${ticket.number} isn't parked`);
+  // The message that wakes it, and the reply, re-read the state just cleared: a read waits only READ_WAIT_MS for the
+  // write worker, so on a busy box they'd see it parked still and hold the waking message (#1244, #1585).
+  await ownWrites();
 }
 
 /** A person's picks for each question of a card: chosen option labels, plus optional free text. */

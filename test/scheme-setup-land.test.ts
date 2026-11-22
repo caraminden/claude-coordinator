@@ -765,3 +765,36 @@ test('a commit that lost its "#N:" title beside one that has it is refused by na
   assert.match(res.stderr, /lost its #N: title/);
   assert.equal(git(r.main, 'rev-parse', 'main'), before);
 });
+
+// #1626: in a scheme whose titles end in "(#N)", none starts "#N", so only an empty subject is a lost title.
+test('"(#N)"-style titles: the empty-subject commit is named, not the newest one, and the advice does not say "#N:"', () => {
+  const r = setup();
+  const before = git(r.main, 'rev-parse', 'main');
+  writeFileSync(join(r.wt, 'b.txt'), 'x\n');
+  git(r.wt, 'add', '-A');
+  git(r.wt, 'commit', '-q', '--allow-empty-message', '-m', '');
+  const empty = git(r.wt, 'rev-parse', '--short', 'HEAD');
+  commitAs(r, 'c.txt', 'Fix X (#170)');
+  const good = git(r.wt, 'rev-parse', '--short', 'HEAD');
+  const res = r.run();
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, new RegExp(`commit ${empty} has an empty subject`));
+  assert.doesNotMatch(res.stderr, new RegExp(`commit ${good}`));
+  assert.doesNotMatch(res.stderr, /start with #N:/);
+  assert.equal(git(r.main, 'rev-parse', 'main'), before);
+});
+
+test('a failed read of the commits refuses instead of skipping the title check', () => {
+  const r = setup();
+  const before = git(r.main, 'rev-parse', 'main');
+  commitAs(r, 'b.txt', '#1: x');
+  // A git that fails only for the title check's log.
+  const real = spawnSync('bash', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
+  const bin = join(root, `shim${n}`);
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'git'), `#!/bin/bash\ncase "$*" in *"log --no-merges --format=%h %s"*) echo "fatal: shimmed" >&2; exit 128;; esac\nexec ${real} "$@"\n`, { mode: 0o755 });
+  const res = r.run({ PATH: `${bin}:${env.PATH}` });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /could not read the commits/);
+  assert.equal(git(r.main, 'rev-parse', 'main'), before);
+});

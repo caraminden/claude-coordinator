@@ -1836,11 +1836,17 @@ build() {
 
   # Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true reads "#N: ..." as a comment
   # and drops it. A commit with an empty subject, or none starting "#N" while a sibling has one, is refused by name.
-  subs=$(git log --no-merges --format='%h %s' "$want..HEAD") || subs=
-  if grep -qE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs" || grep -qE '^[0-9a-f]+ *$' <<<"$subs"; then
-    # grep -v finding nothing (every title is fine) exits 1, which pipefail would turn into the script's own exit.
+  # A read that fails refuses: passing would skip the check (#1626).
+  subs=$(git log --no-merges --format='%h %s' "$want..HEAD") || refuse "could not read the commits of $branch above ${want:0:12} (git log failed, above), so their titles are unchecked and nothing landed; $branch is back where it was. Run this again; if it keeps failing, a person needs to look"
+  # grep finding nothing exits 1, which pipefail would turn into the script's own exit: each ends in || x=''.
+  empty=$(grep -E '^[0-9a-f]+ *$' <<<"$subs" | head -n 1) || empty=''
+  if grep -qE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs"; then
+    # Some commit starts "#N", so the ones that don't lost it.
     lost=$(grep -vE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs" | head -n 1) || lost=''
     [ -z "$lost" ] || refuse "commit ${lost%% *} (\"${lost#* }\") lost its #N: title, which a rebase continued with GIT_EDITOR=true drops, so nothing landed and $branch is back where it was: reword it (git rebase -i, or git commit --amend) to start with #N:, then run this again"
+  elif [ -n "$empty" ]; then
+    # No title starts "#N" (a scheme whose titles end in "(#N)"): only the empty one is the lost title.
+    refuse "commit ${empty%% *} has an empty subject, which a rebase continued with GIT_EDITOR=true can leave behind when it drops a title, so nothing landed and $branch is back where it was: give it a subject in this scheme's title style (git rebase -i, or git commit --amend), then run this again"
   fi
 
   # Its lane, over what it changes on $want, and that lane's check.

@@ -626,7 +626,7 @@ async function restartWith(name: string, health: (restarts: number, n: number, c
   mkdirSync(bin);
   const pidFile = join(root, `${name}-mainpid`);
   writeFileSync(pidFile, '100');
-  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "$*" >>'${log}'\n[ "$2" = show ] && cat '${pidFile}'\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\necho "$*" >>'${log}'\n[ "$4" = EnvironmentFiles ] && echo "$TEST_ENVF (ignore_errors=no)" && exit 0\n[ "$2" = show ] && cat '${pidFile}'\nexit 0\n`, { mode: 0o755 });
   const sleeps = noting(bin, 'sleep', join(root, `${name}-sleeps`));
   const restarts = () => (existsSync(log) ? String(readFileSync(log, 'utf8').split(' restart ').length - 1) : '0');
   let n = 0;
@@ -695,7 +695,8 @@ test("a rollback stops the running turns only when last-good predates turn units
 test('the restart checks health again a little after the first OK, and rolls back if it has gone (#520)', { timeout: 60_000 }, async () => {
   const health = (commit: string) => JSON.stringify({ ok: true, commit });
   // Healthy once, then gone (crashed in its first minute): the rollback path, as if the first check had failed.
-  const r = await restartWith('gone', (restarts, n, { good, target }) => (restarts >= 2 ? health(good) : n === 1 ? health(target) : 503));
+  // Ask 1 is the warm handover's check (#1170), which this server, with no handover field, turns down.
+  const r = await restartWith('gone', (restarts, n, { good, target }) => (restarts >= 2 ? health(good) : n <= 2 ? health(target) : 503));
   assert.equal(r.status, 1, r.stderr);
   assert.match(r.stderr, /rolling back to last-good/);
   assert.equal(r.restarts, 2);
@@ -716,7 +717,7 @@ test('the restart checks health again a little after the first OK, and rolls bac
   assert.equal(r.noteLeft, false);
   // Healthy at both checks, but systemd brought it back in between (Restart=always): it died, so it rolls back too.
   const back = await restartWith('respawned', (restarts, n, { good, target, pidFile }) => {
-    if (restarts === 1 && n === 2) writeFileSync(pidFile, '200');
+    if (restarts === 1 && n === 3) writeFileSync(pidFile, '200'); // ask 1 is the warm handover's check
     return health(restarts >= 2 ? good : target);
   });
   assert.equal(back.status, 1, back.stderr);
@@ -727,13 +728,14 @@ test('the restart checks health again a little after the first OK, and rolls bac
 test('a server that is only slow at the second check is not rolled back, and the report waits for that check (#520)', { timeout: 60_000 }, async () => {
   const health = (commit: string) => JSON.stringify({ ok: true, commit });
   // The second check's first ask goes unanswered past health's limit (1 s here), as in a restart's busy first minute.
-  const r = await restartWith('slow', (_restarts, n, { target }) => (n === 2 ? new Promise((res) => setTimeout(() => res(health(target)), 1500)) : health(target)), { DEPLOY_TEST_HEALTH_TIMEOUT: '1' });
+  // Ask 1 is the warm handover's check (#1170).
+  const r = await restartWith('slow', (_restarts, n, { target }) => (n === 3 ? new Promise((res) => setTimeout(() => res(health(target)), 1500)) : health(target)), { DEPLOY_TEST_HEALTH_TIMEOUT: '1' });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.restarts, 1);
   assert.equal(r.lastGood, r.target);
   assert.equal(r.reports.length, 1);
   assert.equal(r.reports[0].ok, true);
-  assert.ok(r.healthAt.length >= 3 && r.healthAt[1] - r.healthAt[0] >= 500, 'checked again DEPLOY_SETTLE s after the first OK');
+  assert.ok(r.healthAt.length >= 4 && r.healthAt[2] - r.healthAt[1] >= 500, 'checked again DEPLOY_SETTLE s after the first OK');
   assert.ok(r.reports[0].at > r.healthAt.at(-1)!, 'reported only after the second check');
   assert.deepEqual(r.lockHeldAtReport, [true, true, true], 'the restart still held the lock at each report');
   assert.equal(r.noteLeft, false);
@@ -769,4 +771,73 @@ test("a roll back's restart goes back to the commit it was queued for when the c
   assert.equal(r.lastGood, r.good);
   assert.match(r.reports[0].text, /^Rolled back to [0-9a-f]{7} "good": the server restarted and is healthy\./);
   assert.match(readFileSync(join(root, 'pinned-moved-live', '.git', 'cc-deploy', 'bad'), 'utf8'), new RegExp(`^${from} ${r.good} \\d+ ${from} rollback\\n$`));
+});
+
+// #1170: a deploy hands over warm when the running server can (its health has a handover field), and restarts as
+// before when it is off, refused, too slow, or the server predates it.
+test('a deploy hands over warm, and restarts as before when the handover is off, refused, slow or unknown (#1170)', { timeout: 120_000 }, async () => {
+  const health = (commit: string, handover?: string) => JSON.stringify({ ok: true, commit, handover });
+  const killed = (name: string) => { try { return readFileSync(join(root, `${name}-systemctl.log`), 'utf8').includes('kill -s USR2 --kill-whom=main citadel-test'); } catch { return false; } };
+
+  // Taken: the new process answers from the target, and nothing restarts.
+  const taken = await restartWith('warm', (_restarts, _n, { good, target, pidFile }) => {
+    if (!killed('warm')) return health(good, 'refused 1 an old one'); // an earlier refusal doesn't stop a new try
+    writeFileSync(pidFile, '200');
+    return health(target, 'ready');
+  });
+  assert.equal(taken.status, 0, taken.stderr);
+  assert.equal(taken.restarts, 0, taken.systemctl);
+  assert.equal(taken.lastGood, taken.target);
+
+  // Refused (the copy's schema differs): restart at once, with the reason.
+  const refused = await restartWith('warm-refused', (restarts, _n, { good, target }) => {
+    if (restarts >= 1) return health(target, 'ready');
+    return health(good, killed('warm-refused') ? `refused ${Date.now()} the new code changes the database schema` : 'ready');
+  }, { DEPLOY_HANDOVER_WAIT: '60' });
+  assert.equal(refused.status, 0, refused.stderr);
+  assert.match(refused.stderr, /warm handover refused: the new code changes the database schema, so restarting/);
+  assert.equal(refused.restarts, 1);
+
+  // Never finishes: restart after HANDOVER_WAIT.
+  const slow = await restartWith('warm-slow', (restarts, _n, { good, target }) => health(restarts >= 1 ? target : good, 'ready'), { DEPLOY_HANDOVER_WAIT: '1' });
+  assert.equal(slow.status, 0, slow.stderr);
+  assert.match(slow.stderr, /warm handover didn't finish in 1 s, so restarting/);
+  assert.equal(slow.restarts, 1);
+
+  // Off: one file in the deploy's state folder.
+  const off = await restartWith('warm-off', (restarts, _n, { good, target }) => health(restarts >= 1 ? target : good, 'ready'), () => {
+    writeFileSync(join(root, 'warm-off-live', '.git', 'cc-deploy', 'no-handover'), '');
+    return {};
+  });
+  assert.equal(off.status, 0, off.stderr);
+  assert.match(off.stderr, /warm handover is off/);
+  assert.equal(killed('warm-off'), false);
+  assert.equal(off.restarts, 1);
+
+  // The env file: the new server takes the old one's environment, so an edit since the last cold restart restarts.
+  const envf = join(root, 'warm-env-file');
+  writeFileSync(envf, 'X=1\n');
+  const edited = await restartWith('warm-env', (restarts, _n, { good, target }) => health(restarts >= 1 ? target : good, 'ready'), { TEST_ENVF: envf });
+  assert.equal(edited.status, 0, edited.stderr);
+  assert.match(edited.stderr, /warm-env-file changed since the last restart, so restarting/);
+  assert.equal(killed('warm-env'), false);
+  assert.equal(edited.restarts, 1);
+  // ...and one older than that restart hands over.
+  const kept = await restartWith('warm-env-old', (_restarts, _n, { good, target, pidFile }) => {
+    if (!killed('warm-env-old')) return health(good, 'ready');
+    writeFileSync(pidFile, '200');
+    return health(target, 'ready');
+  }, () => {
+    utimesSync(envf, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+    writeFileSync(join(root, 'warm-env-old-live', '.git', 'cc-deploy', 'cold-restart'), '');
+    return { TEST_ENVF: envf };
+  });
+  assert.equal(kept.status, 0, kept.stderr);
+  assert.equal(kept.restarts, 0, kept.systemctl);
+
+  // A server from before handovers: no field, so no USR2 (it would kill it).
+  const old = await restartWith('warm-old', (restarts, _n, { good, target }) => health(restarts >= 1 ? target : good));
+  assert.equal(old.status, 0, old.stderr);
+  assert.equal(killed('warm-old'), false);
+  assert.equal(old.restarts, 1);
 });

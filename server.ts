@@ -5,8 +5,8 @@ import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createConnection, type AddressInfo } from 'node:net';
+import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createConnection, Server as NetServer, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { basename, extname, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -38,7 +38,7 @@ import { AGENT_NAME, Auth, type Nonces, type Session } from './src/auth.ts';
 import { GITHUB_NAME, GithubWatcher, githubRepo, originRepo } from './src/github.ts';
 import { ciFinished, postCard, registerCiArmed, tellTaskmaster } from './src/ci-armed.ts';
 import { claudeConfigDir, lastEffort } from './src/sessions.ts';
-import { buildOwnerKey, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
+import { buildOwnerKey, SCHEMA_VERSION, Store, type Artifact, type CiNumberStep, type Project, type User } from './src/db.ts';
 import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { ShipWatch } from './src/ci-ships.ts';
@@ -69,7 +69,8 @@ import { addAppTurnsChecks, addMemoryCurators, backfillStandardAudits } from './
 import { queueLesson } from './src/ship-lessons.ts';
 import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
-import { every, type Job } from './src/every.ts';
+import { every, stopAll, type Job } from './src/every.ts';
+import { handOver, standby } from './src/handover.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { listenThroughFront, upgrades } from './src/front.ts';
@@ -175,6 +176,11 @@ const PUBLIC_DIR = join(import.meta.dirname, 'public');
 // every thread gets full access.
 const LOCAL_HOST = HOST === '0.0.0.0' || HOST === '::' ? '127.0.0.1' : HOST;
 
+// A deploy's warm handover (#1170, src/handover.ts): a copy the running server started has loaded its code by here,
+// and waits for the old one to let go before it does anything else. Null in a server started any other way.
+const handover = await standby(SCHEMA_VERSION);
+// The environment as this server got it, for the next one's handover: secrets and systemd's variables leave process.env below.
+const bootEnv = { ...process.env };
 await mkdir(DATA_DIR, { recursive: true });
 // The copies of the server files turns run (src/turn-launch.ts): taken first, before a later deploy can move the
 // checkout under a server that is still starting, and before any turn starts or is picked up again.
@@ -252,7 +258,7 @@ const BOOT_AT = Date.now();
 let writerQueued = () => 0;
 if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 700))), 100, 500, { profile: true, backlog: () => writerQueued(), files: ['coordinator.db', 'state.db', 'events.db'].map((f) => join(DATA_DIR, f)) });
 // systemd restarts a hung server once these pings stop (#1135, deploy/claude-coordinator.service.d/watchdog.conf).
-startWatchdog();
+const watchdog = startWatchdog();
 // Before any unit starts: whether systemd-run takes MemoryTHP= (src/unit-thp.ts).
 await Promise.all([loadAssets(), probeThp()]);
 // The chat log's move into events.db (#1169), off the event loop so the watchdog's pings go on; the Store finds it done.
@@ -1855,6 +1861,7 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   inFlight.set(res, `${req.method} ${(req.url ?? '').split('?')[0]}`);
   res.once('close', () => inFlight.delete(res));
+  if (passingOn) return passOn(req, res);
   try {
     if (SETTLED_ROUTE && req.url?.startsWith('/api/test/settled')) {
       inFlight.delete(res);
@@ -1966,12 +1973,14 @@ server.on('listening', keepServing);
 
 // Under socket activation (deploy/claude-coordinator.socket) systemd holds the listening socket, fd 3,
 // across restarts: requests made while the server restarts wait for the next one instead of failing.
-const SYSTEMD_SOCKET = process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.pid);
+// A warm handover's new server got the socket from the old one (src/handover.ts), and becomes systemd's main process once it listens.
+const onSocket = handover !== null || (process.env.LISTEN_FDS === '1' && process.env.LISTEN_PID === String(process.pid));
 const listened = (port: number) => {
   boundPort = port;
   // It asks the port people use, so through the front thread too: /api/health stays on the main thread (#1563).
   if (!BOOT_CHECK) answerProbe.start(boundPort, LOCAL_HOST);
-  console.log(SYSTEMD_SOCKET ? `${APP_NAME} listening on the socket systemd holds (${HOST}:${PORT})` : `${APP_NAME} listening on http://${HOST}:${boundPort}`);
+  console.log(onSocket ? `${APP_NAME} listening on the socket systemd holds (${HOST}:${PORT})` : `${APP_NAME} listening on http://${HOST}:${boundPort}`);
+  handover?.live();
 };
 // People's read-only page requests answer on reader threads, behind a front thread that owns the port (#1563).
 // CITADEL_FRONT=0 is the off switch: the main thread listens itself, as before.
@@ -1979,7 +1988,7 @@ let throughFront: ReturnType<typeof listenThroughFront> | null = null;
 if (process.env.CITADEL_FRONT !== '0') {
   front.on = true;
   throughFront = listenThroughFront(server, {
-    ...(SYSTEMD_SOCKET ? { fd: 3 } : { host: HOST, port: PORT }),
+    ...(onSocket ? { fd: 3 } : { host: HOST, port: PORT }),
     readers: 2,
     appsDomain: APPS_DOMAIN,
     ...(SETTLED_ROUTE ? { answerMs: Number(process.env.CITADEL_READER_ANSWER_MS) || undefined, stuckMs: Number(process.env.CITADEL_READER_STUCK_MS) || undefined } : {}),
@@ -1989,7 +1998,7 @@ if (process.env.CITADEL_FRONT !== '0') {
     usage: (args) => (store.usage.used as (...a: unknown[]) => void)(...args),
     setting: (key, value) => { if (/^plan:\d+:page$/.test(key)) store.setSetting(key, value); },
   });
-} else if (SYSTEMD_SOCKET) {
+} else if (onSocket) {
   server.listen({ fd: 3 }, () => listened(PORT));
 } else {
   server.listen(PORT, HOST, () => listened((server.address() as AddressInfo).port));
@@ -2020,16 +2029,22 @@ server.on('listening', () => void services.interrupted().then((cut) => {
 // callers come back), and exit once the rest are answered, a few seconds at most. Requests made
 // meanwhile wait in systemd's socket for the next server, so every second spent here is a stall (#493).
 const SHUTDOWN_GRACE_MS = 5000;
-process.on('SIGTERM', () => {
-  console.log('SIGTERM: finishing requests, then exiting; running turns carry on.');
+// Let go of the work a next server picks up: turns, app turns, the usage ledger, a storm going on.
+function stopWork() {
   services.stopping = true;
   contraptionTurns.stopping = true; // an app turn systemd's SIGTERM cuts off now says Citadel restarted (#1382)
   claudeLink.close(); // before detachAll: a turn's start still in flight must not see its container idle and replace it
   runner.detachAll();
   store.usage.flush();
   memoryStorms.stop(); // records a storm still going, which the next server would otherwise only see from its middle
+}
+// Stop taking requests, end the ones that never finish, and exit once the rest are answered.
+function closeDown(why: string) {
   process.once('exit', () => ciLoad.stop()); // at the exit itself, after the last request: writes the runner-load samples it still holds
-  for (const c of clients.keys()) c.end();
+  // A handover's new server is already listening: pages come back after 0.2 s, not EventSource's 3 s, and hold the chip.
+  const last = why === 'Handover' ? `retry: 200\ndata: ${JSON.stringify({ type: 'handover' })}\n\n` : undefined;
+  for (const c of clients.keys()) c.end(last);
+  agentListener?.close();
   for (const s of upgraded) s.destroy();
   // Every other event stream too (an app's through /apps/, a machine session, a contraption route): none ends by itself, so
   // each held the whole grace (#1578). The exit cuts them anyway; their callers reconnect to the next server.
@@ -2047,11 +2062,48 @@ process.on('SIGTERM', () => {
   setTimeout(() => {
     server.getConnections((_err, n) => {
       const open = [...inFlight].map(([res, what]) => `${what}${res.headersSent ? ' (answering)' : ''}`).slice(0, 10).join(', ');
-      console.log(`SIGTERM: exiting with ${n} connection(s) still open after ${SHUTDOWN_GRACE_MS / 1000} s${open ? `: ${open}` : ''}`);
+      console.log(`${why}: exiting with ${n} connection(s) still open after ${SHUTDOWN_GRACE_MS / 1000} s${open ? `: ${open}` : ''}`);
       process.exit(0);
     });
   }, SHUTDOWN_GRACE_MS).unref();
+}
+process.on('SIGTERM', () => {
+  console.log('SIGTERM: finishing requests, then exiting; running turns carry on.');
+  stopWork();
+  closeDown('SIGTERM');
 });
+// The machines-only listener, once it is made below: a warm handover lets go of its port for the new server.
+let agentListener: Server | null = null;
+// Once a handover has let go of this server's work, requests still coming in on connections it already had (Caddy keeps
+// them alive) go on to the new server through the socket, which holds them until it listens: this one starts no turn,
+// timer or write the new one doesn't know about.
+let passingOn = false;
+function passOn(req: IncomingMessage, res: ServerResponse) {
+  const up = httpRequest({ host: LOCAL_HOST, port: boundPort, method: req.method, path: req.url, headers: req.headers, agent: false }, (answer) => {
+    res.writeHead(answer.statusCode ?? 502, answer.headers);
+    answer.pipe(res);
+  });
+  up.on('error', (err) => (res.headersSent ? res.destroy() : json(res, 502, { error: `Citadel is handing over to its new server: ${err.message}` })));
+  res.once('close', () => up.destroy());
+  req.pipe(up);
+}
+// A deploy's warm handover (#1170, src/handover.ts): the new code boots beside this server, which lets go once it is
+// ready. Its streams stay open until the new one listens, so pages reconnect straight to it, with no "Reconnecting…".
+process.on('SIGUSR2', () => handOver({
+  quiesce() {
+    // Stop accepting; the socket's queue holds what comes in until the new server listens. net's close, not http's: that
+    // one also closes "idle" connections, which takes in one just accepted whose request isn't read yet (ECONNRESET).
+    if (throughFront) throughFront.release(); // the front thread owns the socket; the main thread's own stays open for it
+    else NetServer.prototype.close.call(server);
+    passingOn = true;
+    agentListener?.close();
+    stopAll();
+    watchdog?.stop();
+    stopWork();
+    writer?.drain(5000, 'handover'); // the new server reads what this one last wrote
+  },
+  finish: () => closeDown('Handover'),
+}, { schema: SCHEMA_VERSION, onSocket, env: bootEnv }));
 
 // A front-end-only deploy: re-read public/ and tell open tabs, which reload once nobody is typing.
 process.on('SIGHUP', () => {
@@ -2090,6 +2142,7 @@ if (MACHINES_URL) {
   }));
   const port = Number(MACHINES_URL.port || 80);
   // The tailnet address may not be up yet at boot; keep trying rather than keep the app from starting.
+  agentListener = agents;
   const listen = () => agents.listen(port, MACHINES_URL.hostname);
   agents.on('listening', () => console.log(`Machines connect at ${MACHINES_URL.origin}`));
   agents.on('error', (err) => {

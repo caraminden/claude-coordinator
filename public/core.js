@@ -295,6 +295,8 @@ let streamTimer = null;
 // and after a moment this chip says why, until the stream is back (#493).
 let reconnectChip = null;
 let reconnectTimer = null;
+// A deploy's warm handover (#1170) says so as it ends the stream: the next server is up, so no chip for a while.
+let quietUntil = 0;
 function reconnecting(on) {
   if (on && (reconnectChip || reconnectTimer || catchUpChip)) return;
   clearTimeout(reconnectTimer);
@@ -304,7 +306,7 @@ function reconnecting(on) {
       reconnectChip = h('div', { class: 'cui-chip reconnecting', 'data-tone': 'warn', role: 'status' },
         h('span', { class: 'cui-spin', 'aria-hidden': 'true' }), 'Reconnecting…');
       document.body.append(reconnectChip);
-    }, 1500);
+    }, Math.max(1500, quietUntil - Date.now()));
   } else {
     reconnectChip?.remove();
     reconnectChip = null;
@@ -395,6 +397,7 @@ function connectStream(catchUp = false) {
     heardAt = Date.now();
     newsArrived();
     const msg = JSON.parse(e.data);
+    if (msg.type === 'handover') quietUntil = Date.now() + 15_000;
     if (msg.type === 'hello') {
       // The server restarted with a different front end; load it instead of running stale code.
       if (assetVersion && msg.version !== assetVersion) {

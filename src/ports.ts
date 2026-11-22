@@ -24,7 +24,9 @@ export function listeningPort(proc: ChildProcess, ms = 20_000): Promise<number> 
     const timer = setTimeout(() => done(() => reject(new Error(`The server did not say which port it listens on within ${ms / 1000} s`))), ms);
     proc.once('exit', exited);
     lines.on('line', (line) => {
-      const port = Number(/listening on http:\/\/.*:(\d+)$/.exec(line)?.[1]);
+      // On systemd's socket (or one a test holds) it names the address it was given (server.ts).
+      const m = /listening on (?:http:\/\/.*:(\d+)$|the socket systemd holds \(.*:(\d+)\))/.exec(line);
+      const port = Number(m?.[1] ?? m?.[2]);
       if (port) done(() => resolve(port));
     });
   });

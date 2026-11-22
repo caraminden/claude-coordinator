@@ -111,7 +111,7 @@ test('a landing and its restart each leave a timing line in the retro log, lande
   // Two processes write them, the restart and land.sh, so either can come first.
   const kind = (k: string, from = 0) => lines().slice(from).filter((l) => l.includes(` · ${k} · `));
   assert.equal(lines().length, 2, lines().join('\n'));
-  assert.match(kind('restart')[0], /^- \d\d:\d\d:\d\dZ · restart · [0-9a-f]{7} · idle-wait \d+ · backup \d+ · healthy \d+ · settle \d+ · live$/);
+  assert.match(kind('restart')[0], /^- \d\d:\d\d:\d\dZ · restart · [0-9a-f]{7} · idle-wait \d+ · backup \d+ · healthy \d+ · settle \d+ · restart · live$/);
   assert.ok(kind('restart')[0].includes(` · ${good.slice(0, 7)} · `), kind('restart')[0]);
   // LAND_CI=0 here: the suite ran on "perigee", after no wait for CI, and the CI fields are empty.
   assert.match(kind('timing')[0], /^- \d\d:\d\d:\d\dZ · timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live \d+ · landed$/);
@@ -124,7 +124,7 @@ test('a landing and its restart each leave a timing line in the retro log, lande
   // It answered healthy at no point, so there was no settle check; land.sh's deploy saw no "live".
   const [restart, timing] = [kind('restart', 2), kind('timing', 2)];
   assert.equal(restart.length, 1, lines().join('\n'));
-  assert.match(restart[0], /· restart · [0-9a-f]{7} · idle-wait \d+ · backup \d+ · healthy - · settle - · rolled back$/);
+  assert.match(restart[0], /· restart · [0-9a-f]{7} · idle-wait \d+ · backup \d+ · healthy - · settle - · restart · rolled back$/);
   assert.equal(timing.length, 1, lines().join('\n'));
   assert.match(timing[0], /· timing · ticket\/2-x · line \d+ · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live - · refused at deploy$/);
 });

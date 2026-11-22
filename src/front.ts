@@ -5,7 +5,7 @@
 // and reads no database, so nothing here can block. Design: the shared folder's specs/reader-threads.md.
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { Agent, createServer, request, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { connect, type Socket } from 'node:net';
+import { connect, Server as NetServer, type Socket } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -99,6 +99,10 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
       if (!front) stopped();
       else front.postMessage('stop');
       return drained;
+    },
+    /** A warm handover (#1170): stop accepting, keep open connections, and send all their requests to the main thread. */
+    release() {
+      front?.postMessage('release');
     },
   };
 }
@@ -224,9 +228,10 @@ function runFront(opts: FrontOptions & { sock: string }) {
     r.worker.postMessage({ id, method: req.method, url: req.url, headers: req.headers });
   };
 
+  let released = false; // a warm handover's: every request goes to the main thread, which passes it on
   const front = createServer({ shouldUpgradeCallback: (req) => upgrades(req, opts.appsDomain) }, (req, res) => {
     try {
-      if (forReader(req)) ask(req, res);
+      if (!released && forReader(req)) ask(req, res);
       else pass(req, res);
     } catch (err) {
       console.error(`Front thread: ${(err as Error)?.stack ?? err}`);
@@ -253,6 +258,12 @@ function runFront(opts: FrontOptions & { sock: string }) {
   else front.listen(opts.port ?? 0, opts.host, listening);
 
   parentPort!.on('message', (m) => {
+    if (m === 'release') {
+      // net's close, not http's, which would also close an idle connection whose request isn't read yet (ECONNRESET).
+      released = true;
+      NetServer.prototype.close.call(front);
+      return;
+    }
     if (m !== 'stop') return;
     // New connections wait in systemd's socket for the next server; open ones finish what they asked, readers' and
     // the main thread's alike (it keeps listening until told this is done), then the main thread exits.

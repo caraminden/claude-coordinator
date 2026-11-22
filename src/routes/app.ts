@@ -15,6 +15,7 @@ import { optOutKey } from '../replay-keep.ts';
 import { moveShip, REASON_MAX, seqsFor } from '../ship-line.ts';
 import { shipLines, stopShip, StopRefused } from '../ship-stop.ts';
 import { CARD_OPTIONS, welcomeAct, welcomeView } from '../welcome.ts';
+import { handoverState } from '../handover.ts';
 
 const MAX_CLIENTS = 100;
 
@@ -84,7 +85,8 @@ export const appRoutes: Route[] = [
     // interruptible: running turns a restart would stop (they don't run in a unit of their own); interruptibleTurns:
     // which minions' turns, by id only (#584): deploy.sh names them from the database. fallbacks: jobs
     // systemd-run couldn't put in a unit of their own since the server started, which ran in it instead (#519).
-    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', interruptible: app.runner.interruptible(), interruptibleTurns: app.runner.interruptibleTurns(), fallbacks: fallbacks.count, preview: app.preview }),
+    // handover: whether it takes SIGUSR2 for a warm handover (#1170), or why it last refused one (src/handover.ts).
+    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', handover: handoverState(), interruptible: app.runner.interruptible(), interruptibleTurns: app.runner.interruptibleTurns(), fallbacks: fallbacks.count, preview: app.preview }),
   },
   {
     // The front-end error beacon (public/error-beacon.js, #724): one uncaught error or rejection from a page, for the

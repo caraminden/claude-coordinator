@@ -303,7 +303,7 @@ function compileCache(): { NODE_COMPILE_CACHE?: string } {
   return compileCacheDir ? { NODE_COMPILE_CACHE: compileCacheDir } : {};
 }
 
-export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string; wrap?: string[]; log?: string; portMs?: number } = {}): Promise<Booted> {
+export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string; name?: string; stdout?: boolean; script?: string; wrap?: string[]; log?: string; portMs?: number; fds?: number[] } = {}): Promise<Booted> {
   const root = opts.root ?? mkdtempSync(join(resolve(tmpdir()), 'boot-'));
   const data = join(root, 'data');
   // `wrap`: a command the server runs under, that execs it (systemd-run --scope for a CPU limit); `log`: a file its stdout and stderr are appended to.
@@ -337,7 +337,8 @@ export async function bootServer(opts: { env?: NodeJS.ProcessEnv; root?: string;
       ...compileCache(),
       ...opts.env,
     },
-    stdio: ['ignore', 'pipe', err],
+    // `fds`: the server's fd 3 on, as a held socket (test/handover.test.ts).
+    stdio: ['ignore', 'pipe', err, ...(opts.fds ?? [])],
   });
   if (typeof err === 'number') closeSync(err);
   let base = '';

@@ -22,6 +22,12 @@ export type JobRow = {
 export type Job = { run(): Promise<void>; stop(): void };
 
 const jobs = new Map<string, JobRow>();
+const stops = new Set<() => void>();
+
+/** Stop every job: a warm handover's old server (src/handover.ts), whose new server runs them from now on. */
+export function stopAll() {
+  for (const stop of [...stops]) stop();
+}
 
 /**
  * Run `fn` every `ms` ms under `name`: a throw or rejection is logged and recorded and the next tick runs again, the
@@ -53,14 +59,14 @@ export function every(name: string, ms: number, fn: () => unknown, first?: numbe
   };
   const timer = setInterval(() => void run(), ms).unref();
   const once = first === undefined ? null : first === 0 ? (void run(), null) : setTimeout(() => void run(), first).unref();
-  return {
-    run,
-    stop() {
-      clearInterval(timer);
-      if (once) clearTimeout(once);
-      if (jobs.get(name) === row) jobs.delete(name);
-    },
+  const stop = () => {
+    clearInterval(timer);
+    if (once) clearTimeout(once);
+    if (jobs.get(name) === row) jobs.delete(name);
+    stops.delete(stop);
   };
+  stops.add(stop);
+  return { run, stop };
 }
 
 /** Over this, a run is marked slow. */

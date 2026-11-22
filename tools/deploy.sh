@@ -44,6 +44,7 @@ TO='' # --to <commit>: roll back to it (#1016)
 PIN=${DEPLOY_PIN:-} # the queued restart of a roll back: the commit it rolls back from, for <state>/bad once it is live
 WANT=${DEPLOY_TARGET:-} # and the commit it rolls back to (#1271)
 HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-60} # a start answers in ~1 s; one that migrates waits for it: dropping events_old took 12-29 s on copies (#1169 ship 3)
+HANDOVER_WAIT=${DEPLOY_HANDOVER_WAIT:-160} # a warm handover's longest: the new server's 90 s to ready + 60 s to live (src/handover.ts)
 SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520); tests use fractions
 REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a deploy report
 REPORT_RETRY=${DEPLOY_REPORT_RETRY:-60} # and how long to keep trying one that never reached it
@@ -72,7 +73,7 @@ retro_log() (
   [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
   dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
   mkdir -p "$dir" || exit 0
-  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started), a `broken test` line per file tools/known-flakes.ts calls a broken test, not a flake (#1487), and per fresh CI run after one cut off before any test failed (cut-off rerun, the same results), and a `bisect run` line per CI run of a red train'"'"'s bisect that gave a verdict. A `smoke` line per landing the smoke check refused before the line (#1012: what failed, its seconds; no timing line for it). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it).' >>"$dir/land.md"
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started), a `broken test` line per file tools/known-flakes.ts calls a broken test, not a flake (#1487), and per fresh CI run after one cut off before any test failed (cut-off rerun, the same results), and a `bisect run` line per CI run of a red train'"'"'s bisect that gave a verdict. A `smoke` line per landing the smoke check refused before the line (#1012: what failed, its seconds; no timing line for it). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it; then restart or handover: how the new server took over, #1170).' >>"$dir/land.md"
   printf -- '- %sZ · %s\n' "$(date -u +%T)" "$1" >>"$dir/land.md"
 ) >/dev/null 2>&1 || true
 
@@ -292,13 +293,42 @@ healthy() {
 
 main_pid() { systemctl --user show -p MainPID --value "$SERVICE" 2>/dev/null || true; }
 
-# Restart the service and wait for it to answer healthy from commit $1 (else 1), then again SETTLE s later
+# A warm handover (#1170, src/handover.ts): the running server starts commit $1's code beside itself and hands it the
+# socket, so open pages and turns' calls never wait out a restart. 0 once another process answers from $1. 1 when it's
+# off ($STATE/no-handover), the running server predates it, or it refused or ran past HANDOVER_WAIT: the old server
+# is still serving then (or systemd is restarting it), and the caller restarts as before.
+handover() {
+  if [ -e "$STATE/no-handover" ]; then say "warm handover is off ($STATE/no-handover), so restarting"; return 1; fi
+  case $(health handover) in ready | "refused "*) ;; *) return 1 ;; esac # an older server has no handover field
+  # The new server takes the old one's environment: an env file edited since the last cold restart needs systemd to read it.
+  local envf
+  envf=$(systemctl --user show -p EnvironmentFiles --value "$SERVICE" 2>/dev/null | head -n 1 | sed 's/ (.*//') || true
+  if [ -f "$envf" ] && [ ! "$STATE/cold-restart" -nt "$envf" ]; then say "$envf changed since the last restart, so restarting"; return 1; fi
+  local old t0 st at deadline=$((SECONDS + HANDOVER_WAIT))
+  old=$(main_pid) t0=$(date +%s%3N)
+  systemctl --user kill -s USR2 --kill-whom=main "$SERVICE" || return 1
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    sleep "$HEALTH_POLL"
+    [ "$(main_pid)" != "$old" ] && [ "$(health commit)" = "$1" ] && return 0
+    st=$(health handover)
+    if [[ $st == "refused "* ]]; then
+      at=${st#refused } at=${at%% *}
+      if [ "$at" -ge "$t0" ]; then say "warm handover refused: ${st#refused * }, so restarting"; return 1; fi
+    fi
+  done
+  say "warm handover didn't finish in ${HANDOVER_WAIT} s, so restarting"
+  return 1
+}
+
+# Restart the service (with $2 = warm, by a warm handover if it takes) and wait for it to answer healthy from
+# commit $1 (else 1), then again SETTLE s later
 # from the same process (else 2): a server can answer once and die in its first minute, and systemd's
 # Restart=always would bring it back healthy-looking (#520). The second check gets the same wait, as that
 # first minute is slow (re-attaching turns, startup checks) and slow isn't down.
 restart_healthy() {
-  R_UP='' R_SETTLED='' # for the restart's timing line
-  systemctl --user restart "$SERVICE" || return 1
+  R_UP='' R_SETTLED='' R_HOW=restart # for the restart's timing line
+  if [ "${2-}" = warm ] && handover "$1"; then R_HOW=handover
+  else touch "$STATE/cold-restart"; systemctl --user restart "$SERVICE" || return 1; fi
   healthy "$1" || return 1
   R_UP=$(date +%s)
   local pid
@@ -315,7 +345,7 @@ restart_timing() (
   now=$(date +%s)
   span() { if [ -n "$1" ]; then echo $((${2:-$now} - $1)); else echo -; fi; } # <start> [<end>, else now]; - if it never started
   read -r up settled <<<"${R_FIRST-$R_UP $R_SETTLED}"
-  retro_log "restart · ${R_COMMIT:-$(git_live rev-parse --short HEAD)} · idle-wait $(span "$R_START" "$R_LOCK") · backup $(span "$R_LOCK" "$R_BACKUP") · healthy $([ -n "$up" ] && span "$R_RESTART" "$up" || echo -) · settle $([ -n "$settled" ] && span "$up" "$settled" || echo -) · $R_OUT"
+  retro_log "restart · ${R_COMMIT:-$(git_live rev-parse --short HEAD)} · idle-wait $(span "$R_START" "$R_LOCK") · backup $(span "$R_LOCK" "$R_BACKUP") · healthy $([ -n "$up" ] && span "$R_RESTART" "$up" || echo -) · settle $([ -n "$settled" ] && span "$up" "$settled" || echo -) · ${R_FIRST_HOW:-${R_HOW:-restart}} · $R_OUT"
 ) >/dev/null 2>&1
 
 # How many running turns a restart would cut off ($1), and which (#584): "2 running turns (Citadel #412 Usage bar,
@@ -424,8 +454,8 @@ restart() {
   restart_phase "restarting $SERVICE on ${target:0:7}"
   local rc=0
   R_RESTART=$(date +%s)
-  restart_healthy "$target" || rc=$?
-  R_OUT=$([ "$rc" = 0 ] && echo live || echo "rolled back") R_FIRST="$R_UP $R_SETTLED" # the rollback's restart_healthy sets them again
+  restart_healthy "$target" warm || rc=$? # the rollback below restarts cold
+  R_OUT=$([ "$rc" = 0 ] && echo live || echo "rolled back") R_FIRST="$R_UP $R_SETTLED" R_FIRST_HOW=$R_HOW # the rollback's restart_healthy sets them again
   if [ "$rc" = 0 ]; then
     git_live tag -f last-good "$target" >/dev/null
     rotate_backups
@@ -671,7 +701,7 @@ deploy() {
   local out
   if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE (tools/deploy.sh)" \
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
-    --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
+    --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_HANDOVER_WAIT="$HANDOVER_WAIT" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
     --setenv=DEPLOY_NOW="$NOW" --setenv=DEPLOY_UNKNOWN_WAIT="$UNKNOWN_WAIT" --setenv=DEPLOY_IDLE_POLL="$IDLE_POLL" --setenv=DEPLOY_BACKUPS="$BACKUPS" --setenv=PATH="$PATH" \
     --setenv=COORDINATOR_SHARED_DIR="${COORDINATOR_SHARED_DIR:-}" --setenv=DEPLOY_PIN="${TO:+$prev}" --setenv=DEPLOY_TARGET="${TO:+$new}" \
     bash "$copy" restart 2>&1 9>&- 7>&-); then

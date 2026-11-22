@@ -123,6 +123,8 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
     // A result or a blocker is worth a ping; whoever set it by hand already knows. The state and note are the ones
     // just written, never read back: a read that gives up on the write queue (src/db-writer.ts) answers from the row
     // before them, which said the old note or, for a state of null, dropped the ping altogether (#1634).
+    // shortcut: a state with no note of its own still falls back to the row read above, so a note write still queued
+    // when this one arrives pings the note before it; upgrade when a write can hand back the row it wrote.
     if (fields.state && NOTIFY_STATES[fields.state]) {
       app.notify(id, { kind: 'state', state: fields.state, note: 'note' in fields ? fields.note ?? null : stored.note }, caller ? null : name);
     }

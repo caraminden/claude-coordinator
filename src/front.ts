@@ -256,9 +256,11 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   // A reader whose thread stopped answering (a read that never ends) is replaced; its requests already went to the main thread.
   setInterval(() => {
     for (const r of readers) if (Date.now() - r.heard > stuckMs) {
-      // One that has never said it is ready is still starting, and terminating it then aborts the process (see Reader
-      // above), so it is left to finish; it answers nothing meanwhile, and the message that says it is ready sets
-      // `heard` again, which puts it back under this watch.
+      // One that has never said it is ready is still evaluating its module, and terminating it then aborts the whole
+      // process (see Reader above), so it is left alone. Accepted: a thread wedged there (a database it can't open)
+      // answers nothing until the next restart and its reads go to the main thread, which beats what this did before
+      // (#1625), which was to kill the server. The message that says it is ready sets `heard` again, which puts it
+      // back under this watch.
       if (!r.ready) {
         console.error(`Reader thread hasn't started in ${Math.round((Date.now() - r.heard) / 1000)} s: leaving it to finish.`);
         r.heard = Infinity; // said once

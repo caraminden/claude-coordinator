@@ -8,7 +8,8 @@
 #   - only while someone else is in the line: with nobody ahead, its run in line starts as soon as a check would;
 #   - only with a runner labelled citadel-ci-linux-check online (tools/ci-runner/README.md); none, no check;
 #   - one check at a time (<state>/own-check.lock): a ship that would wait more than LAND_OWN_CHECK_WAIT (120 s) for the
-#     check running, going by the last check's time, joins the line unchecked instead.
+#     check running, going by the last check's time, gets the light check instead (tools/light-check.sh, #1620): its
+#     own and affected test files on CI's side runner.
 # Verdicts:
 #   green          joins the line. Its rebase goes to <state>/own-checked ("<main> <branch tip> <commit>"), which the
 #                  rebase in line takes (stacked_of), so when main hasn't moved and nobody rides with it, ci_gate finds
@@ -22,6 +23,9 @@
 # cost and catch are counted. Off: LAND_OWN_CHECK=0, or for every landing, touch <state>/own-check-off.
 # shortcut: no guard tests on the check's commit (land.sh defines them past the line); guards() runs them in line.
 # shortcut: no phase on the Releases page while it runs, since the ship has no ticket yet; its land.sh lines say it.
+
+# shellcheck source=tools/light-check.sh
+. "$tools/light-check.sh" # what a ship turned away by a busy check runner gets instead (#1620)
 
 OWN_CHECK_LABEL=citadel-ci-linux-check
 OWN_CHECK_WORKFLOW=.github/workflows/tests.yml
@@ -54,6 +58,7 @@ own_check() {
       say "own check: ${b:-another ship}'s check has about $(((left + 59) / 60)) min to go, more than the ${wait} s a ship waits for it, so this joins the line unchecked"
       retro_log "own check · $label · skipped: the check runner was busy for ${left}s more"
       exec 5>&-
+      light_check "$slug" || refuse "$own_refusal" # #1620: its own tests on the side runner instead
       return 0
     fi
     say "own check: waiting up to ${wait} s for ${b:-another ship}'s check to end, then this one's runs"
@@ -61,6 +66,7 @@ own_check() {
       say "own check: ${b:-another ship}'s check didn't end within ${wait} s, so this joins the line unchecked"
       retro_log "own check · $label · skipped: the check runner stayed busy past ${wait}s"
       exec 5>&-
+      light_check "$slug" || refuse "$own_refusal"
       return 0
     fi
   fi

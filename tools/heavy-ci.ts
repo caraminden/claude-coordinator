@@ -129,7 +129,8 @@ function shipRuns(slug: string): number {
 /** Ships first (#1347, Cara 2026-11-20: "maybe heavy jobs should wait if they are slowing down the ship train?"): while a
  *  ship's run is queued or running, a new heavy job waits here, up to CITADEL_HEAVY_SHIP_WAIT s (default 1800), before it
  *  is dispatched. It waits rather than run on perigee, where a ship that fell back runs its suite too; a job already on
- *  CI goes on. After the limit it goes to CI's queue anyway, so a stuck run never holds it for good. */
+ *  CI goes on. After the limit it goes to CI's queue anyway, so a stuck run never holds it for good. CITADEL_HEAVY_SHIP=1
+ *  skips it, for a ship's own light check (tools/light-check.sh, #1620), which is there to spare the ships' runs. */
 async function waitForShips(slug: string, poll: number) {
   const limit = Number(process.env.CITADEL_HEAVY_SHIP_WAIT) || 1800;
   const from = Date.now();
@@ -234,7 +235,7 @@ async function main(argv: string[]): Promise<number> {
   process.on('SIGINT', () => stop(2));
   process.on('SIGTERM', () => stop(15));
   try {
-    await waitForShips(slug, poll);
+    if (process.env.CITADEL_HEAVY_SHIP !== '1') await waitForShips(slug, poll); // a ship's own light check (#1620) is one
     try {
       const branch = gh([`repos/${slug}`], 'reading the repo').default_branch;
       // From here a run may exist even if the call failed (it timed out after GitHub took it), so it is looked for.

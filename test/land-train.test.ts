@@ -1226,3 +1226,92 @@ test('own check: a check runner busy for longer than a ship waits sends it to th
   assert.doesNotMatch(done.map((d) => d.stderr).join('\n'), /own check/);
   off.done();
 });
+
+// The light check (#1620, tools/light-check.sh; Cara, 2026-11-22, "Fill #1567's gap"): a ship sent away by a busy check
+// runner runs its own and affected test files on CI's side runner instead. heavy-ci.ts is faked: the fake logs where and
+// how it was called, and prints FAKE_LIGHT_OUT as the run's output.
+function busyCheck(r: ReturnType<typeof setup>) {
+  const state = join(git(r.live, 'rev-parse', '--absolute-git-dir'), 'cc-deploy');
+  mkdirSync(state, { recursive: true });
+  writeFileSync(join(state, 'own-check-run'), `${Math.floor(Date.now() / 1000)} ticket/9-x\n`);
+  writeFileSync(join(state, 'own-check-secs'), '1000\n');
+  writeFileSync(join(r.dir, 'bin', 'fake-heavy'), `#!/usr/bin/env bash
+{ echo "pwd $(pwd)"; echo "head $(git rev-parse HEAD)"; echo "ship \${CITADEL_HEAVY_SHIP:-}"; echo "args $*"; echo "log $(git log --format=%s -3 | tr '\\n' '|')"; } >>"${join(r.dir, 'heavy-calls')}"
+printf '%b\\n' "\${FAKE_LIGHT_OUT:-light check: green}"
+`, { mode: 0o755 });
+  return spawn('flock', [join(state, 'own-check.lock'), 'cat'], { stdio: ['pipe', 'ignore', 'ignore'] });
+}
+const light = (d: string) => ({ ...own(d), FAKE_SIDE_RUNNERS: '1', LAND_LIGHT_CHECK_HEAVY: join(d, 'bin', 'fake-heavy') });
+const heavyCalls = (dir: string) => (existsSync(join(dir, 'heavy-calls')) ? readFileSync(join(dir, 'heavy-calls'), 'utf8') : '');
+const lockHeld = (state: string) => spawnSync('flock', ['-n', join(state, 'own-check.lock'), 'true']).status === 1;
+
+test("light check: with the check runner busy, a ship's own tests run on the side runner, on its branch rebased onto main, and green joins the line (#1620)", async () => {
+  let holder: ReturnType<typeof spawn> | undefined;
+  try {
+    const l = await line([{}, {}], light, (r) => (holder = busyCheck(r)));
+    await until('the check lock is held', () => lockHeld(l.state));
+    const done = await l.go();
+    done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+    assert.match(done[1].stderr, /land: light check: its own and affected test files run now on CI's side runner instead, on [0-9a-f]{7,} \(rebased onto main [0-9a-f]{7,}\)/);
+    assert.match(done[1].stderr, /land: light check: green in \d+ s, so it joins the line/);
+    const calls = heavyCalls(l.r.dir);
+    const got = (k: string) => calls.match(new RegExp(`^${k} (.*)$`, 'm'))?.[1] ?? '';
+    assert.equal(got('ship'), '1', 'it skips the wait for ships');
+    assert.equal(got('log'), 'f2.txt: 2|f1.txt: 1|base|', 'ship 2 rebased onto ship 1');
+    assert.equal(got('args'), `bash tools/light-check-run.sh ${git(l.r.source, 'rev-parse', `${got('head')}^`)}`, 'against main, its base');
+    assert.notEqual(got('pwd'), l.wts[1], "in a scratch worktree, not the ship's");
+    assert.ok(!existsSync(got('pwd')), 'its scratch worktree is gone');
+    assert.deepEqual(retro(l.r.dir, 'light check · ').map((x) => x.replace(/\d+s$/, 'Ns')), ['light check · ticket/2-x · green · Ns']);
+    l.done();
+  } finally {
+    holder?.stdin?.end();
+  }
+});
+
+test("light check: a red that is the ship's own is refused before the line, with nobody waiting on it (#1620)", async () => {
+  let holder: ReturnType<typeof spawn> | undefined;
+  try {
+    const l = await line([{}], (d) => ({ ...light(d), FAKE_LIGHT_OUT: '✖ test/p2.test.ts:3 › breaks\\nlight check: red: test/p2.test.ts, test/p3.test.ts' }), (r) => (holder = busyCheck(r)));
+    await until('the check lock is held', () => lockHeld(l.state));
+    const wt = join(l.r.dir, 'wt2');
+    git(l.r.source, 'worktree', 'add', '-q', '-b', 'ticket/2-x', wt);
+    l.r.commit(wt, 'f2.txt', '2\n');
+    const d = await landAsync(wt, l.env, 150_000, () => {});
+    const [first] = await l.go();
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(d.status, 1, d.stderr);
+    assert.match(d.stderr, /light check: test\/p2\.test\.ts, test\/p3\.test\.ts failed on CI's side runner, on its commit rebased onto main, and run alone there fail with this branch and pass on main \(or are new with it\), so it didn't join the line/);
+    assert.match(d.stderr, /citadel-test test\/p2\.test\.ts test\/p3\.test\.ts\)/);
+    assert.match(d.stderr, /✖ test\/p2\.test\.ts:3 › breaks/, 'the run\'s output is shown');
+    assert.doesNotMatch(d.stderr, /in line for the deploy lock/);
+    assert.deepEqual(retro(l.r.dir, 'light check · ').map((x) => x.replace(/\d+s$/, 'Ns')), ['light check · ticket/2-x · red: test/p2.test.ts, test/p3.test.ts · Ns']);
+    assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1']);
+    l.done();
+  } finally {
+    holder?.stdin?.end();
+  }
+});
+
+test('light check: no verdict joins the line; with the side runner busy, or LAND_LIGHT_CHECK=0, nothing runs (#1620)', async () => {
+  for (const [extra, said, logged] of [
+    [{ FAKE_LIGHT_OUT: 'light check: no verdict: test/p2.test.ts passed alone (flakes)' }, /light check: test\/p2\.test\.ts passed alone \(flakes\), so it joins the line, where CI decides/, ['light check · ticket/2-x · no verdict: test/p2.test.ts passed alone (flakes) · Ns']],
+    [{ FAKE_LIGHT_OUT: 'citadel-heavy: no runner took it' }, /light check: the run ended without one \(citadel-heavy: no runner took it\), so it joins the line/, ['light check · ticket/2-x · no verdict: the run ended without one (citadel-heavy: no runner took it) · Ns']],
+    [{ FAKE_SIDE_RUNNERS: '0' }, null, ['light check · ticket/2-x · skipped: no idle side runner']],
+    [{ LAND_LIGHT_CHECK: '0' }, null, []],
+  ] as [Record<string, string>, RegExp | null, string[]][]) {
+    let holder: ReturnType<typeof spawn> | undefined;
+    try {
+      const l = await line([{}, {}], (d) => ({ ...light(d), ...extra }), (r) => (holder = busyCheck(r)));
+      await until('the check lock is held', () => lockHeld(l.state));
+      const done = await l.go();
+      done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+      if (said) assert.match(done[1].stderr, said);
+      else assert.equal(heavyCalls(l.r.dir), '', 'no light check ran');
+      assert.deepEqual(retro(l.r.dir, 'light check · ').map((x) => x.replace(/\d+s$/, 'Ns')), logged);
+      assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f2.txt: 2']);
+      l.done();
+    } finally {
+      holder?.stdin?.end();
+    }
+  }
+});

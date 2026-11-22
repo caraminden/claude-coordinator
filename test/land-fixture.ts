@@ -127,6 +127,8 @@ export function ci(r: ReturnType<typeof setup>) {
 # The check runner (#1567, tools/own-check.sh): none, and the question not logged, unless a test sets FAKE_CHECK_RUNNERS,
 # so every other land test is asked exactly what it was before.
 case "$*" in *citadel-ci-linux-check*) [ -n "\${FAKE_CHECK_RUNNERS:-}" ] || { echo 0; exit 0; } ;; esac
+# The light check's side runner (#1620, tools/light-check.sh): never logged; none idle unless a test sets FAKE_SIDE_RUNNERS.
+case "$*" in *citadel-ci-linux-side*) echo "\${FAKE_SIDE_RUNNERS:-0}"; exit 0 ;; esac
 echo "$*" >>"${calls}"
 case "$*" in
   *"/actions/runs?head_sha="*)

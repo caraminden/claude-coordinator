@@ -164,7 +164,7 @@ export function dropEventsOld(db: DatabaseSync, { batch = DROP_OLD_BATCH, minFre
 function saidDrop(d: DropOld | null): string | null {
   if (!d) return null;
   if ('missing' in d) return `Kept the main file's old copy of the chat log (events_old): ${d.missing} of its events aren't in events.db, so events.db may not hold the whole log. Find out why before dropping it by hand.`;
-  const what = d.rows ? `Dropped the main file's old copy of the chat log (events_old, ${d.rows} events) and vacuumed it` : 'Vacuumed the main file, whose space dropping events_old freed';
+  const what = d.rows ? `Dropped the main file's old copy of the chat log (events_old, ${d.rows} events) and vacuumed it` : 'Vacuumed the main file, over half of it free (as a start stopped between dropping events_old and its VACUUM leaves it)';
   return `${what}: ${d.beforeMb} MB to ${d.afterMb} MB in ${d.ms} ms.`;
 }
 

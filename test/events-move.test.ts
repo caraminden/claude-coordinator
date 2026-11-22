@@ -129,3 +129,20 @@ test('the rollback tool refuses a database whose events are already in the main 
   new DatabaseSync(join(dir, 'events.db')).exec('CREATE TABLE events (id INTEGER PRIMARY KEY)');
   assert.throws(() => unsplitEvents(path), /already has its events in the main file/);
 });
+
+test('two databases in one folder keep their own chat logs; coordinator.db alone takes the plain events.db name', () => {
+  const dir = mkdtempSync(join(root, 'two-'));
+  const a = new Store(join(dir, 'a.sqlite'));
+  const b = new Store(join(dir, 'coordinator.db'));
+  const pa = a.createProject('a', null);
+  const ta = a.createTicket({ project_id: pa.id, title: 'a', permission_mode: 'default', created_by: 'Cara' });
+  a.addEvent(ta.id, 'note', { text: 'only in a' });
+  const pb = b.createProject('b', null);
+  const tb = b.createTicket({ project_id: pb.id, title: 'b', permission_mode: 'default', created_by: 'Cara' });
+  assert.equal(ta.id, tb.id);
+  assert.deepEqual(b.listEvents(tb.id), []);
+  assert.equal(b.eventsPath, join(dir, 'events.db'));
+  assert.equal(a.eventsPath, join(dir, 'a.sqlite.events.db'));
+  a.db.close();
+  b.db.close();
+});

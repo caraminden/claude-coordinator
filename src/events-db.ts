@@ -3,7 +3,7 @@
 // out). A database not yet moved keeps its events in the main file, and they win by name: SQLite looks for an
 // unqualified table in main before any attached file, so every query reads `events` wherever it lives.
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 
@@ -13,9 +13,11 @@ export const CHAT = 'chat';
 /** Set once a database's events have moved to events.db: from then on a missing events.db is an error, never an empty chat log. */
 export const MOVED_KEY = 'events_moved';
 
-/** events.db beside a database file; null for an in-memory database. */
+/** events.db beside coordinator.db, `<name>.events.db` beside any other file (tests keep several in one folder); null in memory. */
 export function eventsPath(dbPath: string): string | null {
-  return dbPath === ':memory:' ? null : join(dirname(dbPath), EVENTS_FILE);
+  if (dbPath === ':memory:') return null;
+  const name = basename(dbPath);
+  return join(dirname(dbPath), name === 'coordinator.db' ? EVENTS_FILE : `${name}.${EVENTS_FILE}`);
 }
 
 /**

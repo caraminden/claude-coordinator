@@ -6,6 +6,7 @@
 import fs, { appendFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
+import { isMainThread } from 'node:worker_threads';
 
 const LOG = process.env.HOST_SIGNAL_TRAP;
 const PACIFIC = 'America/Los_Angeles'; // pacific-ok: the real zone this trap catches a server reading the day from
@@ -59,4 +60,5 @@ for (const m of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString'] a
 }
 
 // The zone the server's local clock (getHours, setHours, a formatter with no zone) ran in.
-process.on('exit', () => appendFileSync(LOG, `zone ${new RealFormat().resolvedOptions().timeZone}\n`));
+// The server's own exit only: a worker that ends (the chat log's move at boot, #1169) fires its own 'exit'.
+if (isMainThread) process.on('exit', () => appendFileSync(LOG, `zone ${new RealFormat().resolvedOptions().timeZone}\n`));

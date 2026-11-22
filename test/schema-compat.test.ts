@@ -38,7 +38,7 @@ const shape = (S: typeof Store, file: string) => {
 
 test(`the last release's Store (${prev}) reads and writes a database this code has migrated`, async () => {
   const { Store: PrevStore, SCHEMA_VERSION: prevVersion = 0 } = await loadPrev();
-  const file = join(root, 'migrated.db');
+  const file = join(root, 'coordinator.db'); // the live name: events.db beside it is the name every release looks for
   const now = new Store(file);
   const project = now.createProject('Compat', null);
   const ticket = now.createTicket({ project_id: project.id, title: 'Before', permission_mode: 'default', created_by: 'Cara' });

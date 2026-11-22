@@ -14,7 +14,7 @@ import { TRIPWIRE_BLOCKS } from './tripwire-blocks.ts';
 import { GLOBAL_OWNER } from './properties.ts';
 import { offSkills } from './skills.ts';
 import { CITADEL_REPLY_MS } from './access.ts';
-import { advisedModel, tableText, tierSummary } from '../public/model-table.js';
+import { advisedModel, tableText } from '../public/model-table.js';
 import type { QueuedMessage } from './runner.ts';
 
 /** The live checkout: the code this server runs, which Citadel's own Taskmaster may read. */
@@ -303,7 +303,8 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
         'Your minion carries properties from the scheme\'s registry (`list_properties`, mcp__thread): a `type` (feature, bug, art, ideation, design, research, chore or other), a `stage`, and the scheme\'s own keys. Set them with `set_properties` once the work is clear, and keep `type` right; if no type fits, set `other` and ask with a card whether it stays. To assign this minion to a person, set `assigned` to their login. Show properties as `key: value`.',
         'End every turn\'s final reply with a status line, not a set_thread_status call: `<!-- status: {"state":"ready","note":"…","replies":[…]} -->`, its fields as set_thread_status defines them (note 60 characters, replies 40). State null when you only wait on an answer; no replies while a card or plan waits.',
         'Scratch files go in $TMPDIR (your own temp folder, also a working directory) or your worktree. Give `rm` and `mv` absolute paths in a call with no `cd` (`rm -rf "$TMPDIR/out"`, `"${d:?}"/*` for a variable); one whose target it can\'t pin down is stopped.',
-        `${deploys ? 'For a dev copy of Citadel, use `citadel-dev-copy start|seed|env|stop` (`--help`; new seed states go in tools/dev-seeds.ts) rather than server.ts by hand, which opens the live database, and drive a page with `node tools/ui-shot.ts <#route> --step \'<verb> <selector>\'` (its header lists the steps). ' : ''}Stop your ${deploys ? 'other ' : ''}processes by pid (\`$!\`, or \`ss -ltnp 'sport = :<port>'\`): every turn, ${APP_NAME} and its apps run as one account, so a kill by name reaches theirs too.`,
+        // The dev copy line moved to .claude/rules/dev-copy.md (#1574): Citadel only, it loads where a dev copy starts.
+        `Stop your processes by pid (\`$!\`, or \`ss -ltnp 'sport = :<port>'\`): every turn, ${APP_NAME} and its apps run as one account, so a kill by name reaches theirs too.`,
         ...(ticket.kind === 'coordinator' ? [] : [shotLine(project)]),
         'Wait for your own background job inside the turn with `citadel-wait pid <pid>` (or `port <n>`, `file <path>`, `cmd \'<test>\'`) and a Bash timeout of 600000, repeated on exit 124. A Grunt runs in the foreground unless its Agent call passes `run_in_background: true`.',
         'When each lookup only names the next, do every hop in one script that prints only the answer (capped). A Grunt starts fresh at about 15k tokens and hands back its conclusion; each file you read stays in your context, re-read on every later call. So a sweep you need only the conclusion of goes to an `Explore` Grunt on Sonnet; a few targeted reads, or reads you will act on, stay inline (citadel:subagents).',
@@ -311,13 +312,9 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
         `${deploys ? 'Once your change is live, or deployed and waiting in pending-deploy,' : 'Once your work is finished'} and the Citadel-wide Closing rule says you are done, end the minion in that same turn: ${deploys ? 'pending-deploy after tools/deploy.sh, close_self otherwise' : 'close_self'}.`,
         'Tell or ask another minion of this scheme with `message_minion` (mcp__thread); `list_tickets` and `read_minion` find who owns what. The Taskmaster (`message_coordinator`) is for what only it can do: starting, closing or reopening minions, a decision, another scheme. Wake a minion sealed on you: `message_minion` `unpark: true`. Sealed on one: note its #N. Give each a `need`; don\'t report shipping (it is shown).',
         'Handoffs (written with `citadel:briefing`) go to the Taskmaster by path (message_coordinator, `need: fyi`) and on one multi-select `ask_question` card, one option per handoff. A proposal always ends in a card.',
-        'When you are proven wrong in a disagreement with the Taskmaster (by a test, git, the live state, a person), strike your own wrong words with `strike_text` (mcp__thread), quoting them exactly; in your reply, also write the wrong words as `~~…~~` with the fix right after.',
-        `Waiting on another minion's change to be deployed? Call the \`wake_when_live\` tool (mcp__thread) with its commit and a reason, set state sealed and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live.`,
-        `A note for another scheme's Taskmaster or a minion once you are live: queue it with \`relay_when_live\` (mcp__thread) before hand_off_land, not by asking the Taskmaster; your Taskmaster sees it now.`,
-        `Models by kind of work, from the Taskmaster's model table: ${tierSummary(project.fable_ok !== 'off')}.`,
+        // Moved where their job meets them (#1574, #1277's ablation): strike → strike_text, wake_when_live and relay_when_live → their own descriptions, model tiers → citadel:subagents and citadel:briefing (test/model-table.test.ts), Settings edits → edit_instructions, done lines → set_properties' reply on type feature and citadel:self-review.
         'Stuck, or a fix that did not hold (citadel:diagnosing-bugs)? On Sonnet, ask the Taskmaster for the next model or effort step (`message_coordinator`, need: ask) rather than carrying on at the same tier.',
         'Wherever the instructions say to run tools/land.sh (but not a build minion\'s --full), call `hand_off_land` (mcp__thread) instead and end your turn: the server runs it, shows you as landing meanwhile, posts the shipped line and dismisses or seals you on a clean land, and wakes you with its output if it fails.',
-        'A Settings text edit (`edit_instructions`) is an agent-instruction change: self-review it, label it at least medium, ship it like the rest, and keep its dated quotes.',
       ],
       files: showingFiles(ticket, null, sharedDir, !!filesDir),
       approval: [shippingLine(project, deploys), ...approvalNote(project)],
@@ -325,7 +322,6 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
       close: [
         'Finish the work before you end the turn: a reply with no tool call ends it, and the work waits until someone writes again, often hours later. Keep going until what was asked is done and checked, and shipped if there is anything to ship. Four endings leave owed work undone, so take the next step instead: a summary that announces the next step, an offer to carry on unless someone objects, a list of decisions none of which blocks the rest, and stopping because the turn is long or a milestone is done. Put progress notes and recommendations in the same message as your next tool call.',
         'Diagnose an ordinary obstacle (an error, a timeout, a locked file, an empty result, a failing tool) and work through it: wait and retry, fix the call, try another tool or source. End the turn when nothing can move without a person (a card or plan awaiting its answer, a ship handed off, a seal on another minion), or when the block is deliberate (a tripwire, withheld access, a file marked hands-off): say plainly what you found. Every rule that asks first still holds: risky or destructive actions, and ships at the Shipping line\'s go threshold, wait for a person\'s go.',
-        'Done lines (#1115): on a feature, before any code, write 3 to 7 "when X, then Y" lines from the person\'s own words and show them in your first reply (or your plan). Keep building: they are a report, not a card, unless two readings would build different things. Keep them in your task list and the PR description, and tick each in your ready note, naming any not met. Bugs, chores and research write none.',
         'People read replies later: end on what you did, state a blocker, and put a choice in a card (or name the waiting one by its link) rather than a closing question.',],
       ...layers,
       personal: personalInstructions(personal, project),

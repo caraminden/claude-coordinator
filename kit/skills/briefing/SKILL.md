@@ -36,6 +36,10 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
 8. **Model and effort**, with one line of why from the Taskmaster's model table: `Opus 5.5 high:
    design-shaped, a new flow`. create_ticket takes the pick in `model` and `effort`; the
    line in the brief is the why.
+   The tiers, read from the table when this skill loaded (in a scheme with Fable off, its prompt says
+   so and Opus 5.5 high is the top):
+
+!`node "${CLAUDE_SKILL_DIR}/../../model-tiers.ts"`
 
 After the eight parts, only what the minion can't find on its own: where it ships (main, or a build's
 branch), the lane or chain it sits in, and anything to clean up when done.

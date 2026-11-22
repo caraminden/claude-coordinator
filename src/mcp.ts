@@ -62,6 +62,7 @@ function C() {
   return c;
 }
 const MAX_TEXT = 4000;
+import { DONE_LINES } from './done-lines.ts';
 import { NEEDS, NEED_LINES, stateWord } from './needs.ts';
 import { heldToolText, msgFromEnv } from './msg-settings.ts';
 import { pacificDay, pacificStamp } from './pacific.ts';
@@ -391,7 +392,7 @@ const PROPOSE_MEMORY = () => ({
 const EDIT_INSTRUCTIONS = {
   name: 'edit_instructions',
   description:
-    "Edit the Settings text the way you edit any other instruction file: this scheme's instructions (scope \"scheme\"), or the Citadel-wide ones (scope \"citadel\", only on a turn run for a member of the Citadel scheme). Give a list of { find, replace } edits; each `find` must match the current text exactly once, or nothing is saved and the failing edits are named. All edits save in one go through Settings' own save, so they show in Settings and its history, by \"#<your number> for <the person your turn runs for>\", and the chat shows each before and after. A Settings edit is an agent-instruction change: self-review it and label its risk (at least medium) like a prompts.ts change. Keep dated quotes in the text: they are the decisions log. One home per rule (#1162): first have a Sonnet Grunt list what already speaks to the same thing (the rest of both Settings texts, CLAUDE.md and the rule files, the kit, your prompt) and pass its findings as `overlaps`. The server checks the edit too, against each registered rule's one home and those places; when either finds something, nothing is saved and a card asks the person to save anyway, work it in where it is already said, or cancel.",
+    "Edit the Settings text the way you edit any other instruction file: this scheme's instructions (scope \"scheme\"), or the Citadel-wide ones (scope \"citadel\", only on a turn run for a member of the Citadel scheme). Give a list of { find, replace } edits; each `find` must match the current text exactly once, or nothing is saved and the failing edits are named. All edits save in one go through Settings' own save, so they show in Settings and its history, by \"#<your number> for <the person your turn runs for>\", and the chat shows each before and after. A Settings text edit is an agent-instruction change: self-review it, label it at least medium, ship it like the rest (like a prompts.ts change), and keep its dated quotes: they are the decisions log. One home per rule (#1162): first have a Sonnet Grunt list what already speaks to the same thing (the rest of both Settings texts, CLAUDE.md and the rule files, the kit, your prompt) and pass its findings as `overlaps`. The server checks the edit too, against each registered rule's one home and those places; when either finds something, nothing is saved and a card asks the person to save anyway, work it in where it is already said, or cancel.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -454,7 +455,7 @@ const STOP_JOB = {
 const STRIKE_TEXT = {
   name: 'strike_text',
   description:
-    'Strike through words of yours that turned out wrong, once you are proven wrong in a disagreement (with the Taskmaster, a minion, or anyone): it finds the newest of your replies, or of your messages to another thread, containing the text, shows that text struck through there, and posts a note with your reason. Say what is right in your reply as usual.',
+    'Strike through words of yours that turned out wrong, once you are proven wrong in a disagreement (with the Taskmaster, a minion, or anyone; by a test, git, the live state, a person), quoting them exactly: it finds the newest of your replies, or of your messages to another thread, containing the text, shows that text struck through there, and posts a note with your reason. In your reply, also write the wrong words as `~~…~~` with the fix right after.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -1634,7 +1635,7 @@ const THREAD_TOOLS = () => ([
   },
   {
     name: 'relay_when_live',
-    description: `Queue a note for another scheme's Taskmaster (\`to\` is the scheme's name) or a minion of this scheme (\`to\` is #N), sent as held mail (it wakes nothing) once \`commit\` is live (in a scheme this server doesn't run: landed). Use it instead of asking the Taskmaster to relay something once you are live. Call it before hand_off_land; \`commit\` defaults to your branch's head. Your Taskmaster gets the full text now as held mail, and a one-line note when it goes out. To send one note to several, pass \`to\` as a list rather than calling once each. A dismissed minion's relays still go out, and a failed land leaves them queued: call it with no arguments to list yours (a \`#id\` each), or with \`cancel\` to drop one. Several allowed.`,
+    description: `Queue a note for another scheme's Taskmaster (\`to\` is the scheme's name) or a minion of this scheme (\`to\` is #N), sent as held mail (it wakes nothing) once \`commit\` is live (in a scheme this server doesn't run: landed). Use it instead of asking the Taskmaster to relay something once you are live. Call it before hand_off_land; \`commit\` defaults to your branch's head. Your Taskmaster sees it now: it gets the full text as held mail at once, and a one-line note when it goes out. To send one note to several, pass \`to\` as a list rather than calling once each. A dismissed minion's relays still go out, and a failed land leaves them queued: call it with no arguments to list yours (a \`#id\` each), or with \`cancel\` to drop one. Several allowed.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1647,7 +1648,7 @@ const THREAD_TOOLS = () => ([
   },
   {
     name: 'wake_when_live',
-    description: `${WAKE_DESCRIPTION.replace('the minion', 'this minion')} Use it instead of asking the Taskmaster to remember, then set state sealed and end your turn.`,
+    description: `Waiting on another minion's change to be deployed? Call this with its commit and a reason, set state sealed and end your turn, instead of asking the Taskmaster to remember: ${APP_NAME} messages you once it is live. ${WAKE_DESCRIPTION.replace('the minion', 'this minion')}`,
     inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
   },
   {
@@ -1911,7 +1912,9 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       const target = C().ROLE === 'thread' ? C().TICKET : await id(args);
       const r = await call('PUT', `/api/tickets/${target}/properties`, { properties: args.properties, file: args.file ?? null });
-      return registryReply(r, `Set. ${propertyText(r.properties) || '(no properties)'}`);
+      // A minion that just made itself a feature reads the done-lines rule here (#1574).
+      const feature = C().ROLE === 'thread' && !args.file && r.properties?.type === 'feature' && Object.keys(args.properties).some((k) => k.toLowerCase() === 'type');
+      return registryReply(r, `Set. ${propertyText(r.properties) || '(no properties)'}${feature ? `\n${DONE_LINES}` : ''}`);
     }
     case 'register_property_values': {
       const r = await call('POST', `/api/projects/${C().PROJECT}/properties/values`, { key: args.key, values: args.values, force: !!args.force });

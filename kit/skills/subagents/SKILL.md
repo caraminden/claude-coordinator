@@ -19,6 +19,11 @@ and `effort` from its job's row. The kit's grunt-model hook sends back a call th
 unset. Forks (`subagent_type: "fork"`) are the one exception: they run on the session's model by
 design.
 
+The tiers a whole minion gets, read from the table when this skill loaded (the rows below follow them for Grunts; in a
+scheme with Fable off, its prompt says so and Opus 5.5 high is the top):
+
+!`node "${CLAUDE_SKILL_DIR}/../../model-tiers.ts"`
+
 | Job | Model | Effort |
 |---|---|---|
 | Find where something lives (a read-only search) | sonnet | low |

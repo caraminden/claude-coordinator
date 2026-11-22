@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BY_TYPE, CLAUDE_MODELS, EFFORT_LEVELS, FALLBACK, guessType, pickFor, tableText, TIERS } from '../public/model-table.js';
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { BY_TYPE, CLAUDE_MODELS, EFFORT_LEVELS, FALLBACK, guessType, pickFor, tableText, tierSummary, TIERS } from '../public/model-table.js';
 import { EFFORTS, MODELS } from '../src/db.ts';
 import { systemPrompt } from '../src/prompts.ts';
 
@@ -65,4 +69,26 @@ test('the Taskmaster prompt switches to Opus high on its own once Fable is over 
   const under = (systemPrompt as any)(...args, false), over = (systemPrompt as any)(...args, true);
   assert.doesNotMatch(under, /over the weekly cap/);
   assert.match(over, /Fable use is over the weekly cap[^.]*start Fable-tier minions on Opus high/);
+});
+
+test("the model tiers moved out of every minion's prompt render in citadel:subagents and citadel:briefing from the table (#1574)", () => {
+  const line = `Models by kind of work, from the Taskmaster's model table: ${tierSummary(true)}.`;
+  const minion = systemPrompt({ id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any, { id: 9, number: 9, title: 'x', kind: 'ticket', branch: 'ticket/9-x' } as any, '/shared/9', '/shared/project', '/tickets', '/memory', [], true, '');
+  assert.ok(!minion.includes('Models by kind of work'), 'the line left the minion prompt');
+  const kit = join(import.meta.dirname, '..', 'kit');
+  for (const skill of ['subagents', 'briefing']) {
+    const text = readFileSync(join(kit, 'skills', skill, 'SKILL.md'), 'utf8');
+    assert.match(text, /^!`node "\$\{CLAUDE_SKILL_DIR\}\/\.\.\/\.\.\/model-tiers\.ts"`$/m, `${skill} runs the tiers script at load, on a line of its own`);
+  }
+  // In Citadel's repo the script finds public/; in a turn's kit copy, the table the server put beside it.
+  assert.equal(execFileSync(process.execPath, [join(kit, 'model-tiers.ts')], { encoding: 'utf8' }).trim(), line);
+  const copy = mkdtempSync(join(tmpdir(), 'kit-'));
+  try {
+    copyFileSync(join(kit, 'model-tiers.ts'), join(copy, 'model-tiers.ts'));
+    assert.match(execFileSync(process.execPath, [join(copy, 'model-tiers.ts')], { encoding: 'utf8' }), /couldn't be read here; ask the Taskmaster/);
+    copyFileSync(join(kit, '..', 'public', 'model-table.js'), join(copy, 'model-table.js'));
+    assert.equal(execFileSync(process.execPath, [join(copy, 'model-tiers.ts')], { encoding: 'utf8' }).trim(), line);
+  } finally {
+    rmSync(copy, { recursive: true, force: true });
+  }
 });

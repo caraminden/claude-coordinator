@@ -60,6 +60,7 @@ import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type Proc
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
+import { DONE_LINES } from './done-lines.ts';
 import { ASK, askText, type Budget, budgetFor, budgetKey, type BudgetState, chatNote, markOf, passed, turnLine, WAKE, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
@@ -3320,6 +3321,8 @@ export class Runner {
       // Its budget (#1114) each turn: what its kind of work usually costs and what it has used.
       const budget = ticket.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
       if (budget) parts.turn.budget = [turnLine(budget, this.store.ticketCost(ticket.id))];
+      // Done lines (#1115) for a feature, once per session (#1574): moved out of every minion's system prompt.
+      if (ticket.kind === 'ticket' && !ticket.session_id && this.store.props.forTarget('minion', ticket.id).type === 'feature') parts.turn.doneLines = [DONE_LINES];
       // The seam trial's fresh group (#1129), while its context is past the mark: hand off at a seam it picks.
       const seamSize = this.store.getSetting<number>(contextKey(ticket.id));
       const seamFresh = ticket.kind === 'ticket' && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticket.id) === 'fresh';

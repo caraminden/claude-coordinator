@@ -2,7 +2,7 @@
 // the Taskmaster's prompt (src/prompts.ts), create_ticket's and schedule_minion's descriptions (src/mcp.ts),
 // the server's own starts (schedules, a start with no model: src/routes/projects.ts, src/schedules.ts)
 // read it. Cara, 2026-11-14: "we should ALWAYS make an intentional choice
-// about model". TIERS is the model rule's one home (src/rule-homes.ts, #1162): every minion's prompt reads tierSummary() from it, and the Citadel-wide "Usage, effort and models" line points here. Josh, 2026-11-13, on Fable: "can we tighten the fable usage a bit, maybe use it about half as often? only for really complex or high risk things?" The Fable budget and the "every Taskmaster on Opus high" rule live in the Taskmaster's prompt beside tableText().
+// about model". TIERS is the model rule's one home (src/rule-homes.ts, #1162): citadel:subagents and citadel:briefing carry tierSummary()'s line, held to it by test/model-table.test.ts (#1574), and the Citadel-wide "Usage, effort and models" line points here. Josh, 2026-11-13, on Fable: "can we tighten the fable usage a bit, maybe use it about half as often? only for really complex or high risk things?" The Fable budget and the "every Taskmaster on Opus high" rule live in the Taskmaster's prompt beside tableText().
 
 /** The Claude models a person can pick, with the names people read. */
 export const CLAUDE_MODELS = [
@@ -124,7 +124,7 @@ export function tableText(fable = true) {
   return `${tiers}.${fable ? '' : ' Fable is off in this scheme: never pick it for a minion, a Grunt or a review; the nearest tier below it is Opus 5.5 at high.'}`;
 }
 
-/** The tiers with a `short` line, as a minion's prompt reads them: "Sonnet 5.5 medium for known-shape work, …". */
+/** The tiers with a `short` line, as citadel:subagents and citadel:briefing say them: "Sonnet 5.5 medium for known-shape work, …". */
 export function tierSummary(fable = true) {
   return TIERS.filter((t) => t.short && (fable || !/fable/.test(t.model))).map((t) => `${tierLabel(t.model, t.effort)} ${t.short}`).join(', ');
 }

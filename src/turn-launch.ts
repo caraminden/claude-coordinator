@@ -126,7 +126,11 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   const SUPERVISOR_VERSION = version('turn-supervisor.mjs');
   const KIT = join(MCP_DIR, 'kit');
   const KIT_SOURCE = join(import.meta.dirname, '..', 'kit');
-  if (existsSync(KIT_SOURCE)) cpSync(KIT_SOURCE, KIT, { recursive: true });
+  if (existsSync(KIT_SOURCE)) {
+    cpSync(KIT_SOURCE, KIT, { recursive: true });
+    // The model table beside kit/model-tiers.ts, which citadel:subagents and citadel:briefing run when they load (#1574).
+    cpSync(join(import.meta.dirname, '..', 'public', 'model-table.js'), join(KIT, 'model-table.js'));
+  }
   const HEAVY = join(MCP_DIR, 'bin', 'citadel-heavy');
   const HEAVY_SOURCE = join(import.meta.dirname, '..', 'tools', 'citadel-heavy');
   if (existsSync(HEAVY_SOURCE)) cpSync(HEAVY_SOURCE, HEAVY);

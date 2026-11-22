@@ -1767,6 +1767,7 @@ export const SCHEMA_HISTORY = [
   [108, 'events moved to events.db; the main file keeps them as events_old (#1169)'],
   [109, 'host_samples warm_ms, warm_mb, warm_backoffs (#1560)'],
   [110, 'host_samples.answer_time (#1559)'],
+  [111, 'events_old dropped and the main file vacuumed, by the server at start (#1169 ship 3)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 

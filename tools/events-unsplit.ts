@@ -4,7 +4,8 @@
 // With the service stopped, it brings events_old (the main file's copy from before the move) up to date from events.db
 // (new rows, edited rows, deleted rows), renames it back to events, restores the main file's card-fates trigger and
 // clears the moved marker, in one transaction. Then events.db is set aside as events.db.unsplit-<time>, so nothing
-// reads it. A main file with no events_old (Ship 3 dropped it) gets a new events table filled from events.db.
+// reads it. A main file with no events_old (the server drops it once every row is in events.db, #1169 ship 3) gets a
+// new events table filled from events.db, which holds the whole log, so the tool works the same after the drop.
 import { renameSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { CHAT, MOVED_KEY, cardFatesTrigger, eventsPath, eventsSchema } from '../src/events-db.ts';

@@ -1,4 +1,5 @@
-// The chat log's move out of the main file into events.db at start (#1169), and tools/events-unsplit.ts, which puts it back.
+// The chat log's move out of the main file into events.db at start (#1169), the old copy's drop after it (ship 3), and
+// tools/events-unsplit.ts, which puts it back.
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { MOVED_KEY, moveEventsOffThread } from '../src/events-db.ts';
+import { CHAT, MOVED_KEY, dropEventsOld, eventsPath, moveEventsOffThread } from '../src/events-db.ts';
 import { unsplitEvents } from '../tools/events-unsplit.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'events-move-'));
@@ -80,17 +81,62 @@ test('an old-layout database moves its chat log to events.db at start, keeps eve
   assert.throws(() => new Store(path), /events\.db/);
 });
 
-test("the server's move runs on a worker thread, and a second start has nothing to move", async () => {
+test("the server's move runs on a worker thread, drops the old copy, and a second start has nothing to do", async () => {
   const dir = mkdtempSync(join(root, 'b-'));
   const path = join(dir, 'coordinator.db');
-  const s = new Store(path);
+  let s = new Store(path);
   const t = s.createTicket({ project_id: s.createProject('p', null).id, title: 't', permission_mode: 'default', created_by: 'Cara' });
   s.addEvent(t.id, 'note', { text: 'hello' });
+  const before = chat(s, t.id);
   s.db.close();
   const { rows } = unsplitEvents(path);
-  assert.match((await moveEventsOffThread(path))!, new RegExp(`${rows} events in \\d+ ms`));
+  assert.match((await moveEventsOffThread(path))!, new RegExp(`${rows} events in \\d+ ms\\. Dropped the main file's old copy of the chat log \\(events_old, ${rows} events\\)`));
   assert.equal(await moveEventsOffThread(path), null);
-  assert.equal(look(path).old!.length, rows);
+  assert.deepEqual([look(path).tables, look(path).moved], [[], true]);
+  s = new Store(path);
+  assert.deepEqual(chat(s, t.id), before);
+  s.db.close();
+});
+
+test('events_old goes in batches only when events.db holds every one of its ids, and the vacuum shrinks the main file', () => {
+  const dir = mkdtempSync(join(root, 'drop-'));
+  const path = join(dir, 'coordinator.db');
+  let s = new Store(path);
+  const t = s.createTicket({ project_id: s.createProject('p', null).id, title: 't', permission_mode: 'default', created_by: 'Cara' });
+  for (let i = 0; i < 300; i++) s.addEvent(t.id, 'note', { text: 'x'.repeat(4000) });
+  s.db.close();
+  unsplitEvents(path);
+  s = new Store(path); // moves, keeping events_old
+  const before = chat(s, t.id);
+  const gone = s.addEvent(t.id, 'note', { text: 'new since the move' }).id;
+  s.db.close();
+
+  const open = () => {
+    const db = new DatabaseSync(path);
+    db.prepare(`ATTACH DATABASE ? AS ${CHAT}`).run(eventsPath(path));
+    return db;
+  };
+  // An id events_old has that events.db lacks: it changes nothing and says how many.
+  let db = open();
+  const first = (db.prepare('SELECT min(id) AS id FROM main.events_old').get() as any).id;
+  db.prepare(`DELETE FROM ${CHAT}.events WHERE id = ?`).run(first);
+  assert.deepEqual(dropEventsOld(db, 7), { missing: 1 });
+  assert.equal((db.prepare('SELECT count(*) AS n FROM main.events_old').get() as any).n, 300);
+  db.prepare(`INSERT INTO ${CHAT}.events SELECT * FROM main.events_old WHERE id = ?`).run(first);
+  const size = () => (db.prepare('PRAGMA main.page_count').get() as any).page_count;
+  const pages = size();
+
+  // Whole: it goes in batches of 7 (300 rows, so the last one is short), and the file gives back the space.
+  const done = dropEventsOld(db, 7) as { rows: number; beforeMb: number; afterMb: number };
+  assert.equal(done.rows, 300);
+  assert.ok(size() < pages - 290, `${size()} pages after, ${pages} before`); // 300 rows of 4 kB, a page each
+  assert.equal(dropEventsOld(db), null);
+  db.close();
+  assert.deepEqual(look(path).tables, []);
+  s = new Store(path);
+  assert.deepEqual(chat(s, t.id).slice(0, before.length), before);
+  assert.equal(s.listEvents(t.id).at(-1)!.id, gone);
+  s.db.close();
 });
 
 test('a copy left by a move that stopped halfway is made again, and a main file with events again after the move stops the start', () => {

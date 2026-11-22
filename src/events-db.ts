@@ -97,8 +97,8 @@ export function attachEventsForWrite(db: DatabaseSync, file: string) {
  * Move the events from the main file into events.db (attached as `chat`), in two commits, since SQLite doesn't commit
  * two WAL files as one: copy them and check every row arrived (same id, minion, kind, time and size), then rename the
  * main table to events_old and mark the database moved. A crash between the two leaves the main table in charge and
- * the next start drops that copy and makes it again. events_old stays until a person says it can go: renaming is instant, dropping
- * 1.6 GB took 33 s on a copy; tools/events-unsplit.ts moves the rows back from it.
+ * the next start drops that copy and makes it again. Renaming is instant; the server drops events_old afterwards in
+ * batches (dropEventsOld), and tools/events-unsplit.ts puts the chat log back with or without it.
  */
 export function moveEvents(db: DatabaseSync, file: string): { rows: number; ms: number } {
   const started = Date.now();
@@ -127,10 +127,46 @@ export function moveEvents(db: DatabaseSync, file: string): { rows: number; ms: 
   return { rows, ms: Date.now() - started };
 }
 
+/** Rows deleted per commit when dropping events_old: on a copy of the live file (2026-11-21) 2,000 took at most 69 ms each, 7.9 s for all 1,088,907, where one DROP of 1.6 GB took 33 s in one write. */
+export const DROP_OLD_BATCH = 2000;
+
+export type DropOld = { rows: number; ms: number; beforeMb: number; afterMb: number } | { missing: number };
+
+/**
+ * Drop the main file's copy of the chat log from before the move (events_old, #1169 ship 3), then VACUUM the main file
+ * to give its space back (2,165 MB to 271 MB on a copy). Only once every events_old id is in events.db: with any missing
+ * it changes nothing and says how many, since a release still writing the main file's copy would mean events.db isn't
+ * the whole log. It deletes in batches of DROP_OLD_BATCH, each its own commit, so no write holds the lock for long and
+ * the WAL checkpoints as it goes, and drops the empty table last; a stop part way leaves fewer rows for the next start.
+ * Null when there is nothing to drop (no events_old, or the database isn't moved).
+ */
+export function dropEventsOld(db: DatabaseSync, batch = DROP_OLD_BATCH): DropOld | null {
+  if (!hasTable(db, 'main', 'events_old') || !eventsMoved(db) || eventsHome(db) !== CHAT) return null;
+  const started = Date.now();
+  const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+  const mb = () => Math.round(((db.prepare('PRAGMA main.page_count').get() as any).page_count * (db.prepare('PRAGMA main.page_size').get() as any).page_size) / 1e6);
+  const missing = n(`SELECT count(*) AS n FROM main.events_old o WHERE NOT EXISTS (SELECT 1 FROM ${CHAT}.events c WHERE c.id = o.id)`);
+  if (missing) return { missing };
+  const beforeMb = mb();
+  const del = db.prepare(`DELETE FROM main.events_old WHERE id IN (SELECT id FROM main.events_old ORDER BY id LIMIT ${batch})`);
+  let rows = 0;
+  for (let changed; (changed = Number(del.run().changes)); ) rows += changed;
+  db.exec('DROP TABLE main.events_old; VACUUM main; PRAGMA main.wal_checkpoint(TRUNCATE);');
+  return { rows, ms: Date.now() - started, beforeMb, afterMb: mb() };
+}
+
+/** What dropEventsOld did, for the server's log. */
+function saidDrop(d: DropOld | null): string | null {
+  if (!d) return null;
+  if ('missing' in d) return `Kept the main file's old copy of the chat log (events_old): ${d.missing} of its events aren't in events.db, so events.db may not hold the whole log. Find out why before dropping it by hand.`;
+  return `Dropped the main file's old copy of the chat log (events_old, ${d.rows} events) and vacuumed it: ${d.beforeMb} MB to ${d.afterMb} MB in ${d.ms} ms.`;
+}
+
 /**
  * The server's move, on a worker thread before it opens the database: the event loop keeps pinging systemd's watchdog
- * (60 s, deploy/claude-coordinator.service.d/watchdog.conf) through a move that took ~30 s on a copy. Resolves to
- * what it did, or null when there was nothing to move.
+ * (60 s, deploy/claude-coordinator.service.d/watchdog.conf) through a move that took ~30 s on a copy. Then the same
+ * worker drops the main file's old copy (dropEventsOld: ~11 s on a copy of the live file). Resolves to what it did, or
+ * null when there was nothing to do.
  */
 export function moveEventsOffThread(dbPath: string): Promise<string | null> {
   return new Promise((ok, no) => {
@@ -150,7 +186,9 @@ if (!isMainThread && workerData?.moveEvents) {
     db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
     attachEventsForWrite(db, eventsPath(path)!);
     const done = eventsHome(db) === 'main' ? moveEvents(db, eventsPath(path)!) : null;
-    parentPort!.postMessage(done && `Moved the chat log to ${eventsPath(path)}: ${done.rows} events in ${done.ms} ms; the main file keeps them as events_old.`);
+    const moved = done && `Moved the chat log to ${eventsPath(path)}: ${done.rows} events in ${done.ms} ms.`;
+    const dropped = saidDrop(dropEventsOld(db));
+    parentPort!.postMessage([moved, dropped].filter(Boolean).join(' ') || null);
   } finally {
     db.close();
   }

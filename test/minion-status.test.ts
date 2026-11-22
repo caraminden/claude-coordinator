@@ -49,6 +49,14 @@ test('a minion shows as running while its turn is live, however stale the row th
     assert.equal(runner.view({ ...stale, status: 'idle' }).status, 'running');
     // A closed minion keeps its own status: nothing of its is live, and the list sorts and hides by it.
     assert.equal(runner.view({ ...stale, status: 'closed' }).status, 'closed');
+    // The readers' copy carries the live turn, not a status (src/reader-live.ts posts it on each broadcast): a reader
+    // combines it with its own fresh row, so a minion doesn't stay 'running' there until the next sweep.
+    assert.equal('status' in runner.live(stale), false, 'the posted copy leaves the status to the row');
+    assert.equal(runner.live(stale).turn_live, true);
+    // A keepalive (#862) is hidden on purpose: no chat, no state, and the list never shows it as running.
+    (runner as unknown as { keepalives: Set<number> }).keepalives.add(t.id);
+    assert.equal(runner.view({ ...stale, status: 'idle' }).status, 'idle', 'a hidden keepalive shows no turn');
+    (runner as unknown as { keepalives: Set<number> }).keepalives.delete(t.id);
   } finally {
     writeFileSync(go, '');
     await until('the turn to end', () => !runner.isRunning(t.id));

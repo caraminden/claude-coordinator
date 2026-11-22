@@ -80,6 +80,10 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
 
 1. A title and one line on what the project is, with a pointer to the README for layout and
    running it.
+   The README it points at has a "## Layout" table (path → what it owns, with globs or folder
+   rows for groups), and the plan's check commands include a small test that fails when a module
+   in the source folders has no row (Citadel's is `test/layout-map.test.ts`). Where "where does X
+   live" is asked, the table answers it, read on demand: never copy it into CLAUDE.md.
 2. **Working rules**: only this repo's own (its stack's traps, a file never to edit by hand).
    The Citadel-wide layer and the scheme instructions already reach every session, so nothing
    of theirs is repeated. A native-app scheme (the plan names a Real hardware part or the

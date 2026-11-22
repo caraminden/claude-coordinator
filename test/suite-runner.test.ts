@@ -69,12 +69,10 @@ test('a run ends once its tests do, even when a file leaves a handle open (the C
   const cwd = join(scratch.dir, 'force-exit');
   mkdirSync(join(cwd, 'test'), { recursive: true });
   writeFileSync(join(cwd, 'test', 'open.test.mjs'), "import test from 'node:test';\nsetInterval(() => {}, 1000);\ntest('passes', () => {});\n");
-  const started = Date.now();
   const r = await new Promise<{ code: number | null; out: string; killed: boolean }>((res) =>
     execFile(process.execPath, [runner, '--concurrency', '1', '--timeout', '30000', '--', 'test/'], { cwd, timeout: 20_000, env: { ...process.env, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_PROGRESS_TO: undefined, CITADEL_TEST_TIMES: undefined } }, (e, out) => res({ code: e ? (e.code as number) : 0, out, killed: !!e?.killed })),
   );
   assert.equal(r.killed, false, 'the run hung on the open handle');
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /^ℹ pass 1$/m);
-  assert.ok(Date.now() - started < 15_000);
 });

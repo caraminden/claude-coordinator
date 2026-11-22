@@ -156,6 +156,8 @@ case "$*" in
     [ -z "\${FAKE_CI_FILE:-}" ] || FAKE_CI=$(cat "\$FAKE_CI_FILE")
     [ "\${FAKE_CI:-}" != down ] || exit 1
     [ "\${FAKE_CI:-}" != rate ] || { echo 'gh: API rate limit exceeded for installation ID 1. (HTTP 403)' >&2; exit 1; }
+    # FAKE_CI_FAIL_AFTER=N: the first N asks for the runs answer, every later one is a rate limit (#1655).
+    if [ -n "\${FAKE_CI_FAIL_AFTER:-}" ]; then echo x >>"${calls}.asks"; [ "$(wc -l <"${calls}.asks")" -le "\$FAKE_CI_FAIL_AFTER" ] || { echo 'gh: API rate limit exceeded for user ID 1. (HTTP 403)' >&2; exit 1; }; fi
     [ "\${FAKE_CI:-}" != garbage ] || { echo '<html><body>Bad gateway</body></html>'; exit 0; }
     lag=0
     if [ -n "\${FAKE_LAG:-}" ] && [ "$(grep -c head_sha "${calls}")" -le "\$((FAKE_LAG + 1))" ]; then lag=1; fi

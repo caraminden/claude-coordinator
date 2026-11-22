@@ -31,7 +31,7 @@ OWN_CHECK_LABEL=citadel-ci-linux-check
 OWN_CHECK_WORKFLOW=.github/workflows/tests.yml
 OWN_CHECK_BURN_STEP='burn in new and changed tests' OWN_CHECK_SUITE_STEP='the full suite' # tests.yml's step names
 # GitHub as the box's own gh login, like land.sh's hub(), with the check's lock (fd 5) closed too.
-own_hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&- 5>&-; }
+own_hub() { gh_count "$@"; env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&- 5>&-; }
 
 own_check() {
   local remote url slug l t n='' left start secs b='' wait=${LAND_OWN_CHECK_WAIT:-120} rc=0
@@ -81,7 +81,7 @@ own_check() {
 own_refusal=''
 own_check_run() {
   local slug=$1 remote=$2 m c wt lane_c t0=$SECONDS taken='' run id='' st='' res='' link='' why='' step failed real f n=0 a b bad=() floor
-  local limit=${LAND_OWN_CHECK_LIMIT:-900} start_limit=${LAND_OWN_CHECK_START:-180} poll=${LAND_OWN_CHECK_POLL:-10}
+  local pfail='' limit=${LAND_OWN_CHECK_LIMIT:-900} start_limit=${LAND_OWN_CHECK_START:-180} poll=${LAND_OWN_CHECK_POLL:-20}
   m=$(git rev-parse main)
   [ -z "$(under_of)" ] || { say "own check: $branch sits on a commit that came off main, so it joins the line unchecked"; return 0; }
   wt=$(mktemp -d "${TMPDIR:-/tmp}/land-own-check.XXXXXX") || return 0
@@ -127,12 +127,12 @@ own_check_run() {
   fi
   say "own check: its CI runs now on the check runner, on $(git rev-parse --short "$c") (rebased onto main $(git rev-parse --short "$m")), before it joins the line: up to $((start_limit / 60)) min to start and $((limit / 60)) min to run"
   while :; do
-    run=$(own_hub gh api "repos/$slug/actions/runs?head_sha=$c&per_page=20" --jq "[.workflow_runs[] | select((.path | startswith(\"$OWN_CHECK_WORKFLOW\")) and .head_branch == \"check/$branch\" and .id > $floor)][0] // empty | [.id, .status, .conclusion // \"-\", .html_url] | @tsv" 2>/dev/null) || run=''
+    run=$(own_hub gh api "repos/$slug/actions/runs?head_sha=$c&per_page=20" --jq "[.workflow_runs[] | select((.path | startswith(\"$OWN_CHECK_WORKFLOW\")) and .head_branch == \"check/$branch\" and .id > $floor)][0] // empty | [.id, .status, .conclusion // \"-\", .html_url] | @tsv" 2>/dev/null) && pfail='' || { run=''; pfail=${pfail:-$(date +%H:%M)}; }
     [[ $run =~ ^[0-9]+$'\t' ]] && read -r id st res link <<<"$run" || true
     [ "$st" != completed ] || break
     [ -n "$taken" ] || [ "$st" != in_progress ] || taken=$SECONDS
-    if [ -z "$taken" ] && [ $((SECONDS - t0)) -ge "$start_limit" ]; then why="no check runner started it within ${start_limit}s"; break; fi
-    if [ -n "$taken" ] && [ $((SECONDS - taken)) -ge "$limit" ]; then why="it ran past ${limit}s"; break; fi
+    if [ -z "$taken" ] && [ $((SECONDS - t0)) -ge "$start_limit" ]; then why="no check runner started it within ${start_limit}s"; [ -z "$pfail" ] || why="GitHub didn't answer since $pfail, so it isn't known whether a check runner started it"; break; fi
+    if [ -n "$taken" ] && [ $((SECONDS - taken)) -ge "$limit" ]; then why="it ran past ${limit}s"; [ -z "$pfail" ] || why="GitHub didn't answer since $pfail, so it isn't known whether it finished"; break; fi
     sleep "$poll"
   done
   if [ "$st" != completed ]; then

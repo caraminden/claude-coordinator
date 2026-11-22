@@ -1012,7 +1012,7 @@ CI_DOWN=${LAND_CI_DOWN:-600} # how long one landing's unanswered wait for CI spa
 # a pipeline-tier ship), and of 69 green land runs from Nov 21 11:30 to Nov 22 PST, counted as this does (pickup to
 # the suite's end, burn-in taken off), p50 was 259 s, p90 353, p95 369 and the max 461: 6 greens ran past 360 s and fell
 # back. 540 s clears that max with room for the suite's growth; a run that hangs costs 3 min more before it falls back.
-CI_START=${LAND_CI_START:-90} CI_START_ONLINE=${LAND_CI_START_ONLINE:-900} CI_LIMIT=${LAND_CI_TIMEOUT:-540} CI_POLL=${LAND_CI_POLL:-5}
+CI_START=${LAND_CI_START:-90} CI_START_ONLINE=${LAND_CI_START_ONLINE:-900} CI_LIMIT=${LAND_CI_TIMEOUT:-540} CI_POLL=${LAND_CI_POLL:-15} CI_BACKOFF=${LAND_CI_BACKOFF:-60} # #1655: 5 s was 720 calls an hour for each landing waiting
 CI_ONLINE_POLL=${LAND_CI_ONLINE_POLL:-30} # how often a job waiting past CI_START asks whether a runner is online
 # The reruns alone get a window of their own (#1374, Cara 2026-11-20: "maybe that situation should restart the timer?
 # instead of globally raising it to 10m?"). On Nov 20 a busy desktop's full run took 295-351 s, so it ended past the
@@ -1026,7 +1026,11 @@ CI_RERUN_STEP='rerun failed files alone' CI_RERUN=${LAND_CI_RERUN:-180}
 # flake, a cut-off or a known flake. At CI_LIMIT the run gets the step's time more (CI_BURN at most), once.
 CI_BURN_STEP='burn in new and changed tests' CI_BURN=${LAND_CI_BURN:-180} CI_BASE_REF=land-base/$branch
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
-hub() { env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&-; }
+# Every gh call of this landing is counted in $state/gh-calls (epoch seconds and the endpoint, no tokens), so the next time
+# the 5,000 an hour run out, `cat run/landings/*/gh-calls` says which landing asked how often (#1655).
+gh_count() { [ "$1" != gh ] || printf '%s %s\n' "$(date +%s)" "${2:-} ${3:-}" >>"$state/gh-calls" 2>/dev/null || true; }
+hub() { gh_count "$@"; env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&-; }
+ci_fail_n=0 ci_fail_at=''
 ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why='' burn_red='' burned=''
 # Perigee runs a ship's suite only while it is quiet (#1254, Josh 2026-11-20: "only if and when perigee has plenty of
 # resources, just make sure we play nice and that it doesnt affect performance"): CPU pressure (some avg60) under
@@ -1207,7 +1211,9 @@ ci_gate() {
   say "waiting for CI on $short: the full suite on Cara's desktop (up to $((CI_START_ONLINE / 60)) min for a runner to start it while one is online, then at most $((CI_LIMIT / 60)) min for the run; past that it runs here once perigee is quiet)"
   queue_phase "waiting for CI since $(date +%H:%M)"
   while :; do
-    ci_run || true # one missed answer is not a verdict: the limits below end the wait
+    # One missed answer is not a verdict: the limits below end the wait. But a run of them is: ci_status is then the last
+    # answer GitHub gave, maybe long ago, so the limits below say GitHub didn't answer instead of blaming CI (#1655).
+    if ci_run; then ci_fail_n=0; else ci_fail_n=$((ci_fail_n + 1)); [ "$ci_fail_n" -gt 1 ] || ci_fail_at=$(date +%H:%M); fi
     [ "$ci_id" != "$stale" ] || ci_id='' ci_status=''
     if [ -z "$ci_taken" ] && { [ "$ci_status" = in_progress ] || [ "$ci_status" = completed ]; }; then # a runner took it
       ci_taken=1 taken_at=$SECONDS
@@ -1221,7 +1227,9 @@ ci_gate() {
     why='' down=''
     if [ -n "$ci_taken" ]; then
       ran=$((SECONDS - taken_at))
-      if [ "$ran" -ge "$limit" ]; then
+      if [ "$ran" -ge "$limit" ] && [ "$ci_fail_n" -gt 0 ]; then
+        why="GitHub didn't answer since $ci_fail_at ($ci_fail_n polls failed in a row)$(ci_said), so it isn't known whether CI finished${ci_url:+ ($ci_url)}" down=1
+      elif [ "$ran" -ge "$limit" ]; then
         if [ -z "$burn_wait" ] && ci_burned; then
           burn_wait=1 limit=$((limit + burned))
           say "CI's burn-in of new and changed tests took ${burned}s before its full suite, so this waits that much more ($ci_url)"
@@ -1250,6 +1258,8 @@ ci_gate() {
       fi
     fi
     nap=$CI_POLL
+    # GitHub failing: asking faster only spends what is left of the hour, so each failed poll in a row waits a poll longer, up to CI_BACKOFF s.
+    if [ "$ci_fail_n" -gt 0 ]; then nap=$(awk -v p="$CI_POLL" -v n="$ci_fail_n" -v m="$CI_BACKOFF" 'BEGIN { v = p * (1 + n); print (v > m ? (m > p ? m : p) : v) }'); fi
     # On a busy perigee it asks CI and perigee again every QUIET_POLL s, not every CI_POLL s (Josh: "re-checking every 30 s").
     if [ -n "$why" ]; then
       if quiet; then [ -z "$down" ] || ci_down; return 2; fi

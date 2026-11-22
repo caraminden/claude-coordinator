@@ -304,7 +304,8 @@ export interface CiHealthDeps {
   /** Message a minion (wake_when_runners_back, a run it dispatched); `fyi` for news that needs nothing: a dispatched run that passed, which also runs at low effort (#951). No message, no wakes. */
   wake?: (ticketId: number, text: string, fyi?: boolean) => void;
   /** Held mail for a scheme's Taskmaster (a failed scheduled run), or a message that wakes it (`wake`: a watched workflow gone red); false (no Taskmaster) or none at all, and those wait untold. */
-  tell?: (project: Project, text: string, wake?: boolean) => boolean | number;
+  /** `people`: the admins its alert rings, whose own Taskmasters in the scheme hear of it (taskmastersFor). */
+  tell?: (project: Project, text: string, wake?: boolean, people?: number[]) => boolean | number;
   /** The scheme whose Taskmaster hears problems that aren't one scheme's (#983): the live checkout's. */
   home?: () => Project | undefined;
   /** The server's outbox: waits on runners are rows in it (ADR 0021, step 4); without one they stay in the old key. */
@@ -313,6 +314,17 @@ export interface CiHealthDeps {
   green?: (project: Project, runs: GreenRun[], branch: string) => void;
   /** The long jobs (citadel-heavy --long) on record: one running inside its deadline is not a hung runner. */
   longs?: () => LongJob[];
+}
+
+/**
+ * #1659 (Cara, 2026-11-22: a CI alert should wake "the appropriate taskmaster" so she finds it already looked at): who hears of a problem
+ * in a scheme: the own Taskmaster of each person its alert rings, else the scheme's Overlord (a scheme with one Taskmaster is that one).
+ * Peek's red on Nov 22 woke only its Overlord while Cara's own Taskmaster, the chat she opened, never heard.
+ */
+export function taskmastersFor(store: Pick<Store, 'getOverlord' | 'coordinatorFor'>, projectId: number, people: number[] = []): Ticket[] {
+  const found = people.map((id) => store.coordinatorFor(projectId, id)).filter((t): t is Ticket => !!t);
+  const all = found.length ? found : [store.getOverlord(projectId)].filter((t): t is Ticket => !!t);
+  return all.filter((t, i) => all.findIndex((u) => u.id === t.id) === i);
 }
 
 export class CiHealth {
@@ -529,8 +541,8 @@ export class CiHealth {
   private onIt(p: Project, x: Problem): string | undefined {
     if (x.fixMinion && !x.fixMinion.closed) return `#${x.fixMinion.number} is fixing it`;
     const woke = (k: string) => this.store.getSetting<string[]>(`ci-health:woke:${k}`) ?? [];
-    // A red's mark is kept only once its wake went through (a send that failed deletes it).
-    const own = x.key.startsWith('red:') || woke(String(p.id)).includes(x.key) || woke('land').includes(x.key);
+    // Only a wake that went out counts: none overnight or with nobody to tell.
+    const own = woke(String(p.id)).includes(x.key) || woke('land').includes(x.key);
     const poss = (n: string) => (n.endsWith('s') ? `${n}'` : `${n}'s`);
     if (own) return `${poss(p.name)} Taskmaster has been woken`;
     const home = this.deps.home?.();
@@ -1104,7 +1116,7 @@ ${text}`);
   /** Held mail for the Taskmaster about `run`: true once it has it; false (no Taskmaster yet, or the send threw) to try again next poll. */
   private say(p: Project, run: number | string, text: string, wake = false, entry?: (id: number) => void): boolean {
     try {
-      const told = this.deps.tell!(p, text, wake);
+      const told = this.deps.tell!(p, text, wake, this.admins().map((u) => u.id));
       if (typeof told === 'number' && told > 0) entry?.(told);
       return !!told;
     } catch (err) {

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import {
-  CiHealth, addRunnerWaiter, onlineRunners, runnerWaiters, WAIT_MS, HUNG_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, itemText, neverStarted,
+  CiHealth, taskmastersFor, addRunnerWaiter, onlineRunners, runnerWaiters, WAIT_MS, HUNG_MS, bundleTitle, deadGroups, deadProblem, ghGet, itemKey, itemText, neverStarted,
   trackOffline, servers, stuckProblems, hungProblems, redProblem, sharedHost, skippedJobs, verdictPair, type GhAnswer, type Job, type Run,
   firstTickDelay, START_DELAY_MS, clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, LAND_RING_STREAK, LAND_RING_MS, RED_FIX_MS, type LandState, runMinion,
 } from '../src/ci-health.ts';
@@ -1008,7 +1008,6 @@ test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on 
 
   await health.tick(NOW + RED_FIX_MS);
   assert.match(item('ci.open')!, /^CI, Peek Auras: desktop\.yml failed on main \(run 9001, at windows › Test\): no fix minion started\./, 'an hour with no fix rings');
-  assert.match(item('ci.open')!, /no fix minion started\. On it: Peek Auras' Taskmaster has been woken\. Why:/, 'the ring says who is on it, since the wake went out with the red (#1659)');
   assert.equal(item(), null, 'and the quiet one goes');
 
   // A minion whose brief names the run: quiet again, with its number.
@@ -1702,4 +1701,44 @@ test("runMinion: a land's run and a ship's own check (#1567) count for the minio
   const tickets = [{ number: 1567, branch: 'ticket/1567-x', kind: 'ticket' }] as Parameters<typeof runMinion>[2];
   for (const b of ['land/ticket/1567-x', 'check/ticket/1567-x', 'early/ticket/1567-x', 'ticket/1567-x']) assert.equal(runMinion(b, 'abc', tickets, new Map()), 1567, b);
   assert.equal(runMinion('other/ticket/1567-x', 'abc', tickets, new Map()), null);
+});
+
+test('a red wakes the own Taskmaster of each person its alert rings, else the Overlord; the ring says so only once a wake went out (#1659)', async () => {
+  const w = outsideWorld();
+  w.quietDelve();
+  const user = (login: string) => w.store.listUsers().find((u) => u.login === login)!;
+  // Nov 22: Peek had split, and the wake reached only its Overlord while Cara's own Taskmaster, the chat she opened, never heard.
+  w.store.createTicket({ project_id: w.peek.id, kind: 'coordinator', title: 'Taskmaster', permission_mode: 'default', created_by: 1 } as any);
+  assert.equal(w.store.isSplit(w.peek.id), false);
+  const one = w.store.getOverlord(w.peek.id)!;
+  assert.deepEqual(taskmastersFor(w.store, w.peek.id, [user('cara').id]).map((t) => t.id), [one.id], 'one Taskmaster hears it');
+  w.store.splitScheme(w.peek.id, user('josh').id);
+  const caras = w.store.coordinatorFor(w.peek.id, user('cara').id)!;
+  assert.notEqual(caras.id, w.store.getOverlord(w.peek.id)!.id);
+  assert.deepEqual(taskmastersFor(w.store, w.peek.id, [user('cara').id, user('josh').id]).map((t) => t.id), [caras.id, w.store.coordinatorFor(w.peek.id, user('josh').id)!.id]);
+  assert.deepEqual(taskmastersFor(w.store, w.peek.id, [user('rachel').id]).map((t) => t.id), [w.store.getOverlord(w.peek.id)!.id], 'no own one: the Overlord, once');
+  assert.deepEqual(taskmastersFor(w.store, w.peek.id).map((t) => t.id), [w.store.getOverlord(w.peek.id)!.id]);
+
+  // CI health hands the people its alert rings to the tell.
+  const people: (number[] | undefined)[] = [];
+  let ok = true;
+  const health = new CiHealth(w.store, { ...w.outside, tell: (_p: unknown, _text: string, _wake?: boolean, who?: number[]) => (people.push(who), ok) });
+  w.gh.jobs.set(9001, [job({ run_id: 9001, name: 'windows', conclusion: 'failure', steps: [{ name: 'Test', conclusion: 'failure' }] })]);
+  w.gh.mainRuns = [runOf({ id: 9001, event: 'push', workflow_id: 7, path: '.github/workflows/desktop.yml', conclusion: 'failure', created_at: iso(20 * MIN), updated_at: iso(19 * MIN) })];
+  await health.tick(NOW);
+  assert.deepEqual(people.at(-1), [user('cara').id], 'the admins with Mandate');
+  const ring = () => w.puts.filter(([, key]) => key === 'ci.open').at(-1)?.[2] ?? '';
+
+  // An hour on it rings with nobody named: 5 AM is inside the overnight hold, so the Taskmaster isn't woken again yet.
+  await health.tick(NOW + RED_FIX_MS);
+  assert.match(ring(), /no fix minion started/);
+  assert.doesNotMatch(ring(), /On it/);
+  // 10 AM, but no Taskmaster took the wake: still nobody on it.
+  ok = false;
+  await health.tick(NOW + 6 * HOUR);
+  assert.doesNotMatch(ring(), /On it/);
+  // The wake goes out, and the same alert says so.
+  ok = true;
+  await health.tick(NOW + 6 * HOUR + 5 * MIN);
+  assert.match(ring(), /no fix minion started\. On it: Peek Auras' Taskmaster has been woken\. Why:/);
 });

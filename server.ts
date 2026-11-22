@@ -102,7 +102,7 @@ import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
 import { pressure } from './src/pressure.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
-import { addRunnerWaiter, CiHealth, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
+import { addRunnerWaiter, CiHealth, taskmastersFor, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
 import { Incidents, readCiRuns, readDeploys, readJournal } from './src/incidents.ts';
 import { ghGet, ghHelpers } from './src/gh-api.ts';
@@ -1397,13 +1397,16 @@ const ciHealth = new CiHealth(store, {
   home: () => store.getProject(alertScheme(0)),
   // Wakes (a red on main, any trigger, #774/#968; a problem that rings, #983) or held mail (back to green) for the scheme's Taskmaster.
   // The CI-red judge's one act (#1503): log-only turns every Taskmaster wake and mail from CI health into a retro-log line.
-  tell: judged('ci-red', 'tell', (project, text, wake) => {
-    const coordinator = store.getOverlord(project.id);
-    if (!coordinator) return false;
-    if (!wake) return runner.leaveMail(coordinator.id, APP_NAME, text), true;
-    runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
+  tell: judged('ci-red', 'tell', (project, text, wake, people) => {
+    const to = taskmastersFor(store, project.id, people);
+    if (!to.length) return false;
+    for (const coordinator of to) {
+      if (!wake) runner.leaveMail(coordinator.id, APP_NAME, text);
+      else runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
+    }
+    if (!wake) return true;
     // The chat entry the wake became (the CI page links to it, #992); true if it can't be found.
-    return store.eventsOfKinds(coordinator.id, ['user_message']).at(-1)?.id ?? true;
+    return store.eventsOfKinds(to[0].id, ['user_message']).at(-1)?.id ?? true;
   }, () => true, judgeNote((project) => project.id)),
   // A red's fix minion (#1074): its branch tip once its own commits (since it started) are in `sha`, GitHub's main.
   // shortcut: reads the scheme's clone, so a PR-merging scheme whose clone lacks GitHub's tip starts no re-run until it fetches; add a fetch if one does.

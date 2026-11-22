@@ -47,11 +47,24 @@ is_protected() {
   return 1
 }
 
+# 0 when a glob pattern (absolute) can match a listed app's live folder: it matches the folder's name.
+live_glob() {
+  local n g
+  for n in "${LIVE_APPS[@]}"; do
+    [ -n "$n" ] || continue
+    for g in "$HOME/apps/$n" "$HOME/apps/.$n"; do
+      # shellcheck disable=SC2254
+      case "$g" in $1|$1/*) return 0 ;; esac
+    done
+  done
+  return 1
+}
+
 # 0 when a path (or a command word holding one, as --opt=path or VAR=path) is a listed app's live
 # folder, see LIVE_APPS at the top. ~ and $HOME are expanded; links are followed, then .. resolved.
 # Always 1 while LIVE_APPS is empty.
 is_live() {
-  local p="${1//$'\035'/}" n real target
+  local slots p="${1//$'\035'/}" n real target
   [ "${#LIVE_APPS[@]}" -gt 0 ] || return 1
   case "$p" in -*=*|[A-Za-z_]*=*) p="${p#*=}" ;; esac
   case "$p" in [\<\>]*|[0-9\<\>\&]*[\<\>]*) p="${p#"${p%%[!0-9<>&]*}"}" ;; esac # >file, 2>>file: the file
@@ -62,11 +75,18 @@ is_live() {
     '$HOME/'*) p="$HOME/${p#'$HOME/'}" ;;
     '${HOME}/'*) p="$HOME/${p#'${HOME}/'}" ;;
   esac
-  case "$p" in /*) ;; *) return 1 ;; esac
+  case "$p" in
+    /*) ;;
+    *) [ -n "${cwd:-}" ] && case "$cwd" in /*) p="$cwd/$p" ;; *) return 1 ;; esac || return 1 ;; # relative: from the command's cwd
+  esac
+  # A glob over the apps folder (~/apps/x*, ~/apps/*) can name a live folder: refuse one that matches it.
+  case "$p" in *[\*\?\[]*) live_glob "$p" && return 0 ;; esac
   real="$(realpath -m -- "$p" 2>/dev/null || printf '%s' "$p")"
   for n in "${LIVE_APPS[@]}"; do
     [ -n "$n" ] || continue
     target="$(realpath -m -- "$HOME/apps/$n" 2>/dev/null)"
+    slots="$(realpath -m -- "$HOME/apps/.$n" 2>/dev/null)"
+    case "$real" in "$slots"|"$slots/"*) [ -n "$slots" ] && [ "$slots" != / ] && return 0 ;; esac
     case "$p" in "$HOME/apps/$n"|"$HOME/apps/$n/"*|"$HOME/apps/.$n"|"$HOME/apps/.$n/"*) return 0 ;; esac
     case "$real" in "$HOME/apps/$n"|"$HOME/apps/$n/"*|"$HOME/apps/.$n"|"$HOME/apps/.$n/"*) return 0 ;; esac
     # The live link may lead anywhere: where it leads counts too (never empty, or "/"* would match all).
@@ -81,7 +101,7 @@ live_command() { # command line, ps flag, depth
   local word
   while IFS= read -r word; do
     case "$word" in $'\034') continue ;; $'\036'*) word="${word#?}"; word="${word//$'\037'/$'\n'}" ;; esac
-    is_live "$word" && return 0
+    if is_live "$word"; then live_word="$word"; return 0; fi
     case "$word" in *[[:space:]]*) [ "${3:-0}" -lt 3 ] && live_command "$word" "$2" $((${3:-0} + 1)) && return 0 ;; esac
   done < <(tokenize "$1" "$2")
   return 1
@@ -652,6 +672,18 @@ self_test() {
   HOME="$tmp/h" t 2 Bash topic "bash -c 'cat ~/apps/x/f'"
   HOME="$tmp/h" t 0 Bash topic 'ls ~/apps/other ~/apps/.xy'
   HOME="$tmp/h" run 2 bash "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"cwd\":\"$tmp/h/apps/.x/b\"}"
+  HOME="$tmp/h" t 2 Bash topic 'echo x >~/apps/x/f'
+  HOME="$tmp/h" t 2 Bash topic 'cmd 2>>~/apps/.x/b/log'
+  HOME="$tmp/h" t 2 Bash topic 'tool --out=~/apps/x/f'
+  HOME="$tmp/h" t 2 Bash topic 'ls $HOME/apps/x'
+  HOME="$tmp/h" t 2 Bash topic 'rm -rf ~/apps/x*'
+  HOME="$tmp/h" t 0 Bash topic 'ls ~/apps/other*'
+  HOME="$tmp/h" run 2 bash "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf x/f\"},\"cwd\":\"$tmp/h/apps\"}"
+  HOME="$tmp/h" run 0 bash "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf other/f\"},\"cwd\":\"$tmp/h/apps\"}"
+  HOME="$tmp/h" run 2 files '{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"~/apps/x/n.ipynb"}}'
+  # A home that is itself a link: the physical path of the other slot counts too.
+  mkdir -p "$tmp/real-home" && ln -s real-home "$tmp/link-home" && mkdir -p "$tmp/real-home/apps/.x/a" "$tmp/real-home/apps/.x/b" && ln -s .x/a "$tmp/real-home/apps/x" || exit 1
+  HOME="$tmp/link-home" run 2 files "$(fw "$tmp/real-home/apps/.x/b/f")"
   unset GUARD_LIVE_APPS
   # The self-test itself, as a git hook runs it: it must pass and leave that hook's repo alone.
   if [ -z "${GUARD_SELF_TEST_NESTED:-}" ]; then
@@ -691,14 +723,17 @@ case "$mode" in
     ;;
   bash)
     input="$(cat)"
+    [ "${#LIVE_APPS[@]}" -gt 0 ] || case "$input" in *push*) ;; *) exit 0 ;; esac
     cmd="$(json_field command)"
     cwd="$(json_field cwd)"
     ps=0
     [ "$(json_field tool_name)" = PowerShell ] && ps=1
     if [ "${#LIVE_APPS[@]}" -gt 0 ]; then
       # A shell can't be told reads from writes, so a command naming the live folder is refused.
-      if is_live "$cwd" || live_command "$cmd" "$ps"; then
-        block_live "${cwd:-the command}"
+      if is_live "$cwd"; then
+        block_live "$cwd (the working folder)"
+      elif live_command "$cmd" "$ps"; then
+        block_live "The command's ${live_word:-path}"
       fi
     fi
     case "$input" in *push*) ;; *) exit 0 ;; esac

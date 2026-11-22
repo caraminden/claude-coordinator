@@ -449,6 +449,14 @@ the first runner: flake proofs (`flake-proof.yml`), heavy jobs (`citadel-heavy.y
 every land fell back to perigee). Runners added before #1240 got the side label by hand, as the repo's admin:
 `gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-side'`.
 Without a runner carrying it, those wait in GitHub's queue (up to a day) while lands go on; `test/ci-runner-choice.test.ts` fails on a workflow job that could take the first runner.
+Long jobs (`citadel-heavy --long`, `src/long-jobs.ts`) have a third runner of their own, `-linux-3`, which carries
+`citadel-ci-linux-long` and not the side label (#1592: on 2026-11-22 a long job held the side runner from 02:04 to 07:30
+and five flake proofs queued behind it). `citadel-heavy.yml` takes a `long` input, and the pump sends it when the
+workflow declares one, so a scheme whose workflow lacks it keeps its long jobs on the side runner. `add-runner.sh` gives
+every runner after the first the side label, so a long runner is relabelled by hand, as the repo's admin:
+`gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-long'`, then
+`gh api -X DELETE repos/caraminden/claude-coordinator/actions/runners/<id>/labels/citadel-ci-linux-side`. Without a runner
+carrying the long label, a long job waits in GitHub's queue for a day and is then lost.
 `.github/workflows/tests.yml` runs on every push to a `land/**` branch, and `tools/land.sh` is the only
 thing that pushes there: it sends the rebased commit to `land/<branch>`, waits for the run on that exact commit
 while it holds the deploy lock, and deletes the branch again. A land that touches no pipeline file leaves out the

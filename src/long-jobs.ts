@@ -3,7 +3,8 @@
 // <CITADEL_HEAVY_DIR>/long/<id>.json, then the minion ends its turn. This pump, once a minute, starts each queued job on
 // its scheme's CI at night: from 2am Pacific until the job hours of the PC running that repo's runners end (the GPU jobs'
 // hours, src/machine-jobs.ts; Cara, 2026-11-20, picked "Nights only", "Start them at 2am"), one long job per repo at a time,
-// so ships never test beside one in the day. It reads
+// so ships never test beside one in the day. A workflow with a `long` input runs it on a runner of its own (#1592: on
+// 2026-11-22 one held the side runner for 5 hours while five flake proofs queued behind it). It reads
 // the run from GitHub on every pass, so a restart loses nothing; when the run ends it writes the command's output to
 // <id>.log beside the job and wakes the minion that queued it, as a GPU job's end does. Every scheme with a
 // citadel-heavy workflow gets it: the job carries its repo, and the scheme's owner's GitHub login dispatches it.
@@ -154,7 +155,10 @@ export class LongJobs {
     const branch = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}`])).default_branch;
     // GitHub checks inputs against the workflow on the branch it runs, so `minutes` goes only when that copy declares it.
     const wf = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}/contents/.github/workflows/${WORKFLOW}?ref=${encodeURIComponent(branch)}`]));
-    const minutes = /^\s+minutes:\s*$/m.test(Buffer.from(wf.content ?? '', 'base64').toString('utf8')) ? ['-f', `inputs[minutes]=${LONG_MINUTES}`] : [];
+    const text = Buffer.from(wf.content ?? '', 'base64').toString('utf8');
+    const minutes = /^\s+minutes:\s*$/m.test(text) ? ['-f', `inputs[minutes]=${LONG_MINUTES}`] : [];
+    // A `long` input sends it to a runner only long jobs use, so flake proofs and heavy runs never queue behind it (#1592).
+    if (/^\s+long:\s*$/m.test(text)) minutes.push('-f', 'inputs[long]=true');
     // Saved first and never put back on an error: a dispatch GitHub took but didn't answer is found by watch(), and one it
     // never took goes back in line there once it shows no run, so the command can't run twice.
     Object.assign(j, { state: 'dispatched', dispatched_at: this.now(), tries: (j.tries ?? 0) + 1 });

@@ -133,6 +133,25 @@ test('a workflow on the default branch with a minutes input gets the long limit;
   assert.ok(s.calls.some((c) => c.some((a) => a.endsWith('/contents/.github/workflows/citadel-heavy.yml?ref=main'))), 'the workflow is read at the branch GitHub runs');
 });
 
+// #1592: on 2026-11-22 a long job held the side runner from 02:04 to about 07:30, and five flake proofs queued behind it.
+// A workflow with a `long` input sends long jobs to a runner of their own, so proofs and heavy runs keep the side one.
+test('a workflow with a long input sends long jobs to their own runner; one without it keeps the side runner', async () => {
+  const s = setup([9], { now: NIGHT, workflow: 'on:\n  workflow_dispatch:\n    inputs:\n      minutes:\n        required: false\n      long:\n        required: false\n' });
+  await s.pump.pump();
+  assert.ok(s.dispatches()[0].includes('inputs[long]=true'), s.dispatches()[0].join(' '));
+  const old = setup([10], { now: NIGHT });
+  await old.pump.pump();
+  assert.ok(!old.dispatches()[0].some((a) => a.startsWith('inputs[long]')), 'GitHub refuses an input the workflow lacks');
+});
+
+test('citadel-heavy.yml runs a long job only on the long runner, and every other heavy run off it', () => {
+  const wf = readFileSync(new URL('../.github/workflows/citadel-heavy.yml', import.meta.url), 'utf8');
+  assert.match(wf, /^ {6}long:\s*$/m, 'it declares the input the pump looks for');
+  const runsOn = wf.match(/^ {4}runs-on: (.*)$/m)![1];
+  assert.match(runsOn, /inputs\.long == 'true' && fromJSON\('\["self-hosted", "citadel-ci-linux", "citadel-ci-linux-long"\]'\)/);
+  assert.match(runsOn, /\|\| fromJSON\('\["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"\]'\)/);
+});
+
 test('a dispatch that errors is never sent twice at once: it waits for a run, goes back in line, and is lost after three tries', async () => {
   const s = setup([8], { now: NIGHT });
   s.run.dispatchFails = true;

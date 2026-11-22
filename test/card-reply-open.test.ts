@@ -17,3 +17,6 @@ test('a long reply with no code block starts collapsed, a short one open', () =>
 test('backticks in the middle of a line are not a code block', () => {
   assert.equal(replyStartsOpen(`${prose} use \`\`\`x\`\`\` inline`), false);
 });
+test('a line that opens and closes its backticks is inline code, not a block', () => {
+  assert.equal(replyStartsOpen(`${prose}\n\`\`\`x\`\`\` is inline`), false);
+});

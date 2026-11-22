@@ -43,7 +43,7 @@ test('the probe makes a real request on a fresh connection each time, and a slow
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const probe = new AnswerProbe({ everyMs: 100, lookMs: 20 });
   probe.start((server.address() as { port: number }).port);
-  await new Promise((r) => setTimeout(r, 1200));
+  await new Promise((r) => setTimeout(r, 1200)); // timing-ok: the probe's own clock (every 100 ms) is what is measured
   const w = probe.take(1, 1)!;
   probe.stop(); server.close(); server.closeAllConnections();
   assert.ok(hits >= 8, `probes kept coming while one was slow: ${hits}`);

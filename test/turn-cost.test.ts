@@ -12,6 +12,7 @@ import { bootServer, stopTurns, until, ok } from './helpers.ts';
 const TURNS = 100, WINDOW_S = 15, LIVE_S = 40;
 const budgetFile = join(import.meta.dirname, 'turn-cost.json');
 const root = mkdtempSync(join(tmpdir(), 'turn-cost-'));
+// timing-ok: stopTurns ends every child first
 after(async () => { await stopTurns(root); rmSync(root, { recursive: true, force: true }); });
 
 /** The main thread's CPU so far in ms: utime + stime of /proc/<pid>/task/<pid>, in 10 ms ticks. */
@@ -41,9 +42,9 @@ createInterface({ input: process.stdin }).once('line', () => {
     const project = ok(await srv.call('/api/projects', { name: 'Load' }));
     for (let i = 0; i < TURNS; i++) await srv.call(`/api/projects/${project.id}/tickets`, { message: `turn ${i}` });
     await until(`${TURNS} turns running`, () => existsSync(started) && readdirSync(started).length >= TURNS, { timeout: 90_000 } as any);
-    await new Promise((r) => setTimeout(r, 3000)); // their starts settle
+    await new Promise((r) => setTimeout(r, 3000)); // timing-ok: their starts settle; a fixed settle before a CPU window
     const before = mainCpuMs(srv.proc.pid!);
-    await new Promise((r) => setTimeout(r, WINDOW_S * 1000));
+    await new Promise((r) => setTimeout(r, WINDOW_S * 1000)); // timing-ok: the measurement window is the point; CPU is read at its ends
     const perTurnSecond = (mainCpuMs(srv.proc.pid!) - before) / (TURNS * WINDOW_S);
     const { msPerTurnSecond } = JSON.parse(readFileSync(budgetFile, 'utf8'));
     console.log(`main thread: ${perTurnSecond.toFixed(3)} ms of CPU per turn-second (budget ${msPerTurnSecond})`);

@@ -170,3 +170,68 @@ test('freeAppPort skips taken and listening ports; schemeRunner reads the label 
   assert.equal(schemeRunner({ name: 'Trips' }, join(root, 'trips')), 'trips-ci');
   assert.equal(schemeRunner({ name: 'Plain' }, join(root, 'plain')), null);
 });
+
+// adopt_app (#1624): an app already on the scheme's main branch, registered and deployed with no minion and no new files.
+const MANIFEST_JSON = JSON.stringify({ start: ['node', 'server.ts'], health: '/health' });
+const commit = (dir: string, file: string, text: string) => {
+  mkdirSync(join(dir, file, '..'), { recursive: true });
+  writeFileSync(join(dir, file), text);
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-qm', `add ${file}`);
+};
+
+test('adopt_app: registers an app at the repo root or in a folder, on for the members, with no minion, and reports its deploy', async () => {
+  commit(join(root, 'trips'), 'apps/old-trips/citadel-app.json', JSON.stringify({ start: ['node', 'server.ts'], icon: '/old.svg' }));
+  commit(join(root, 'plain'), 'citadel-app.json', MANIFEST_JSON);
+  const s0 = db();
+  const before = s0.listTickets(Trips.id).length;
+  s0.db.close();
+  const r = await tool(TripsTM, 'adopt_app', { name: 'old-trips', title: 'Old Trips', folder: 'apps/old-trips/' });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, /Adopted old-trips: registered on port \d+, deployed from apps\/old-trips/);
+  assert.match(r.text, /It did not deploy: Only the live Citadel manages app services[^]*stays registered/);
+  const root1 = await tool(PlainTM, 'adopt_app', { name: 'whole-repo', title: 'Whole Repo', folder: '.', repo: 'o/plain' });
+  assert.equal(root1.isError, false, root1.text);
+  const s = db();
+  try {
+    const c = s.getContraption('old-trips')!;
+    assert.deepEqual([c.repo, c.branch, c.subdir, c.folder, c.icon, c.home_scheme], ['o/trips', null, 'apps/old-trips', null, '/old.svg', Trips.id]);
+    assert.ok(c.port >= 7350 && c.port <= 7999, String(c.port));
+    assert.deepEqual(s.contraptionUsers(c.id).sort(), [cara.id, josh.id].sort());
+    const w = s.getContraption('whole-repo')!;
+    assert.deepEqual([w.subdir, w.icon, w.home_scheme, w.repo], [null, '/icon.svg', Plain.id, 'o/plain']);
+    assert.notEqual(w.port, c.port);
+    assert.equal(s.listTickets(Trips.id).length, before, 'adopting starts no minion');
+  } finally {
+    s.db.close();
+  }
+});
+
+test('adopt_app refuses a non-member turn, a taken name, no manifest on main, another repo, a bad folder and a scheme with no repo', async () => {
+  const refused = async (t: { id: number; project_id: number }, args: object, says: RegExp) => {
+    const r = await tool(t, 'adopt_app', args);
+    assert.ok(r.isError && says.test(r.text), r.text);
+  };
+  const outsider = await turnFor(olive.id, () => tool(TripsTM, 'adopt_app', { name: 'olives', title: 'Olives', folder: 'apps/old-trips' }));
+  assert.ok(outsider.isError && /member of Trips/.test(outsider.text), outsider.text);
+  await refused(TripsTM, { name: 'old-trips', title: 'Again', folder: 'apps/old-trips' }, /already an app called old-trips/);
+  await refused(TripsTM, { name: 'packing', title: 'Again', folder: 'apps/old-trips' }, /already an app called packing/);
+  await refused(TripsTM, { name: 'nothing-here', title: 'Nothing', folder: 'apps/nothing' }, /No apps\/nothing\/citadel-app\.json on main/);
+  await refused(TripsTM, { name: 'no-root', title: 'No Root', folder: '' }, /No citadel-app\.json on main/);
+  await refused(TripsTM, { name: 'elsewhere', title: 'Elsewhere', folder: 'apps/old-trips', repo: 'o/other' }, /isn't Trips's repo/);
+  await refused(TripsTM, { name: 'escape', title: 'Escape', folder: '../trips/apps/old-trips' }, /inside the repo/);
+  await refused(TripsTM, { name: 'Bad Name', title: 'T', folder: '' }, /short slug/);
+  await refused(LocalTM, { name: 'local-adopt', title: 'Local', folder: '' }, /no GitHub repo/);
+  // On another branch only: not on main.
+  const dir = join(root, 'trips');
+  git(dir, 'checkout', '-qb', 'side');
+  commit(dir, 'apps/side-only/citadel-app.json', MANIFEST_JSON);
+  git(dir, 'checkout', '-q', 'main');
+  await refused(TripsTM, { name: 'side-only', title: 'Side', folder: 'apps/side-only' }, /No apps\/side-only\/citadel-app\.json on main/);
+  const s = db();
+  try {
+    for (const n of ['olives', 'nothing-here', 'no-root', 'elsewhere', 'escape', 'local-adopt', 'side-only']) assert.equal(s.getContraption(n), undefined, n);
+  } finally {
+    s.db.close();
+  }
+});

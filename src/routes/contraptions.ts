@@ -20,7 +20,7 @@ import { ServiceError } from '../app-services.ts';
 import { contraptionRead } from '../contraption-read.ts';
 import { mandateItem, SCHEME_CALLER } from '../mandate-items.ts';
 import { relay } from '../relay.ts';
-import { makeApp } from '../make-app.ts';
+import { adoptApp, makeApp } from '../make-app.ts';
 import { pushToPeople } from '../fcm.ts';
 import type { ContraptionRow, Ticket } from '../db.ts';
 import { HttpError, json, oneOf, ownWrites, readJson, send, SECURITY_HEADERS, str, type App, type Ctx, type Route } from '../http.ts';
@@ -293,6 +293,23 @@ export const contraptionRoutes: Route[] = [
   {
     method: 'POST', path: '/api/projects/:project/apps', who: ['taskmaster'], refuse: "Only a scheme's Taskmaster makes an app",
     handler: async ({ req, res, app, project, caller, session }) => json(res, 201, await makeApp(app, project, caller!, session.name, await readJson(req))),
+  },
+  // adopt_app (#1624): the same Taskmaster, on a member's turn, registers an app already on its repo's main and starts its deploy.
+  {
+    method: 'POST', path: '/api/projects/:project/apps/adopt', who: ['taskmaster'], refuse: "Only a scheme's Taskmaster adopts an app",
+    async handler({ req, res, app, project, caller, session }) {
+      const adopted = await adoptApp(app, project, caller!, await readJson(req));
+      // A deploy that can't start (services off, say) leaves the registration: deploy_contraption retries it.
+      const c = app.store.getContraption(adopted.name)!;
+      const uid = app.store.turnAsker(caller!.id);
+      let deployError: string | null = null;
+      try {
+        await startDeploy(app, c, `${project.name} Taskmaster`, caller, uid);
+      } catch (err) {
+        deployError = (err as Error).message;
+      }
+      return json(res, 201, { ...adopted, deployError });
+    },
   },
   // Its member switch: the home scheme's Taskmaster, on a member's turn, switches one of its apps on or off for a person.
   {

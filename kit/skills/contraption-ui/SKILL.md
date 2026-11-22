@@ -283,7 +283,7 @@ finding (`citadel:self-review`, "UI findings").
   events, asks, the relay, `/app-api/read`, `citadel-app.json` and deploys, env vars, a heavy step
   through `$CITADEL_HEAVY`, your `DATA_DIR`'s disk use, limits):
   [references/api.md](references/api.md), the current spec. Prefer it over any pasted copy.
-- Starting a new app: ask your scheme's Taskmaster for `make_app` rather than writing one by hand; its
+- Starting a new app: ask your scheme's Taskmaster for `make_app` rather than writing one by hand (an app already in the repo: `adopt_app`); its
   starter is `new-app/template/` in this skill's folder ([references/api.md](references/api.md), "The registry entry").
 - Testing your app's server with no Citadel running (a signed identity header, a scripted agent turn, asks,
   spend, relay, media): `fake-citadel/fake-citadel.ts` in this skill's folder, `startFakeCitadel({ app })`. Copy

@@ -54,3 +54,14 @@ part, so moving one over later is small:
 - Apps made before this stay as they are; moving them onto the shared parts is a separate handoff.
 - The app's repo is its scheme's: its CI, ship and push guard are that scheme's, so an app made in a scheme with no
   runner has no CI until the scheme gets one.
+
+## Adopting an app that already exists (#1624)
+
+A scheme whose app code already sits in its own repo (TransitionTracker's, at the repo root) has no use for `make_app`,
+which would write a second app into `apps/<name>/`. Cara, 2026-11-22: "Yes, start a minion" (a scheme's Taskmaster registers
+and deploys an app that's already in its repo, for members of that scheme). It is a sibling tool, `adopt_app`, not a mode of
+`make_app`: it takes no idea, starts no minion and writes no files. Same one-way-per-part shape: the route checks what
+`make_app` checks (a member's turn, the name), plus a `citadel-app.json` committed on main at the folder, and a `repo` that,
+when given, is the scheme's own; it registers with that subdir, a free port, the manifest's `icon` or `/icon.svg`, switches
+the app on for every member (as `make_app` does), and starts the same deploy `deploy_contraption` does. A deploy that can't
+start leaves the registration, and says so. Another scheme's repo stays the admin-only `register_contraption`.

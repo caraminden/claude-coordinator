@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { manifestOn, parseManifest, MANIFEST } from './app-services.ts';
 import { pickFor, pickReason } from '../public/model-table.js';
 import { APP_NAME } from './appname.ts';
 import { runnerLabel } from './ci-runner.ts';
@@ -139,4 +140,72 @@ export function brief(a: { name: string; title: string; idea: string; maker: str
     `2. Ship it as this scheme ships. The ship deploys it; if /apps/${a.name}/ isn't up after, call deploy_contraption for ${a.name}. Check the page says "Signed in as" you at 1440 and 390 px.`,
     `3. Then build the idea in apps/${a.name}/, following its CLAUDE.md and the citadel:contraption-ui skill. It is design-shaped, so grill ${a.maker} first with citadel:grilling, and ship in small steps.`,
   ].join('\n');
+}
+
+export interface Adopted {
+  name: string;
+  port: number;
+  subdir: string | null;
+  icon: string;
+}
+
+/** A folder of the repo from what a Taskmaster typed: "" and "." are the root (null); anything leaving the repo is refused. */
+export function adoptFolder(raw: unknown): string | null {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  const parts = text.split('/').filter((p) => p !== '' && p !== '.');
+  if (text.startsWith('/') || parts.includes('..') || /[\\\0]/.test(text)) throw new HttpError(400, 'folder must be a folder inside the repo, like apps/trip-notes ("" or "." for the repo root)');
+  return parts.length ? parts.join('/') : null;
+}
+
+/**
+ * adopt_app (#1624): register an app whose code is already on its scheme's main branch (citadel-app.json at the root or in
+ * `folder`), as make_app does a new one (same checks, port, icon default and member switch) but with no minion and no
+ * files written. The route starts its deploy afterwards (startDeploy lives with the routes).
+ */
+export async function adoptApp(app: App, project: Project, caller: Ticket, body: { name?: unknown; title?: unknown; folder?: unknown; repo?: unknown }): Promise<Adopted> {
+  const { store } = app;
+  const { TITLE } = await import('../kit/skills/contraption-ui/new-app/new-app.ts');
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+  if (!CONTRAPTION_NAME.test(name) || RESERVED.has(name) || SCHEME_CALLER.test(name)) throw new HttpError(400, 'name must be a short slug: lowercase letters, digits and dashes, like trip-notes');
+  if (!TITLE.test(title)) throw new HttpError(400, 'title must be 1 to 60 letters, digits, spaces and simple punctuation');
+  const subdir = adoptFolder(body.folder);
+  const asker = store.turnAsker(caller.id);
+  const maker = asker === null ? null : store.listMembers(project.id).find((m) => m.id === asker);
+  if (!maker) throw new HttpError(403, `adopt_app runs only on a turn a member of ${project.name} asked for`);
+  if (store.getContraption(name) || making.names.has(name)) throw new HttpError(409, `There is already an app called ${name}`);
+  const repo = repoSlug(project.repo_url);
+  if (!project.repo_dir || !repo) throw new HttpError(400, `${project.name} has no GitHub repo to keep the app in`);
+  if (body.repo !== undefined && body.repo !== null && body.repo !== '' && String(body.repo).toLowerCase() !== repo.toLowerCase()) {
+    throw new HttpError(400, `${body.repo} isn't ${project.name}'s repo (${repo}): adopt_app registers only apps in this scheme's own repo`);
+  }
+  const where = subdir ? `${subdir}/${MANIFEST}` : MANIFEST;
+  if (!manifestOn(project.repo_dir, subdir ?? '', 'main')) throw new HttpError(404, `No ${where} on main in ${project.name}'s repo: ship it to main first`);
+  let icon = '/icon.svg';
+  try {
+    const text = (await run('git', ['show', `main:${where}`], { cwd: project.repo_dir })).stdout;
+    parseManifest(text);
+    const named = JSON.parse(text)?.icon;
+    if (typeof named === 'string' && /^\/[\w./-]*$/.test(named)) icon = named;
+  } catch (err) {
+    throw new HttpError(400, `${where} on main isn't a usable manifest: ${(err as Error).message}`);
+  }
+  making.names.add(name);
+  let port = 0;
+  try {
+    port = await freeAppPort(new Set([...store.listContraptions().map((c) => c.port), ...making.ports]));
+    making.ports.add(port);
+    app.contraptions.register({
+      name, title, port, icon, home_scheme: project.id, open_paths: '[]', relay_paths: '[]', static_paths: null,
+      default_model: null, turn_cap: null, repo, branch: null, folder: null, subdir,
+    });
+    const contraption = store.getContraption(name)!;
+    for (const m of store.listMembers(project.id)) store.setContraptionUser(contraption.id, m.id, true, maker.id);
+    void app.releases.refresh(true);
+    addAppTurnsCheck(store, app.dataDir, project.id);
+    return { name, port, subdir, icon };
+  } finally {
+    making.names.delete(name);
+    making.ports.delete(port);
+  }
 }

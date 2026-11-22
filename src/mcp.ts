@@ -946,6 +946,17 @@ const CONTRAPTION_FIELDS = {
   folder: { type: ['string', 'null'], description: 'Where its repo is checked out; null for ~/apps/<name>.' },
 };
 
+/** Wait up to an hour for the deploy at `path` (builds take minutes), then hand back so the turn can follow again. */
+async function followDeploy(path: string): Promise<string> {
+  const until = Date.now() + 60 * 60_000;
+  let d = await call('GET', path);
+  while (d?.state === 'running' && Date.now() < until) {
+    await sleep(5000);
+    d = await call('GET', path);
+  }
+  return d?.state === 'running' ? `${deployText(d)}\nStill running after an hour: call deploy_contraption again with follow: true to keep waiting.` : deployText(d);
+}
+
 /** make_app and its member switch (#1136): every scheme's Taskmaster, for its own scheme, on a member's turn. */
 const APP_TOOLS = [
   {
@@ -959,6 +970,20 @@ const APP_TOOLS = [
         idea: { type: 'string', maxLength: 4000, description: "What it's for, in the asker's own words (at most 4,000 characters): it goes into the app's CLAUDE.md and the minion's brief." },
       },
       required: ['name', 'title', 'idea'],
+    },
+  },
+  {
+    name: 'adopt_app',
+    description: `Register and deploy an app whose code is already in this scheme's own repo (not make_app, which writes a new one): a citadel-app.json on main at the repo root or in a folder. It registers the app (port, icon, this scheme as home), switches it on for every member, deploys it and returns the deploy's outcome. Refused for a name that's taken, on a turn no member of this scheme asked for, with no citadel-app.json at that path on main, or for another repo. Switch it on or off for other people with set_app_person.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Its name, kept for good: in its address. Lowercase letters, digits and dashes, like trip-notes.' },
+        title: { type: 'string', maxLength: 60, description: 'What people see, like Trip Notes: letters, digits, spaces and simple punctuation, at most 60.' },
+        folder: { type: 'string', description: 'The folder of its citadel-app.json in the repo, like apps/trip-notes; "" or "." for the repo root.' },
+        repo: { type: 'string', description: "Optional owner/name; refused unless it is this scheme's own repo." },
+      },
+      required: ['name', 'title', 'folder'],
     },
   },
   {
@@ -1955,6 +1980,12 @@ async function runTool(name: string, args: any): Promise<string> {
       const m = await call('POST', `/api/projects/${C().PROJECT}/apps`, { name: args.name, title: args.title, idea: args.idea });
       return `Made ${m.name}: #${m.minion} ships it and builds the idea (its branch already holds the app, ${m.files} files${m.workflow ? ', its CI workflow included' : ', no CI workflow: this scheme has no runner'}). It is registered on port ${m.port}, deploys from apps/${m.name}/, and is on for this scheme's members. Name the minion as #${m.minion} in your reply.`;
     }
+    case 'adopt_app': {
+      const a = await call('POST', `/api/projects/${C().PROJECT}/apps/adopt`, { name: args.name, title: args.title, folder: args.folder ?? '', repo: args.repo });
+      const head = `Adopted ${a.name}: registered on port ${a.port}, deployed from ${a.subdir ?? 'the repo root'}, icon ${a.icon}, on for this scheme's members.`;
+      if (a.deployError) return `${head}\nIt did not deploy: ${a.deployError}\nIt stays registered: call deploy_contraption for ${a.name} to try again.`;
+      return `${head}\n${await followDeploy(`/api/contraptions/${encodeURIComponent(a.name)}/deploy`)}`;
+    }
     case 'set_app_person': {
       if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
       const r = await call('PUT', `/api/projects/${C().PROJECT}/apps/${encodeURIComponent(String(args.name))}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
@@ -2122,14 +2153,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'deploy_contraption': {
       const path = `${contraptionPath(args)}/deploy`;
       if (args.follow !== true) await call('POST', path, {});
-      // Builds take minutes: wait up to an hour here, then hand back so the turn can follow again.
-      const until = Date.now() + 60 * 60_000;
-      let d = await call('GET', path);
-      while (d?.state === 'running' && Date.now() < until) {
-        await sleep(5000);
-        d = await call('GET', path);
-      }
-      return d?.state === 'running' ? `${deployText(d)}\nStill running after an hour: call deploy_contraption again with follow: true to keep waiting.` : deployText(d);
+      return followDeploy(path);
     }
     case 'contraption_service': {
       const path = `${contraptionPath(args)}/service`;

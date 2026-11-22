@@ -15,6 +15,7 @@ import { bootServer, PASSWORD, until, type Booted, stopTurns } from './helpers.t
 
 const root = mkdtempSync(join(tmpdir(), 'people-'));
 after(async () => {
+  await srv?.stop(); // the server first: its writes into root raced the delete below (ENOTEMPTY in a 10-copy burn-in, #1635)
   await stopTurns(root); // turns are detached: end them before deleting their folders (#271)
   rmSync(root, { recursive: true, force: true });
 });
@@ -394,7 +395,6 @@ before(async () => {
   await as('Cara', '/api/projects', { name: 'Delve' });
   assert.equal((await as('Cara', '/api/projects', { name: 'Citadel' })).data.id, 2);
 });
-after(() => srv?.stop());
 
 test('people make their own schemes, add others to them, and see nothing else', async () => {
   const cara = (await as('Cara', '/api/projects', { name: 'Caras' })).data;

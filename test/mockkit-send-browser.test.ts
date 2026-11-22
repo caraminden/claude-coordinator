@@ -35,7 +35,6 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 <body class="mk"><main class="mk-page">
   <section data-pick="a" data-title="Take A"><h2>Take A</h2></section>
   <section data-pick="b" data-title="Take B"><h2>Take B</h2><img alt="Header shot" src="/shot.png" width="40" height="40"></section>
-  <p><a href="/shot.png"><img alt="Linked shot" src="/shot.png" width="40" height="40"></a> <a href="/other.html"><img alt="Page link" src="/shot.png" width="40" height="40"></a></p>
 </main>
 <script>mock.picks({ options: [{ v: 'pick', label: 'Pick this', done: 'Picked' }] }); mock.ready.then(() => setTimeout(() => (window.ready = true), 50));</script>`;
 
@@ -46,6 +45,8 @@ let base = '';
 before(async () => {
   if (skip) return;
   app = await serve((path, res) => {
+    // A separate page, so its extra pictures don't change the dock test's page height (a scrollbar moves the dock).
+    if (path === '/modal') return void res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE.replace('</main>', '<p><img alt="Header shot" src="/shot.png" width="40" height="40"> <a href="/shot.png"><img alt="Linked shot" src="/shot.png" width="40" height="40"></a> <a href="/other.html"><img alt="Page link" src="/shot.png" width="40" height="40"></a></p></main>'));
     if (path === '/') return void res.writeHead(200, { 'content-type': 'text/html' }).end(PAGE);
     if (path === '/mockkit.js' || path === '/mockkit.css') {
       return void res.writeHead(200, { 'content-type': path.endsWith('js') ? 'text/javascript' : 'text/css' }).end(readFileSync(join(starter, path)));
@@ -187,14 +188,14 @@ test('a picture drawn on shows marked, counts in the dock and goes with Send; ta
 });
 
 test('a click on a picture, linked to its file or not, opens a modal that closes by X, outside or Esc, and never navigates', { skip }, async () => {
-  const page = await browser.page(base);
+  const page = await browser.page(new URL("/modal", base).href);
   await waitFor(page, 'the page', 'window.ready');
   const open = () => page.eval<boolean>('!!document.querySelector("dialog.mk-viewer[open]")');
   const key = (k: string) => page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: k, windowsVirtualKeyCode: 27 });
   for (const alt of ['Header shot', 'Linked shot']) {
     await click(page, `img[alt="${alt}"]`);
     assert.equal(await open(), true, `${alt} opens the modal`);
-    assert.equal(await page.eval('location.pathname'), '/', `${alt} stays on the page`);
+    assert.equal(await page.eval("location.pathname"), "/modal", `${alt} stays on the page`);
     await click(page, '.mk-viewer-x');
     assert.equal(await open(), false, 'X closes it');
     await click(page, `img[alt="${alt}"]`);

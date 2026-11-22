@@ -1,7 +1,7 @@
 // wake_when_live: minions waiting on someone else's deploy hear once it is live, instead of relying
 // on the Taskmaster to remember. The server checks the waiters when it starts (a restart) and when it
 // reloads its front end (a front-end-only deploy, which doesn't restart).
-// Chained minions (create_ticket's start_after) use the same check: one is created parked, with its
+// Chained minions (create_ticket's start_after) use the same check: one is created sealed, with its
 // brief held until the minion it follows has its work live (or merged); also checked when a minion
 // is dismissed. With the server's outbox a chain is a `chain` row (ADR 0021, step 3, #1389): the check
 // meets it, and the outbox starts the minion on its lane (chainedStep).
@@ -80,7 +80,7 @@ export interface Waiter {
 /** How people read a chain's `when` (Cara, 2026-11-19: "Land"): "#3's work has landed", "... is merged into Build 4" for a feeder (whose merged means in its build), or "... is live". */
 export const chainIs = (when: Chain['when'], build?: number | null) => (when !== 'merged' ? 'is live' : build ? `is merged into Build ${build}` : 'has shipped');
 
-/** A minion created parked, whose brief is held until minion `after`'s work is live or merged. */
+/** A minion created sealed, whose brief is held until minion `after`'s work is live or merged. */
 export interface Chain {
   ticket: number;
   /** The id (not number) of the minion it follows. */
@@ -188,7 +188,7 @@ const KEY = 'wake-when-live';
 const CHAINS = 'chained-minions';
 /** A chain row's held reason: its leader was dismissed without its work shipping (people were told once). */
 const HELD_LEADER = 'leader dismissed unshipped';
-/** Why a chain row's start runs, when no check gave a reason: a Start now or Unpark a restart cut short. */
+/** Why a chain row's start runs, when no check gave a reason: a Start now or Unseal a restart cut short. */
 const RESTARTED_WHY = 'Its start was cut short by a server restart';
 const RELAYS = 'relay-when-live';
 
@@ -562,8 +562,8 @@ export class LiveWaiters {
   }
 
   /**
-   * What wakes parked `ticket` by itself: its start_after leader's work, unless the chain is held (only Unpark starts it then),
-   * or its wake_when_live reason; null when nothing here does. The list shows such a minion under Waiting, not Parked.
+   * What wakes sealed `ticket` by itself: its start_after leader's work, unless the chain is held (only Unseal starts it then),
+   * or its wake_when_live reason; null when nothing here does. The list shows such a minion under Waiting, not Sealed.
    */
   wakesOn(ticket: number): string | null {
     const c = this.chains().find((o) => o.ticket === ticket);
@@ -571,7 +571,7 @@ export class LiveWaiters {
     return this.list().find((w) => w.ticket === ticket)?.reason ?? null;
   }
 
-  /** What `ticket`, parked on start_after, waits for ("#3 Leader's work has landed"), or null when it isn't. */
+  /** What `ticket`, sealed on start_after, waits for ("#3 Leader's work has landed"), or null when it isn't. */
   heldFor(ticket: number): string | null {
     const c = this.chains().find((o) => o.ticket === ticket);
     return c ? this.chainWhat(c) : null;
@@ -580,7 +580,7 @@ export class LiveWaiters {
   private chainWhat(c: Chain): string {
     const leader = this.store.getTicket(c.after);
     const who = `#${leader?.number ?? c.after} ${leader?.title ?? ''}`;
-    return c.held ? `${who}'s work ${chainIs(c.when, leader?.build)}, and ${who} was dismissed without it, so only Unpark starts you` : `${who}'s work ${chainIs(c.when, leader?.build)}`;
+    return c.held ? `${who}'s work ${chainIs(c.when, leader?.build)}, and ${who} was dismissed without it, so only Unseal starts you` : `${who}'s work ${chainIs(c.when, leader?.build)}`;
   }
 
   /** The brief `ticket` holds until its leader's work is in, for its chat to show read-only; null once it is sent (release) or when there is none. */
@@ -943,7 +943,7 @@ export class LiveWaiters {
 /**
  * Start a chained minion (LiveWaiters.start, Start now): catch its branch up to what a new minion would
  * branch from, so it builds on the work it waited for, then send its held brief. Both run on the minion's
- * lane: after a turn running in its worktree now (a parked minion answering a message) and that turn's
+ * lane: after a turn running in its worktree now (a sealed minion answering a message) and that turn's
  * save, never under it, and before the brief's turn (#468 S07-2). The brief stays in the chain until it is
  * sent, so a server that dies during the catch-up starts it after the restart. Resolves once it is sent,
  * or at once while a turn runs, so Start now doesn't wait that turn out.

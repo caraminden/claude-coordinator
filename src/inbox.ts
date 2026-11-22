@@ -30,8 +30,8 @@ const forPerson = (card: { to?: string }, person: string) => !card.to || card.to
 
 /**
  * Approval cards hold up a running turn, so they come first; the rest newest first. For `person`, only
- * minions assigned to them or to no one (#197); the Taskmaster is no one's. A parked minion waits on
- * something else by design, so its cards and replies wait too (#344; Josh, 2026-11-05: "Parked minions
+ * minions assigned to them or to no one (#197); the Taskmaster is no one's. A sealed minion waits on
+ * something else by design, so its cards and replies wait too (#344; Josh, 2026-11-05: "Sealed minions
  * shouldnt add to the inbox badge count"); only an approval, which a running turn is stuck on, still shows.
  */
 export function inboxItems(store: Store, approvals: Approvals, projectId: number, person: string): InboxItem[] {
@@ -54,7 +54,7 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     ...approvals.pending().filter((a) => ids.has(a.ticketId))
       .map(({ ticketId, at, card }) => ({ kind: 'approval', ticketId, at, card, eventId: store.cardEventId(ticketId, 'approval', (card as { id: string }).id) ?? undefined, key: `approval:${(card as { id: string }).id}` })),
     // A new stored card kind only needs adding to Store.openCards.
-    // A card addressed to one person (#687) is theirs alone, whoever the minion is assigned to and even while it's parked.
+    // A card addressed to one person (#687) is theirs alone, whoever the minion is assigned to and even while it's sealed.
     ...store.openCards(projectId).map((e) => ({ e, card: JSON.parse(e.data) }))
       .filter(({ e, card }) => (card.to ? forPerson(card, person) : awake.has(e.ticket_id)))
       .map(({ e, card }) => ({ kind: e.kind, ticketId: e.ticket_id, at: e.created_at, card, eventId: e.id, key: `${e.kind}:${e.id}` })),

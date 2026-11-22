@@ -343,7 +343,7 @@ export class Outbox {
   }
 
   /**
-   * Start now and Unpark (src/routes/tickets.ts): take a waiting or held row to send it outside a pass, as the outbox would
+   * Start now and Unseal (src/routes/tickets.ts): take a waiting or held row to send it outside a pass, as the outbox would
    * (sending, so no pass claims it too, and a kill leaves it for boot to send again). False if it was not there to take.
    */
   take(id: number, payload: object = {}): boolean {

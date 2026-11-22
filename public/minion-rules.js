@@ -344,7 +344,7 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
   ];
   /** Never hold (#1067; Josh, 2026-11-19, "this kind of message should not wait"): kinds of mail that wake their reader at once. */
   const neverHold = () => live({ icon: 'spark', hue: 'running', title: 'Never hold' },
-    settingsHelp('Kinds of message that always wake their reader, even a fyi or a cold chat. The held-mail card in a chat sets these too.', 'Each wake re-reads the whole context, so turn on only what can\'t wait. A parked minion and the loop guard still hold everything.'),
+    settingsHelp('Kinds of message that always wake their reader, even a fyi or a cold chat. The held-mail card in a chat sets these too.', 'Each wake re-reads the whole context, so turn on only what can\'t wait. A sealed minion and the loop guard still hold everything.'),
     (mount) => {
       const on = new Set((stored().msg_never_hold ?? '').split(',').filter(Boolean));
       mount.replaceChildren(h('div', { class: 'rules-seg', role: 'group', 'aria-label': 'Never hold' }, NEVER_HOLD_KINDS.map((k) => h('button', { type: 'button', 'aria-pressed': String(on.has(k)), onclick: () => {

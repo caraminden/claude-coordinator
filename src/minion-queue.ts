@@ -21,7 +21,7 @@ export type Steer = { end: number; msg: QueuedMessage };
 export interface QueueRecord {
   /** Messages waiting for the minion's next turn, in order. */
   msgs?: QueuedMessage[];
-  /** Held mail (#405, #413, #718): waits for the next turn something else starts, or a release (unpark, cold cap). */
+  /** Held mail (#405, #413, #718): waits for the next turn something else starts, or a release (unseal, cold cap). */
   held?: QueuedMessage[];
   /** When the first mail held for a cold session was held (#413), for the cap. */
   coldAt?: number;
@@ -146,7 +146,7 @@ export class MinionQueue {
     });
   }
 
-  /** Move held mail into the queue (an unpark, the cold cap): how many moved. */
+  /** Move held mail into the queue (an unseal, the cold cap): how many moved. */
   release(id: number): number {
     const r = this.get(id);
     const n = r.held?.length ?? 0;

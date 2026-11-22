@@ -73,7 +73,7 @@ const URGENT = () => ({ type: 'boolean', description: 'true: wake a cold recipie
 const HELD = () => heldToolText(C().MSG, 'the minion and the Taskmaster');
 
 const WAKE_DESCRIPTION =
-  `Park until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as shipped: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it lands), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
+  `Seal until a deploy is live: ${APP_NAME} messages the minion once the server runs a commit that contains \`commit\` (it must be on main, as shipped: a rebase gives it a new hash), or after the next deploy if no commit is given. In a scheme whose code this server doesn't run, it wakes once \`commit\` is on that scheme's main instead (checked at each deploy and each minion dismissal, so not the moment it lands), and a commit from that scheme is required. Woken once, then forgotten; a dismissed minion is skipped.`;
 const WAKE_PROPS = {
   commit: { type: 'string', description: 'Optional: the commit to wait for (a hash, short or full)' },
   reason: { type: 'string', maxLength: 1000, description: 'What to do once it is live (at most 1,000 characters); it comes back in the wake message, e.g. "#63\'s approve cards are live: retry the tripwire test"' },
@@ -117,8 +117,8 @@ const TITLE = { type: 'string', maxLength: 120, description: 'The short ask, abo
 /** A minion or ticket state; without `deploys`, pending-deploy is left out. */
 const stateSchema = (deploys: boolean) => ({
   type: ['string', 'null'],
-  enum: ['ready', 'complete', 'try', 'parked', 'blocked', 'outside', ...(deploys ? ['pending-deploy'] : []), null],
-  description: `Where the turn leaves things, for the minions list: ready (a person has to act: ship, pick it up or answer), complete (no work left; it closes by itself once a member has seen it; needs a note in the same call saying what is left: "nothing left" or what to read), try (ready for people to try out), parked (on hold on purpose), blocked (stuck on something outside the minion, not a person's answer), outside (work still running somewhere this minion cannot wait on, like CI)${deploys ? ', pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you)' : ''}. null when it is simply people's turn to answer, which the list shows by itself. Cleared automatically when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state' : ''}.`,
+  enum: ['ready', 'complete', 'try', 'sealed', 'parked', 'blocked', 'outside', ...(deploys ? ['pending-deploy'] : []), null],
+  description: `Where the turn leaves things, for the minions list: ready (a person has to act: ship, pick it up or answer), complete (no work left; it closes by itself once a member has seen it; needs a note in the same call saying what is left: "nothing left" or what to read), try (ready for people to try out), sealed (on hold on purpose), blocked (stuck on something outside the minion, not a person's answer), outside (work still running somewhere this minion cannot wait on, like CI)${deploys ? ', pending-deploy (deployed with tools/deploy.sh, waiting to go live, and nothing else left: a successful deploy dismisses the minion, so not while someone still needs you)' : ''}. null when it is simply people's turn to answer, which the list shows by itself. Cleared automatically when the next turn starts${deploys ? ', except pending-deploy, which stays until you set another state' : ''}.`,
 });
 const STATE = stateSchema(true);
 const NOTE = { type: ['string', 'null'], maxLength: 60, description: 'One terse line on where things stand, at most 60 characters, e.g. "needs a pick: tabs or a list" or "shipped, live after restart". No names or prefixes.' };
@@ -553,7 +553,7 @@ const SHIP_RISK = {
 /** live_facts (#1113): a minion's live facts in one small read, for both roles; the Citadel scheme's Taskmaster also reads other schemes'. */
 const LIVE_FACTS = {
   name: 'live_facts',
-  description: "A minion's live facts, read now in one small call: its status and state, the cards waiting on people (with links), what it is parked on, what it waits on right now, its branch and head commit, where its change is (on its branch, on main, deploying, live, a failed deploy), its PR and its newest CI run with the result. Call it before you state any of these about a minion (whether it has shipped or is live, its CI result, that its card waits on a person), rather than answering from memory or an earlier reply.",
+  description: "A minion's live facts, read now in one small call: its status and state, the cards waiting on people (with links), what it is sealed on, what it waits on right now, its branch and head commit, where its change is (on its branch, on main, deploying, live, a failed deploy), its PR and its newest CI run with the result. Call it before you state any of these about a minion (whether it has shipped or is live, its CI result, that its card waits on a person), rather than answering from memory or an earlier reply.",
   inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID }, required: ['ticket_id'] },
 };
 
@@ -591,7 +591,7 @@ const TOOLS = () => ([
         message: { type: 'string', maxLength: 100000, description: 'First message to the new minion, at most 100,000 characters' },
         start_after: {
           type: 'integer',
-          description: "A minion number (#N) to chain after: this one is created parked with its message held (messages to it too, read with its brief), and starts by itself on a branch caught up to main once #N is live (or shipped, see start_when). If #N is dismissed without shipping it stays parked and you are told; message_ticket with unpark starts it early.",
+          description: "A minion number (#N) to chain after: this one is created sealed with its message held (messages to it too, read with its brief), and starts by itself on a branch caught up to main once #N is live (or shipped, see start_when). If #N is dismissed without shipping it stays sealed and you are told; message_ticket with unseal starts it early.",
         },
         start_when: { type: 'string', enum: ['live', 'merged'], description: 'With start_after: "live" (default) waits until the server runs #N\'s work; "merged" starts once it has shipped to main (for a minion in a build with a branch, once it is merged into build/<n>), for work with nothing to deploy. In a scheme whose code this server doesn\'t run, live means shipped.' },
         parent: {
@@ -613,15 +613,15 @@ const TOOLS = () => ([
   },
   {
     name: 'message_ticket',
-    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A parked minion (state parked, or chained on start_after) holds it unread until it is unparked or woken, unless you pass unpark. A minion idle over ' + C().MSG.coldMin + ' minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within ' + C().MSG.holdH + ' hours), unless it is urgent. After ' + C().MSG.loopLimit + ' messages either way with one minion in ' + C().MSG.loopMin + ' minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
+    description: 'Send a message to a minion. It runs now, or after the current turn if the minion is busy. Reopens it if dismissed. A sealed minion (state sealed, or chained on start_after) holds it unread until it is unsealed or woken, unless you pass `unpark`. A minion idle over ' + C().MSG.coldMin + ' minutes (cold) gets it as held mail instead, read on its next turn (a person\'s message, or within ' + C().MSG.holdH + ' hours), unless it is urgent. After ' + C().MSG.loopLimit + ' messages either way with one minion in ' + C().MSG.loopMin + ' minutes, the next is held until a person continues. Waking an idle minion reloads its whole context: send news it need not act on now with your next message to it instead.',
     inputSchema: {
       type: 'object',
       properties: {
         ticket_id: TICKET_ID,
         text: { type: 'string', maxLength: 10000, description: 'The message, at most 10,000 characters (`message` is accepted too)' },
         urgent: URGENT(),
-        unpark: { type: 'boolean', description: 'For a parked minion: true unparks it and this message wakes it, with everything held for it (a minion chained on start_after starts now, its brief first). Only when people want it running now; without it the message waits for its unpark or wake.' },
-        start_now: { type: 'boolean', description: 'Old name for unpark.' },
+        unpark: { type: 'boolean', description: 'For a sealed minion: true unseals it and this message wakes it, with everything held for it (a minion chained on start_after starts now, its brief first). Only when people want it running now; without it the message waits for its unseal or wake.' },
+        start_now: { type: 'boolean', description: 'Old name for `unpark`.' },
       },
       required: ['ticket_id', 'text'],
     },
@@ -650,7 +650,7 @@ const TOOLS = () => ([
   },
   {
     name: 'update_ticket',
-    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. State null on a parked minion unparks it: a turn starts that reads what was held for it (a chained one starts now). (The branch keeps its original name.)",
+    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. State null on a sealed minion unseals it: a turn starts that reads what was held for it (a chained one starts now). (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
       properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, reason: PICK_REASON, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
@@ -659,12 +659,12 @@ const TOOLS = () => ([
   },
   {
     name: 'wake_when_live',
-    description: `${WAKE_DESCRIPTION} Use it when you park a minion that waits on another minion's deploy. The wake message doesn't count toward the loop guard.`,
+    description: `${WAKE_DESCRIPTION} Use it when you seal a minion that waits on another minion's deploy. The wake message doesn't count toward the loop guard.`,
     inputSchema: { type: 'object', properties: { ticket_id: TICKET_ID, ...WAKE_PROPS }, required: ['ticket_id', 'reason'] },
   },
   {
     name: 'fresh_session',
-    description: `Hand off to a fresh Claude session of yours: when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt and memory) instead of this whole conversation. People's chat history stays as it is. Use it when ${APP_NAME} asks for a handoff, or on your own when your context is long and mostly stale. First save to your memory files anything durable that lives only in this chat. Then pass every open ask and who made it, relays you still owe, cards waiting on people, who is parked on what, and what you promised next: facts, not history.`,
+    description: `Hand off to a fresh Claude session of yours: when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt and memory) instead of this whole conversation. People's chat history stays as it is. Use it when ${APP_NAME} asks for a handoff, or on your own when your context is long and mostly stale. First save to your memory files anything durable that lives only in this chat. Then pass every open ask and who made it, relays you still owe, cards waiting on people, who is sealed on what, and what you promised next: facts, not history.`,
     inputSchema: { type: 'object', properties: { summary: { type: 'string', maxLength: 20000, description: 'The handoff your next session starts from, at most 20,000 characters' } }, required: ['summary'] },
   },
   {
@@ -1481,7 +1481,7 @@ const SHIP_LESSONS = {
 /** A minion's fresh_session (the seam trial's fresh group, #1129): the same route as a Taskmaster's, and it carries on by itself. */
 const SEAM_FRESH = {
   name: 'fresh_session',
-  description: `Hand off to a fresh Claude session at a seam you pick (your turn's [System] note says when you are in the trial): when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt, memory and a facts sheet ${APP_NAME} adds: your cards, state and people's last messages) instead of this whole conversation, and it starts by itself. People's chat history stays as it is. Commit your work first. In \`summary\` put: each person's asks and decisions in their own words, with who and when; your task list with what is done; the branch, its head and what is committed or pushed; cards waiting on people with their links; what is parked or waited on; what you ruled out and why; and the next step. Facts, not history. Then reply in one line and end the turn.`,
+  description: `Hand off to a fresh Claude session at a seam you pick (your turn's [System] note says when you are in the trial): when this turn ends, your context resets and your next turn starts from \`summary\` (plus your system prompt, memory and a facts sheet ${APP_NAME} adds: your cards, state and people's last messages) instead of this whole conversation, and it starts by itself. People's chat history stays as it is. Commit your work first. In \`summary\` put: each person's asks and decisions in their own words, with who and when; your task list with what is done; the branch, its head and what is committed or pushed; cards waiting on people with their links; what is sealed or waited on; what you ruled out and why; and the next step. Facts, not history. Then reply in one line and end the turn.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -1572,13 +1572,13 @@ const THREAD_TOOLS = () => ([
   {
     name: 'message_coordinator',
     description:
-      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unpark one parked on you, message it yourself (message_minion). Say what you need with `need`: start, unpark, decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over " + C().MSG.coldMin + " minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within " + C().MSG.holdH + " hours), unless it is urgent. After " + C().MSG.loopLimit + " messages either way in " + C().MSG.loopMin + " minutes, the next is held until a person continues.",
+      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unseal one sealed on you, message it yourself (message_minion). Say what you need with `need`: start, unpark (unseals a minion), decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. A Taskmaster idle over " + C().MSG.coldMin + " minutes (cold) gets it as held mail instead, read on its next turn (a person's message, or within " + C().MSG.holdH + " hours), unless it is urgent. After " + C().MSG.loopLimit + " messages either way in " + C().MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, need: NEED, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn. A need of fyi is always held mail' }, urgent: URGENT(), when_ci_passes: WHEN_CI_PASSES }, required: ['text', 'need'] },
   },
   {
     name: 'message_minion',
     description:
-      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A parked minion holds it until it is unparked or woken, unless you pass unpark; one idle over " + C().MSG.coldMin + " minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After " + C().MSG.loopLimit + " messages either way between two minions in " + C().MSG.loopMin + " minutes, the next is held until a person continues.",
+      "Send a message to another minion of this scheme (#N), to pass it information or ask it something, without going through the Taskmaster. It runs now, or after its current turn if it is busy. A sealed minion holds it until it is unsealed or woken, unless you pass `unpark`; one idle over " + C().MSG.coldMin + " minutes (cold) gets it as held mail, read on its next turn, unless it is urgent. Waking a minion reloads its whole context: news it need not act on now goes with wake: false. It shows in both chats, labelled with your number and title, and the Taskmaster gets a one-line copy that wakes nothing. A dismissed minion is refused, never reopened: starting, closing and reopening minions, setting their properties and anything in another scheme stay with the Taskmaster (message_coordinator). Not for acknowledgements. After " + C().MSG.loopLimit + " messages either way between two minions in " + C().MSG.loopMin + " minutes, the next is held until a person continues.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1586,7 +1586,7 @@ const THREAD_TOOLS = () => ([
         text: { type: 'string', maxLength: 10000, description: 'Self-contained: it cannot see your chat, so give file paths in full. At most 10,000 characters (`message` is accepted too)' },
         wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn (held mail if it is cold, unless urgent)' },
         urgent: URGENT(),
-        unpark: { type: 'boolean', description: "For a minion parked waiting on you (your work, your word): true unparks it and this message wakes it now, so don't ask the Taskmaster. A chain a person put on hold is refused: only their Unpark or the Taskmaster starts it." },
+        unpark: { type: 'boolean', description: "For a minion sealed waiting on you (your work, your word): true unseals it and this message wakes it now, so don't ask the Taskmaster. A chain a person put on hold is refused: only their Unseal or the Taskmaster starts it." },
       },
       required: ['ticket_id', 'text'],
     },
@@ -1618,12 +1618,12 @@ const THREAD_TOOLS = () => ([
   },
   {
     name: 'wake_when_live',
-    description: `${WAKE_DESCRIPTION.replace('the minion', 'this minion')} Use it instead of asking the Taskmaster to remember, then set state parked and end your turn.`,
+    description: `${WAKE_DESCRIPTION.replace('the minion', 'this minion')} Use it instead of asking the Taskmaster to remember, then set state sealed and end your turn.`,
     inputSchema: { type: 'object', properties: WAKE_PROPS, required: ['reason'] },
   },
   {
     name: 'wake_when_runners_back',
-    description: `Park until this scheme's CI runners are back: after land.sh exits 75 (CI gave no verdict, nearly always because the machine the runners run on is off), call this, set state parked and end your turn. ${APP_NAME} checks the scheme's GitHub runners every 5 minutes and messages you once one labelled <scheme-slug>-ci, <scheme-slug>-ci-linux or <scheme-slug>-desktop is online, so you can run land again. If it can't read the runners with the scheme's GitHub login, it says so at its next check instead. Woken once, then forgotten; a second call replaces the first.`,
+    description: `Seal until this scheme's CI runners are back: after land.sh exits 75 (CI gave no verdict, nearly always because the machine the runners run on is off), call this, set state sealed and end your turn. ${APP_NAME} checks the scheme's GitHub runners every 5 minutes and messages you once one labelled <scheme-slug>-ci, <scheme-slug>-ci-linux or <scheme-slug>-desktop is online, so you can run land again. If it can't read the runners with the scheme's GitHub login, it says so at its next check instead. Woken once, then forgotten; a second call replaces the first.`,
     inputSchema: { type: 'object', properties: { reason: { type: 'string', maxLength: 1000, description: 'What to do once they are back (at most 1,000 characters); it comes back in the wake message, e.g. "run tools/land.sh again"' } }, required: ['reason'] },
   },
   {
@@ -1649,7 +1649,7 @@ const THREAD_TOOLS = () => ([
     name: 'hand_off_land',
     // Always loaded (ALWAYS_LOAD, #1275), so every word here is in every minion's prompt: the how-to lives in the self-review skill.
     description:
-      `Ship: the server runs tools/land.sh in your worktree. Use it where the instructions say to run tools/land.sh, once tested and self-reviewed (or first, when the self-review says it ships alongside). Commit everything first: uncommitted or conflicting work is refused at once. On a clean land the server posts the shipped line and dismisses you${C().DEPLOYS ? ', or sets pending-deploy for a restart' : ''}; it never parks you.${C().HOME_CONTRAPTIONS.length ? ` A ship to main also deploys ${C().HOME_CONTRAPTIONS.join(', ')}; the shipped line says if it went live, so never call deploy_contraption or ask for a redeploy.` : ''} If it fails (a conflict, even once main moves while it waits; a red test; a refusal; a failed deploy), you are woken with its output's end: fix it and hand it off again. Else end your turn with a short reply and set no state: you show as shipping until it ends.`,
+      `Ship: the server runs tools/land.sh in your worktree. Use it where the instructions say to run tools/land.sh, once tested and self-reviewed (or first, when the self-review says it ships alongside). Commit everything first: uncommitted or conflicting work is refused at once. On a clean land the server posts the shipped line and dismisses you${C().DEPLOYS ? ', or sets pending-deploy for a restart' : ''}; it never seals you.${C().HOME_CONTRAPTIONS.length ? ` A ship to main also deploys ${C().HOME_CONTRAPTIONS.join(', ')}; the shipped line says if it went live, so never call deploy_contraption or ask for a redeploy.` : ''} If it fails (a conflict, even once main moves while it waits; a red test; a refusal; a failed deploy), you are woken with its output's end: fix it and hand it off again. Else end your turn with a short reply and set no state: you show as shipping until it ends.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -2142,10 +2142,10 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'message_ticket': {
       const ticketId = await id(args);
       sharedFilesExist(args.text ?? args.message, 'Send this');
-      // Unpark (#718; start_now is its old name): the server unparks it first if it's parked, and this message wakes it.
+      // Unseal (#718; start_now is its old name): the server unseals it first if it's sealed, and this message wakes it.
       const unpark = args.unpark === true || args.start_now === true;
       const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}), ...(unpark ? { unpark: true } : {}) });
-      if (t.held === 'parked') return `Held for #${t.number}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken (its deploy wait or chained start). Do not resend it; message_ticket with unpark wakes it now.\n${ticketLine(t)}`;
+      if (t.held === 'parked') return `Held for #${t.number}: it is sealed, so the message shows in its chat now and reaches it when it is unsealed or woken (its deploy wait or chained start). Do not resend it; message_ticket with `unpark` wakes it now.\n${ticketLine(t)}`;
       return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `${HELD()} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
@@ -2294,7 +2294,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('POST', `/api/tickets/${C().TICKET}/minion-message`, { to: n, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.unpark === true ? { unpark: true } : {}) });
       const who = `#${r.number} ${r.title}`;
       if (r.held === true) return `${heldToolText(C().MSG, `you and #${r.number}`)} Finish your turn.`;
-      if (r.held === 'parked') return `Held for ${who}: it is parked, so the message shows in its chat now and reaches it when it is unparked or woken. Do not resend it; if it is parked on you, resend with unpark: true.`;
+      if (r.held === 'parked') return `Held for ${who}: it is sealed, so the message shows in its chat now and reaches it when it is unsealed or woken. Do not resend it; if it is sealed on you, resend with `unpark: true`.`;
       if (r.held === 'cold') return COLD(`#${r.number}`);
       if (r.held === 'mail') return `Left as held mail: ${who} reads it on its next turn, whoever wakes it. Do not resend it.`;
       return `Sent. ${who} runs it now, or after its current turn.`;
@@ -2371,7 +2371,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const what = r.commit ? `\`${r.commit.slice(0, 7)}\`` : 'the next deploy';
       if (!r.waiting && r.merged) return `${what} is on the scheme's main already, so there is nothing to wait for.`;
       if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
-      return `Waiting for ${what}: ${APP_NAME} sends ${C().ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${C().ROLE === 'thread' ? ' Set state parked and end your turn.' : ''}`;
+      return `Waiting for ${what}: ${APP_NAME} sends ${C().ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${C().ROLE === 'thread' ? ' Set state sealed and end your turn.' : ''}`;
     }
     case 'relay_when_live': {
       const r = await call('POST', `/api/tickets/${C().TICKET}/relay-when-live`, { to: args.to ?? null, text: args.text, commit: args.commit ?? null, cancel: args.cancel ?? null });
@@ -2397,7 +2397,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'wake_when_runners_back': {
       const r = await call('POST', `/api/tickets/${C().TICKET}/wake-runners`, { reason: args.reason });
-      return `Waiting for a runner labelled ${(r.labels ?? [r.label]).join(', ').replace(/, ([^,]*)$/, ' or $1')} to be online: ${APP_NAME} looks every 5 minutes and sends you a message then. Set state parked and end your turn.`;
+      return `Waiting for a runner labelled ${(r.labels ?? [r.label]).join(', ').replace(/, ([^,]*)$/, ' or $1')} to be online: ${APP_NAME} looks every 5 minutes and sends you a message then. Set state sealed and end your turn.`;
     }
     case 'list_artifacts': {
       const [artifacts, shared] = await Promise.all([call('GET', `/api/projects/${C().PROJECT}/artifacts?titles`), call('GET', `/api/projects/${C().PROJECT}/shared?titles`)]);

@@ -202,10 +202,10 @@ async function branchTips(dir: string | null | undefined): Promise<Map<string, s
 
 // ---------- wake_when_runners_back (#541) ----------
 // A landing whose CI gate got no verdict (the kit's land.sh exits 75: no runner took the run, nearly always the
-// desktop off) parks its minion. Its CI ran on a scratch branch the PR watcher never sees, so this poll wakes it:
+// desktop off) seals its minion. Its CI ran on a scratch branch the PR watcher never sees, so this poll wakes it:
 // once one of its scheme's runners (labelled <scheme>-ci or <scheme>-ci-linux, as ci_runners adds them) is online.
 
-/** A minion parked until its scheme's runners are back; in the settings table, so it outlives a restart. */
+/** A minion sealed until its scheme's runners are back; in the settings table, so it outlives a restart. */
 export interface RunnerWaiter {
   ticket: number;
   reason: string;
@@ -1137,13 +1137,13 @@ ${text}`);
       const reason = String(r.payload.reason).replace(/[.\s]+$/, '');
       const text = !up
         ? `${APP_NAME} can't read ${p.name}'s CI runners with the scheme's GitHub login, so it can't tell when they are back: ask a person whether they are, then ${reason}.`
-        : `${p.name}'s CI runners are back (${names} online): ${reason}. If land parks again on no runner while they're online, the workflow's runs-on may not match them: ask a person instead of parking again.`;
+        : `${p.name}'s CI runners are back (${names} online): ${reason}. If land seals again on no runner while they're online, the workflow's runs-on may not match them: ask a person instead of sealing again.`;
       outbox.meet(r.id, { text });
     }
   }
 
   /**
-   * Message (once) and drop the scheme's minions parked on its runners, once one of them is online; dismissed ones are dropped.
+   * Message (once) and drop the scheme's minions sealed on its runners, once one of them is online; dismissed ones are dropped.
    * `runners` null: the list can't be read, so nothing would ever say they're back, and the minions hear that instead.
    */
   wakeParked(p: Project, runners: Runner[] | null) {
@@ -1161,7 +1161,7 @@ ${text}`);
       const reason = w.reason.replace(/[.\s]+$/, '');
       try {
         if (!up) this.deps.wake!(w.ticket, `${APP_NAME} can't read ${p.name}'s CI runners with the scheme's GitHub login, so it can't tell when they are back: ask a person whether they are, then ${reason}.`);
-        else this.deps.wake!(w.ticket, `${p.name}'s CI runners are back (${names} online): ${reason}. If land parks again on no runner while they're online, the workflow's runs-on may not match them: ask a person instead of parking again.`);
+        else this.deps.wake!(w.ticket, `${p.name}'s CI runners are back (${names} online): ${reason}. If land seals again on no runner while they're online, the workflow's runs-on may not match them: ask a person instead of sealing again.`);
       } catch (err) {
         console.error(`Waking #${w.ticket} for its runners failed:`, err); // the others still get theirs
       }

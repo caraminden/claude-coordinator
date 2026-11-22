@@ -326,7 +326,7 @@ export interface AppInstructions {
 export const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5-5+opus-advisor', 'claude-haiku-5-5', 'claude-fable-5-1', 'claude-fable-5-2', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-luna'] as const;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
-/** ready: done, ready to merge or pick up · try: ready for people to try · parked: on hold on purpose ·
+/** ready: done, ready to merge or pick up · try: ready for people to try · sealed: on hold on purpose ·
  * blocked: stuck on something outside the thread · outside: work still running elsewhere (CI, someone's machine) ·
  * pending-deploy: deployed, not live yet; outlasts a new turn, and a successful deploy dismisses the thread ·
  * limited: the last turn hit the account's usage limit (set by the server, not the thread). */

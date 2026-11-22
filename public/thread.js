@@ -499,11 +499,11 @@ export function renderTicketHead() {
     const unparkSlot = form.querySelector('.unpark-slot');
     if (unparkSlot) {
       const parked = (t.parked_for || t.state === 'parked') && !coord && t.status !== 'closed' && t.status !== 'running';
-      const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while parked';
+      const title = t.parked_for ? 'Start it now with its held brief and the messages left for it, without waiting for its leader\'s work' : 'Wake it now: it reads the messages left for it while sealed';
       unparkSlot.hidden = !parked;
       unparkSlot.replaceChildren(...(parked ? [
-        h('button', { type: 'button', class: 'secondary act-unpark', title, onclick: () => unpark(t) }, 'Unpark'),
-        h('button', { type: 'button', class: 'secondary act-send-unpark', title: 'Send your message and unpark it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unpark'),
+        h('button', { type: 'button', class: 'secondary act-unpark', title, onclick: () => unpark(t) }, 'Unseal'),
+        h('button', { type: 'button', class: 'secondary act-send-unpark', title: 'Send your message and unseal it, so it reads the message now', onclick: () => form.sendAndUnpark?.() }, 'Send and unseal'),
       ] : []));
     }
     const hint = form.querySelector('.parked-hint');
@@ -819,10 +819,10 @@ function markHeld(bubble, ticket, last = true) {
     bubble.querySelector('.who .held-tag')?.remove();
     if (!row) bubble.append(row = h('div', { class: 'held-line', role: 'status' }));
     const parked = ticket.parked_for || ticket.state === 'parked';
-    row.replaceChildren(h('span', { class: 'held-text' }, parked ? "Not sent yet: this minion is parked, so it reads this when it's unparked." : line.text));
+    row.replaceChildren(h('span', { class: 'held-text' }, parked ? "Not sent yet: this minion is sealed, so it reads this when it's unsealed." : line.text));
     if (last) {
       const btn = parked
-        ? h('button', { type: 'button', class: 'secondary small held-act', title: 'Wake it now: it reads the messages left for it' }, 'Unpark and send')
+        ? h('button', { type: 'button', class: 'secondary small held-act', title: 'Wake it now: it reads the messages left for it' }, 'Unseal and send')
         : h('button', { type: 'button', class: 'secondary small held-act', title: 'Run a turn now that reads all the held mail' }, 'Deliver');
       btn.dataset.for = bubble.dataset.event;
       btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); if (parked) unpark(ticket); else deliverMail(ticket, btn); };
@@ -865,7 +865,7 @@ function unpark(t) {
     apply: () => show({ state: null, parked_for: null, held_brief: null }),
     send: () => api(`api/tickets/${t.id}/unpark`, { method: 'POST', body: {} }),
     undo: () => t.state === null && show(was),
-    label: `unpark ${threadLabel(t)}`,
+    label: `unseal ${threadLabel(t)}`,
   }).catch(() => {});
 }
 
@@ -1322,7 +1322,7 @@ function newMinionCopies() {
 function addMinionCopy(group, data, event) {
   const list = group.querySelector('.mc-list');
   const sender = data.author?.replace(/^#\d+\s*/, '') ?? '';
-  const who = `${data.unparked ? 'unparked' : '→'} #${data.to}`;
+  const who = `${data.unparked ? 'unsealed' : '→'} #${data.to}`;
   list.append(h('div', { class: 'mc-row', 'data-eid': event.id }, h('span', { class: 'mc-who' }, `${data.from ? '#' + data.from : data.author} ${who}`), h('span', { class: 'mc-text', title: sender }, data.text)));
   const nums = new Set((group.dataset.nums ? group.dataset.nums.split(',').map(Number) : []));
   for (const n of [data.from, data.to]) if (n) nums.add(n);

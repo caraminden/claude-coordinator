@@ -168,7 +168,7 @@ function buildHeading(s) {
 }
 
 /** The resting sections' headings (threadgroups.js threadSections). */
-const REST = { deploying: 'Deploying', waiting: 'Waiting', parked: 'Parked' };
+const REST = { deploying: 'Deploying', waiting: 'Waiting', parked: 'Sealed' };
 
 let sidebarFrame = 0;
 /**

@@ -1,7 +1,7 @@
 // The stuck list (#1506): when a person starts a Taskmaster turn, the server lists that Taskmaster's minions and cards
 // that have waited with nothing set to move them, so people stop being the ones who notice (13 silent-wait chases in
 // three weeks to 2026-11-21: shared/project/reports/taskmaster-misses-deep-dive-2026-11-21.md). It informs only: it
-// adds no wakes and changes nothing; the Taskmaster decides. What wakes a park is storedFacts' (src/live-facts.ts).
+// adds no wakes and changes nothing; the Taskmaster decides. What wakes a seal is storedFacts' (src/live-facts.ts).
 import { cardHref, cardText } from './card-links.ts';
 import type { Store, Ticket } from './db.ts';
 import { storedFacts } from './live-facts.ts';
@@ -11,7 +11,7 @@ import type { Runner } from './runner.ts';
 export const STUCK_IDLE_MS = 6 * 3_600_000;
 /** A card is listed once it has waited on people this long. */
 export const STUCK_CARD_MS = 24 * 3_600_000;
-/** A park that can't wake (its change is live, or its leader was dismissed) is listed after this, so a wake about to fire isn't. */
+/** A seal that can't wake (its change is live, or its leader was dismissed) is listed after this, so a wake about to fire isn't. */
 export const STUCK_PARK_MS = 3_600_000;
 /** An item shows again only this long after it last showed. */
 export const STUCK_GAP_MS = 12 * 3_600_000;
@@ -57,9 +57,9 @@ export function stuckItems(store: Store, runner: Pick<Runner, 'view'>, taskmaste
     if (f.cards.length || coming(t, v)) continue;
     const idle = now - t.updated_at;
     const parked = f.state === 'parked';
-    if (parked && f.ship?.stage === 'live' && idle > STUCK_PARK_MS) items.push({ key: `park:${t.id}`, rank: 0, waited: idle, line: `${head}, idle ${ago(idle)}): parked, but its own change is live${note}` });
-    else if (parked && f.parkedOn && idle > STUCK_PARK_MS) items.push({ key: `park:${t.id}`, rank: 1, waited: idle, line: `${head}, idle ${ago(idle)}): parked on ${cut(f.parkedOn, 160)}${note}` });
-    else if (idle > STUCK_IDLE_MS) items.push({ key: `idle:${t.id}`, rank: 3, waited: idle, line: `${head}, idle ${ago(idle)}): ${parked ? 'parked, nothing wakes it by itself' : 'nothing set to wake it'}${note}` });
+    if (parked && f.ship?.stage === 'live' && idle > STUCK_PARK_MS) items.push({ key: `park:${t.id}`, rank: 0, waited: idle, line: `${head}, idle ${ago(idle)}): sealed, but its own change is live${note}` });
+    else if (parked && f.parkedOn && idle > STUCK_PARK_MS) items.push({ key: `park:${t.id}`, rank: 1, waited: idle, line: `${head}, idle ${ago(idle)}): sealed on ${cut(f.parkedOn, 160)}${note}` });
+    else if (idle > STUCK_IDLE_MS) items.push({ key: `idle:${t.id}`, rank: 3, waited: idle, line: `${head}, idle ${ago(idle)}): ${parked ? 'sealed, nothing wakes it by itself' : 'nothing set to wake it'}${note}` });
   }
   return items.sort((a, b) => a.rank - b.rank || b.waited - a.waited);
 }
@@ -78,7 +78,7 @@ export function stuckList(store: Store, runner: Pick<Runner, 'view'>, taskmaster
   store.setSetting(shownKey(taskmaster.id), keep);
   const more = fresh.length - show.length;
   return [
-    `Stuck list, built by the server: your minions and cards that have waited with nothing set to move them (each shows again after ${STUCK_GAP_MS / 3_600_000} h at the earliest). It wakes nothing and changes nothing. Answer the person first, then take each: nudge it, unpark it, put it to its person on a card, close it, or leave it if it waits on purpose.`,
+    `Stuck list, built by the server: your minions and cards that have waited with nothing set to move them (each shows again after ${STUCK_GAP_MS / 3_600_000} h at the earliest). It wakes nothing and changes nothing. Answer the person first, then take each: nudge it, unseal it, put it to its person on a card, close it, or leave it if it waits on purpose.`,
     ...show.map((i) => `- ${i.line}`),
     ...(more > 0 ? [`- and ${more} more`] : []),
   ].join('\n');

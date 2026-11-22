@@ -14,12 +14,12 @@ export function heldLine(data, eventId, ticket) {
   if (!data?.mail) return null;
   const held = !!ticket?.held_ids?.includes(eventId);
   const queued = held && ticket.status === 'running';
-  return { waiting: held && !queued, queued, text: 'Not sent yet: held mail, read on its next turn.', tag: data.parked ? 'left while parked' : 'held mail', title: data.parked ? 'Left while it was parked, read when it was unparked' : 'Held for its next turn, read then' };
+  return { waiting: held && !queued, queued, text: 'Not sent yet: held mail, read on its next turn.', tag: data.parked ? 'left while sealed' : 'held mail', title: data.parked ? 'Left while it was sealed, read when it was unsealed' : 'Held for its next turn, read then' };
 }
 
 /** The one-line hint over the composer while the open minion is parked (a message waits), or null. */
 export function composerHint(t) {
-  return parkedChat(t) ? "This minion is parked: messages wait until it's unparked." : null;
+  return parkedChat(t) ? "This minion is sealed: messages wait until it's unsealed." : null;
 }
 
 const parkedChat = (t) => !!(t.parked_for || t.state === 'parked') && t.kind !== 'coordinator' && t.status !== 'closed' && t.status !== 'running';

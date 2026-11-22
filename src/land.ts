@@ -47,7 +47,7 @@ export interface Handoff {
   deploy?: false;
   /** True (#909): the brief has more pieces for this minion, so a clean land leaves it open (ready) instead of dismissing it. */
   stayOpen?: true;
-  /** With stayOpen: what it waits on next. It is never parked (#942): once its work is live it is woken with the shipped line, for its after-land steps. */
+  /** With stayOpen: what it waits on next. It is never sealed (#942): once its work is live it is woken with the shipped line, for its after-land steps. */
   waitingOn?: string;
   /** Its three lines (#1119, src/ship-lessons.ts): what it had to find out; '' for nothing. Queued only on a clean land. */
   learned?: string;
@@ -608,7 +608,7 @@ export interface HandoffDeps {
   flakes?(id: number, output: string): void;
   /** The minion that owns build/<n> for this minion's scheme, if one is set. */
   buildOwner?(id: number, build: number): number | null;
-  /** Park the minion until its scheme's CI runners are back; false when it has none to watch. */
+  /** Seal the minion until its scheme's CI runners are back; false when it has none to watch. */
   runnersBack(id: number, reason: string): boolean;
   /** Whether the server already runs this minion's branch (a restart that went live before land.sh's end was read). */
   liveAlready(id: number): Promise<boolean>;
@@ -684,8 +684,8 @@ export class LandHandoffs {
   }
 
   /**
-   * A feeder's merge into build/<n> is the build minion's main event: it gets one message that wakes it, parked or
-   * cold alike (urgent, and unparked first), so it never sits parked after its feeders are in.
+   * A feeder's merge into build/<n> is the build minion's main event: it gets one message that wakes it, sealed or
+   * cold alike (urgent, and unsealed first), so it never sits sealed after its feeders are in.
    */
   private wakeBuildOwner(id: number, into: string | null, what: string) {
     const n = Number(/^build\/(\d+)$/.exec(into ?? '')?.[1]);
@@ -725,7 +725,7 @@ export class LandHandoffs {
       await once('told', () => runner.send(id, from, `Your handed-off land was stopped by ${stop.by} ${stop.via ?? 'from the Status page'} at ${at}. ${moved ? 'Its output says main had already moved, so check `git log main` before handing it off again.' : 'Nothing landed and main is untouched.'} It left the line and let go of the lock. Check your worktree with \`git status\` (a rebase it was in may need \`git rebase --abort\`), ask why if the reason isn't in your chat, and hand it off again when it should go.\n\n${tail()}`));
       return;
     }
-    if (r.kind === 'failed' || (r.kind === 'no-ci' && !(await once('runners', () => this.d.runnersBack(id, 'Your handed-off land parked because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))))) {
+    if (r.kind === 'failed' || (r.kind === 'no-ci' && !(await once('runners', () => this.d.runnersBack(id, 'Your handed-off land sealed because CI gave no verdict (land.sh exit 75). Hand it off again with hand_off_land.'))))) {
       store.updateTicket(id, { state: null, note: null });
       runner.broadcastTicket(id);
       const why = r.smoke ? `its smoke check refused it before it got in line (nothing landed, and it never waited on the line or CI)` : `tools/land.sh exited ${run.code} (main only moved if its output says so)`;
@@ -750,7 +750,7 @@ export class LandHandoffs {
       return;
     }
     if (r.kind === 'no-ci') {
-      store.updateTicket(id, { state: 'parked', note: 'ship parked: waiting for CI runners' });
+      store.updateTicket(id, { state: 'parked', note: 'ship sealed: waiting for CI runners' });
       runner.broadcastTicket(id);
       await once('noted', () => runner.emit(id, 'note', { text: `Shipping parked: CI gave no verdict (land.sh exit 75), most likely because the runners' machine is off. This minion is woken once the scheme's runners are back, to hand it off again.` }));
       return;
@@ -801,10 +801,10 @@ export class LandHandoffs {
       return;
     }
     if (h.stayOpen && h.waitingOn) {
-      // #942: never parked, since nothing would wake it. It is woken once its work is in (after the restart, through
+      // #942: never sealed, since nothing would wake it. It is woken once its work is in (after the restart, through
       // wake_when_live's waiter), once, and sets its own state from there.
       const restart = r.kind === 'restart' && !(await this.d.liveAlready(id));
-      const text = (now: string) => `Your handed-off land went through (${what}, ${now}). You handed it off waiting on: ${h.waitingOn}. Run your after-land steps now, then set your state for that wait: a person's test, card or confirmation leaves it null (or try); another minion's land is wake_when_live on its commit, then parked.`;
+      const text = (now: string) => `Your handed-off land went through (${what}, ${now}). You handed it off waiting on: ${h.waitingOn}. Run your after-land steps now, then set your state for that wait: a person's test, card or confirmation leaves it null (or try); another minion's land is wake_when_live on its commit, then sealed.`;
       // true: the waiter wakes it at live; false: live already; undefined: no waiter here, so it hears now.
       const queued = restart ? await once('waiter', () => this.d.wakeWhenLive?.(id, r.commit ?? null, text('live now'))) : undefined;
       store.updateTicket(id, { state: queued ? 'outside' : null, note: `${queued ? 'shipped, wakes once live' : 'shipped'}; waiting on: ${h.waitingOn}`.slice(0, 120) });

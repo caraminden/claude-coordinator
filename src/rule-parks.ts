@@ -1,6 +1,6 @@
-// Parks under an old rule (#1488). On Nov 21 Cara changed the pipeline lane to "Build in parallel", but minions parked
-// "waiting for pipeline lane", and the chains behind them, stayed parked until she asked why. After every Settings
-// instructions save, the parked minions whose note shares a two-word phrase with the changed paragraphs (old or new
+// Seals under an old rule (#1488). On Nov 21 Cara changed the pipeline lane to "Build in parallel", but minions sealed
+// "waiting for pipeline lane", and the chains behind them, stayed sealed until she asked why. After every Settings
+// instructions save, the sealed minions whose note shares a two-word phrase with the changed paragraphs (old or new
 // wording), and the start_after chains behind them, go to their Taskmaster as held mail for its next turn.
 import type { Project, Ticket } from './db.ts';
 import type { App } from './http.ts';
@@ -22,7 +22,7 @@ export function rulePhrases(before: string, after: string): Set<string> {
   return out;
 }
 
-/** Parked minions of `projects` whose note names a changed phrase, and the chains behind them: id → why. */
+/** Sealed minions of `projects` whose note names a changed phrase, and the chains behind them: id → why. */
 export function parksUnder(app: Pick<App, 'store' | 'runner' | 'waiters'>, project: Project, phrases: Set<string>): Map<number, string> {
   const parked = new Map(app.store.listTickets(project.id).filter((t) => app.runner.parked(t)).map((t) => [t.id, t]));
   const named = new Map<number, string>();
@@ -43,7 +43,7 @@ export function parksUnder(app: Pick<App, 'store' | 'runner' | 'waiters'>, proje
   return named;
 }
 
-/** After an instructions save: tell each affected Taskmaster which of its parked minions may be waiting under the old wording. */
+/** After an instructions save: tell each affected Taskmaster which of its sealed minions may be waiting under the old wording. */
 export function mailParksUnderOldRule(app: Pick<App, 'store' | 'runner' | 'waiters'>, projects: Project[], before: string, after: string, where: string) {
   const phrases = rulePhrases(before, after);
   if (!phrases.size) return;
@@ -58,8 +58,8 @@ export function mailParksUnderOldRule(app: Pick<App, 'store' | 'runner' | 'waite
     for (const [tm, list] of byTm) {
       const lines = list.slice(0, 15).map((t) => `- #${t.number} ${t.title}: "${t.note ?? ''}" (${named.get(t.id)})`);
       if (list.length > 15) lines.push(`- and ${list.length - 15} more`);
-      app.runner.leaveMail(tm, 'Settings', `(check these) The ${where} instructions just changed, and these parked minions may be waiting under the old wording:\n${lines.join('\n')}\n`
-        + 'Unpark each one parked only because of the old rule (message_ticket with unpark: true), and keep real code chains (start_after on work it needs).');
+      app.runner.leaveMail(tm, 'Settings', `(check these) The ${where} instructions just changed, and these sealed minions may be waiting under the old wording:\n${lines.join('\n')}\n`
+        + 'Unpark each one sealed only because of the old rule (message_ticket with unpark: true), and keep real code chains (start_after on work it needs).');
     }
   }
 }

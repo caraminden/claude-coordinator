@@ -7,7 +7,7 @@ export type Need = (typeof NEEDS)[number];
 
 export const NEED_LINES: Record<Need, string> = {
   start: 'start a minion',
-  unpark: 'unpark one',
+  unpark: 'unseal one',
   decision: 'a decision only the Taskmaster or a person can make',
   relay: 'pass something to another scheme',
   ask: 'anything else it must act on now',

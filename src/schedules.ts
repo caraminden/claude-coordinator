@@ -620,7 +620,7 @@ export class ScheduledRuns {
       const message = runBrief(s, pacific(now), runWindow(s, last?.number ?? null, minions));
       const opts = { brief: true, schedule: s.name };
       const send = () => runner.send(id, by, message, [], opts);
-      // The minion exists either way; while the box is starved its brief waits (up to 10 minutes) as a parked row.
+      // The minion exists either way; while the box is starved its brief waits (up to 10 minutes) as a sealed row.
       if (this.d.held) await this.d.held.start({ ticket: id, from: by, message, opts, schedule: s.id }, send); else send();
       console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
     } catch (err: any) {

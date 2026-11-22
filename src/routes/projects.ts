@@ -1346,9 +1346,9 @@ export const projectRoutes: Route[] = [
         const { leader, when } = follow;
         waiters.chain({ ticket: id, after: leader.id, when, message: brief0, from: session.name, base: follow.base, since: follow.since });
         store.updateTicket(id, { state: 'parked', note: `starts when #${leader.number} ${chainIs(when, leader.build)}` });
-        runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when, leader.build)}. Messages to it wait for that start; Unpark starts it now.` });
+        runner.emit(id, 'note', { text: `Created by ${session.name}; its brief is held until #${leader.number} ${leader.title}'s work ${chainIs(when, leader.build)}. Messages to it wait for that start; Unseal starts it now.` });
         runner.broadcastTicket(id);
-        notes.push(`Parked: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with unpark starts it now.`);
+        notes.push(`Sealed: it starts by itself once #${leader.number}'s work ${chainIs(when, leader.build)}. Messages to it are held for that start; message_ticket with `unpark` starts it now.`);
       } else {
         runner.send(id, session.name, brief0, [], { brief: true });
       }

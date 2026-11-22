@@ -143,7 +143,7 @@ export interface QueuedMessage {
   fresh?: 'handoff' | 'compact'; // a Taskmaster's fresh-start step (#406), which runs alone
   cold?: true; // held mail left because its recipient was cold (#413), for the Held list (#1059)
   fyi?: boolean; // a notice that needs no action (its PR merged, CI passed): it doesn't cancel a pending close_self (#619)
-  parked?: string; // held for a parked minion (#718): when it was sent, "2026-11-14 18:02" UTC
+  sealed?: string; // held for a sealed minion (#718): when it was sent, "2026-11-14 18:02" UTC
   keepalive?: true; // a hidden keepalive (#862, src/keepalive.ts): no chat, no state, nothing of the minion's changes
   light?: true; // a machine's notice of success (a land that landed, CI passed, a job done): a turn of only these runs at low effort (#951)
 }
@@ -568,7 +568,7 @@ export class Runner {
   private stepRatios = new Map<number, { at: number; ratio: number }>();
   /** The minion whose relayed message started each ticket's current turn, when a relay came before any person's message. */
   private turnFrom = new Map<number, number>();
-  /** A parked minion's state and note when a turn answering a message started: put back at its end, while still parked (#261). */
+  /** A sealed minion's state and note when a turn answering a message started: put back at its end, while still sealed (#261). */
   private parkedAs = new Map<number, { state: string | null; note: string | null }>();
   private store: Store;
   private broadcast: Broadcast;
@@ -672,11 +672,11 @@ export class Runner {
   onStreamEvent: (ticketId: number, ev: any) => void = () => {};
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
-  /** What a minion parked on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
+  /** What a minion sealed on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
   heldFor: (ticketId: number) => string | null = () => null;
   /** The brief a chained minion holds, shown read-only in its chat (LiveWaiters.heldBrief, set by the server). */
   heldBrief: (ticketId: number) => { text: string; from: string; leader: number; when: 'live' | 'merged'; is: string } | null = () => null;
-  /** What wakes a parked minion by itself (an unheld start_after, wake_when_live, wake_when_runners_back), or null (set by the server). */
+  /** What wakes a sealed minion by itself (an unheld start_after, wake_when_live, wake_when_runners_back), or null (set by the server). */
   wakesOn: (ticketId: number) => string | null = () => null;
   /** What the minion waits for, for the list's chip (src/waits-readout.ts, set by the server). */
   outboxWaits: (ticket: Ticket) => unknown[] = () => [];
@@ -1017,10 +1017,10 @@ export class Runner {
       // With several accounts all limited, each one's reset (#819), for the banner.
       limit_accounts: limit?.accounts ?? null,
       approvals: this.approvals.waiting(ticket.id),
-      // Parked on start_after: what it waits for, for Start now.
+      // Sealed on start_after: what it waits for, for Start now.
       parked_for: this.heldFor(ticket.id),
       held_brief: closed ? null : this.heldBrief(ticket.id),
-      // What wakes it by itself (start_after, wake_when_live, runners back): the list shows such a parked minion as Waiting, not Parked.
+      // What wakes it by itself (start_after, wake_when_live, runners back): the list shows such a sealed minion as Waiting, not Sealed.
       wakes_on: ticket.state === 'parked' ? this.wakesOn(ticket.id) : null,
       // Everything it waits for, timed or on an event, for the list row's chip (ADR 0021 step 7).
       outbox_waits: closed ? [] : this.outboxWaits(ticket),
@@ -1080,7 +1080,7 @@ export class Runner {
   }
 
   /**
-   * Claims that changed hands (#1334). The new holder hears it in one chat line, which wakes it, parked or not. One wake
+   * Claims that changed hands (#1334). The new holder hears it in one chat line, which wakes it, sealed or not. One wake
    * when a chain or wake_when_live fires for it at the same go-live (Cara, 2026-11-20, "Separate, one wake"): a chained
    * minion still holding its brief gets the line as held mail, read with its brief when its chain starts it, and one
    * already running (just started by its chain or wake) takes it mid-turn. Whoever keeps the scheme's claims hears it as
@@ -2037,7 +2037,7 @@ export class Runner {
    * `extra.from` is the thread that sent a relayed message, so it can strike_text it later.
    */
   /**
-   * `hold` (#718): a message from a person, the Taskmaster or another minion, which a parked minion with no turn
+   * `hold` (#718): a message from a person, the Taskmaster or another minion, which a sealed minion with no turn
    * running keeps for its next turn instead of starting one ('parked'). Wakes (wake_when_live, a chained start,
    * runners back, a card's answer, GitHub) leave it off and start a turn as before.
    */
@@ -2076,7 +2076,7 @@ export class Runner {
     }, id);
     const msg: QueuedMessage = { author, text, images, ...(files.length ? { files } : {}), about: extra.comment?.about, id, ...(extra.from ? { from: extra.from } : {}), ...(extra.typed ? { typed: true } : {}), ...(extra.typed || 'answer' in extra ? { own: true } : {}), ...(fyi ? { fyi: true } : {}), ...(light ? { light: true as const } : {}), asker };
     if (parked) {
-      // With the held mail, in order: whatever next wakes it (Unpark, a wake, its chained start) reads it after its own message.
+      // With the held mail, in order: whatever next wakes it (Unseal, a wake, its chained start) reads it after its own message.
       this.queue.hold(ticketId, { ...msg, parked: new Date(this.now()).toISOString().slice(0, 16).replace('T', ' ') });
       const row = line();
       this.heard(ticketId, ticket, msg);
@@ -2173,32 +2173,32 @@ export class Runner {
     return !!ended && this.now() - ended > this.relays.settings(ticketId).coldMin * 60_000;
   }
 
-  /** Parked (#718): on hold on purpose (state parked) or waiting on start_after, and not dismissed. A message to it is held. */
+  /** Sealed (#718): on hold on purpose (state sealed) or waiting on start_after, and not dismissed. A message to it is held. */
   parked(t: Ticket): boolean {
     return t.kind !== 'coordinator' && t.status !== 'closed' && (t.state === 'parked' || !!this.heldFor(t.id));
   }
 
-  /** Messages held for this minion's next turn (#718's parked ones and held mail). */
+  /** Messages held for this minion's next turn (#718's sealed ones and held mail). */
   heldCount(ticketId: number): number {
     return this.queue.get(ticketId).held?.length ?? 0;
   }
 
   /**
-   * Unpark a minion in state parked (#718): the state clears now, and unless `quiet` (a message wakes it instead) a
+   * Unseal a minion in state sealed (#718): the state clears now, and unless `quiet` (a message wakes it instead) a
    * turn starts that reads what was held for it, with a message from `author` (a person's name runs it as them, as a
    * card's answer does). A chained minion starts with its brief instead (routes/tickets.ts unparkTicket). False when
-   * it isn't in state parked.
+   * it isn't in state sealed.
    */
   unpark(ticketId: number, by: string, author: string, quiet = false): boolean {
     const t = this.store.getTicket(ticketId);
     if (!t || t.kind === 'coordinator' || t.status === 'closed' || t.state !== 'parked') return false;
-    this.emit(ticketId, 'note', { text: `${by} unparked this minion.` });
+    this.emit(ticketId, 'note', { text: `${by} unsealed this minion.` });
     if (!quiet && !this.isRunning(ticketId)) {
       this.dropDisabled(ticketId); // so the count below says only what follows (#1509)
       const n = this.heldCount(ticketId);
-      const held = n ? `${n === 1 ? 'The message' : `The ${n} messages`} left for you while you were parked ${n === 1 ? 'follows' : 'follow'}.` : 'Nothing was left for you while you were parked.';
+      const held = n ? `${n === 1 ? 'The message' : `The ${n} messages`} left for you while you were sealed ${n === 1 ? 'follows' : 'follow'}.` : 'Nothing was left for you while you were sealed.';
       // Queued before the state clears (#1378): a crash between the two leaves a turn to start, not held mail nothing releases.
-      this.send(ticketId, author, `${author === by ? 'Unparked' : `${by} unparked`} you. ${held} Pick up where you left off.`);
+      this.send(ticketId, author, `${author === by ? 'Unsealed' : `${by} unsealed`} you. ${held} Pick up where you left off.`);
     }
     this.store.updateTicket(ticketId, { state: null });
     this.broadcastTicket(ticketId);
@@ -2216,7 +2216,7 @@ export class Runner {
       for (const t of this.store.listTickets(p.id)) {
         const since = this.queue.get(t.id).coldAt;
         if (!since || (t.session_id && now - since < msgSettings(p).holdH * 3_600_000)) continue;
-        // A parked minion's mail waits for its unpark or wake, however long (#718).
+        // A sealed minion's mail waits for its unseal or wake, however long (#718).
         if (this.parked(t)) continue;
         if (this.isRunning(t.id) || this.lanes.busy(t.id)) continue;
         this.releaseMail(t, p);
@@ -2246,7 +2246,7 @@ export class Runner {
 
   /**
    * The mail waiting for this chat's next turn (#1067), for its inbox card: held as a fyi or wake: false, for a cold session,
-   * or for a parked one. `until` is when a cold hold's cap sends it anyway. Null when nothing waits.
+   * or for a sealed one. `until` is when a cold hold's cap sends it anyway. Null when nothing waits.
    */
   heldMail(t: Ticket): { until: number | null; items: { id: number | null; author: string; from: number | null; need: string | null; note: boolean; parked: boolean; at: number; text: string }[] } | null {
     const { held: mail, coldAt: since } = this.queue.get(t.id);
@@ -3097,7 +3097,7 @@ export class Runner {
       // outlasts a stray turn (a GitHub ping), so the deploy still dismisses the minion unless the turn
       // sets another state or a person wrote to it (personWrote).
       // A limited minion's note is the server's, about the wait this turn ends; a complete one's says nothing is left (#547).
-      // A minion parked on start_after stays parked through a turn that answers a message (#261).
+      // A minion sealed on start_after stays sealed through a turn that answers a message (#261).
       // One recover() put back is a cut-off turn's, from before that turn could change the state (#1452). A turn
       // after a resume that never started (a re-run batch, a person's message) keeps it: the minion is still held.
       const parkedAs = this.parkedAs.get(ticket.id);
@@ -3666,7 +3666,7 @@ export class Runner {
     // A fresh session's handoff is in its transcript once the session exists (#406); then the fresh start's own step, if any.
     if (turn?.handoff && this.store.getTicket(ticketId)?.session_id) this.store.deleteSetting(handoffKey(ticketId));
     this.endFresh(ticketId, turn ?? null, cleared, stopped);
-    // Still parked after answering: the row stays parked, whatever state the turn set. A failed turn keeps its error note.
+    // Still sealed after answering: the row stays sealed, whatever state the turn set. A failed turn keeps its error note.
     const parkedAs = this.parkedAs.get(ticketId);
     this.parkedAs.delete(ticketId);
     if (parkedAs && status !== 'error' && this.heldFor(ticketId)) this.store.updateTicket(ticketId, parkedAs);

@@ -1,4 +1,4 @@
-// Live facts (#1113): one minion's state, open cards, what it is parked on, branch and head, its newest CI run and
+// Live facts (#1113): one minion's state, open cards, what it is sealed on, branch and head, its newest CI run and
 // whether its change is live, read in one call (the live_facts tool), so a Taskmaster or minion checks before it
 // states them instead of answering from memory (Citadel-wide rule "Verify live state"). 26 replies were struck in the
 // week to 2026-11-19, most of them a Taskmaster stating another minion's, CI's or a deploy's state from memory.
@@ -34,11 +34,11 @@ export interface Facts {
   number: number;
   title: string;
   scheme: string;
-  /** running, idle, closed… and the label state (ready, parked…), as the minions list shows them. */
+  /** running, idle, closed… and the label state (ready, sealed…), as the minions list shows them. */
   status: string;
   state: string | null;
   note: string | null;
-  /** What wakes it by itself while parked (a chain, wake_when_live, runners back), or null. */
+  /** What wakes it by itself while sealed (a chain, wake_when_live, runners back), or null. */
   parkedOn: string | null;
   cards: CardLink[];
   /** What it waits on right now (the land line, its landing, a heavy slot, a PR's CI run), in words. */
@@ -132,7 +132,7 @@ export function factsText(f: Facts): string {
   return [
     `#${f.number} ${f.title} (scheme ${f.scheme})`,
     `status: ${f.status}${f.state ? `, ${f.state}` : ''}${f.note ? ` · note: ${f.note}` : ''}`,
-    f.parkedOn ? `parked on: ${f.parkedOn}` : f.state === 'parked' ? 'parked on: nothing wakes it by itself (only a message or Unpark)' : '',
+    f.parkedOn ? `sealed on: ${f.parkedOn}` : f.state === 'parked' ? 'sealed on: nothing wakes it by itself (only a message or Unseal)' : '',
     f.cards.length ? f.cards.map((c) => `waiting on people: ${cardText(c)}`).join('\n') : 'cards waiting on people: none',
     f.waiting ? `waiting now: ${f.waiting}` : '',
     f.branch ? `branch: ${f.branch}${f.head ? ` @ ${f.head}` : ''}` : 'branch: none',
@@ -153,7 +153,7 @@ const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` 
 
 /**
  * A Taskmaster's facts sheet for its fresh session, straight from the database (G6): its scheme's open cards and who
- * they wait on, parks and what wakes each, minions in flight with state and note, ships in progress, and the last few
+ * they wait on, seals and what wakes each, minions in flight with state and note, ships in progress, and the last few
  * messages from people. Same facts as live_facts (storedFacts), no GitHub read: it runs as a turn ends.
  */
 export function handoffSheet(store: Store, runner: Pick<Runner, 'view'>, taskmaster: Ticket): string {
@@ -170,7 +170,7 @@ export function handoffSheet(store: Store, runner: Pick<Runner, 'view'>, taskmas
   const part = (head: string, items: string[], none: string) => `${head}\n${items.length ? items.join('\n') : none}`;
   return [
     part('Open cards waiting on people:', cards, 'none'),
-    part('Parked minions:', parks, 'none'),
+    part('Sealed minions:', parks, 'none'),
     part('Minions in flight:', flight, 'none'),
     part('Ships in progress:', ships, 'none'),
     part('Last messages from people (newest last):', people, 'none'),
@@ -180,7 +180,7 @@ export function handoffSheet(store: Store, runner: Pick<Runner, 'view'>, taskmas
 const MINION_PEOPLE = 10;
 
 /**
- * A minion's own facts sheet under its seam handoff (#1129): what the database knows of it (state, note, park, cards
+ * A minion's own facts sheet under its seam handoff (#1129): what the database knows of it (state, note, seal, cards
  * waiting on people, branch) and people's last messages to it in their own words, so a thin handoff can't lose them.
  */
 export function minionSheet(store: Store, runner: Pick<Runner, 'view'>, t: Ticket): string {
@@ -190,7 +190,7 @@ export function minionSheet(store: Store, runner: Pick<Runner, 'view'>, t: Ticke
     .slice(0, MINION_PEOPLE).reverse().map((x) => `- ${x!.d.author}, ${pacific(x!.at)}: ${cut(x!.d.text.replace(/\s+/g, ' '), 600)}`);
   return [
     `State: ${f.status}${f.state ? `, ${f.state}` : ''}${f.note ? ` · note: ${f.note}` : ''}`,
-    f.parkedOn ? `Parked on: ${f.parkedOn}` : '',
+    f.parkedOn ? `Sealed on: ${f.parkedOn}` : '',
     `Cards waiting on people:\n${f.cards.length ? f.cards.map((c) => `- ${cardText(c)}`).join('\n') : 'none'}`,
     `Branch: ${f.branch ?? 'none'}`,
     `People's last messages (newest last):\n${people.length ? people.join('\n') : 'none'}`,

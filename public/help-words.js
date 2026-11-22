@@ -11,7 +11,7 @@ export const WORDS = {
   card: { word: 'Card', def: 'A card is a question a minion needs you to answer: a choice, a plan to approve, or a go to ship. The minion waits until someone answers.' },
   turn: { word: 'Turn', def: 'A turn is one stretch of Claude working. It starts when a message reaches it and ends when it has answered or is waiting on you.' },
   ship: { word: 'Ship', def: "To ship is to put a finished change into the project's main code. Whether it is live right after depends on the project." },
-  parked: { word: 'Parked', def: 'A parked minion is on hold on purpose. Messages to it wait until you, its Taskmaster or the thing it waits for wakes it.' },
+  parked: { word: 'Sealed', def: 'A sealed minion is on hold on purpose. Messages to it wait until you, its Taskmaster or the thing it waits for wakes it.' },
   contraption: { word: 'Contraption', def: 'A contraption is a small app that runs inside Citadel, with its own page and often its own agent.' },
 };
 

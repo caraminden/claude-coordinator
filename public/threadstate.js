@@ -210,7 +210,7 @@ export function askWhy(item, t, now = Date.now()) {
   const card = item.card ?? {};
   const what = card.notice ? 'notice' : card.doc ? 'choices page' : card.secret ? 'secret' : item.kind;
   switch (item.kind) {
-    case 'approval': return `An approval card since ${since}: its turn waits on it. Approvals count even while the minion is parked.`;
+    case 'approval': return `An approval card since ${since}: its turn waits on it. Approvals count even while the minion is sealed.`;
     case 'question': case 'plan': return `A ${what} card for you since ${since}. It leaves once someone answers it.`;
     case 'spend': return `This turn passed $${card.stage} at ${since}. It leaves once someone answers the alert.`;
     case 'quiet': return `No output from its turn since ${since}, well past its usual gap. You asked for it, so it shows here until the turn talks again or ends.`;

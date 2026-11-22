@@ -78,7 +78,7 @@ export function recapSections(tickets, since, turns, stateOf) {
     { key: 'you', label: 'Needs you', rows: [] },
     { key: 'look', label: 'Ready, to try or done', rows: [] },
     { key: 'work', label: 'Still working', rows: [] },
-    { key: 'wait', label: 'Parked or waiting', rows: [] },
+    { key: 'wait', label: 'Sealed or waiting', rows: [] },
     { key: 'closed', label: 'Dismissed', rows: [] },
   ];
   const changed = tickets.filter((t) => turns[t.id] || t.updated_at > since).sort((a, b) => b.updated_at - a.updated_at);

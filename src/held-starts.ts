@@ -1,7 +1,7 @@
 // Citadel's own minions wait while the box is starved (#1302, performance P8 shape B; specs/automatic-work-yields.md).
 // A scheduled run or a flaky-test fixer that comes due while src/pressure.ts says starved is made at once, but its brief
-// is held: the minion is parked, with a note saying when it starts. The schedules' 30 s tick sends it once the box is
-// not starved, or after HOLD_MAX_MS, whichever is first; Unpark ("Start now") sends it at once. Only these two callers
+// is held: the minion is sealed, with a note saying when it starts. The schedules' 30 s tick sends it once the box is
+// not starved, or after HOLD_MAX_MS, whichever is first; Unseal ("Start now") sends it at once. Only these two callers
 // ask. A person's or a Taskmaster's start, a follow-on and every wake never read the pressure (Cara, 2026-11-20 14:44 PST:
 // "Only Citadel's own", "Yes, wake at once"), and no gate sits in the runner.
 // The list is in the settings table like the chains in src/wake.ts, so a restart keeps it; an entry is removed before its
@@ -53,7 +53,7 @@ export class HeldStarts {
     const since = this.now();
     this.d.store.setSetting(KEY, [...this.list().filter((o) => o.ticket !== h.ticket), { ...h, since }]);
     this.d.store.updateTicket(h.ticket, { state: 'parked', note: `Waiting for the box (${r.why.replace(' pressure', '')}), starts by ${clockTime(since + HOLD_MAX_MS)}` });
-    this.d.runner.emit(h.ticket, 'note', { text: `The box is starved (${r.why}): this brief waits up to ${HOLD_MAX_MS / 60_000} minutes. Unpark starts it now.` });
+    this.d.runner.emit(h.ticket, 'note', { text: `The box is starved (${r.why}): this brief waits up to ${HOLD_MAX_MS / 60_000} minutes. Unseal starts it now.` });
     this.d.broadcastTicket?.(h.ticket);
     return true;
   }
@@ -78,7 +78,7 @@ export class HeldStarts {
     const h = this.claim(ticket);
     if (!h) return false;
     const t = this.d.store.getTicket(ticket);
-    // Dismissed meanwhile, or someone took it out of parked another way: it is theirs now, so no second brief.
+    // Dismissed meanwhile, or someone took it out of sealed another way: it is theirs now, so no second brief.
     if (!t || t.status === 'closed' || t.state !== 'parked') return true;
     const mins = Math.max(0, Math.round((this.now() - h.since) / 60_000));
     this.d.store.updateTicket(ticket, { state: null, note: null });

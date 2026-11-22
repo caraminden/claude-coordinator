@@ -29,7 +29,7 @@ export const STATES = {
   ready: { label: 'Pending review' },
   complete: { label: 'Done, read it' },
   try: { label: 'Ready to try' },
-  parked: { label: 'Parked' },
+  parked: { label: 'Sealed' },
   blocked: { label: 'Blocked on something outside the minion' },
   outside: { label: 'Waiting on work running elsewhere' },
   'pending-deploy': { label: 'Deployed; dismissed once it is live' },

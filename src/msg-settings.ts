@@ -50,7 +50,7 @@ export function cleanMsgSettings(body: Record<string, unknown>): Row {
 /**
  * Kinds of held mail a scheme never holds (#1067; Josh, 2026-11-19, picked "By kind, scheme-wide"): a message's `need`,
  * or `note` for Citadel's own notes (leaveMail). Mail of such a kind wakes its receiver instead, as wake: true would;
- * a parked receiver and the loop guard still hold it. Stored comma-separated in projects.msg_never_hold.
+ * a sealed receiver and the loop guard still hold it. Stored comma-separated in projects.msg_never_hold.
  */
 export const NEVER_HOLD_KINDS = [...NEEDS, 'note'] as const;
 export const neverHold = (project?: { msg_never_hold?: string } | null): Set<string> =>

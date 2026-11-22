@@ -199,7 +199,7 @@ export function staleCards(text: string, settled: SettledCard[]): SettledCard[] 
 /** A sentence that says something waits on a person: "waiting on you", "still yours", "needs your go", "blocked on Cara". */
 const WAITS = /\b(?:wait(?:s|ing)? (?:on|for) (?:you|cara|josh|cody)\b|awaiting (?:your|cara|josh|cody)|still (?:yours|needed from you)|needs? (?:your|cara'?s?|josh'?s?) (?:go|ok|okay|pick|decision|answer|input|sign-?off|approval)|blocked on (?:you|cara|josh|cody)\b|on you to\b)/i;
 /** Negations and "it's done" wording near the match, which let the line through. */
-const NOT_WAITING = /\b(?:until|was|were|had|parked|will|would|should(?:n't)?|risk|high-risk|allow|reading|read|per|nothing|no(?:thing| one| longer)?|not|never|isn't|aren't|nobody|n't|already|done|resolved|answered|settled|no need)\b/i;
+const NOT_WAITING = /\b(?:until|was|were|had|parked|sealed|will|would|should(?:n't)?|risk|high-risk|allow|reading|read|per|nothing|no(?:thing| one| longer)?|not|never|isn't|aren't|nobody|n't|already|done|resolved|answered|settled|no need)\b/i;
 
 /**
  * The first sentence that says something waits on a person, when its paragraph links no card (an `?e=` link)

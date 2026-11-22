@@ -158,7 +158,7 @@ export class Relay {
 
   /** Held mail from the app itself (#678: a red scheduled run for a Taskmaster): no loop guard, no turn started. */
   leaveMail(to: number, author: string, text: string) {
-    // A scheme that never holds Citadel's notes (#1067) gets it as a message that wakes it, like any other: parked still holds it.
+    // A scheme that never holds Citadel's notes (#1067) gets it as a message that wakes it, like any other: sealed still holds it.
     if (this.neverHolds(to, 'note')) this.d.send(to, author, text, [], { hold: true }, false);
     else this.mail(to, author, text, undefined, false, undefined, true);
   }
@@ -205,8 +205,8 @@ export class Relay {
     const loop = store.getSetting<LoopState>(key) ?? { sent: [], held: [] };
     const now = this.d.now();
     loop.sent = loop.sent.filter((t) => now - t < windowMs);
-    // A parked receiver holds it whatever (#718), urgent too: only an unpark wakes it. It wakes nothing, so it
-    // isn't counted: notes left for a parked minion never pause the loop.
+    // A sealed receiver holds it whatever (#718), urgent too: only an unseal wakes it. It wakes nothing, so it
+    // isn't counted: notes left for a sealed minion never pause the loop.
     const receiver = store.getTicket(to);
     if (!mail && !this.d.isRunning(to) && receiver && this.d.parked(receiver)) {
       this.d.send(to, author, text, [], { from, hold: true, ...(need ? { need } : {}) }, steer);

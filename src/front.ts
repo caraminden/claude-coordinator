@@ -135,6 +135,7 @@ function runFront(opts: FrontOptions & { sock: string }) {
     });
     // A client that goes (a closed page's live stream) closes the main thread's side too.
     res.once('close', () => { if (!res.writableFinished) up.destroy(); });
+    up.flushHeaders(); // the head goes now: main may answer from it alone (an upload refused by its size) before any body comes
     req.pipe(up);
   };
 

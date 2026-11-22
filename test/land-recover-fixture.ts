@@ -121,11 +121,12 @@ unset DEPLOY_LOCKED DEPLOY_TESTED DEPLOY_QUEUE_TICKET
     run(script: string, cwd: string, extra: Record<string, string> = {}) { return this.start(script, cwd, extra).done; },
     lockFree: () => spawnSync('flock', ['-n', join(state, 'lock'), 'true']).status === 0,
     restartLockFree: () => spawnSync('flock', ['-n', join(state, 'restart.lock'), 'true']).status === 0,
-    restartsDone: () => (existsSync(join(dir, 'restart.done')) ? readFileSync(join(dir, 'restart.done'), 'utf8').trim().split('\n').length : 0),
+    // A restart's code is appended with `echo $? >>`, which makes the file empty before it writes: only whole lines count (the 03:40 red on Nov 22 read '').
+    restartsDone: () => (existsSync(join(dir, 'restart.done')) ? readFileSync(join(dir, 'restart.done'), 'utf8').split('\n').filter(Boolean).length : 0),
     // Every queued restart runs on after the deploy that queued it: wait for the k-th to end. Its exit codes so far.
     async restarts(k: number) {
       const done = join(dir, 'restart.done');
-      const codes = () => (existsSync(done) ? readFileSync(done, 'utf8').trim().split('\n') : []);
+      const codes = () => (existsSync(done) ? readFileSync(done, 'utf8').split('\n').filter(Boolean) : []);
       await until(`restart ${k} to end`, () => codes().length >= k);
       return codes();
     },

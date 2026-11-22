@@ -772,7 +772,8 @@ test('in a fast scheme the hand-off passes LAND_FAST for low and medium only, an
       const cwd = join(srv.root, name);
       mkdirSync(join(cwd, 'tools'), { recursive: true });
       const dump = join(srv.root, `${name}.env`);
-      writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf 'fast=%s\\nknown=%s\\n' "\${LAND_FAST:-}" "\${LAND_KNOWN_RED:-}" >${JSON.stringify(dump)}\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+      // Written whole, then renamed in: a bare redirect creates the file empty first, and the wait below saw it that way under load.
+      writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf 'fast=%s\\nknown=%s\\n' "\${LAND_FAST:-}" "\${LAND_KNOWN_RED:-}" >${JSON.stringify(dump + '.part')}\nmv ${JSON.stringify(dump + '.part')} ${JSON.stringify(dump)}\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
       git(cwd, 'init', '-q');
       git(cwd, 'add', '.');
       git(cwd, 'commit', '-qm', 'init');

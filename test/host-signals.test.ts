@@ -16,8 +16,9 @@ import { until } from './wait.ts';
 test('a booted server reads no host signal, and its day and hour in the zone the test handed it', async () => {
   const tmp = tempRoot('host-signals-');
   const log = tmp.path('trap.log');
+  const serverLog = tmp.path('server.log');
   try {
-    const srv = await bootServer({ root: tmp.dir, env: { NODE_OPTIONS: `--import=${join(import.meta.dirname, 'host-signal-trap.ts')}`, HOST_SIGNAL_TRAP: log } });
+    const srv = await bootServer({ root: tmp.dir, log: serverLog, env: { NODE_OPTIONS: `--import=${join(import.meta.dirname, 'host-signal-trap.ts')}`, HOST_SIGNAL_TRAP: log } });
     try {
     // The status page's first host sample (memory, load, pressure, the CPU ledger) is taken at boot; the host-load page reads pressure.
       await until('the first host sample', async () => ok(await srv.call('/api/status')).citadel?.host?.latest);
@@ -27,8 +28,10 @@ test('a booted server reads no host signal, and its day and hour in the zone the
       await srv.stop(); // the zone line is written as the server exits
     }
     const lines = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : [];
-    assert.deepEqual(lines.filter((l) => !l.startsWith('zone ')), [], 'reads that reached the real box');
-    assert.deepEqual(lines.filter((l) => l.startsWith('zone ')), [`zone ${TEST_ZONE}`], 'the local clock runs in the zone the test handed over');
+    // An empty zone line means the server ended without its exit hook (a signal, a crash): say how, and what it printed last (03:34 on Nov 22).
+    const ended = `the server ended with ${srv.proc.signalCode ? `signal ${srv.proc.signalCode}` : `exit code ${srv.proc.exitCode}`}; its last output:\n${(existsSync(serverLog) ? readFileSync(serverLog, 'utf8') : '').split('\n').slice(-30).join('\n')}`;
+    assert.deepEqual(lines.filter((l) => !l.startsWith('zone ')), [], `reads that reached the real box (${ended})`);
+    assert.deepEqual(lines.filter((l) => l.startsWith('zone ')), [`zone ${TEST_ZONE}`], `the local clock runs in the zone the test handed over (${ended})`);
   } finally {
     await tmp.teardown();
   }

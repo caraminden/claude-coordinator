@@ -85,7 +85,9 @@ test('a ship hung on the real line lets go of the lock and leaves the line when 
   const q = join(state, 'queue');
   let line: LandTicket[] = [];
   await until('the hung ship holds the line', () => (line = readQueue(q, 4)).some((t) => t.got > 0 && /waiting for CI/.test(t.phase)));
-  const sleeper = descendants(land.pid!);
+  // The phase line is written before the sleep forks, so under load the line can be read first: wait for the fork.
+  let sleeper: number[] = [];
+  await until('its sleep runs under it', () => (sleeper = descendants(land.pid!)).length > 0);
   assert.equal(sleeper.length, 1, 'its sleep runs under it');
   const ended = new Promise((r) => land.on('exit', (code, sig) => r(code ?? sig)));
   stopInLine(q, 4, line[0].seq);

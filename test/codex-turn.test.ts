@@ -96,10 +96,14 @@ const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
 const note = (method, params) => send({ method, params: { threadId: 'th1', turnId: 'tu1', ...params } });
 const mode = process.env.FAKE;
 let turns = 0;
+// An approval request holds the turn until the shim answers, as in Codex: ending first raced its reply
+// against the shim's SIGTERM, so a loaded fake could exit before reading the decline.
+let onApproval = null;
 process.on('SIGTERM', () => { log({ signal: 'SIGTERM' }); process.exit(0); });
 require('node:readline').createInterface({ input: process.stdin }).on('line', (line) => {
   const m = JSON.parse(line);
   log(m);
+  if (m.id === 77 && !m.method && onApproval) return onApproval();
   if (m.method === 'initialize') send({ id: m.id, result: {} });
   if (m.method === 'account/rateLimits/read') send({ id: m.id, result: { rateLimits: { primary: { usedPercent: 20, resetsAt: 2000000000, windowDurationMins: 300 }, secondary: null } } });
   if (m.method === 'thread/start') send({ id: m.id, result: { thread: { id: 'th1' } } });
@@ -143,9 +147,13 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', (l
   note('hook/completed', { run: { status: 'blocked', entries: [{ kind: 'feedback', text: '[tripwire] no' }] } });
   note('turn/plan/updated', { plan: [{ step: 'Fix it', status: 'inProgress' }, { step: 'Test it', status: 'pending' }] });
   note('thread/tokenUsage/updated', { tokenUsage: { last: { inputTokens: 100, cachedInputTokens: 60, cacheWriteInputTokens: 0, outputTokens: 7 } } });
+  const n = turns;
+  onApproval = () => {
+    onApproval = null;
+    note('item/completed', { item: { type: 'agentMessage', id: 'm2', text: 'Done ' + n + '.' } });
+    note('turn/completed', { turn: { id: 'tu' + n, status: 'completed' } });
+  };
   send({ id: 77, method: 'item/commandExecution/requestApproval', params: {} });
-  note('item/completed', { item: { type: 'agentMessage', id: 'm2', text: 'Done ' + turns + '.' } });
-  note('turn/completed', { turn: { id: 'tu' + turns, status: 'completed' } });
 });
 `);
 chmodSync(fake, 0o755);

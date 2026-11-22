@@ -1,5 +1,5 @@
 // The server's main thread goes first in line for a core (#1561). At a box load of 60 to 130 it spent 9% of its time
-// runnable but waiting for one (reports/server-responsiveness-2026-11.md). Node can't set a scheduling policy, so
+// runnable but waiting for one (the shared folder's reports/server-responsiveness-2026-11.md). Node can't set a scheduling policy, so
 // `chrt -R -r -p 1 <pid>` sets SCHED_RR priority 1 on the main thread (its tid is the pid); -R makes children it forks
 // start at SCHED_OTHER again; the kernel applies that flag to the threads it creates too (libuv's pool, Workers: the
 // test checks them), so only the main thread is real-time. A spinning real-time thread holds a core until the systemd watchdog
@@ -58,7 +58,12 @@ export function startRealtime(o: RealtimeOpts): { tick(): Promise<void>; stop():
         on = true;
         log('Server main thread is now SCHED_RR priority 1 with reset-on-fork (src/realtime.ts); turn it off with the realtime_priority setting.');
       } else if (!want && isRr && on) {
-        await run(['-R', '-o', '-p', '0', String(pid)]);
+        try {
+          await run(['-R', '-o', '-p', '0', String(pid)]);
+        } catch (e) {
+          log(`Could not put the server's main thread back to normal priority: ${(e as Error).message}`);
+          return; // stays real-time; the next tick tries again
+        }
         on = false;
         log('Server main thread is back at normal priority.');
       }

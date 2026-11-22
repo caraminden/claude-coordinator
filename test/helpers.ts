@@ -111,7 +111,7 @@ export function tempRoot(prefix = 'test-'): TempRoot {
 
 /**
  * Kill every process of this user that names a path in one of `dirs` (a turn's wrapper and claude name
- * its turn folder), then wait until they have gone. Turns are detached so they outlive a server restart;
+ * its turn folder), then wait until they have gone and this process's own background work is done. Turns are detached so they outlive a server restart;
  * a fake claude still waiting for its release would otherwise run forever once its test has deleted the
  * folder (#271). It goes by the command line, not pid.json: a turn the server started just before it
  * was stopped may not have written that yet.
@@ -119,7 +119,13 @@ export function tempRoot(prefix = 'test-'): TempRoot {
 export async function stopTurns(...dirs: string[]) {
   for (let i = 0; i < 100; i++) {
     const left = procsUnder(dirs);
-    if (!left.size) return;
+    if (!left.size) {
+      // Nor is this process itself still writing in there: a finished turn's session save runs on a worker thread of
+      // its own, which opens state.db in the folder, and put the file back while the teardown's delete walked it
+      // (ENOTEMPTY, #1619). What is still busy after the wait is left to the delete to report, as before.
+      await settledInProcess(10_000);
+      return;
+    }
     for (const pid of left.keys()) {
       try {
         process.kill(-pid, 'SIGKILL'); // claude leads a process group of its own, with its tools in it

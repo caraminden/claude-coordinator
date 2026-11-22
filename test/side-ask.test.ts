@@ -157,7 +157,7 @@ test('it answers while the minion is mid-turn, and the fork runs with the read-o
   sides.ask(m.id, cara.id, 'Cara', 'is it stuck?');
   await until('it', () => answers(m.id).length === 1);
   assert.equal(store.getTicket(m.id)!.status, 'running', 'the answer came before the turn ended');
-  assert.equal(answers(m.id)[0].ok, true);
+  assert.equal(answers(m.id)[0].ok, true, answers(m.id)[0].text);
   writeFileSync(release, '');
   await until('it', () => store.getTicket(m.id)!.status === 'idle');
 
@@ -178,4 +178,34 @@ test('refuses a minion with no session, a thread that ended, and a second ask wh
   assert.throws(() => sides.ask(t.id, cara.id, 'Cara', 'hi'), /no session/);
   store.updateTicket(t.id, { session_id: 'sess-x' });
   assert.throws(() => sides.ask(t.id, cara.id, 'Cara', 'hi', 999999), /ended/);
+});
+
+test("an answer that lands between the tick's two looks is not lost (#1619)", async () => {
+  const m = await minion();
+  const hand: any = new SideAsks(store, runner, (msg) => sent.push(msg), 60_000); // polled by hand below
+  const ev = hand.ask(m.id, cara.id, 'Cara', 'who is asking?');
+  const dir: string = hand.threads.get(ev.thread).run.dir;
+  const stream = join(dir, 'stream.jsonl');
+  const exit = join(dir, 'exit.json');
+  await until('the fork to exit', () => existsSync(exit));
+  const printed = readFileSync(stream, 'utf8');
+  // Back to the moment before claude printed anything. This time its answer and its exit land in the gap between the
+  // tick's read of the stream and its look for exit.json, where a loaded box can leave the tick for whole milliseconds;
+  // and its last line has no newline, as a stream that ends with the process can.
+  writeFileSync(stream, '');
+  rmSync(exit);
+  let gaps = 0;
+  const read = hand.read.bind(hand);
+  hand.read = (t: any, toEnd: boolean) => {
+    read(t, toEnd);
+    if (gaps++) return;
+    writeFileSync(stream, printed.trimEnd());
+    writeFileSync(exit, '{"code":0,"signal":null}');
+  };
+  hand.poll();
+  hand.poll();
+  assert.ok(gaps >= 1, 'the gap was never exercised: a tick no longer reads the stream');
+  const a = answers(m.id).at(-1)!;
+  assert.equal(a.ok, true, a.text);
+  assert.match(a.text, /answer to/);
 });

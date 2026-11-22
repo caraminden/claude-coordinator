@@ -122,8 +122,11 @@ export class SideAsks {
         if (now - t.lastAt > SIDE_IDLE_MS) this.end(t);
         continue;
       }
-      this.read(t);
+      // Looked for before the read, as the runner's own poll does: once exit.json is there, everything claude wrote is
+      // in the stream, so this tick's read takes the answer with it. Read first and an answer written in between is
+      // lost, and the thread ends saying it stopped without one (#1619).
       const exited = existsSync(join(t.run.dir, 'exit.json'));
+      this.read(t, exited);
       if (!exited && now - t.run.startedAt > SIDE_LIMIT_MS) {
         this.runner.signal({ dir: t.run.dir, unit: null, container: t.run.container }, 'SIGKILL');
         this.finish(t, `It took longer than ${SIDE_LIMIT_MS / 60_000} minutes, so it was stopped.`);
@@ -137,7 +140,8 @@ export class SideAsks {
     }
   }
 
-  private read(t: SideThread) {
+  /** @param toEnd claude has exited, so its last line is all there is, newline or not. */
+  private read(t: SideThread, toEnd = false) {
     const run = t.run!;
     let text: string;
     try {
@@ -146,7 +150,7 @@ export class SideAsks {
       return;
     }
     const from = this.offsets.get(run.ask) ?? 0;
-    const end = text.lastIndexOf('\n') + 1;
+    const end = toEnd ? text.length : text.lastIndexOf('\n') + 1;
     if (end <= from) return;
     const seen = this.found.get(run.ask) ?? {};
     for (const line of text.slice(from, end).split('\n')) {

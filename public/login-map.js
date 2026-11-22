@@ -18,7 +18,7 @@ export function mountLoginMap(app) {
   app.prepend(root);
   globalThis.citadelMap.draw(scene, 'lm-');
   // The map starts under the top bar, so the CITADEL banner at its top isn't hidden behind it.
-  // Measured fresh each time: the bar grows by a notch's inset after the page is up, and can be redrawn.
+  // Watched by its border box: a notch's inset (it changes on rotation) is padding, which the default content box misses.
   const fit = () => {
     const bar = document.querySelector('.topbar');
     const h = `${bar ? bar.getBoundingClientRect().height : 0}px`;
@@ -26,9 +26,8 @@ export function mountLoginMap(app) {
   };
   fit();
   const ro = new ResizeObserver(() => (root.isConnected ? fit() : ro.disconnect()));
-  ro.observe(document.documentElement);
   const bar = document.querySelector('.topbar');
-  if (bar) ro.observe(bar);
+  if (bar) ro.observe(bar, { box: 'border-box' });
   watch(root);
 }
 

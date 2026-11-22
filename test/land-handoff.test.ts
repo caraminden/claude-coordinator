@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, prepConflict, type DeployOps, type HandoffDeps } from '../src/land.ts';
+import { deployApps, LandHandoffs, landConflict, Landings, landPhase, landResult, outputTail, prepConflict, prepMessage, type DeployOps, type HandoffDeps } from '../src/land.ts';
 import { agentToken, bootServer, until } from './helpers.ts';
 import { signalTree } from '../src/ship-stop.ts';
 import { git } from './git.ts';
@@ -935,10 +935,12 @@ test('handoffs() answers from memory: it does not read the landings folder again
 test('a prep line from a running land wakes the minion once, with the scratch-worktree steps, and the land keeps running', async () => {
   const top = 'a'.repeat(40), base = 'b'.repeat(40), head = 'c'.repeat(40);
   const line = `land: prep: ticket/7-x will conflict with ticket/3-y once ticket/2-z's ship train ships; conflicted files: a.txt, src/b.ts; record the fix against ${top} from ${base} to ${head}`;
-  assert.deepEqual(prepConflict(`queue: 2nd in line\n${line}\n`), { branch: 'ticket/7-x', cause: 'ticket/3-y', front: 'ticket/2-z', files: 'a.txt, src/b.ts', top, base, head });
+  assert.deepEqual(prepConflict(`queue: 2nd in line\n${line}\n`), { branch: 'ticket/7-x', cause: 'ticket/3-y', front: 'ticket/2-z', files: 'a.txt, src/b.ts', top, base, head, train: true });
   // The kit's template (#1571): the one ship ahead, no train, and its own "resolves it" line.
   const tpl = `land: prep: ticket/7-x will conflict with ticket/6-y once ticket/6-y ships; conflicted files: a.txt; record the fix against ${top} from ${base} to ${head}`;
-  assert.deepEqual(prepConflict(`${tpl}\n`), { branch: 'ticket/7-x', cause: 'ticket/6-y', front: 'ticket/6-y', files: 'a.txt', top, base, head });
+  assert.deepEqual(prepConflict(`${tpl}\n`), { branch: 'ticket/7-x', cause: 'ticket/6-y', front: 'ticket/6-y', files: 'a.txt', top, base, head, train: false });
+  assert.match(prepMessage(prepConflict(tpl)!), /once ticket\/6-y ships, your rebase/);
+  assert.doesNotMatch(prepMessage(prepConflict(tpl)!), /ship train|the train/);
   assert.equal(prepConflict(`${tpl}\nland: prep: ticket/7-x conflicts with 1234567 by its rebase, but the fix recorded ahead of time (git rerere) resolves it\n`), null);
   assert.equal(prepConflict(`${line}\nland: prep: ticket/7-x conflicts with ticket/3-y on ticket/2-z's ship train (a.txt), but the fix recorded ahead of time (git rerere) resolves it, so its rebase goes through once that train ships\n`), null, 'recorded already');
   const s = setup('prep');

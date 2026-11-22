@@ -245,9 +245,9 @@ park() { say "$*"; exit 75; }
 #   land_recover <main's commit>  each pass of the line before this landing's work, in the main checkout: puts right
 #                                 what a deploy that died half way left behind (Citadel's restart bookkeeping).
 #                                 A failure refuses the landing; a person needs to look.
-#   land_under <commit> <branch>  once a plain landing: prints a commit under <commit> (the branch) whose own commits
-#                                 left $BRANCH since (a deploy rolled them back), so the rebase replays only the
-#                                 branch's commits above it. Nothing printed: the usual fork point (header at under_of).
+#   land_under <commit> <branch>  plain landings, at the early checks and again before each rebase: prints the newest
+#                                 commit under <commit> (the branch) whose own commits came off $BRANCH (a deploy
+#                                 rolled them back), so the rebase replays only the branch's commits above it. Nothing printed: the usual fork point (header at under_of).
 #   land_merge <side> <base> <ours> <theirs> <path>  the "hook" rule of MERGES: merges the file, leaving the result in
 #                                 <ours>; <side> names which of ours and theirs is $BRANCH's. Exit 0 clean, else
 #                                 it stops the rebase as a clash does. With LAND_MERGE_DIFF3=1 (the path has append or
@@ -1052,15 +1052,16 @@ claims_check() {
   refuse "$why"
 }
 
-# land.local.sh's land_under <the branch's commit> <branch>, asked once a landing (plain landings only): prints a
-# commit under the branch's whose own commits came off $BRANCH since the branch took them (a deploy rolled them back),
+# land.local.sh's land_under <the branch's commit> <branch>, asked at the early checks and again right before each
+# rebase, since a deploy can roll back while the landing waits (plain landings only): prints the newest commit under the
+# branch's whose own commits came off $BRANCH since the branch took them (a deploy rolled them back),
 # so this script's rebases replay only the branch's commits above it (git rebase --onto) and the early checks merge
 # from it. Nothing printed: the usual fork point. A commit that isn't under the branch's, or a failure, refuses.
 under='' under_asked=''
 under_of() { # <the branch's commit>
-  local rc=0 out c
+  local rc=0 out c was=$under
   [ -z "$under_asked" ] || return 0
-  under_asked=1
+  under_asked=1 under=''
   declare -F land_under >/dev/null && [ "$mode" = land ] || return 0
   out=$(mktemp) || return 0
   (cd "$here" && land_under "$1" "$branch") </dev/null >"$out" 9>&- 6>&- 7>&- &
@@ -1071,7 +1072,7 @@ under_of() { # <the branch's commit>
   [ -n "$c" ] || return 0
   under=$(git rev-parse -q --verify "$c^{commit}") && git merge-base --is-ancestor "$under" "$1" ||
     refuse "land.local.sh's land_under printed \"$c\", which is not a commit under $branch's, so nothing landed; a person needs to look"
-  say "the rebase replays only $branch's commits above ${under:0:12} (land_under)"
+  [ "$under" = "$was" ] || say "the rebase replays only $branch's commits above ${under:0:12} (land_under)"
 }
 
 # Conflict prep (CONFLICT_PREP): this script's rebases and early checks run with git rerere on (rr, set once the mode is
@@ -1114,6 +1115,7 @@ prep_count() { find "$(git rev-parse --path-format=absolute --git-common-dir)/rr
 # output as the caller sends it. 1 with the rebase stopped, for the caller to abort.
 land_rebase() {
   local -a r=("$1")
+  under_asked='' # asked again: a deploy may have rolled back since the early checks
   under_of "$pre"
   [ -z "$under" ] || r=(--onto "$1" "$under")
   land_git ours "${rr[@]}" rebase -q "${r[@]}" && return 0

@@ -178,10 +178,10 @@
 #   [ ! -e .deploy-half-done ] || tools/deploy-finish.sh "$1"
 # }
 
-# Print a commit under the branch's whose own commits left main since (a deploy rolled them back), so the rebase
-# replays only the branch's commits above it. Nothing: the usual fork point.
+# Print the newest commit under the branch's whose own commits left main since (a deploy rolled them back), so the
+# rebase replays only the branch's commits above it. Nothing: the usual fork point. Asked again before each rebase.
 # land_under() { # <the branch's commit> <branch>
-#   cat .rolled-back-to 2>/dev/null || true # the deploy's roll back writes main's commit before the rolled-back ones
+#   cat .rolled-back-to 2>/dev/null || true # the deploy's roll back writes the newest commit it took off main
 # }
 
 # MERGES's hook rule: merge <path>, leaving the result in <ours>. <side> says which of ours and theirs is main's

@@ -471,16 +471,16 @@ export function landPhase(output: string): string {
 
 /** land.sh's conflict-prep lines (#1366): a ship waiting in line that will conflict once the train ahead ships. The kit's
  *  template (CONFLICT_PREP, #1571) says "once <the ship ahead> ships", with no train. */
-const PREP = /^land: prep: (\S+) will conflict with (.+) once (\S+?)(?:'s ship train)? ships; conflicted files: (.*); record the fix against ([0-9a-f]{7,64}) from ([0-9a-f]{7,64}) to ([0-9a-f]{7,64})$/;
+const PREP = /^land: prep: (\S+) will conflict with (.+) once (\S+?)('s ship train)? ships; conflicted files: (.*); record the fix against ([0-9a-f]{7,64}) from ([0-9a-f]{7,64}) to ([0-9a-f]{7,64})$/;
 
-export interface PrepConflict { branch: string; cause: string; front: string; files: string; top: string; base: string; head: string }
+export interface PrepConflict { branch: string; cause: string; front: string; files: string; top: string; base: string; head: string; train: boolean }
 
 /** The newest conflict-prep line in a landing's output, if any. */
 export function prepConflict(output: string): PrepConflict | null {
   for (const line of output.split('\n').reverse()) {
     if (/^land: prep: \S+ conflicts with .* resolves it/.test(line)) return null; // the fix is recorded already
     const m = PREP.exec(line);
-    if (m) return { branch: m[1], cause: m[2], front: m[3], files: m[4], top: m[5], base: m[6], head: m[7] };
+    if (m) return { branch: m[1], cause: m[2], front: m[3], train: !!m[4], files: m[5], top: m[6], base: m[7], head: m[8] };
   }
   return null;
 }
@@ -489,16 +489,16 @@ export function prepConflict(output: string): PrepConflict | null {
 export function prepMessage(p: PrepConflict): string {
   const wt = '"$TMPDIR/train-prep"';
   return [
-    `Heads-up while your ship waits in line: once ${p.front}'s ship train ships, your rebase onto it will conflict with ${p.cause} in ${p.files || 'files git didn\'t name'}. Record the fix now, ahead of time, so the real rebase replays it and your ship isn't refused (conflict prep, #1366).`,
+    `Heads-up while your ship waits in line: once ${p.front}${p.train ? "'s ship train" : ''} ships, your rebase onto it will conflict with ${p.cause} in ${p.files || 'files git didn\'t name'}. Record the fix now, ahead of time, so the real rebase replays it and your ship isn't refused (conflict prep, #1366).`,
     '',
     `Don't touch your branch or worktree: land.sh is running in it, and your branch must never take those unshipped commits. Work in a scratch worktree (\`git worktree\` and \`git cherry-pick\` there are fine; the folder is yours):`,
     '```bash',
     `git worktree add --detach ${wt} ${p.top}`,
     `git -C ${wt} -c rerere.enabled=true cherry-pick ${p.base}..${p.head}`,
     '```',
-    `At each stop, resolve the conflicted files in ${wt} keeping both sides' intent, \`git -C ${wt} add\` them, then run \`git -C ${wt} -c rerere.enabled=true -c core.editor=true cherry-pick --continue\` until the pick is done. If it says there is nothing to commit (your fix kept the train's side whole), run \`git -C ${wt} -c rerere.enabled=true rerere\` and then \`git -C ${wt} cherry-pick --skip\` instead. Then \`git worktree remove --force ${wt}\`.`,
+    `At each stop, resolve the conflicted files in ${wt} keeping both sides' intent, \`git -C ${wt} add\` them, then run \`git -C ${wt} -c rerere.enabled=true -c core.editor=true cherry-pick --continue\` until the pick is done. If it says there is nothing to commit (your fix kept the side ahead whole), run \`git -C ${wt} -c rerere.enabled=true rerere\` and then \`git -C ${wt} cherry-pick --skip\` instead. Then \`git worktree remove --force ${wt}\`.`,
     '',
-    `Don't hand it off again: your ship keeps its place. land.sh checks again within seconds and says "prep: … resolves it" in its output. If the train changes before it ships, the record just goes unused. End your turn once it's recorded.`,
+    `Don't hand it off again: your ship keeps its place. land.sh checks again within seconds and says "prep: … resolves it" in its output. If what's ahead changes before it ships, the record just goes unused. End your turn once it's recorded.`,
   ].join('\n');
 }
 

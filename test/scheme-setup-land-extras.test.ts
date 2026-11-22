@@ -128,6 +128,21 @@ test('land_under: the rebase replays only the commits above the one it names; a 
   assert.deepEqual(git(r.main, 'log', '--format=%s', 'main').split('\n'), ['b.txt: b', 'm.txt: main', 'base']);
 });
 
+test('land_under: asked again right before the rebase, so a roll back after the early checks still stays off main', () => {
+  // The first ask (the early checks) has nothing yet; the deploy rolls back while the landing waits.
+  const r = setup('true', {}, 'land_under() { echo x >>"$ASKED"; [ "$(wc -l <"$ASKED")" -lt 2 ] || cat "$UNDER"; }\n');
+  const under = join(r.dir, 'under');
+  const asked = join(r.dir, 'asked');
+  r.commit(r.wt, 'rolled.txt', 'back\n');
+  writeFileSync(under, `${git(r.wt, 'rev-parse', 'HEAD')}\n`);
+  r.commit(r.wt, 'b.txt', 'b\n');
+  r.commit(r.main, 'm.txt', 'main\n');
+  const ok = r.run({ UNDER: under, ASKED: asked });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.ok(readFileSync(asked, 'utf8').split('\n').length > 2, 'asked more than once');
+  assert.deepEqual(git(r.main, 'log', '--format=%s', 'main').split('\n'), ['b.txt: b', 'm.txt: main', 'base']);
+});
+
 // Citadel's src/db.ts: SCHEMA_HISTORY renumbered by its own driver (tools/ship-numbers.ts, the hook) and MIGRATIONS
 // appended by rule, in one file.
 const DB_FILE = 'src/db.ts';

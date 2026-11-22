@@ -395,7 +395,7 @@ export function watchLoopLag(log: (text: string) => void = console.warn, every =
     const own = !!sampler && mostlyRecorder(sampler.spans, from, to);
     void Promise.all([own ? [] : sampler?.take() ?? [], held >= 2000 && files.length ? openersOf(files) : []]).then(([ps, who]) => {
       const ran = namedStacks(ps, from, to);
-      const inWork = own ? `100% the freeze recorder's own roll (src/loop-lag.ts)` : namedStacks(ps, from, to, 3, true);
+      const inWork = own ? `mostly the freeze recorder's own roll (src/loop-lag.ts)` : namedStacks(ps, from, to, 3, true);
       log(`${line}${inWork ? ` In: ${inWork}.` : ''}${ran ? ` Running: ${ran}` : ''}${disk}${who.length ? ` Also open on the database: ${who.join('; ')}.` : ''}`);
     });
   }, every).unref();

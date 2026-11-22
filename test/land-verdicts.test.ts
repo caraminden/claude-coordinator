@@ -190,7 +190,7 @@ test('D: a red reached through a hub file names no suspects: the bisect', () => 
   assert.match(r.log, /retro: would spare #1369 \(hub\): no suspects, so the bisect · test\/db-writer\.test\.ts/);
   assert.equal(run({ script: `${D}\nguess test/db-writer.test.ts`, rules: 'hub=live' }).out, '\n');
   // It reproduces alone, so before any guess the pin finds the front, #1356 (#1403): from 21:01 every train had it.
-  const pin = run({ script: `${D}\ntip=tip1382\ntrain_pin test/db-writer.test.ts`, red: 'test/db-writer.test.ts', failsAt: 'own1356 tip1384 tip1358 tip1394 tip1369 tip1383 tip1382' });
+  const pin = run({ script: `${D}\ntip=tip1382\nwt=$(mktemp -d)\ngit worktree add -q --detach "$wt" "$tip"\ntrain_pin test/db-writer.test.ts "$wt"`, red: 'test/db-writer.test.ts', failsAt: 'own1356 tip1384 tip1358 tip1394 tip1369 tip1383 tip1382' });
   assert.equal(pin.out, '0\n');
 });
 // D2: run 44869305694 (Nov 20 21:06 PST, report 2106): front #1355, riders #1356, #1384, #1365, #1358, #1394; db-writer

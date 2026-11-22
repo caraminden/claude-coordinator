@@ -57,7 +57,8 @@ export function dayZone(ms: number): string {
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23', timeZoneName: 'shortOffset' }).formatToParts(ms).map((x) => [x.type, x.value])); // pacific-ok: the date the fixed zone keeps
   const pacificOffset = Number(/GMT([+-]\d+)/.exec(p.timeZoneName)![1]); // -8 or -7
   const offset = Math.max(-12, pacificOffset + 12 - Number(p.hour)); // Etc reaches 12 hours behind UTC at most
-  return offset === 0 ? 'Etc/GMT' : `Etc/GMT${offset > 0 ? '-' : '+'}${Math.abs(offset)}`; // Etc's sign is POSIX's, the reverse of ISO's
+  // Offset 0 is 'UTC': ICU resolves Etc/GMT to UTC, so TZ=Etc/GMT would read back under another name.
+  return offset === 0 ? 'UTC' : `Etc/GMT${offset > 0 ? '-' : '+'}${Math.abs(offset)}`; // Etc's sign is POSIX's, the reverse of ISO's
 }
 
 /** Whether Intl knows `zone`. */

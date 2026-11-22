@@ -5,6 +5,7 @@
 // the test hands it (CITADEL_ZONE: TEST_ZONE, which the test's own fixtures use too).
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
@@ -73,6 +74,17 @@ test('the fixed zone keeps Pacific\'s date and an afternoon hour', () => {
   assert.deepEqual(at('2026-11-22T07:45:00Z'), ['Etc/GMT+12', '2026-11-21, 19:45:00'], '23:45 PST: still the 21st');
   assert.deepEqual(at('2026-07-02T06:10:00Z'), ['Etc/GMT+12', '2026-07-01, 18:10:00'], '23:10 PDT');
   assert.deepEqual(at('2026-07-01T19:00:00Z'), ['Etc/GMT+7', '2026-07-01, 12:00:00'], 'noon PDT');
+});
+
+test('every hour of a Pacific day gets a zone that reads back under its own name, as the local clock does', () => {
+  for (const [day, utcOffset] of [['2026-11-21', '-08:00'], ['2026-07-01', '-07:00']]) {
+    for (let h = 0; h < 24; h++) {
+      const ms = Date.parse(`${day}T00:00:00${utcOffset}`) + h * 3_600_000 + 30 * 60_000;
+      const zone = dayZone(ms);
+      const read = spawnSync(process.execPath, ['-e', 'console.log(Intl.DateTimeFormat().resolvedOptions().timeZone)'], { env: { ...process.env, TZ: zone }, encoding: 'utf8' }).stdout.trim();
+      assert.equal(read, zone, `${day} ${h}:30 Pacific`);
+    }
+  }
 });
 
 /** The whole-hour zone whose clock reads 00:xx at `ms`: just after its midnight. */

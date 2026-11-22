@@ -43,7 +43,7 @@ setup() {
     echo "citadel-callgrind: building valgrind $VG_VERSION into $VG (a few minutes at nice 19)" >&2
     curl -sSfL "https://sourceware.org/pub/valgrind/valgrind-$VG_VERSION.tar.bz2" | tar -C "$src" -xj
     local heavy=()
-    command -v citadel-heavy >/dev/null && heavy=(citadel-heavy --here)
+    command -v citadel-heavy >/dev/null && heavy=(citadel-heavy --here --heavy) # --heavy: a cold valgrind build, minutes of CPU (#1629)
     (cd "$src/valgrind-$VG_VERSION" && "${heavy[@]}" nice -n 19 bash -c \
       "./configure --prefix='$VG' >'$src/configure.log' 2>&1 && make -j4 >'$src/make.log' 2>&1 && make install >'$src/install.log' 2>&1") \
       || die "the valgrind build failed; logs in $src"

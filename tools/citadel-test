@@ -37,7 +37,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ ${#files[@]} -gt 0 ] || affected=1 # no files named: what the change can break (#1621)
-full_suite="the full suite is the land gate's job (tools/land.sh runs it on CI); if you must run it: citadel-heavy npm test (on the repo's CI when it has the citadel-heavy workflow)"
+full_suite="the full suite is the land gate's job (tools/land.sh runs it on CI); if you must run it: citadel-heavy --heavy npm test (on the repo's CI when it has the citadel-heavy workflow)"
 if [ -n "$affected" ]; then
   alist=$("$root/tools/citadel-node" "$root/tools/affected.ts" --root "$root" --base "$base") ; as=$?
   [ $as -eq 3 ] && { say "the map has no rule for: $(echo "$alist" | sed -n 's/^unmapped\t//p' | tr '\n' ' ')and its @fallback is full: $full_suite"; exit 2; }

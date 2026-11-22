@@ -597,7 +597,7 @@ a run (the defaults are set for perigee; each script's comments say more):
 | `CITADEL_HEAVY_PLAIN_SLOTS` | 1 | `citadel-heavy`: perigee slots plain jobs share, at nice 19; deploy and APK builds get one more of their own |
 | `CITADEL_HEAVY_JUDGE` | on | `citadel-heavy`: `0` sends every job to the line, as before #1629; otherwise only heavy jobs queue and light ones run here at once |
 | `CITADEL_HEAVY_MIN_RUN` | 180 s | `citadel-heavy`: a job is heavy only when its last runs' median is at least this long… |
-| `CITADEL_HEAVY_MIN_CPU` | 50 % | `citadel-heavy`: …and their median CPU time is at least this share of it; jobs that run Claude are always light |
+| `CITADEL_HEAVY_MIN_CPU` | 75 % | `citadel-heavy`: …and their median CPU time (over all cores) is at least this share of it; jobs that run Claude are always light |
 | `CITADEL_HEAVY_GUESS` | light | `citadel-heavy`: what a job with no past runs counts as; `heavy` is `--heavy` for every job |
 
 ## Permissions

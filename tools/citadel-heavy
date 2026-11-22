@@ -44,7 +44,8 @@
 # for its lands; the rest wait here in ci-<owner>-<repo>-<n>, which costs perigee nothing. When nothing ran there
 # (no workflow, no runner took it in 10 min, GitHub refused) it says why and runs here as below. Its history line has
 # reason ci:<owner>/<repo>. `citadel-heavy --here <command...>` (or CITADEL_HEAVY_HERE=1) keeps a job on perigee:
-# one that reads data only perigee has, uses its Android emulator, or runs Claude. Priority jobs always run here.
+# one that reads data only perigee has or uses its Android emulator (a job that runs Claude is light: below). Priority
+# jobs always run here.
 #
 # Perigee's small slot (#1160, Josh: "One small slot here"): plain jobs here use at most CITADEL_HEAVY_PLAIN_SLOTS (1)
 # of the slots, at nice 19 and idle disk priority, so minions never feel them; the other slots are for priority jobs
@@ -61,9 +62,11 @@
 #   Cara: "Our goal is to be able to run many Claudes as efficiently as possible, its the actual heavy work we want to
 #   offload". No limit of their own.
 # - Otherwise by the job's own past runs: history lines of the same scheme (who up to " #" or " (") and the same command
-#   (its first 3 words past env, nice, timeout, time and `mise exec ... --`, paths cut to their last part), the newest 5.
+#   (its first 8 words past env, nice, timeout, time and `mise exec ... --`, paths cut to their last part, so a filtered
+#   `cargo test -p x some_test` is not the whole crate's run), the newest 5.
 #   Heavy when their median run is CITADEL_HEAVY_MIN_RUN s (180) or more AND their median CPU time is at least
-#   CITADEL_HEAVY_MIN_CPU % (50) of the run. Lines from before the CPU column count by run time alone: long is heavy.
+#   CITADEL_HEAVY_MIN_CPU % (75, "the vast majority") of the run, counted over all its cores. Lines from before the
+#   CPU column count by run time alone: long is heavy.
 # - A job with no past runs is light unless the caller guesses heavy: `citadel-heavy --heavy <command...>` (or
 #   CITADEL_HEAVY_GUESS=heavy), Cara: "Let the minion make an intelligent guess for unknowns". Its own runs decide after.
 # Priority jobs skip the judgment, and CITADEL_HEAVY_JUDGE=0 turns it off. A light job's nested citadel-heavy calls are judged on their own.
@@ -108,7 +111,7 @@ judge() {
   if [[ " $* $what " =~ $claude ]]; then echo "light it runs Claude turns, which wait on Claude, not the CPU"; return; fi
   local h=$dir/history
   [ -f "$h" ] || h=/dev/null # a fifo or a missing file would hang or fail the read
-  awk -F'\t' -v who="$who" -v what="$what" -v guess="$guess" -v min_run="${CITADEL_HEAVY_MIN_RUN:-180}" -v min_cpu="${CITADEL_HEAVY_MIN_CPU:-50}" '
+  awk -F'\t' -v who="$who" -v what="$what" -v guess="$guess" -v min_run="${CITADEL_HEAVY_MIN_RUN:-180}" -v min_cpu="${CITADEL_HEAVY_MIN_CPU:-75}" '
     function scheme(w) { sub(/ [#(].*/, "", w); return w }
     function key(s,   a, n, i, j, k, out, w) {
       n = split(s, a, / +/)
@@ -124,7 +127,7 @@ judge() {
         }
         sub(/.*\//, "", w); sub(/\.ts$/, "", w)
         out = out (k++ ? " " : "") w
-        if (k == 3) break
+        if (k == 8) break
       }
       return out
     }

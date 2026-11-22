@@ -469,8 +469,8 @@ const judged = (env: NodeJS.ProcessEnv) => ({ ...env, CITADEL_HEAVY_JUDGE: undef
 
 test('a job whose past runs were short runs at once while the slot is held, and its line says light', async () => {
   const { dir, env } = folder(1);
-  // Its key skips wrappers and keeps 3 words: these past runs are the same job as `sh -c echo quick`.
-  seed(dir, past('Tiny #2 (cara)', 'timeout -k 30 600 sh -c echo quick', 1, 1) + past('Tiny #3 (cara)', 'mise exec node@24 -- sh -c echo quick now', 2, 1));
+  // Its key skips wrappers: these past runs are the same job as `sh -c echo quick`.
+  seed(dir, past('Tiny #2 (cara)', 'timeout -k 30 600 sh -c echo quick', 1, 1) + past('Tiny #3 (cara)', 'mise exec node@24 -- sh -c echo quick', 2, 1));
   const { go, holder } = await holdSlot(env);
   try {
     const r = spawnSync(heavy, ['sh', '-c', 'echo quick'], { env: { ...judged(env), CITADEL_HEAVY_WHO: 'Tiny #6 (cara)' }, encoding: 'utf8', timeout: 10_000 });
@@ -506,9 +506,9 @@ test('a Claude-bound job never takes a slot, whatever its past runs say or the c
 
 test('a long CPU-bound job still queues behind the held slot, with no guess of its own', async () => {
   const { dir, env } = folder(1);
-  const what = "land.sh's suite for ticket/2-b (CI fallback)";
-  // The branch in the name is past the key's 3 words, so another branch's suite is the same job.
-  seed(dir, past('Citadel #1 (cara)', "land.sh's suite for ticket/1-a (CI fallback)", 600, 2400).repeat(3));
+  const what = 'npm test';
+  // Another minion of the scheme ran it long on busy cores; short runs of one file are another job, not its median.
+  seed(dir, past('Citadel #1 (cara)', 'env CI=1 npm test', 600, 2400).repeat(3) + past('Citadel #3 (cara)', 'npm test test/a.test.ts', 2, 2).repeat(5));
   const { go, holder } = await holdSlot(env);
   const up = join(root, `long-up-${n++}`);
   const c = job({ ...judged(env), CITADEL_HEAVY_WHAT: what }, 'Citadel #2 (cara)', touch(up));
@@ -523,16 +523,17 @@ test('a long CPU-bound job still queues behind the held slot, with no guess of i
   assert.ok(existsSync(up));
 });
 
-test('a long but mostly idle job runs at once; a long one from before the CPU column queues', async () => {
+test('a long job busy under 75 % of its run runs at once; a long one from before the CPU column queues', async () => {
   const { dir, env } = folder(1);
-  seed(dir, past('Idle #1 (cara)', 'sh -c echo idle', 900, 30).repeat(2) + past('Old #1 (cara)', 'sh -c echo old', 900).repeat(2));
+  // 60 % busy is not "the vast majority" of its run (CITADEL_HEAVY_MIN_CPU, 75).
+  seed(dir, past('Idle #1 (cara)', 'sh -c echo idle', 900, 540).repeat(2) + past('Old #1 (cara)', 'sh -c echo old', 900).repeat(2));
   const { go, holder } = await holdSlot(env);
   const up = join(root, `old-up-${n++}`);
-  const old = job(judged(env), 'Old #2 (cara)', `echo old; ${touch(up)}`);
+  const old = job({ ...judged(env), CITADEL_HEAVY_WHAT: 'sh -c echo old' }, 'Old #2 (cara)', `echo old; ${touch(up)}`);
   try {
     const r = spawnSync(heavy, ['sh', '-c', 'echo idle'], { env: { ...judged(env), CITADEL_HEAVY_WHO: 'Idle #2 (cara)' }, encoding: 'utf8', timeout: 10_000 });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stderr, /without a heavy slot: its last 2 run\(s\) took 900 s \(median\), CPU busy 3% of it/);
+    assert.match(r.stderr, /without a heavy slot: its last 2 run\(s\) took 900 s \(median\), CPU busy 60% of it/);
     await until('the old job to wait for the slot', () => /waiting for one/.test(old.err()));
     assert.ok(!existsSync(up), 'it waits');
   } finally {

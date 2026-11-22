@@ -1,7 +1,8 @@
 # Heavy jobs on the scheme's own CI (Citadel #1160). Copy to .github/workflows/citadel-heavy.yml.
 #
-# With this on the default branch, `citadel-heavy <command>` in a minion's turn runs here, on the scheme's runners,
-# instead of on perigee: Citadel's tools/heavy-ci.ts pushes the minion's working copy as a snapshot commit
+# With this on the default branch, a heavy `citadel-heavy <command>` in a minion's turn (minutes of busy CPU by its past
+# runs, or `--heavy`; Citadel #1629) runs here, on the scheme's runners, instead of on perigee (quick or idle jobs run
+# on perigee at once): Citadel's tools/heavy-ci.ts pushes the minion's working copy as a snapshot commit
 # (refs/citadel-heavy/<id>, which no push trigger sees), starts this workflow on it, waits, prints what the command
 # printed between the two markers below and exits with its status. `citadel-heavy --long <command>` only queues the job:
 # Citadel starts it here at night (from 2am, in the CI PC's job hours) with a longer `minutes`,
@@ -14,8 +15,8 @@
 #      <runner-label> below for theirs (<scheme-slug>-ci-linux, or <scheme-slug>-ci on Windows). Only one heavy job
 #      per repo runs at a time, so with two runners one always stays free for the scheme's ship tests.
 #   2. Toolchain: add the setup steps the scheme's own CI uses (setup-node, a Rust toolchain, setup-uv, mise-action...)
-#      where it says so below. Jobs that need perigee itself (data only it has, its Android emulator, Claude) stay
-#      there with `citadel-heavy --here`, so leave those out.
+#      where it says so below. Jobs that need perigee itself (data only it has, its Android emulator) stay there
+#      with `citadel-heavy --here`, and jobs that run Claude never come here, so leave those out.
 #   3. Ship it: GitHub starts a dispatch only from the default branch's copy.
 # Buying compute: the repo variable CI_RUNNER=github runs it on GitHub's own runners, which cost Actions minutes, so
 # ask a person first. Keep the name, run-name, inputs and markers: heavy-ci.ts finds the run and the output by them.

@@ -3,7 +3,7 @@
 // they notice the bug coming back.
 //
 //   node tools/fix-replay.ts plan [--since 2026-11-01] [--batch 25] [--out dir] [--spec heat-map.md]   cheap git only
-//   citadel-heavy node tools/fix-replay.ts run <batch.json>                         the undo and the tests: CI only
+//   citadel-heavy --heavy node tools/fix-replay.ts run <batch.json>                 the undo and the tests: CI only
 //   node tools/fix-replay.ts tally <results.jsonl...>                               counts per outcome
 //
 // Never run `run` on perigee: it runs test files, which is what citadel-heavy sends to the scheme's CI.

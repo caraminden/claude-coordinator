@@ -753,7 +753,7 @@ land_fallback() {
   left=$((CITADEL_QUIET_LIMIT - spent))
   CITADEL_HEAVY_WHAT="land.sh's suite for $branch (CI fallback)" CITADEL_HEAVY_MAX_WAIT=${LAND_HEAVY_MAX_WAIT:-$((left > 60 ? left : 60))} \
     CITADEL_TEST_CONCURRENCY=${CITADEL_TEST_CONCURRENCY:-$half} DEPLOY_TEST_CPU_WEIGHT=${DEPLOY_TEST_CPU_WEIGHT-20} \
-    "$t/citadel-heavy" --here "$t/run-tests.sh" "$log" || trc=$?
+    "$t/citadel-heavy" --here --heavy "$t/run-tests.sh" "$log" || trc=$?
   if [ "$trc" = 75 ]; then
     if [ "${LAND_PARK_RETRIED:-0}" -lt "$PARK_RETRIES" ]; then
       say "refused by the pipeline (perigee's heavy slot was taken), not your change: keeping its place in line and asking CI again in place, once"

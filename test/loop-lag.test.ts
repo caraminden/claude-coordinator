@@ -208,7 +208,7 @@ test('console profiles handed over overlapping give each window its profile with
     console.profileEnd('t1');
     const a = done.get('t0'), b = done.get('t1');
     assert.ok(a.samples.length > 0 && b.samples.length > 0);
-    assert.ok(Math.abs(a.endTime - b.startTime) < 5000, 'the next profile starts where the last ends');
+    assert.ok(b.startTime <= a.endTime, 'the next profile starts before the last ends: no gap');
     console.profileEnd('t2');
   } finally {
     s.disconnect();

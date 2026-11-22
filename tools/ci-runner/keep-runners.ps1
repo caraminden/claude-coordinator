@@ -30,6 +30,9 @@
   used, and what the squeezed slot gets once its squeeze lifts. Where Git Bash is installed, it also starts a ping
   through bash in the squeezed slot and checks the ping stays there. It exits 0 when all of that holds.
 
+.PARAMETER GitBin
+  With -Prove: the folder holding Git Bash's bash.exe, as the installer was given it.
+
 .PARAMETER CpuPercent
   The share of the whole PC (every core) all CI together may use, 1 to 100.
 
@@ -48,6 +51,7 @@ param(
   [ValidateRange(1, 100)][int]$SqueezePercent = 30,
   [int]$AgentPid = 0,
   [ValidateRange(5, 300)][int]$EverySeconds = 15,
+  [string]$GitBin = 'C:\Program Files\Git\bin',
   [switch]$Prove
 )
 $ErrorActionPreference = 'Stop'
@@ -167,8 +171,8 @@ if ($Prove) {
   $used = @{}
   # Git Bash asks to break away whenever a job allows it (a bash step's cargo got out that way, #1268): a native program
   # it starts in the squeezed slot must stay there.
-  $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
-  $bashHeld = $null
+  $gitBash = Join-Path $GitBin 'bash.exe'
+  $bashHeld = $null; $pings = @()
   try {
     if (Test-Path -LiteralPath $gitBash) {
       $bashParent = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -ArgumentList '-NoProfile', '-EncodedCommand', ([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("Start-Sleep -Seconds 3; & '$gitBash' -c 'ping -n 30 127.0.0.1 >/dev/null'"))) -WindowStyle Hidden -PassThru
@@ -191,9 +195,13 @@ if ($Prove) {
     $inJob = @($slots.Keys | ForEach-Object { $slot = $slots[$_]; $kids[$_] | Where-Object { [CitadelCiJob]::InJob($slot, [int]$_.ProcessId) -and [CitadelCiJob]::InJob($job, [int]$_.ProcessId) } }).Count
     $below = @($all | Where-Object { (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).PriorityClass -eq 'BelowNormal' }).Count
     if (Test-Path -LiteralPath $gitBash) {
-      $every = @(Get-CimInstance -ClassName Win32_Process)
-      $under = @($bashParent.Id); $pings = @()
-      for ($i = 0; $i -lt $under.Count; $i++) { foreach ($c in $every | Where-Object { $_.ParentProcessId -eq $under[$i] }) { $under += [int]$c.ProcessId; if ($c.Name -eq 'PING.EXE') { $pings += $c } } }
+      # bash may be slow to start on a busy PC: look for its ping for up to 15 seconds more.
+      for ($wait = 0; $pings.Count -eq 0 -and $wait -le 15; $wait++) {
+        if ($wait) { Start-Sleep -Seconds 1 }
+        $every = @(Get-CimInstance -ClassName Win32_Process)
+        $under = @($bashParent.Id)
+        for ($i = 0; $i -lt $under.Count; $i++) { foreach ($c in $every | Where-Object { $_.ParentProcessId -eq $under[$i] }) { $under += [int]$c.ProcessId; if ($c.Name -eq 'PING.EXE') { $pings += $c } } }
+      }
       $bashHeld = $pings.Count -gt 0 -and @($pings | Where-Object { [CitadelCiJob]::InJob($slots.squeezed, [int]$_.ProcessId) }).Count -eq $pings.Count
     }
     # The share of the whole PC each job used over 10 seconds.
@@ -211,16 +219,14 @@ if ($Prove) {
     Start-Sleep -Seconds 2
     $lifted = & $measure
   } finally {
-    [CitadelCiJob]::Kill($job)
-    # A ping that got out ends by itself; stop it now.
-    if ($bashHeld -eq $false) { foreach ($p in $pings) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue } }
+    [CitadelCiJob]::Kill($job)  # a ping that got out isn't killed with it, and ends by itself within 30 seconds
   }
   $held = $kids.ship.Count -gt 0 -and $kids.squeezed.Count -gt 0 -and $inJob -eq $all.Count -and $below -eq $all.Count -and $used.job -le $cap + 5 -and
     $used.squeezed -le $squeezed + 3 -and $used.ship -ge $cap - $squeezed - 10 -and $lifted.squeezed -ge $squeezed + 10 -and $lifted.job -le $cap + 5 -and $bashHeld -ne $false
   Write-Host ("{0} of {1} burners started, {2} in the job and their slot, {3} at below-normal priority." -f $all.Count, (2 * $cores), $inJob, $below)
   Write-Host ("Squeezed: the job used {0:N1}% of the PC's {1} cores against a cap of {2}%; the ship's slot {3:N1}%, the squeezed one {4:N1}% against {5}%." -f $used.job, $cores, $cap, $used.ship, $used.squeezed, $squeezed)
   Write-Host ("Lifted: the job used {0:N1}%; the ship's slot {1:N1}%, the other {2:N1}% (it should get well over {3}% now)." -f $lifted.job, $lifted.ship, $lifted.squeezed, $squeezed)
-  Write-Host $(if ($null -eq $bashHeld) { 'Git Bash: not installed here, not checked.' } elseif ($bashHeld) { 'Git Bash: the program it started stayed in its slot.' } else { 'Git Bash: the program it started is NOT in its slot (it broke away, or never started).' })
+  Write-Host $(if ($null -eq $bashHeld) { 'Git Bash: not installed here, not checked.' } elseif ($bashHeld) { 'Git Bash: the program it started stayed in its slot.' } elseif ($pings.Count) { 'Git Bash: the program it started is NOT in its slot (it broke away).' } else { "Git Bash: the ping it should have started never appeared (is $gitBash working?)." })
   Write-Host $(if ($held) { 'Held: the cap, the priority and the squeeze reach processes started inside the slots, and the squeeze lifts.' } else { 'NOT held: the lines above say which part failed.' })
   exit $(if ($held) { 0 } else { 1 })
 }

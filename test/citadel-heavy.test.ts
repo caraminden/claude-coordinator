@@ -573,8 +573,9 @@ test('a job with no past runs runs at once and never asks for CI, unless the cal
 
 test("the history line's last column is the command's CPU seconds, its children's included", () => {
   const { dir, env } = folder(2);
-  // About 2 s of a busy loop, much of it in the date processes it starts.
-  const r = spawnSync(heavy, ['sh', '-c', 'end=$(($(date +%s) + 2)); while [ "$(date +%s)" -lt $end ]; do :; done'], { env, timeout: 20_000 });
+  // A fixed amount of work (about 3 CPU s here), not a fixed time: a light job runs at nice 19, so on a busy box a
+  // time-bound loop got under 1 CPU s. Its CPU is all in sh, the command's own process.
+  const r = spawnSync(heavy, ['sh', '-c', 'i=0; while [ $i -lt 2000000 ]; do i=$((i+1)); done'], { env, timeout: 120_000 });
   assert.equal(r.status, 0);
   const cpu = Number(lastLine(dir)[8]);
   assert.ok(cpu >= 1 && cpu <= Number(lastLine(dir)[5]) * 16, `${cpu} CPU s`);

@@ -188,6 +188,14 @@ function secretAsk(raw: any): SecretAsk {
  * (any number on a pick-any question), so people always see what Claude would pick. An option's
  * image must be a picture or video the ticket may show, so a card can't reach files outside its folders.
  */
+/** The shells a command block on a card (or in a reply) is tagged with: the Citadel-wide "Commands people run" rule. */
+const SHELL_TAGS = ['powershell', 'powershell-admin', 'wsl', 'fish', 'bash', 'cmd'];
+/** Whether a card's text opens a fenced block with no tag: every other fence line opens one, and an opener needs its info string. */
+export function untaggedFence(text: string): boolean {
+  const fences = text.split('\n').map((l) => /^\s*```(.*)$/.exec(l)).filter((m) => m !== null);
+  return fences.some((m, i) => i % 2 === 0 && !m[1].trim());
+}
+
 async function cleanQuestions(app: App, ticket: Ticket, raw: unknown) {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 4) throw new HttpError(400, 'questions must be a list of 1 to 4 questions');
   const questions = raw.map((q: any, i: number) => {
@@ -208,10 +216,13 @@ async function cleanQuestions(app: App, ticket: Ticket, raw: unknown) {
     });
     if (new Set(options.map((o: any) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);
     const recommended = options.filter((o: any) => o.recommended).length;
-    if (!recommended) throw new HttpError(400, `${n} needs a recommended option: set "recommended": true on the one you would pick`);
+    if (!recommended) throw new HttpError(400, `${n} needs a recommended option: set "recommended": true on the one you would pick (exactly one; any number on a multiSelect question)`);
     if (recommended > 1 && q.multiSelect !== true) throw new HttpError(400, `${n} recommends ${recommended} options; mark just one`);
+    const question = str(q.question, n, 500);
+    const untagged = [question, ...options.map((o: any) => o.description ?? '')].some(untaggedFence);
+    if (untagged) throw new HttpError(400, `${n} has a code block with no tag. A command people run goes in a fenced block tagged with where it runs (${SHELL_TAGS.map((t) => '```' + t).join(', ')}): the card draws it with that header and a Copy button, as a reply does, and every value in it is filled in, no <placeholder> but a secret. Tag anything else \`\`\`text`);
     return {
-      question: str(q.question, n, 500),
+      question,
       ...(q.header ? { header: str(q.header, `${n} header`, 24) } : {}),
       multiSelect: q.multiSelect === true,
       options,
@@ -1804,7 +1815,7 @@ export const ticketRoutes: Route[] = [
       const reason = typeof body.reason === 'string' && body.reason.trim() ? str(body.reason.trim(), 'Reason', 500) : null;
       // A state ready is cleared rather than refused (#480): a finished minion sets it by habit before close_self.
       const kept = runner.keptOpen(id, true);
-      if (kept) throw new HttpError(409, `Not dismissed: ${kept}. Leave the minion open for them; if nothing is left for people (the card was answered in the chat, or there is nothing to try), settle the card or clear the state first`);
+      if (kept) throw new HttpError(409, `Not dismissed: ${kept}. Leave the minion open for them; if nothing is left for people (the card was answered in the chat, or there is nothing to try), settle the card or clear the state first. If it stays open, say why in your reply`);
       const cleared = app.store.getTicket(id)!.state === 'ready';
       if (!runner.closeAfterTurn(id, reason)) throw new HttpError(409, 'The minion is not mid-turn');
       return json(res, 202, { ...ticketView(app, id), cleared });

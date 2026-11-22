@@ -163,9 +163,17 @@ const SCHEDULE_EFFORT = { ...EFFORT, description: 'The effort each run starts wi
  * it: a final state of complete, try or ready cancels the close (#809), so the answer says that before the minion writes it.
  */
 export function closeSelfResult(cleared: boolean): string {
-  return `${cleared ? 'Dismissed (state ready cleared): do not set state ready again this turn, since that keeps it open. ' : ''}This minion will be dismissed when your turn ends (unless the turn fails or a new message arrives). `
+  return `${cleared ? 'Dismissed (state ready cleared): do not set state ready again this turn, since that keeps it open. ' : ''}This minion will be dismissed when your turn ends, unless the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. `
     + 'Your final reply\'s status line counts too: a state of complete, try or ready there (or a card posted after this call) cancels the close, so end it with state null. '
-    + 'Do not announce the close in prose. If you do stay open, say plainly why ("Staying open in state ready for you to do X"; a complete minion closes by itself once a member has seen it). Finish your reply now.';
+    + 'Leave the close out of your reply, since the server shows the dismissal and a new message can still skip it. If you do stay open, say plainly why ("Staying open in state ready for you to do X"; a complete minion closes by itself once a member has seen it). Finish your reply now.';
+}
+
+/** hand_off_land's answer: what happens next, the deploy, and what to do on a failure (its description's rules since #1575). */
+export function handOffResult(args: Record<string, any>, contraptions: string[], deploys: boolean): string {
+  const deploy = contraptions.length && args.deploy !== false && !args.into ? `, then deploys ${contraptions.join(', ')}; the shipped line says if it went live, so never call deploy_contraption or ask for a redeploy` : '';
+  const end = args.stay_open === true ? 'leaves this minion open (stay_open)' : `dismisses this minion${deploys ? ' (or sets pending-deploy for a restart)' : ''}`;
+  return `Handed off: the server runs tools/land.sh now, behind any landings in line${deploy}. End your turn now with a short reply and set no state (the server shows you as shipping until it ends): the server posts the shipped line and ${end} on a clean land; it never seals you. `
+    + 'If it fails (a conflict, even once main moves while it waits; a red test; a refusal; a failed deploy), you are woken with the end of its output: fix it and hand it off again.';
 }
 
 export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns', 'memory-curator', 'ship-lessons'] as const;
@@ -233,7 +241,8 @@ const WHEN_CI_PASSES = {
 const ASK_QUESTION = () => ({
   name: 'ask_question',
   description:
-    'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type). A plain card asked while your earlier plain card of this turn is still unanswered joins it (up to 8 questions in all), so one turn shows one card with one Send. A card repeating one open, or answered today, is refused once; if yours differs, retry with not_duplicate. When to ask and how to word a card: the Citadel-wide card rule (Asking and picking); a lone go may be a reply button instead. Each question marks the option you would pick with `recommended: true` (exactly one; any number on multiSelect), first; a question without one is refused. Options may carry an image, shown as a gallery. A command people run goes in the question (or an option description) as a fenced block tagged with where it runs (```powershell, ```powershell-admin, ```wsl, ```fish, ```bash, ```cmd): the card draws it with the same header and Copy button as a reply, and the same no-placeholder rule holds. A visual or multi-part choice goes on a choices page (citadel:docs-and-mocks): pass `doc` with its path and no questions, and its Send settles the card. For a password, API key or token, pass `secret` and no questions: a masked field; you get only the name, read from $CITADEL_SECRET_<NAME>, used in commands without printing it. After calling it, end your turn with a short reply; the answers arrive as the next message. The result gives the card\'s link: make every mention of the card a link to it, as in [the card below](#/p/2/t/12?e=345) ("below" this turn, "above" later).',
+    // Always loaded (ALWAYS_LOAD), so only its first sentence is here: each other rule is in the result or refusal that meets it (#1575).
+    'Ask people in this chat 1 to 4 multiple-choice questions on a card they answer with a click (or type).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -262,7 +271,7 @@ const ASK_QUESTION = () => ({
                     description:
                       'Optional picture: a path in your working directory or shared folder to a png, jpg, gif, webp, avif, svg, mp4, webm or mov, shown as a thumbnail.',
                   },
-                  recommended: { type: 'boolean', description: 'true on the option you recommend; the card labels it "(Recommended)". Leave the words out of the label.' },
+                  recommended: { type: 'boolean', description: 'true on the option you recommend, listed first; the card labels it "(Recommended)". Leave the words out of the label.' },
                 },
                 required: ['label'],
               },
@@ -1567,7 +1576,8 @@ const THREAD_TOOLS = () => ([
   {
     name: 'message_coordinator',
     description:
-      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme. To pass information to a minion of this scheme, or to unseal one sealed on you, message it yourself (message_minion). Say what you need with `need`: start, unpark (unseals a minion), decision, relay, ask, or fyi. A fyi (status, landed, live, tracking: anything with no action) is always held mail: it shows in its chat at once and reaches it on its next turn, whoever wakes it. If you need anything done it is not a fyi. Don't report that you landed or are live: the server's shipped line already tells it. If a landing should start more work, ask for it with create_ticket's start_after when the work is planned. Not for acknowledgements or progress. After " + C().MSG.loopLimit + " messages either way in " + C().MSG.loopMin + " minutes, the next is held until a person continues.",
+      // Always loaded: the rest of its rules are in its results (fyi, held) and its need parameter (#1575).
+      "Send a message to the Taskmaster of the person who owns this minion (assigned, else who asked for it; the scheme's one Taskmaster when it has one), waking it by default; others who touched this minion get it as held mail, and a minion with no owner reaches the Overlord: for what only it can do, such as starting, closing or reopening a minion, setting another minion's properties, or anything in another scheme.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', maxLength: 10000, description: 'What you need, self-contained: name minions as #N and give file paths in full. At most 10,000 characters (`message` is accepted too)' }, need: NEED, wake: { type: 'boolean', description: 'false: held mail, read on its next turn, for news that needs no action now. Default true: it runs now, or after its current turn. A need of fyi is always held mail' }, when_ci_passes: WHEN_CI_PASSES }, required: ['text', 'need'] },
   },
   {
@@ -1643,7 +1653,8 @@ const THREAD_TOOLS = () => ([
     name: 'hand_off_land',
     // Always loaded (ALWAYS_LOAD, #1275), so every word here is in every minion's prompt: the how-to lives in the self-review skill.
     description:
-      `Ship: the server runs tools/land.sh in your worktree. Use it where the instructions say to run tools/land.sh, once tested and self-reviewed (or first, when the self-review says it ships alongside). Commit everything first: uncommitted or conflicting work is refused at once. On a clean land the server posts the shipped line and dismisses you${C().DEPLOYS ? ', or sets pending-deploy for a restart' : ''}; it never seals you.${C().HOME_CONTRAPTIONS.length ? ` A ship to main also deploys ${C().HOME_CONTRAPTIONS.join(', ')}; the shipped line says if it went live, so never call deploy_contraption or ask for a redeploy.` : ''} If it fails (a conflict, even once main moves while it waits; a red test; a refusal; a failed deploy), you are woken with its output's end: fix it and hand it off again. Else end your turn with a short reply and set no state: you show as shipping until it ends.`,
+      // Its other rules are in its refusals (uncommitted work, a conflict, a missing go) and its result (#1575).
+      'Ship: the server runs tools/land.sh in your worktree.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1680,7 +1691,8 @@ const THREAD_TOOLS = () => ([
   {
     name: 'close_self',
     description:
-      `Dismiss this minion when the turn ends, once its work has shipped and nothing needs deploying${C().DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}. It is skipped if the turn doesn't finish cleanly or a new message arrives first (a GitHub notice that needs no action doesn't count); its worktree and branch are kept, and a message reopens it. Call it near the end of your turn, before your final answer. Refused while a question or plan card is open or in state try or complete (a complete minion closes itself once a member has seen it); a state ready is cleared. A state of complete, try or ready set after it, the final status line included, cancels it. Leave the close out of your reply, since the server shows the dismissal and a new message can still skip it: call this, and if it refuses or the minion stays open, say why.`,
+      // Always loaded: the rest is in its result (closeSelfResult) and its refusal (keptOpen) (#1575).
+      `Dismiss this minion when the turn ends, once its work has shipped and nothing needs deploying${C().DEPLOYS ? ' (after tools/deploy.sh, set state pending-deploy instead: the deploy dismisses it once live)' : ''}.`,
     inputSchema: {
       type: 'object',
       properties: { reason: { type: 'string', maxLength: 500, description: 'Optional one-line summary shown in the minion with the dismissal, at most 500 characters, e.g. "Shipped abc1234; live after the restart"' } },
@@ -2163,20 +2175,23 @@ async function runTool(name: string, args: any): Promise<string> {
       }
       if (args.secret != null && args.questions == null) {
         const { id: questionId, href } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { secret: args.secret, ...direct });
-        return `The secret card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}; its link is ${href}: link every mention of it, e.g. [the card below](${href}). End your turn now with a short reply. Once someone saves it, you get a message with the name it was saved as (never the value), and your next turn has it in $CITADEL_SECRET_<NAME>.`;
+        return `The secret card (id ${questionId}) is in the chat${args.to ? ` for ${args.to}` : ''}; its link is ${href}: link every mention of it, e.g. [the card below](${href}). End your turn now with a short reply. Once someone saves it, you get a message with the name it was saved as (never the value), and your next turn has it in $CITADEL_SECRET_<NAME>: use it in commands without ever printing it.`;
       }
       if (args.to && args.questions == null) {
         const { href, armed } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { ...direct, notice: args.notice, ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
         if (armed) return `${armed} Nothing comes back from it, so keep working.`;
         return `The notice for ${args.to} is in the chat; its link is ${href}. Nothing comes back from it, so keep working.`;
       }
+      // A choices page or a secret card asks on its own: questions beside it would post a plain card and drop the page or field.
+      if (args.questions != null && args.doc != null) throw new Error('Pass doc or questions, not both: a choices page (citadel:docs-and-mocks) asks on its own page, and its Send settles the card. Call again with doc alone, or questions alone.');
+      if (args.questions != null && args.secret != null) throw new Error('Pass secret or questions, not both: a secret card is one masked field for a password, API key or token. Call again with secret alone; you get only the name it was saved as.');
       if (args.questions == null) throw new Error('questions is required, unless you send a notice to one person (to and notice), ask on a choices page (doc) or ask for a secret (secret)');
       const ci = args.when_ci_passes === true ? { when_ci_passes: true } : {};
       const everyone = args.for_everyone === true ? { for_everyone: true } : {};
       const { id: questionId, href, armed, merged } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { questions: args.questions, ...(args.not_duplicate === true ? { not_duplicate: true } : {}), ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci, ...everyone });
       if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
-      if (merged) return `Your earlier question card of this turn was still unanswered, so these questions joined it: people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href})). End your turn now with a short reply; the answers will come as the next message.`;
-      return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.`;
+      if (merged) return `Your earlier question card of this turn was still unanswered, so these questions joined it (up to 8 questions in all): people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href})). End your turn now with a short reply; the answers will come as the next message.`;
+      return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})${args.for_everyone === true ? '' : ' ("below" this turn, "above" later)'}` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.${args.kind ? '' : ' A plain card you ask later this turn joins this one (up to 8 questions in all), so people see one card with one Send.'}`;
     }
     case 'settle_question': {
       const { settled } = await call('POST', `/api/tickets/${C().TICKET}/settle`, { questionId: args.question_id ?? null });
@@ -2278,8 +2293,11 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('POST', `/api/tickets/${C().TICKET}/coordinator`, { text: args.text ?? args.message, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.when_ci_passes === true ? { when_ci_passes: true } : {}) });
       if (r.armed) return `${r.armed} End your turn with state outside.`;
       if (r.held) return `${HELD()} Finish your turn.`;
-      if (r.mail) return 'Left as held mail: the Taskmaster reads it on its next turn, whoever wakes it. Do not resend it.';
-      return 'Sent. The Taskmaster runs it now, or after its current turn.';
+      // Rules its description held before #1575, where they apply (message_minion's pointer is in the minion prompt).
+      const fyi = args.need === 'fyi' ? " A fyi is for status, shipped, live or tracking: anything with no action. If you need anything done it is not a fyi, so send it again with the need that fits; otherwise do not resend it. Never send that you shipped or are live (the server's shipped line already tells it), nor acknowledgements or progress." : '';
+      const start = args.need === 'start' ? ' If the work should start only once something ships, say what: the Taskmaster starts it with create_ticket\'s start_after when the work is planned.' : '';
+      if (r.mail) return `Left as held mail: it shows in the Taskmaster's chat now, and the Taskmaster reads it on its next turn, whoever wakes it.${fyi || ' Do not resend it.'}`;
+      return `Sent. The Taskmaster runs it now, or after its current turn.${fyi}${start}`;
     }
     case 'message_minion': {
       const n = Number(args.ticket_id);
@@ -2323,7 +2341,7 @@ async function runTool(name: string, args: any): Promise<string> {
       for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       await call('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);
-      return 'Handed off: the server runs tools/land.sh now, behind any landings in line' + (C().HOME_CONTRAPTIONS.length && args.deploy !== false && !args.into ? `, then deploys ${C().HOME_CONTRAPTIONS.join(', ')}` : '') + '. End your turn now with a short reply and set no state (the server shows you as landing until it ends): the server posts the shipped line and ' + (args.stay_open === true ? 'leaves this minion open (stay_open)' : 'dismisses this minion (or sets pending-deploy)') + ' on a clean land, or wakes you with the end of its output if it fails.';
+      return handOffResult(args, C().HOME_CONTRAPTIONS, C().DEPLOYS);
     }
     case 'land': {
       // The server checks into, files, full and build against the shapes land.sh accepts (landArgs in src/land.ts).

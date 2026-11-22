@@ -846,8 +846,29 @@ fi
 # ("<when> <why>") when its boot check fails and removes it when one passes. On Nov 13 nine landings each waited in
 # line and for CI, to be refused by a boot check that failed on every commit. The fix for such a failure passes here
 # and lands as usual. Off: LAND_PREFLIGHT=0, or for every landing, touch <state>/preflight-off.
+# A ship that fails it while main fails it too is not the cause (#1564, Cara 2026-11-21, D "Go"): a plain land keeps
+# its ticket, lets go of the lock and holds with the phase "held: main is broken", passed over by the line, and goes on
+# from its rebase once main boots again (refusing cleared by a deploy that passed, main moved, or main's own check
+# passing on a recheck). Only past LAND_HOLD_MAX is it refused as before.
+main_boot() { # main's own boot check (its exit code), shared by every ship: run again once main moves or after LAND_HOLD_RECHECK s
+  local m sha rc at d
+  m=$(git -C "$SOURCE" rev-parse main)
+  (
+    flock 4
+    read -r sha rc at 2>/dev/null <"$state/boot-main" || true
+    if [ "${sha:-}" = "$m" ] && [[ ${at:-} =~ ^[0-9]+$ ]] && [ $(($(date +%s) - at)) -lt "${LAND_HOLD_RECHECK:-900}" ]; then echo "$rc"; exit 0; fi
+    d=$(mktemp -d "${TMPDIR:-/tmp}/land-main-boot.XXXXXX")
+    # A copy that can't be made can't tell, so the ship is judged alone, as before.
+    git -C "$SOURCE" archive "$m" | tar -x -C "$d" || { rm -rf "${d:?}"; echo 0; exit 0; }
+    rc=0
+    timeout -k 10 "${DEPLOY_BOOT_TIMEOUT:-420}" "$d/tools/citadel-node" "$d/tools/boot-check.ts" "$d" "${DEPLOY_DB:-$HOME/.local/share/claude-coordinator/coordinator.db}" >"$state/boot-main.log" 2>&1 9>&- 7>&- 6>&- 4>&- || rc=$?
+    rm -rf "${d:?}"
+    echo "$m $rc $(date +%s)" >"$state/boot-main"
+    echo "$rc"
+  ) 4>"$state/boot-main.lock"
+}
 preflight() {
-  local at why since rc=0
+  local at why since rc=0 mrc ref m l from
   [ -s "$state/refusing" ] || return 0
   { [ "${LAND_PREFLIGHT:-1}" != 0 ] && [ ! -e "$state/preflight-off" ]; } || return 0
   read -r at why <"$state/refusing" || true
@@ -862,10 +883,37 @@ preflight() {
     say "the boot check passes on $short, so this landing goes on"
     return 0
   fi
-  retro_log "preflight refusal · $label · refusing since $since ($why)"
   # 124, or 137 from timeout's KILL: stopped at the limit, which is not a verdict on the change (as deploy.sh says of it).
+  if [ "$rc" = 124 ] || [ "$rc" = 137 ]; then
+    say "the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-420} s): running it on main, to tell a broken main from a broken change"
+  else
+    say "$short fails the same check here (its output is above): running it on main, to tell a broken main from a broken change"
+  fi
+  mrc=$(main_boot) || mrc=0
+  if [ "$mrc" != 0 ] && [ "$mode" = land ] && [ -n "${DEPLOY_QUEUE_TICKET:-}" ] && [ -e "$DEPLOY_QUEUE_TICKET" ]; then
+    retro_log "preflight hold · $label · refusing since $since ($why)"
+    say "main fails it too (exit $mrc; its output: $state/boot-main.log), so main or the box is broken, not $branch: held in its place in line without the lock, and it goes on from its rebase once main boots again (a fix ships, or the box is fixed). No CI run was spent and $untouched"
+    m=$(git -C "$SOURCE" rev-parse main) ref=$(cat "$state/refusing" 2>/dev/null) from=$SECONDS
+    mapfile -t l <"$DEPLOY_QUEUE_TICKET"
+    flock -u 9
+    while :; do
+      QUEUE_TRAIN='' QUEUE_YIELD=yield queue_write "$DEPLOY_QUEUE_TICKET" "${l[0]}" 0 "${l[2]}" "held: main is broken ($(((SECONDS - from) / 60)) min)"
+      sleep "${LAND_HOLD_POLL:-30}"
+      [ "$(cat "$state/refusing" 2>/dev/null)" = "$ref" ] || { say "the deploy's note changed (a deploy ran)"; break; }
+      [ "$(git -C "$SOURCE" rev-parse main)" = "$m" ] || { say "main moved"; break; }
+      [ "$(main_boot)" != 0 ] || { say "main's boot check passes again"; break; }
+      [ $((SECONDS - from)) -lt "${LAND_HOLD_MAX:-28800}" ] || refuse "held $(((SECONDS - from) / 60)) min while main failed the boot check (refusing since $since: $why), the most a ship holds, so it is refused and $untouched; $branch keeps the rebased work. Landings are blocked until main boots again: tell the Taskmaster"
+    done
+    say "back in line after $(((SECONDS - from) / 60)) min held: it starts over from its rebase at the front"
+    queue_wait_check() { { train_verdict && prep_check; } || true; }
+    QUEUE_KEEP=$DEPLOY_QUEUE_TICKET queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
+    unset -f queue_wait_check
+    train_verdict held
+    LAND_REBASED=1 LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}"
+  fi
+  retro_log "preflight refusal · $label · refusing since $since ($why)"
   [ "$rc" != 124 ] && [ "$rc" != 137 ] || refuse "deploy has been refusing since $since: $why, and the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-420} s), so no CI run was spent and $untouched; $branch keeps the rebased work. A hang is not a verdict on the change: run it again, and if it hangs again tell the Taskmaster, since landings are blocked until that is fixed"
-  refuse "deploy has been refusing since $since: $why, and $short fails the same check here (its output is above), so no CI run was spent and $untouched; $branch keeps the rebased work. If the cause is in your change, fix it and land again. If it isn't, landings are blocked until the fix for it lands (that fix passes this check and lands as usual): tell the Taskmaster, and don't retry until then"
+  refuse "deploy has been refusing since $since: $why, and $short fails the same check here (its output is above) while main passes it, so the cause is in your change: no CI run was spent and $untouched; $branch keeps the rebased work. Fix it and land again"
 }
 # A light land deploys without the boot check, so a refusing deploy doesn't hold it up.
 [ "$mode" = into ] || [ "$mode" = full ] || [ "$lane" = light ] || preflight

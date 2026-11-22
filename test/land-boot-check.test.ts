@@ -1,9 +1,15 @@
 // A boot check that fails, hangs or is stopped, and the rollback after it (#553).
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { tools, git, until, pipe, land, subjects } from './land-recover-fixture.ts';
+
+// Each ticket's phase in the deploy line (its 4th line, tools/deploy-queue.sh).
+const phases = (state: string) => {
+  const q = join(state, 'queue');
+  return existsSync(q) ? readdirSync(q).filter((f) => /^\d+$/.test(f)).map((f) => readFileSync(join(q, f), 'utf8').split('\n')[3] ?? '') : [];
+};
 
 // F1: land.sh said "landed" (or "live now") and left before the restart's own check could fail.
 test('a landing whose restart is rolled back says so, fails, and takes its commit off main', { timeout: 200_000 }, async (t) => {
@@ -76,16 +82,21 @@ test('a boot check that never returns is stopped at its time limit, called a han
   assert.equal(git(p.live, 'rev-parse', 'HEAD'), p.base, 'the live checkout is back');
   assert.equal(git(p.source, 'rev-parse', 'main'), p.base, 'main is back');
   assert.ok(p.lockFree(), 'the deploy lock is free');
-  // The landing behind meets the same hang before its test run, and is told it is a hang, not a failed check.
+  // The landing behind meets the same hang before its test run, and main hangs too: it holds its place without the lock
+  // instead of being refused (#1564), and ships once the check stops hanging.
   rmSync(gate, { force: true });
   const mark = join(p.dir, 'test-runs');
-  const giveUp2 = setTimeout(() => writeFileSync(gate, ''), 30_000);
-  const next = await p.run(land, p.wts[0], { BOOT_MARK: join(p.dir, 'boot-started'), BOOT_GATE: gate, DEPLOY_BOOT_TIMEOUT: '2', TEST_MARK: mark });
-  clearTimeout(giveUp2);
-  assert.equal(next.status, 1, next.stderr);
-  assert.match(next.stderr, /the boot check hung on [0-9a-f]{7,} here too \(stopped after 2 s\)/);
-  assert.doesNotMatch(next.stderr, /fails the same check/);
+  const next = p.start(land, p.wts[0], { BOOT_MARK: join(p.dir, 'boot-started'), BOOT_GATE: gate, DEPLOY_BOOT_TIMEOUT: '2', TEST_MARK: mark, LAND_HOLD_POLL: '0.2', LAND_HOLD_RECHECK: '0' });
+  await until('the next landing to hold', () => phases(p.state).some((x) => x.startsWith('held: main is broken')));
+  assert.match(next.stderr(), /the boot check hung on [0-9a-f]{7,} here too \(stopped after 2 s\): running it on main/);
+  assert.match(next.stderr(), /main fails it too \(exit 124;/);
   assert.ok(!existsSync(mark), 'no test run was spent on it');
+  assert.ok(p.lockFree(), 'a held ship lets go of the lock');
+  writeFileSync(gate, '');
+  const shipped = await next.done;
+  assert.equal(shipped.status, 0, shipped.stderr);
+  assert.match(shipped.stderr, /main's boot check passes again/);
+  assert.doesNotMatch(shipped.stderr, /fails the same check|is refused/);
   assert.ok(p.lockFree(), 'the deploy lock is free');
 });
 
@@ -112,8 +123,9 @@ test('a deploy stopped with TERM during its boot check stops the check and puts 
 });
 
 // #646: on Nov 13 nine landings each waited in line and for CI, to be refused by a boot check that failed on every commit.
+// Since #1564 (Cara 2026-11-21, D "Go") they aren't refused for it: main fails it too, so each holds its place.
 const testRuns = (mark: string) => (existsSync(mark) ? readFileSync(mark, 'utf8').trim().split('\n').length : 0);
-test('while the boot check fails on every commit, the next landing is refused before its test run, and the fix lands as usual', { timeout: 300_000 }, async (t) => {
+test('while the boot check fails on every commit, the next ship holds its place before its test run, none is refused for it, and it ships once main boots again', { timeout: 300_000 }, async (t) => {
   const p = await pipe(t, 2);
   const broken = join(p.dir, 'box-broken');
   const mark = join(p.dir, 'test-runs');
@@ -131,16 +143,6 @@ test('while the boot check fails on every commit, the next landing is refused be
   const left = readFileSync(refusing, 'utf8');
   assert.match(left, /^\d+ the boot check failed on [0-9a-f]{7,}\n$/);
 
-  const second = await p.run(land, p.wts[1], extra);
-  assert.equal(second.status, 1, second.stderr);
-  assert.match(second.stderr, /deploy has been refusing since .*: the boot check failed on [0-9a-f]{7,}, and [0-9a-f]{7,} fails the same check here/);
-  assert.match(second.stderr, /no CI run was spent and main is untouched/);
-  assert.equal(testRuns(mark), 1, 'no test run was spent on it');
-  assert.equal(git(p.source, 'rev-parse', 'main'), p.base);
-  assert.equal(git(p.live, 'rev-parse', 'HEAD'), p.base);
-  assert.ok(p.lockFree(), 'the deploy lock is free');
-  assert.equal(readFileSync(refusing, 'utf8'), left, 'the first refusal\'s time stays');
-
   // Each off switch: the landing finds out at the deploy again, as before.
   const off = await p.run(land, p.wts[1], { ...extra, LAND_PREFLIGHT: '0' });
   assert.equal(off.status, 1, off.stderr);
@@ -154,10 +156,25 @@ test('while the boot check fails on every commit, the next landing is refused be
   rmSync(join(p.state, 'preflight-off'));
   assert.equal(readFileSync(refusing, 'utf8'), left);
 
-  // The box is fixed: the check passes before CI, the landing goes through and the note goes.
+  // The preflight: it fails here, and on main too, so the ship holds without the lock instead of being refused.
+  const held = p.start(land, p.wts[1], { ...extra, LAND_HOLD_POLL: '0.2', LAND_HOLD_RECHECK: '0' });
+  await until('the ship to hold', () => phases(p.state).some((x) => x.startsWith('held: main is broken')));
+  assert.match(held.stderr(), /deploy has been refusing since .*: running its boot check on [0-9a-f]{7,}/);
+  assert.match(held.stderr(), /[0-9a-f]{7,} fails the same check here \(its output is above\): running it on main/);
+  assert.match(held.stderr(), /main fails it too \(exit 1;.*not ticket\/2-x: held in its place in line without the lock/);
+  assert.doesNotMatch(held.stderr(), /is refused|keeps the rebased work/);
+  assert.equal(testRuns(mark), 3, 'no test run was spent on it');
+  assert.equal(git(p.source, 'rev-parse', 'main'), p.base);
+  assert.equal(git(p.live, 'rev-parse', 'HEAD'), p.base);
+  assert.ok(p.lockFree(), 'a held ship lets go of the lock');
+  assert.equal(readFileSync(refusing, 'utf8'), left, 'the first refusal\'s time stays');
+
+  // The box is fixed: main's recheck passes, the held ship starts over from its rebase, and ships; the note goes.
   rmSync(broken);
-  const fixed = await p.run(land, p.wts[1], extra);
+  const fixed = await held.done;
   assert.equal(fixed.status, 0, fixed.stderr);
+  assert.match(fixed.stderr, /main's boot check passes again/);
+  assert.match(fixed.stderr, /back in line after \d+ min held/);
   assert.match(fixed.stderr, /the boot check passes on [0-9a-f]{7,}, so this landing goes on/);
   assert.match(fixed.stderr, /live now: the server restarted on/);
   assert.equal(testRuns(mark), 4);

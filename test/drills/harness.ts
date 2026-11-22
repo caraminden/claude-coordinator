@@ -70,7 +70,7 @@ export class Drill {
 
   /** Rows from the server's database, read the way an outsider does (read-only, its own connection). */
   rows<T = any>(sql: string, ...args: any[]): T[] {
-    const db = new DatabaseSync(join(this.data, 'coordinator.db'), { readOnly: true });
+    const db = new DatabaseSync(join(this.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
     try {
       return db.prepare(sql).all(...args) as T[];
     } finally {

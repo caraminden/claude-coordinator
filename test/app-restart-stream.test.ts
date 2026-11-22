@@ -131,7 +131,7 @@ test('through Citadel: a page load of an app that isn\'t answering gets the down
   assert.equal(await script.text(), 'Fixture is not answering');
   // The digest's writes go through one worker in order, so once the later two are in, the check would be too.
   const rows = () => {
-    const db = new DatabaseSync(join(srv!.data, 'coordinator.db'), { readOnly: true });
+    const db = new DatabaseSync(join(srv!.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
     try {
       return db.prepare("SELECT key, count FROM contraption_errors WHERE kind = 'http'").all().map((r) => ({ ...r }));
     } finally {

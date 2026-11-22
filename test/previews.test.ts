@@ -114,10 +114,10 @@ test('the proxy serves the preview to a signed-in person, as that person, withou
   assert.equal(logout.status, 200);
   assert.equal(logout.headers.get('set-cookie'), null);
   // The copy came without push subscriptions or turn records, though the live database has them.
-  const live = new DatabaseSync(join(data, 'coordinator.db'), { readOnly: true });
+  const live = new DatabaseSync(join(data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   assert.equal(live.prepare("SELECT count(*) AS n FROM settings WHERE key LIKE 'turn:%'").get()!.n, 1);
   live.close();
-  const copy = new DatabaseSync(join(data, 'previews', String(ticket.id), 'coordinator.db'), { readOnly: true });
+  const copy = new DatabaseSync(join(data, 'previews', String(ticket.id), 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   assert.equal(copy.prepare('SELECT count(*) AS n FROM push_subscriptions').get()!.n, 0);
   assert.equal(copy.prepare("SELECT count(*) AS n FROM settings WHERE key LIKE 'turn:%'").get()!.n, 0);
   // Nor the running ultra reviews, whose folders a branch's older server.ts would delete (#468 S08-1).

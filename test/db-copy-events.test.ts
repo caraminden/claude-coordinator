@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
@@ -55,4 +56,28 @@ test('a database not yet moved has no events.db to copy, and a stale one at the 
   new DatabaseSync(join(out, 'events.db')).exec('CREATE TABLE stale (x)');
   await copyDb(join(src, 'coordinator.db'), join(out, 'coordinator.db'));
   assert.ok(!existsSync(join(out, 'events.db')));
+});
+
+test('a copy waits for a writer that holds events.db, not "database is locked"', async () => {
+  const src = join(root, 'd');
+  live(src);
+  const evFile = join(src, 'events.db');
+  const w = new DatabaseSync(evFile);
+  w.exec('PRAGMA journal_mode = DELETE'); // a rollback-journal file: an exclusive lock blocks readers
+  w.close();
+  // The lock is held by another process, since a busy wait in this one would also stop the timer that releases it.
+  const holder = spawn(process.execPath, ['-e', `
+    const { DatabaseSync } = require('node:sqlite');
+    const d = new DatabaseSync(process.argv[1]);
+    d.exec('BEGIN EXCLUSIVE'); console.log('locked');
+    setTimeout(() => { d.exec('COMMIT'); process.exit(0); }, 400);`, evFile], { stdio: ['ignore', 'pipe', 'inherit'] });
+  try {
+    await new Promise((res) => holder.stdout.once('data', res));
+    const out = join(root, 'd-out');
+    mkdirSync(out);
+    await copyDb(join(src, 'coordinator.db'), join(out, 'coordinator.db'), { events: 'open' });
+    assert.deepEqual(rows(join(out, 'events.db')).r, ['1:1', '1:3']);
+  } finally {
+    holder.kill();
+  }
 });

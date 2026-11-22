@@ -235,7 +235,7 @@ export const SECRET = 'x'.repeat(40);
 
 /** The token minion `id`'s current turn holds on the server whose DATA_DIR is `data`. */
 export function agentToken(data: string, id: number): string {
-  const db = new DatabaseSync(join(data, 'coordinator.db'), { readOnly: true });
+  const db = new DatabaseSync(join(data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(`agent-nonce:${id}`) as { value: string } | undefined;
   db.close();
   return new Auth(PASSWORD, SECRET).agentToken(id, row ? JSON.parse(row.value).current ?? undefined : undefined);

@@ -19,7 +19,8 @@ export async function copyDb(src: string, dest: string, { events = 'all' }: { ev
   await Promise.all([to, `${to}-wal`, `${to}-shm`].map((f) => rm(f, { force: true })));
   if (!(await access(from).then(() => true, () => false))) return; // a database not yet moved, from before events.db
   if (events === 'all') return copyFile(from, to);
-  const db = new DatabaseSync(to);
+  // A busy timeout: the attached source is a live writer's file, and the default of 0 fails at once with "database is locked" (#1632).
+  const db = new DatabaseSync(to, { timeout: 30_000 });
   try {
     db.prepare('ATTACH DATABASE ? AS src').run(from);
     db.prepare('ATTACH DATABASE ? AS copy').run(dest);
@@ -33,7 +34,7 @@ export async function copyDb(src: string, dest: string, { events = 'all' }: { ev
 }
 
 async function copyFile(src: string, dest: string) {
-  const live = new DatabaseSync(src, { readOnly: true });
+  const live = new DatabaseSync(src, { readOnly: true, timeout: 30_000 });
   try {
     await backup(live, dest, { rate: 2 ** 31 - 1 });
   } finally {

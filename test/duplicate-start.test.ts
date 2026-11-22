@@ -47,7 +47,7 @@ test('a chained minion\'s held brief counts, and a minion closed over 3 days ago
   assert.equal(twin.status, 409);
   assert.match(twin.data.error, new RegExp(`#${held.data.number} Held`));
 
-  const db = new DatabaseSync(join(srv.data, 'coordinator.db'));
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
   const close = (ago: number) => db.prepare("UPDATE tickets SET status = 'closed', closed_at = ? WHERE project_id = ? AND kind = 'ticket' AND title != 'Leader'").run(Date.now() - ago, p.id);
   close(2 * 86_400_000);
   assert.equal((await start('Again', `Your brief is ${shared}/handoffs/y.md`)).status, 409, 'closed 2 days ago still counts');

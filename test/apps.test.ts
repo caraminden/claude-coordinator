@@ -92,7 +92,7 @@ before(async () => {
   // come before the stub exists or anyone is enabled, or a request of it can be cut off after the stub saw it: wait for the
   // recorded paths, not for the last request, so no read lands inside a test that counts what the stub saw.
   await until('the boot-time install-files read', () => {
-    const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });
+    const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
     try {
       return db.prepare("SELECT static_paths FROM contraptions WHERE name = 'stub'").get()?.static_paths != null;
     } finally {
@@ -341,7 +341,7 @@ test('a 5xx answer counts in the error digest, grouped by path with ids out and 
   for (const id of [17, 9000]) assert.equal((await get(`/apps/stub/boom/${id}?token=abc`, asCara())).status, 500);
   // The count goes through the DB write worker (#1244) and a proxied answer isn't held for it: wait until both are written.
   await srv.settled();
-  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   try {
     const rows = db.prepare("SELECT kind, key, count FROM contraption_errors WHERE kind = 'http'").all().map((r) => ({ ...r }));
     assert.deepEqual(rows, [{ kind: 'http', key: '500 GET /apps/stub/boom/#', count: 2 }]);
@@ -390,7 +390,7 @@ test('keys that don\'t open: a page gets Citadel\'s styled panel with a Settings
   assert.equal(made.status, 201, JSON.stringify(made.data));
   assert.equal((await srv.call(`/api/contraptions/locked/people/${cara}`, { enabled: true }, 'PUT')).status, 200);
   const scheme = (await srv.call('/api/projects', { name: 'Scheme' })).data.id;
-  const db = new DatabaseSync(join(srv.data, 'coordinator.db'));
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
   try {
     db.prepare("UPDATE contraptions SET identity_private = 'garbage' WHERE name = 'locked'").run();
   } finally {

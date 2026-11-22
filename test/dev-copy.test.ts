@@ -91,7 +91,7 @@ test('env hands a script the copy\'s URL, cookie and pid; seed adds a state to a
   const [, route, number, url] = seeded.stdout.match(/^question-card: (#\/p\/\d+\/t\/(\d+)\?e=\d+) +(\S+)$/m) ?? [];
   assert.ok(route, seeded.stdout);
   assert.equal(url, s.url + route);
-  const db = new DatabaseSync(join(s.data, 'coordinator.db'), { readOnly: true });
+  const db = new DatabaseSync(join(s.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   const { id } = db.prepare("SELECT t.id FROM tickets t JOIN projects p ON p.id = t.project_id WHERE p.name = 'Seeded' AND t.number = ?").get(Number(number)) as { id: number };
   db.close();
   // The running server sees the seeded minion at once, signed in with the cookie env printed.
@@ -158,7 +158,7 @@ test('it refuses unknown arguments and a copy with no live database', () => {
 
 test('a copy finishes while the live server keeps writing', async () => {
   // Bigger than one backup() step (100 pages), so a restart on every write would never end (#529).
-  const db = new DatabaseSync(join(live, 'coordinator.db'));
+  const db = new DatabaseSync(join(live, 'coordinator.db'), { timeout: 30_000 });
   db.exec("INSERT INTO settings (key, value) VALUES ('turn:529', '{}')");
   db.exec('CREATE TABLE filler (b BLOB); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) INSERT INTO filler SELECT randomblob(4000) FROM n');
   db.close();
@@ -177,7 +177,7 @@ test('a copy finishes while the live server keeps writing', async () => {
     seen.push(s.pid, s.holder);
     assert.match(r.stdout, /on a copy of the live data/);
     // The copy is whole: every filler row made before the writer started is in it.
-    const copy = new DatabaseSync(join(tmp, 'dev-copy', 'data', 'coordinator.db'), { readOnly: true });
+    const copy = new DatabaseSync(join(tmp, 'dev-copy', 'data', 'coordinator.db'), { readOnly: true, timeout: 30_000 });
     assert.ok((copy.prepare('SELECT count(*) AS n FROM filler').get() as { n: number }).n >= 2000);
     assert.equal(copy.prepare("SELECT 1 FROM settings WHERE key = 'turn:529'").get(), undefined, 'scrubbed as a preview copy is');
     copy.close();

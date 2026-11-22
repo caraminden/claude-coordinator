@@ -25,7 +25,7 @@ test("a template schedule's page renders its kit template fresh with the notes, 
   const fresh = made.data.brief;
   assert.match(fresh, /\n\nFor Audited:\nvitest only\.$/);
   // The stored copy goes stale, as when the kit's template text changes after the last save.
-  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'), { timeout: 30_000 });
   db.prepare('UPDATE schedules SET brief = ? WHERE id = ?').run('STALE stored copy', id);
   db.close();
   const page = (await call(`/api/projects/${p.id}/schedules`)).data.schedules.find((s: any) => s.id === id);

@@ -70,7 +70,7 @@ test('through the server: a person\'s Settings save mails the Taskmaster about a
   const t = (await srv.call(`/api/projects/${p.id}/tickets`, { title: 'Lane', message: 'a lane change' })).data;
   // Its turn (CLAUDE_BIN is /bin/false) ends in error and writes its note: park it after that.
   await until('its turn to end', async () => (await srv.call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
-  const db = new DatabaseSync(join(srv.data, 'coordinator.db'));
+  const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { timeout: 30_000 });
   db.prepare("UPDATE tickets SET state = 'parked', note = 'waiting for pipeline lane' WHERE id = ?").run(t.id);
   db.close();
   const tm = (await srv.call(`/api/projects/${p.id}`)).data.coordinator; // reading the scheme makes its Taskmaster

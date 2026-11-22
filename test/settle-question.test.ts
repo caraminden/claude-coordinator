@@ -125,7 +125,7 @@ test('a card addressed to one person (#687): to must be a member; a notice takes
 
   // #702: the answer wakes the asker even once it has gone cold (its last turn ended over 55 minutes ago).
   const { id } = await post({ to: 'cara', questions: [{ question: 'Direct?', options: opts }] });
-  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'));
+  const db = new DatabaseSync(join(root, 'data', 'coordinator.db'), { timeout: 30_000 });
   db.prepare('UPDATE turns SET ended_at = ended_at - ? WHERE ticket_id = ?').run(2 * 3_600_000, ticket.id);
   db.close();
   await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: id, answers: [{ selected: ['B'], other: '' }] } });

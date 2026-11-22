@@ -98,7 +98,7 @@ test('an app posts its verdict on a turn, and only members of its home scheme re
   const tmOf = async (project: number) => {
     await srv.call(`/api/projects/${project}`);
     const { DatabaseSync } = await import('node:sqlite');
-    const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true });
+    const db = new DatabaseSync(join(srv.data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
     const row = db.prepare("SELECT id FROM tickets WHERE project_id = ? AND kind = 'coordinator'").get(project) as { id: number };
     db.close();
     return row.id;

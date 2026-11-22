@@ -187,7 +187,7 @@ test('the Taskmaster claims the lane for a minion; minions only read; dismissing
   assert.equal(freed.data.released.name, 'release-train');
 
   // A one-person scheme has no other Taskmasters, so its takes and releases leave no digest lines (R3: it stays as it was).
-  const digest = new DatabaseSync(join(root, 'data', 'coordinator.db'), { readOnly: true });
+  const digest = new DatabaseSync(join(root, 'data', 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   const lines = (digest.prepare('SELECT text FROM taskmaster_digest WHERE project_id = ? ORDER BY id').all(p.id) as { text: string }[]).map((r) => r.text);
   digest.close();
   assert.deepEqual(lines, []);

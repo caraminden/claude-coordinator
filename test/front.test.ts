@@ -300,12 +300,23 @@ test("a running turn, a queued message and an approval card: the readers' list, 
       assert.ok(reader.reader && !main.reader, `${who} ${p}`);
       assert.equal(reader.status, main.status, `${who} ${p}`);
       if (who !== 'olive') assert.equal(reader.status, 200, `${who} ${p}`);
-      // The Status page's clock is each answer's own. While a card waits on a person, main's quiet check moves the
-      // turn's activity clock on a timer with no broadcast (Runner.checkQuiet), which only the sweep carries.
-      const sansNow = (body: string) => ({ ...JSON.parse(body, (k, v) => (k === 'activity' && v ? { ...v, at: 0 } : v)), now: 0 });
-      assert.deepEqual(sansNow(reader.body), sansNow(main.body), `${who} ${p}`);
+      // The Status page's clock is each answer's own. Two values main moves on a timer with no broadcast, which only the
+      // sweep (off here) carries: the turn's activity clock while a card waits on a person (Runner.checkQuiet), and the
+      // answer-time probe's last reading.
+      const timed = (k: string, v: unknown) => (k === 'activity' && v ? { ...v, at: 0 } : k === 'answer' && v && typeof v === 'object' && 'probing' in v ? { ...v, now: 0 } : v);
+      const sansNow = (body: string) => ({ ...JSON.parse(body, timed), now: 0 });
+      const [r, m] = [sansNow(reader.body), sansNow(main.body)];
+      assert.deepEqual(r, m, `${who} ${p}: ${differs(r, m).slice(0, 5).join(', ')}`);
     }
   } finally {
     await live.stop();
   }
 });
+
+/** The paths where two JSON values differ, for an assertion's message. */
+function differs(a: unknown, b: unknown, at = ''): string[] {
+  if (a === b) return [];
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return [at || '(root)'];
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].flatMap((k) => differs((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${at}.${k}`));
+}

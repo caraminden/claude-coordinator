@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -8,6 +8,21 @@ import { test } from 'node:test';
 // The push guard's own cases (tools/guard.sh --self-test): Citadel's copy, and the scheme-setup
 // template every auto-merge scheme copies, so neither can regress unseen.
 const root = join(import.meta.dirname, '..');
+// A scheme that opts in to LIVE_APPS (env or written into its copy) must still pass the self-test.
+test('the template --self-test passes with LIVE_APPS set by env and written into the file', () => {
+  const tpl = join(root, 'kit/skills/scheme-setup/templates/guard.sh');
+  const dir = mkdtempSync(join(tmpdir(), 'guard-live-'));
+  try {
+    const copy = join(dir, 'guard.sh');
+    writeFileSync(copy, readFileSync(tpl, 'utf8').replace(/^LIVE_APPS=\(\)$/m, 'LIVE_APPS=(x)'));
+    for (const [path, env] of [[tpl, { ...process.env, GUARD_LIVE_APPS: 'x' }], [copy, process.env]] as const) {
+      const r = spawnSync('bash', [path, '--self-test'], { encoding: 'utf8', env });
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stdout, /self-test: \d+ passed, 0 failed/);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 for (const file of ['tools/guard.sh', 'kit/skills/scheme-setup/templates/guard.sh']) {
   test(`${file} --self-test passes`, () => {
     const r = spawnSync('bash', [join(root, file), '--self-test'], { encoding: 'utf8' });

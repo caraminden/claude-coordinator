@@ -13,11 +13,11 @@
 #   tools/guard.sh --install       SessionStart: point core.hooksPath at .githooks
 #   tools/guard.sh --hook bash     PreToolUse on Bash/PowerShell: checks each `git push`
 #   tools/guard.sh --hook github   PreToolUse on GitHub MCP file writes: checks the branch
-#   tools/guard.sh --self-test     runs both hook modes on known commands; 0 when all pass
+#   tools/guard.sh --hook files    PreToolUse on Write|Edit|MultiEdit|NotebookEdit: refuses a listed app's live folder
+#   tools/guard.sh --self-test     runs all three hook modes on known commands; 0 when all pass
 #
 # Hook modes read Claude Code's JSON on stdin and exit 2 with the reason on stderr to block.
 # Needs only bash, awk and git (no jq), so it runs the same in Git Bash on Windows.
-#   tools/guard.sh --hook files    PreToolUse on Write|Edit|MultiEdit|NotebookEdit: refuses a listed app's live folder
 #
 # Opt-in live-app check: list the scheme's app names in LIVE_APPS below (or set GUARD_LIVE_APPS,
 # space separated). A path is live when it is ~/apps/<name>, ~/apps/.<name> or under either (Citadel's
@@ -463,18 +463,23 @@ check_words() { # ps flag, words...
 # Runs the hook modes on known commands: tools/guard.sh --self-test exits 0 when all pass.
 # Add a line here for every gap you close or false block you fix.
 self_test() {
-  local b pass=0 fail=0 # tmp stays global for the EXIT trap
+  local b pass=0 fail=0 g="$0" # tmp stays global for the EXIT trap
+  # The cases start from no live apps whatever the caller or this file opted in to: GUARD_LIVE_APPS
+  # is cleared, and the "inert" cases run $inert, a copy of this file with its LIVE_APPS emptied.
+  unset GUARD_LIVE_APPS
   # Run from a git hook, git exports GIT_DIR and friends, which would point the scratch repos
   # below (and their HEAD and config) at the repo being pushed.
   unset $(git rev-parse --local-env-vars)
   tmp="$(mktemp -d)" || exit 1
   trap 'rm -rf "$tmp"' EXIT
+  mkdir -p "$tmp/inert" && sed 's/^LIVE_APPS=(.*)$/LIVE_APPS=()/' "$0" >"$tmp/inert/guard.sh" || exit 1
+  local inert="$tmp/inert/guard.sh"
   for b in main topic; do
     git init -q "$tmp/on-$b" && git -C "$tmp/on-$b" symbolic-ref HEAD "refs/heads/$b" || exit 1
   done
   run() { # expected exit, hook, JSON
     local got
-    printf '%s' "$3" | bash "$0" --hook "$2" 2>/dev/null
+    printf '%s' "$3" | bash "$g" --hook "$2" 2>/dev/null
     got=$?
     if [ "$got" = "$1" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); printf 'FAIL: wanted %s, got %s: %s\n' "$1" "$got" "$3"; fi
   }
@@ -653,8 +658,10 @@ self_test() {
   mkdir -p "$tmp/h/apps/.x/a" "$tmp/h/apps/.x/b" "$tmp/h/apps/other" "$tmp/h/srv/live" "$tmp/h2/apps" &&
     ln -s .x/a "$tmp/h/apps/x" && ln -s ../srv/live "$tmp/h2/apps/x" || exit 1
   fw() { printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$1"; } # JSON for a file write
+  g="$inert"
   HOME="$tmp/h" run 0 files "$(fw "$tmp/h/apps/x/file")"
   HOME="$tmp/h" t 0 Bash topic 'ls ~/apps/x/../x'
+  g="$0"
   export GUARD_LIVE_APPS="x"
   HOME="$tmp/h" run 2 files "$(fw "$tmp/h/apps/x")"
   HOME="$tmp/h" run 2 files "$(fw "$tmp/h/apps/.x")"

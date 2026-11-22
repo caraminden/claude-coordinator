@@ -625,9 +625,12 @@ function githubCard() {
     // Two ways to link (#464): the OAuth App's full access, and the GitHub App's limited one. Linking again replaces the link.
     const linkBtn = (label, kind, cls = '') => h('a', { class: `button small ${cls}`, href: `api/github/link?project=${view.projectId}${kind === 'limited' ? '&kind=limited' : ''}` }, label);
     const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener' }, text);
-    const install = install_url ? ext(install_url, 'installs Citadel\'s GitHub App') : 'installs Citadel\'s GitHub App';
+    const install = 'installs Citadel\'s GitHub App'; // text only: the one install link is installBlock (#1557)
     // GitHub hands the install link's state to the App's Setup URL, which brings the person back to this scheme (#670).
-    const installYours = install_url ? ext(`${install_url}?state=${view.projectId}`, 'Install Citadel\'s GitHub App') : 'Install Citadel\'s GitHub App';
+    // The one install link, in every state that doesn't already show it as step 1 of the two steps (#1557).
+    const installBlock = install_url ? h('div', { class: 'link-install' },
+      h('a', { class: 'button small secondary', href: `${install_url}?state=${view.projectId}`, target: '_blank', rel: 'noopener' }, 'Install the GitHub app on a repo'),
+      h('p', { class: 'muted small' }, 'Pick your account, choose "Only select repositories" and pick the repo. If the app is already installed, the same page opens its settings, where you add more repos. Only a repo\'s owner (or an org admin) can install it on that repo. Installing alone doesn\'t link you.')) : '';
     const kinds = h('ul', { class: 'muted small link-kinds' },
       full ? h('li', {}, h('b', {}, 'Full access'), ': Citadel can act on every repo your GitHub account can reach.') : '',
       limited ? h('li', {}, h('b', {}, 'Limited'), ': Citadel can act only on repos where the repo\'s owner ', install, ' and you already have access. Nothing else in your account.') : '');
@@ -651,17 +654,17 @@ function githubCard() {
     const steps = limited ? h('div', { class: 'link-steps' },
       h('p', { class: 'small' }, h('b', {}, 'Limited, in two steps'), full ? ' (full access is one: just press its button)' : '', ':'),
       h('ol', { class: 'small' },
-        h('li', {}, installYours, ' on your own repos. On GitHub, choose "Only select repositories" to pick which. Skip this for repos someone else owns: their owner installs it.'),
-        h('li', {}, `Press Link GitHub${full ? ' (limited)' : ''} below and authorize Citadel on GitHub. Installing alone doesn't link you; GitHub usually brings you straight on to this step.`))) : '';
+        h('li', {}, 'Install Citadel\'s GitHub App (the button above)',  ' on your own repos. On GitHub, choose "Only select repositories" to pick which. Skip this for repos someone else owns: their owner installs it.'),
+        h('li', {}, `Press Link GitHub${full ? ' (limited)' : ''} below and authorize Citadel on GitHub. GitHub usually brings you straight on to this step.`))) : '';
     if (!link) {
       return card.replaceChildren(title('Not linked', 'off'), errLine,
         h('p', {}, 'Link your GitHub so turns you start push branches and open pull requests as you. Until then they run and commit, but can\'t push.'),
-        kinds, steps, linkRow(), note);
+        kinds, installBlock, steps, linkRow(), note);
     }
     if (link.failed) {
       return card.replaceChildren(title('Needs linking again', 'warn'), errLine,
         h('p', {}, `GitHub stopped accepting Citadel's link for @${link.login} (revoked on GitHub, or the server's secret changed). Your turns can't push until you link again.`),
-        kinds, h('div', { class: 'row' }, ...linkRow(' again').childNodes, unlink));
+        kinds, installBlock, h('div', { class: 'row' }, ...linkRow(' again').childNodes, unlink));
     }
     const repoLinks = (link.reach ?? []).flatMap((slug, i) => [i ? ', ' : '', ext(`https://github.com/${slug}`, slug)]);
     const reach = !link.limited ? 'Every repo your GitHub account can reach'
@@ -675,7 +678,8 @@ function githubCard() {
         h('dt', {}, 'Commits as'), h('dd', {}, `${link.name || link.login} <${link.email}>`),
         h('dt', {}, 'Can reach'), h('dd', {}, reach),
         h('dt', {}, 'Linked'), h('dd', {}, new Date(link.linked_at).toLocaleDateString(undefined, { dateStyle: 'medium' }))),
-      link.limited ? h('p', { class: 'muted small' }, 'A repo of your own: ', install_url ? ext(install_url, 'pick which of your repos Citadel may reach') : 'install Citadel\'s GitHub App on your account and pick the repos', '. Someone else\'s repo missing from the list: its owner ', install, ' on it.') : '',
+      installBlock,
+      link.limited ? h('p', { class: 'muted small' }, 'Someone else\'s repo missing from the list: its owner installs Citadel\'s GitHub App on it.') : '',
       h('div', { class: 'row' }, other, unlink), note);
   };
   api('api/me/github').then(render).catch((err) => card.replaceChildren(h('p', { class: 'error' }, err.message)));

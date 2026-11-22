@@ -13,8 +13,8 @@ const CHECK = 'echo run >>"$COUNT"; test ! -e red || { echo "the check saw red";
 const on = (check: string) => ({ EARLY_CHECK: '1', CHECK_LIGHT: check });
 const count = (dir: string) => (existsSync(join(dir, 'count')) ? readFileSync(join(dir, 'count'), 'utf8').split('\n').filter(Boolean).length : 0);
 const state = (r: { main: string }) => git(r.main, 'rev-parse', '--absolute-git-dir');
-// The line before land.sh's own last one: the check's tail (this check prints one line).
-const tail = (stderr: string) => stderr.trimEnd().split('\n').at(-2);
+// The line before land.sh's own last one (its refusal; the ship: line after it is dropped): the check's tail (this check prints one line).
+const tail = (stderr: string) => stderr.trimEnd().replace(/\nship: .*$/, '').split('\n').at(-2);
 
 test('a branch whose rebase onto main fails the check is refused before the line, with the last lines a red at the front gets, and never takes a ticket', () => {
   const runs: Record<string, ReturnType<ReturnType<typeof setup>['run']>> = {};
@@ -41,6 +41,7 @@ test('a branch whose rebase onto main fails the check is refused before the line
   assert.equal(tail(runs['1'].stderr), 'the check saw red');
   assert.equal(tail(runs['0'].stderr), 'the check saw red');
   assert.match(runs['1'].stderr, /the check saw red\nland: smoke: the check failed/);
+  assert.match(runs['1'].stderr.trimEnd(), /\nship: refused \S+ batch 1 of 1 deploy none$/, 'a refusal before the line still ends on the ship line');
 });
 
 test('with main unmoved at the front, the commit the early check passed lands as it is, with what the check committed, and the check runs once', () => {

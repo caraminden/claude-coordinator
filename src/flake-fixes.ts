@@ -7,6 +7,7 @@
 //     minion's branch; the Test health tab shows the clean runs so far.
 // No test is skipped or quarantined (Cara, 2026-11-10: "Keep failing, log it").
 import { readdirSync, readFileSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pacificStamp } from './pacific.ts';
 import type { Job, Run } from './ci-health.ts';
@@ -144,12 +145,12 @@ export class FlakeFixes {
     if (!dir || !this.d.front) return 0;
     const root = join(dir, 'retro-log');
     let days: string[];
-    try { days = readdirSync(root).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
+    try { days = (await readdir(root)).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
     const why = new Map<string, [number, string]>(); // file -> its newest line's time and "red in N of M runs in the last 6 h"
     for (const day of days) {
       if (Date.parse(`${day}T23:59:59Z`) < now - BROKEN_FRONT_MS) continue;
       let md: string;
-      try { md = readFileSync(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+      try { md = await readFile(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
       for (const m of md.matchAll(/^- (\d\d:\d\d:\d\d)Z · broken test · (\S+) · (.+?) · \S+$/gm)) {
         const at = Date.parse(`${day}T${m[1]}Z`);
         if (at >= now - BROKEN_FRONT_MS && at <= now + 60_000) why.set(m[2], [at, m[3]]);

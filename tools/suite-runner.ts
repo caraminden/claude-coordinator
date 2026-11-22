@@ -100,6 +100,9 @@ async function main() {
   const timesPath = process.env.CITADEL_TEST_TIMES || undefined;
   const old = readTimes(timesPath);
   const files = order(expand(o.targets.length ? o.targets : ['test/']), old);
+  // The times file is this run's: a test that starts a run of its own must not rewrite it. (Not run()'s env option:
+  // the leak guard's global setup adds its run id to process.env after this point, and the tests must inherit it.)
+  delete process.env.CITADEL_TEST_TIMES;
   const stream = run({
     files,
     concurrency: o.concurrency,

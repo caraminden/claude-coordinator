@@ -48,15 +48,15 @@ test("a folder expands to the files node's own patterns pick in it, and a file s
 test('a run starts its files in that order, reports as the CLI did, fails on a failed test, and keeps the new times', async () => {
   const cwd = join(scratch.dir, 'run');
   mkdirSync(join(cwd, 'test'), { recursive: true });
-  for (const n of ['a', 'b', 'c']) writeFileSync(join(cwd, 'test', `${n}.test.mjs`), `import test from 'node:test';\nimport { appendFileSync } from 'node:fs';\ntest('${n}', () => { appendFileSync('started', '${n}\\n'); });\n`);
+  for (const n of ['a', 'b', 'c']) writeFileSync(join(cwd, 'test', `${n}.test.mjs`), `import test from 'node:test';\nimport { appendFileSync } from 'node:fs';\ntest('${n}', () => { appendFileSync('started', '${n}' + (process.env.CITADEL_TEST_TIMES ? ' saw the times file' : '') + '\\n'); });\n`);
   writeFileSync(join(cwd, 'test', 'red.test.mjs'), "import test from 'node:test';\ntest('red', () => { throw new Error('no'); });\n");
   const times = join(cwd, 'times.tsv');
   writeFileSync(times, '1\ttest/a.test.mjs\n5\ttest/b.test.mjs\n3\ttest/c.test.mjs\n9\ttest/red.test.mjs\n');
   const r = await new Promise<{ code: number | null; out: string }>((res) =>
-    execFile(process.execPath, [runner, '--concurrency', '1', '--timeout', '30000', '--failed-to', 'failed', '--', 'test/'], { cwd, env: { ...process.env, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_TIMES: times } }, (e, out) => res({ code: e ? (e.code as number) : 0, out })),
+    execFile(process.execPath, [runner, '--concurrency', '1', '--timeout', '30000', '--failed-to', 'failed', '--', 'test/'], { cwd, env: { ...process.env, NODE_TEST_CONTEXT: undefined, CITADEL_TEST_PROGRESS_TO: undefined, CITADEL_TEST_TIMES: times } }, (e, out) => res({ code: e ? (e.code as number) : 0, out })),
   );
   assert.equal(r.code, 1, r.out);
-  assert.equal(readFileSync(join(cwd, 'started'), 'utf8'), 'b\nc\na\n');
+  assert.equal(readFileSync(join(cwd, 'started'), 'utf8'), 'b\nc\na\n', 'longest first, and the tests never see the times file');
   assert.match(r.out, /^ℹ fail 1$/m);
   assert.match(r.out, /^ℹ skipped 0$/m);
   assert.match(readFileSync(join(cwd, 'failed'), 'utf8'), /^test\/red\.test\.mjs\t\d+\n$/);

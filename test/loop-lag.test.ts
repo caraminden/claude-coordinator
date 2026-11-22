@@ -169,7 +169,9 @@ test('a hold of the main thread is sampled from /proc by a worker: the line name
     // Blocked off-CPU, as on a disk wait: the thread sleeps in the kernel.
     logged.length = 0;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
-    await waitFor(() => logged.some((l) => /Main thread waited on: S/.test(l)), logged);
+    // S anywhere in the summary, not only first: it lists states by count, and on a loaded box the thread waits runnable (R)
+    // for the CPU after the wake, which can outnumber the sleep's S samples (#1584).
+    await waitFor(() => logged.some((l) => /Main thread waited on: (?:[^.]*, )?S\b/.test(l)), logged);
   } finally {
     watch.stop();
   }

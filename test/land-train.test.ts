@@ -1165,7 +1165,7 @@ test("own check: green on the check runner, it joins the line and that run is it
 // An earlier red check run of the same commit (handed off again unchanged) is no verdict on this one: the check waits
 // for the run its own push starts, which GitHub lists a poll or two later.
 test("own check: an earlier check run of the same commit is not taken for this one's (#1567)", async () => {
-  const l = await line([{}, {}], (d) => ({ ...own(d), FAKE_CHECK_OLD: 'ticket/2-x 4' }));
+  const l = await line([{}, {}], (d) => ({ ...own(d), FAKE_CHECK_OLD: 'ticket/2-x 3' }));
   const done = await l.go();
   done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
   assert.match(done[1].stderr, /land: own check: green in \d+ s \(https:\/\/ci\/99\), so it joins the line/);

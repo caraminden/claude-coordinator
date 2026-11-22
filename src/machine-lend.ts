@@ -17,10 +17,12 @@ export type LendChange = {
   /** The switches: workspace tools (an agent from before ticks) and always on. */
   workspace_tools?: boolean;
   always_on?: boolean;
+  /** The GPU jobs switch (#1175): false refuses GPU tasks and stops one running. */
+  gpu?: boolean;
 };
 
 /** The machine's state a change applies to: what the Machines page shows. */
-export type MachineNow = { projects: number[]; lend: Lend | null; workspace_tools: boolean; always_on: boolean };
+export type MachineNow = { projects: number[]; lend: Lend | null; workspace_tools: boolean; always_on: boolean; managed?: boolean | null };
 
 const names = (v: unknown, what: string): string[] | undefined => {
   if (v === undefined) return undefined;
@@ -47,7 +49,7 @@ export function parseLendChange(body: any): LendChange {
     if (body.server !== null && !(typeof body.server === 'string' && SERVER_NAME.test(body.server))) throw new Error('server must be an MCP server\'s name, as list_machines shows it, or null to untick it');
     change.server = body.server;
   }
-  for (const k of ['workspace_tools', 'always_on'] as const) {
+  for (const k of ['workspace_tools', 'always_on', 'gpu'] as const) {
     const v = bool(body[k], k);
     if (v !== undefined) change[k] = v;
   }
@@ -60,13 +62,18 @@ export function lendPatch(change: LendChange, now: MachineNow, schemeId: number)
   if (change.here !== undefined && change.here !== now.projects.includes(schemeId)) {
     patch.projects = change.here ? [...now.projects, schemeId] : now.projects.filter((id) => id !== schemeId);
   }
-  if (change.tick || change.untick || change.server !== undefined) {
-    // As a tick on the page does: the stored lend with this change, keeping its GPU switch.
-    const { before_ticks: _, ...base } = now.lend ?? { server: null, workspaces: [] };
+  const gpuFlip = change.gpu !== undefined && change.gpu === !!now.lend?.gpu_off;
+  if (now.managed === false) {
+    // An agent from before ticks: the page's GPU switch saves only that (public/settings-machines.js).
+    if (gpuFlip) patch.lend = { server: null, workspaces: [], before_ticks: true, ...(change.gpu ? {} : { gpu_off: true as const }) };
+  } else if (change.tick || change.untick || change.server !== undefined || gpuFlip) {
+    // As a tick on the page does: the stored lend with this change, keeping its GPU switch unless the change sets it.
+    const { before_ticks: _, gpu_off: off, ...base } = now.lend ?? { server: null, workspaces: [] };
     const workspaces = [...base.workspaces.filter((w) => !change.untick?.includes(w)), ...(change.tick ?? []).filter((w) => !base.workspaces.includes(w))];
     const server = change.server !== undefined ? change.server : base.server;
-    if (server !== base.server || workspaces.length !== base.workspaces.length || workspaces.some((w) => !base.workspaces.includes(w)) || now.lend?.before_ticks) {
-      patch.lend = { ...base, server, workspaces };
+    const gpuOff = change.gpu !== undefined ? !change.gpu : !!off;
+    if (server !== base.server || workspaces.length !== base.workspaces.length || workspaces.some((w) => !base.workspaces.includes(w)) || gpuOff !== !!off || now.lend?.before_ticks) {
+      patch.lend = { ...base, server, workspaces, ...(gpuOff ? { gpu_off: true as const } : {}) };
     }
   }
   for (const k of ['workspace_tools', 'always_on'] as const) if (change[k] !== undefined && change[k] !== now[k]) patch[k] = change[k];
@@ -84,6 +91,7 @@ export function lendLines(change: LendChange, now: MachineNow, scheme: { id: num
     for (const w of lend.workspaces.filter((w) => !was.workspaces.includes(w))) lines.push(`+ Tick the ${w} workspace`);
     for (const w of was.workspaces.filter((w) => !lend.workspaces.includes(w))) lines.push(`− Untick the ${w} workspace: every scheme it is lent to loses it`);
     if (lend.server !== was.server) lines.push(lend.server ? `+ Lend the ${lend.server} MCP server${was.server ? ` in place of ${was.server}` : ''}` : `− Untick the ${was.server} MCP server`);
+    if (!!lend.gpu_off !== !!was.gpu_off) lines.push(lend.gpu_off ? '− Switch GPU jobs off: GPU tasks are refused and a running one stops' : '+ Switch GPU jobs on');
   }
   if (patch.workspace_tools !== undefined) lines.push(`${patch.workspace_tools ? '+ Switch workspace tools on' : '− Switch workspace tools off'}`);
   if (patch.always_on !== undefined) lines.push(patch.always_on ? '+ Always on: offline over 5 minutes shows as Down' : '− Not always on: offline shows as Asleep');

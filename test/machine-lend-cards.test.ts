@@ -85,6 +85,14 @@ test('the change is worked out against the machine as it is: only what differs, 
   assert.deepEqual(lendLines({ here: true, tick: ['x'], server: null, workspace_tools: true }, now, { id: 2, name: 'S' }, 'm'), [
     '+ Lend m to S', '+ Tick the x workspace', '− Untick the own MCP server', '+ Switch workspace tools on',
   ]);
+  // The GPU jobs switch, the page's third (Cara, 2026-11-22, "Machine switches").
+  assert.deepEqual(lendPatch({ gpu: true }, now, 1), { lend: { server: 'own', workspaces: ['w'] } });
+  assert.deepEqual(lendPatch({ gpu: false }, now, 1), {}, 'already off');
+  assert.deepEqual(lendLines({ gpu: true }, now, { id: 1, name: 'S' }, 'm'), ['+ Switch GPU jobs on']);
+  // An agent from before ticks saves only the switch, as the page's does for it.
+  const old = { projects: [], lend: null, workspace_tools: true, always_on: false, managed: false };
+  assert.deepEqual(lendPatch({ gpu: false }, old, 1), { lend: { server: null, workspaces: [], before_ticks: true, gpu_off: true } });
+  assert.deepEqual(lendPatch({ gpu: true }, old, 1), {});
 });
 
 test('a minion\'s call posts a card with the change and what it lends after; bad calls are refused before anyone sees them', async () => {
@@ -194,7 +202,7 @@ async function mcp(t: any, role: string, method: string, params: object) {
   }
 }
 
-test('the tool is offered to minions and Taskmasters, and its reply links the card and the Machines page', async () => {
+test('end to end: the tool call posts the card, its reply links it and the Machines page, and Approve saves it', async () => {
   for (const [t, role] of [[minion, 'thread'], [taskmaster, 'coordinator']] as const) {
     const tools = (await mcp(t, role, 'tools/list', {})).tools.map((x: any) => x.name);
     assert.ok(tools.includes('propose_machine_lend'), `${role} has it`);
@@ -203,4 +211,10 @@ test('the tool is offered to minions and Taskmasters, and its reply links the ca
   assert.equal(r.isError, undefined, r.content[0].text);
   assert.match(r.content[0].text, new RegExp(`\\[the lending card below\\]\\(#/p/${project.id}\\?e=\\d+\\)`), 'a Taskmaster\'s card is in its scheme\'s chat');
   assert.match(r.content[0].text, new RegExp(`\\[box on the Machines page\\]\\(#/p/${project.id}/machines/box\\)`));
+  const [c] = (await events(taskmaster)).filter((e: any) => e.status === 'pending' && e.machineLend);
+  assert.deepEqual(c.machineLend.lines, ['+ Lend box to Cantrips']);
+  await verdict('Cara', taskmaster, c.id, 'approve');
+  assert.deepEqual((await boxNow()).projects, [project.id]);
+  assert.match(await lastMessage(taskmaster), /^Approved: box's lending is saved as the card showed/);
+  await idle(taskmaster);
 });

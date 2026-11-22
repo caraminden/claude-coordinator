@@ -336,7 +336,7 @@ const PROPOSE_PLAN = {
 const PROPOSE_MACHINE_LEND = {
   name: 'propose_machine_lend',
   description:
-    "Ask for a connected machine's lending to change, as a card in this chat: put this scheme on its list or take it off (here), tick or untick its workspaces (folders) and its MCP server, and set its switches. Use it instead of describing the Machines page to a person. Only who can save that machine on the Machines page approves (an admin, or its owner for someone's own); approving saves it exactly as the page does (its agent is told, and sessions on what is no longer lent end), rejecting changes nothing, and either comes as a message. A scheme's minions use a workspace only if it is ticked AND the scheme is on the machine's list, so ask for both in one card. Ticks are the machine's, shared by every scheme it is lent to. Names come from list_machines; a newer proposal for the same machine replaces an open one. Minion turns get the change from their next start. Link every mention of the card, as with propose_plan.",
+    "Ask for a connected machine's lending to change, as a card in this chat: put this scheme on its list or take it off (here), tick or untick its workspaces (folders) and its MCP server, and set its switches (workspace tools, always on, GPU jobs). Use it instead of describing the Machines page to a person; when you mention the page, link it with the machine's page link list_machines and this tool's reply give. Only who can save that machine on the page approves (an admin, or its owner for someone's own); approving saves it exactly as the page does (its agent is told, and sessions on what is no longer lent end), rejecting changes nothing, and either comes as a message. A scheme's minions use a workspace only if it is ticked AND the scheme is on the machine's list, so ask for both in one card. Ticks are the machine's, shared by every scheme it is lent to. Names come from list_machines; a newer proposal for the same machine replaces an open one. Minion turns get the change from their next start. Link every mention of the card, as with propose_plan.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -347,6 +347,7 @@ const PROPOSE_MACHINE_LEND = {
       server: { type: ['string', 'null'], description: 'The MCP server to lend (it lends one at a time), or null to untick it. Leave out to keep it' },
       workspace_tools: { type: 'boolean', description: "Only for an agent from before ticks: all its folders on or off" },
       always_on: { type: 'boolean', description: 'true: offline over 5 minutes shows as Down (a desktop); false: shows as Asleep (a laptop)' },
+      gpu: { type: 'boolean', description: 'The GPU jobs switch: false refuses GPU tasks (run-gpu) and stops one running; true allows them again' },
       why: { type: 'string', maxLength: 500, description: 'What it is for, for the person approving: at most 500 characters' },
     },
     required: ['machine'],

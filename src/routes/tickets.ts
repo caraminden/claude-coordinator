@@ -1064,25 +1064,25 @@ export const ticketRoutes: Route[] = [
         throw new HttpError(404, machine ? `${name} is a CI runner host: it lends no tools` : `No machine called ${name}; there are ${names.join(', ') || 'none'}`);
       }
       // An online agent says what it has, so a typo is caught here, not after a person approves it. Offline, nobody knows.
+      const page = `#/p/${project.id}/machines/${name}`;
       if (view.managed === false && (change.tick || change.untick || change.server !== undefined)) {
-        throw new HttpError(400, `${name}'s agent is from before ticks: it lends what its own command line says. Propose workspace_tools instead, or ask its owner to reinstall it from the Machines page`);
+        throw new HttpError(400, `${name}'s agent is from before ticks: it lends what its own command line says. Propose workspace_tools instead, or ask its owner to reinstall it from [${name} on the Machines page](${page})`);
       }
       if (view.managed) {
         const missing = (change.tick ?? []).filter((w) => !view.workspaces.some((f) => f.name === w));
         if (missing.length) throw new HttpError(400, `${name} has no workspace called ${missing.join(', ')}; it has ${view.workspaces.map((w) => w.name).join(', ') || 'none'}`);
         if (change.server && !view.found.some((f) => f.name === change.server)) throw new HttpError(400, `${name} has no MCP server called ${change.server}; it found ${view.found.map((f) => f.name).join(', ') || 'none'}`);
       }
-      const now = { projects: view.projects, lend: view.lend, workspace_tools: view.workspace_tools, always_on: view.always_on };
+      const now = { projects: view.projects, lend: view.lend, workspace_tools: view.workspace_tools, always_on: view.always_on, managed: view.managed };
       const scheme = { id: project.id, name: project.name };
       const lines = lendLines(change, now, scheme, name);
       if (!lines.length) throw new HttpError(400, `Nothing to change: ${name} already ${Object.keys(change).length ? 'has all of that' : 'is as it is; name what should change'}`);
       const after = lendAfter(change, now, project.id);
       const was = view.projects.includes(project.id);
       const owner = machine.owner_id === null ? null : store.getUser(machine.owner_id)?.name ?? null;
-      const page = `#/p/${project.id}/machines/${name}`;
       const event = postPlan(app, ticket.id, {
         summary: change.here === false && was ? `Take ${name} from ${project.name}` : change.here && !was ? `Lend ${name} to ${project.name}` : `Change what ${name} lends`,
-        plan: [...lines, '', `After this it lends: ${after.server ? `the ${after.server} MCP server; ` : ''}${after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'}.`, ...(why ? ['', why] : []), '', `[${name} on the Machines page](${page})`].join('\n'),
+        plan: [...lines, '', view.managed === false ? 'It goes on lending what its own command line says.' : `After this it lends: ${after.server ? `the ${after.server} MCP server; ` : ''}${after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'}.`, ...(why ? ['', why] : []), '', `[${name} on the Machines page](${page})`].join('\n'),
         machineLend: { id: machine.id, name, owner, scheme, change, lines, after, why, page },
       });
       return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id), owner, page });
@@ -1174,7 +1174,7 @@ export const ticketRoutes: Route[] = [
           // Who can save it on the Machines page (Cara, 2026-11-22, "Who can save the page"): an admin, or its owner for their own.
           if (!managesMachine(session, machine)) throw new HttpError(403, `Only ${ml.owner ? `${ml.owner}, who owns ${ml.name},` : 'an admin'}${ml.owner ? ' or an admin' : ''} can change what it lends`);
           const v = app.machines.view(machine);
-          const patch = lendPatch(ml.change, { projects: v.projects, lend: v.lend, workspace_tools: v.workspace_tools, always_on: v.always_on }, ml.scheme.id);
+          const patch = lendPatch(ml.change, { projects: v.projects, lend: v.lend, workspace_tools: v.workspace_tools, always_on: v.always_on, managed: v.managed }, ml.scheme.id);
           if (patch.projects?.includes(ml.scheme.id) && !store.canSee(session, ml.scheme.id)) throw new HttpError(403, `You aren't in ${ml.scheme.name}, so you can't lend ${ml.name} to it`);
           // The same save as the page's: the agent is told the ticks, and sessions on what is no longer lent end.
           if (Object.keys(patch).length) await patchMachine(app, session, machine, patch);

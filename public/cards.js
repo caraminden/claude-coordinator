@@ -4,7 +4,7 @@ import { account, ago, api, fileHref, fileKind, fileUrl, h, noAutofill, isCoordi
 import { catchUpEvents, markdown, threadRefs } from './core.js';
 import { optimistic } from './ui/optimistic.js';
 import { changesLine, collapseRuns, planChanges } from './plan-diff.js';
-import { adoptTicket } from './thread.js';
+import { adoptTicket } from './thread-head.js';
 import { answerNow } from './inbox.js';
 import { cardAttachments } from './composer.js';
 import { pastedFiles } from './paste.js';

@@ -14,7 +14,8 @@ import { homeScheme, openStartScheme, renderSidebar, scheduleSidebar } from './s
 import { forgetSchemes, showProject, showReleases, showTicket } from './project.js';
 import { closeViewer, onArtifactsChanged, setArtifacts, showArtifact, showFile, showSharedFile } from './artifacts.js';
 import { bridgeTypedAt, bridgeUnsaved, onArtifactData, tabBridgeOpen } from './bridge-host.js';
-import { appendEvent, jumpToEvent, refreshBranch, renderBranch, renderCardJump, renderTicketHead } from './thread.js';
+import { appendEvent, jumpToEvent, renderCardJump } from './thread.js';
+import { refreshBranch, renderBranch, renderTicketHead } from './thread-head.js';
 import { replaceHash } from './navstack.js';
 import { onPropertiesChanged, onViewsChanged } from './properties.js';
 import { countsIfOwed, forgetOtherSchemes, holdAnswered, inboxEvent, inboxOtherTicket, inboxTicket, onSeenItems, refreshSchemeCounts } from './inbox.js';

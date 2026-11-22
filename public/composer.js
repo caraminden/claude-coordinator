@@ -3,7 +3,8 @@
 // pasted and dropped files with their drafts, the model and effort pickers, and steer or queue mid-turn.
 import { account, api, formatSize, h, noAutofill, isCoordinator, me, uploadUrl, view } from './base.js';
 import { codex, reloadWhenIdle, scrollToBottom, sending, setSending } from './core.js';
-import { adoptTicket, renderTyping } from './thread.js';
+import { adoptTicket } from './thread-head.js';
+import { renderTyping } from './thread.js';
 import { base64Url, blobBase64, userBubble } from './bubbles.js';
 import { mountComposer } from './ui/composer.js';
 import { openDialog } from './ui/dialog.js';

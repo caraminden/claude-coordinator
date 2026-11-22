@@ -11,7 +11,8 @@ import { LAST_SCHEME, renderSidebar, revealActiveRow, threadSearchBox } from './
 import { startPick } from './pick.js';
 import { artifactViewer, renderArtifactHead, setArtifacts, renderSharedHead, renderShelf, sharedViewer } from './artifacts.js';
 import { filesView, renderFiles } from './files.js';
-import { chatSection, chatView, mountChat, renderTicketHead, tmViewMode } from './thread.js';
+import { chatSection, chatView, mountChat, tmViewMode } from './thread.js';
+import { renderTicketHead } from './thread-head.js';
 import { mergedView } from './mine.js';
 import * as properties from './properties.js';
 import { preparePropFilter, renderSettingsCount } from './properties.js';

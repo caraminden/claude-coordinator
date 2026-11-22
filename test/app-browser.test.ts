@@ -217,7 +217,7 @@ async function inboxPage(status: 'ok' | 'fail' | 'hold', closed = false): Promis
   window.tmv = () => base.view;
     const { inboxStrip, refreshInbox } = await import('/inbox.js');
     const { onTicketUpdate } = await import('/core.js');
-    const { renderTicketHead } = await import('/thread.js');
+    const { renderTicketHead } = await import('/thread-head.js');
     const minion = { id: 900, number: 12, project_id: 2, kind: 'ticket', title: 'Report', status: ${closed ? "'closed'" : "'idle'"}, state: 'complete', replies: [], updated_at: Date.now() };
     window.server = ${closed ? '[]' : "[{ kind: 'state', ticketId: 900, at: Date.now(), key: 'state:900' }]"};
     window.fetch = async (path, opts) => {

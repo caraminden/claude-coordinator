@@ -186,18 +186,20 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     return { id, cached, page: cached ? null : loadEvents(id).catch(() => null) };
   })();
   // The list draws as soon as its own answer comes (#1533): requests sent with it queue on the server's one thread and hold
-  // it back, so a chat or Home asks for the files, machines and scheme list after its first paint. The Needs-you strip and
-  // the Filters button still come with that paint (#989), from what this tab saw of the scheme, or the shut strip's line
-  // holding its place; only a first sight of the filter or an opened strip waits, beside the list (both are small).
+  // it back, so a chat or Home asks for the files and machines after its first paint. The Needs-you strip and the Filters
+  // button still come with that paint (#989), from what this tab saw of the scheme, or the shut strip's line holding its
+  // place; only a first sight of the filter or an opened strip waits, beside the list (both are small). So does the scheme
+  // list on a tab's first open: it draws the schemes shelf and the crumb's icon, which would push things if they came late.
   const later = main.kind === 'chat' || main.kind === 'home';
   const known = view?.projects?.length ? view.projects : null;
+  const schemes = known ?? api('api/projects').catch(() => null);
   const filter = preparePropFilter(projectId);
   const firstItems = !stale && stripWaits(projectId) ? fetchInbox(projectId) : null;
   const files = stale || later ? null : shelfFiles(projectId);
-  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, items] = stale
-    ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes, build_previews: stale.buildPreviews }, null]
+  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, items, projects] = stale
+    ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes, build_previews: stale.buildPreviews }, null, known]
     // The dismissed minions stay on the server until the Dismissed list is opened, searched or linked to: most of a big scheme's payload (#538), 8,000 elements.
-    : await Promise.all([api(`api/projects/${projectId}?tickets=open`), firstItems, filter]);
+    : await Promise.all([api(`api/projects/${projectId}?tickets=open`), firstItems, schemes, filter]);
   const [artifacts, shared, machines] = stale ? [stale.artifacts, stale.shared, stale.machines] : files ? await files : [[], [], []];
   let tickets = open;
   // A link to a dismissed minion fetches that one minion; any other open draws without it.
@@ -235,7 +237,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     pins: pins ?? [], // ticket ids you pinned, oldest pin first (#179)
     builds: builds ?? [], // build branches' headers: { build, merged, open, behind } (src/builds.ts)
     buildPreviews: !!build_previews, // this server runs the scheme's code, so each build branch has a preview (src/previews.ts)
-    artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects: known ?? view?.projects ?? [],
+    artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects: projects ?? view?.projects ?? [],
     file: main.file ?? null,
     ...chatView(chatId, ticket, merged),
   });
@@ -323,7 +325,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderSidebar();
   renderGithubStrip();
   renderSchemesShelf();
-  refreshSchemes();
+  if (!projects || known) refreshSchemes(); // the list known before this open may be old; a failed fetch tries again
   if (stale) refreshScheme(projectId);
   else if (later) fillShelf(projectId);
   renderHiddenNote();
@@ -349,9 +351,8 @@ const shelfFiles = (projectId) => Promise.all([
 
 /** A chat's or Home's first paint left the files and machines till after (#1533): fill them in, unless the page has moved on. */
 async function fillShelf(projectId) {
-  const list = view.tickets;
   const [artifacts, shared, machines] = await shelfFiles(projectId);
-  if (view?.kind !== 'project' || view.tickets !== list) return;
+  if (view?.kind !== 'project' || view.projectId !== projectId) return;
   view.machines = machines; // only the Machines page draws them, and it isn't one of these
   setArtifacts(artifacts, shared);
 }

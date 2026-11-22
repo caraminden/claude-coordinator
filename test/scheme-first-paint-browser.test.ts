@@ -1,5 +1,5 @@
-// A scheme's first paint draws its minions list on the list's own answer (#1533): the files, machines and scheme list
-// come after it and fill in place, the Needs-you strip and Filters still hold their place from that paint (#989), and a
+// A scheme's first paint draws its minions list on the list's own answer (#1533): the files and machines come after it
+// and fill in place, the Needs-you strip and Filters still hold their place from that paint (#989), and a
 // link by number asks for its chat's history beside the list, not after it.
 // Citadel's real front end in headless Chromium (test/browser.ts), fetch answered in the page with a slow server's timings.
 import assert from 'node:assert/strict';
@@ -24,20 +24,23 @@ const STUB = `<script>
     const url = new URL(typeof input === 'string' ? input : input.url, location.href);
     const path = url.pathname.replace(/^\\//, ''), key = path + url.search;
     if (path === 'api/me') return send(key, { name: 'Cara', login: 'cara', admin: true, uid: 1 }, 0);
-    // The scheme list, files and machines come late; the list in between; the strip's and filter's answers are quick.
-    if (path === 'api/projects') return send(key, [{ id: 1, name: 'Alpha', inbox: 1, icon: null, coordinator_id: 100 }, { id: 2, name: 'Beta', inbox: 0, icon: null, coordinator_id: 200 }], 1200);
+    // The files and machines come late; the list in between; the scheme list's, strip's and filter's answers are quick.
+    if (path === 'api/projects') return send(key, [{ id: 1, name: 'Alpha', inbox: 1, icon: null, coordinator_id: 100 }, { id: 2, name: 'Beta', inbox: 0, icon: null, coordinator_id: 200 }], 150);
     if (path === 'api/projects/1' && url.searchParams.has('number')) return send(key, scheme([minion]), 0);
     if (path === 'api/projects/1') return send(key, scheme([minion]), 400);
     if (path === 'api/projects/1/inbox') return send(key, { items: [{ ticketId: 101, kind: 'state', key: 'a', state: 'ready' }] }, 150);
     if (path === 'api/projects/1/properties') return send(key, { keys: [{ key: 'type', status: 'active', value_kind: 'enum', values: [{ value: 'bug', status: 'active' }] }], proposals: [] }, 150);
     if (path === 'api/projects/1/views') return send(key, [], 150);
-    if (/^api\\/projects\\/1\\/(artifacts|shared)$/.test(path) || path === 'api/machines') return send(key, [], 1200);
+    if (path === 'api/projects/1/artifacts') return send(key, [{ id: 5, name: 'notes.md', kind: 'doc', path: 'notes.md', mtime: 1, ticket_id: 101, ticket_number: 7 }], 1200);
+    if (path === 'api/projects/1/shared' || path === 'api/machines') return send(key, [], 1200);
     if (/^api\\/tickets\\/\\d+\\/events$/.test(path)) return send(key, { events: [], tasks: [], more: false }, 0);
     return send(key, [], 0);
   };
   window.EventSource = class { close() {} };
-  // Where the list's pieces sit below the panel's top, every frame from its first row until 1.6 s later.
+  // Where the list's pieces sit below the panel's top, every frame from its first row until a few frames after the late answers.
   window.positions = []; window.drawnAt = null;
+  const late = ['api/projects/1/artifacts', 'api/projects/1/shared', 'api/machines', 'api/projects/1/inbox'];
+  let after = 0;
   (function f() {
     const top = document.querySelector('.sidebar > summary')?.getBoundingClientRect().top;
     const at = (sel) => { const e = document.querySelector(sel); return e ? Math.round(e.getBoundingClientRect().top - top) : null; };
@@ -45,7 +48,8 @@ const STUB = `<script>
       drawnAt ??= performance.now() - t0;
       positions.push(JSON.stringify([at('.inbox-strip'), at('#coordinator-row'), at('#threads')]));
     }
-    if (drawnAt == null || performance.now() - t0 < drawnAt + 1600) requestAnimationFrame(f); else window.watched = true;
+    if (late.every((k) => net.some(([q, w]) => q === k && w === 'answer'))) after++;
+    if (after < 5) requestAnimationFrame(f); else window.watched = true;
   })();
 </script>`;
 
@@ -75,7 +79,7 @@ for (const strip of ['shut', 'open']) {
     const net = (await page.eval('net')) as Net;
     const drawnAt = (await page.eval('drawnAt')) as number;
     assert.ok(drawnAt < when(net, 'api/projects/1/artifacts', 'answer'), `the list drew at ${Math.round(drawnAt)} ms, after the files answered`);
-    assert.ok(drawnAt < when(net, 'api/projects', 'answer'), 'the list drew before the scheme list answered');
+    await waitFor(page, 'the late files to reach the shelf', `document.querySelector('#artifact-shelf .fold .count')?.textContent === '1'`);
     // The chat's history was asked for before the list answered: its id came from the number, not from the list.
     assert.ok(when(net, 'api/tickets/101/events', 'ask') < when(net, 'api/projects/1?tickets=open', 'answer'), 'the events waited for the list');
     const positions = [...new Set((await page.eval('positions')) as string[])];

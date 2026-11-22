@@ -13,7 +13,7 @@
 #
 # One file: exits 0 when every copy passed, 1 when one failed or was stopped at the limit (its output is printed, then a
 # "burn-in: <file>: failed in <n> of <N> copies at once" line, which land.sh reads). BURN_IN_FILE_LIMIT (600) s per copy.
-# --ship: exits 1 on the first file with a failed copy. A file stopped at the ship's time limit has no verdict, said
+# --ship: runs every file, and exits 1 when any had a failed copy, naming each. A file stopped at the ship's time limit has no verdict, said
 # loudly: the full suite after it has its own hang limit. A file not started in time is named, as skipped. Map rules
 # whose glob holds `**` are left out: they map a whole folder to guard tests that read the repo, which race on nothing.
 # BURN_IN_NICE: a prefix for each copy (the flake proof's `nice -n 19`).
@@ -148,15 +148,18 @@ for ((i = 0; i < ${#imp[@]}; i++)); do echo "burn-in: picked ${imp[i]}: it ${imp
 files=("${direct[@]}" "${mapped[@]}" "${imp[@]}")
 [ ${#files[@]} -gt 0 ] || { echo "burn-in: this change adds or changes no test file, and no test is mapped to it or imports it: nothing to burn in"; exit 0; }
 echo "burn-in: ${#files[@]} file(s), $copies copies of each at once, one file after another, within $limit s: ${direct[*]:+changed: ${direct[*]}}${mapped[*]:+${direct[*]:+; }mapped from the change: ${mapped[*]}}${imp[*]:+${direct[*]}${mapped[*]:+; }importing the change: ${imp[*]}}"
-deadline=$((SECONDS + limit)) skipped=() nov=()
+# Every file runs, past a red one (#1564): a train with three racy riders hears of all three in one red run, not one a run.
+deadline=$((SECONDS + limit)) skipped=() nov=() red=()
 for f in "${files[@]}"; do
   left=$((deadline - SECONDS))
   [ "$left" -ge 15 ] || { skipped+=("$f"); continue; }
   rc=0
   burn_one "$f" "$copies" "$left" || rc=$?
-  [ "$rc" != 1 ] || { echo "burn-in: refused: a copy of $f failed when run $copies at once, so it is racy (its output is above); fix the race, not the wait"; exit 1; }
+  [ "$rc" != 1 ] || red+=("$f")
   [ "$rc" != 2 ] || nov+=("$f")
 done
 [ ${#nov[@]} = 0 ] || echo "burn-in: NO VERDICT on ${nov[*]}: stopped at the ${limit} s limit (the full suite runs it next, with its own hang limit)"
 [ ${#skipped[@]} = 0 ] || echo "burn-in: SKIPPED ${skipped[*]}: the ${limit} s limit ran out before they could start"
 echo "burn-in: done in $((limit - (deadline - SECONDS))) s"
+for f in "${red[@]}"; do echo "burn-in: refused: a copy of $f failed when run $copies at once, so it is racy (its output is above); fix the race, not the wait"; done
+[ ${#red[@]} = 0 ] || exit 1

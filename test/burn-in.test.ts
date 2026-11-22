@@ -47,6 +47,16 @@ test('a test file failing 1 copy in 10 is refused, with that copy named and its 
   assert.match(r.stdout, /^burn-in: refused: a copy of test\/racy\.test\.ts failed when run 10 at once/m);
 });
 
+test('every file runs past a racy one, and each racy file is named, so a train hears of all of them in one red run (#1564)', () => {
+  const r = ship(repo({ 'test/a-racy.test.ts': ONE_IN_TEN, 'test/b-clean.test.ts': CLEAN, 'test/c-racy.test.ts': ONE_IN_TEN }));
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: test\/b-clean\.test\.ts: 10 of 10 copies at once passed/m, 'the file after the first red still ran');
+  for (const f of ['a-racy', 'c-racy']) {
+    assert.match(r.stdout, new RegExp(`^burn-in: test/${f}\\.test\\.ts: failed in 1 of 10 copies at once \\(copies 3\\)`, 'm'));
+    assert.match(r.stdout, new RegExp(`^burn-in: refused: a copy of test/${f}\\.test\\.ts failed when run 10 at once`, 'm'));
+  }
+});
+
 test('a clean new test passes all 10 copies at once', () => {
   const r = ship(repo({ 'test/clean.test.ts': CLEAN }));
   assert.equal(r.status, 0, r.stdout + r.stderr);

@@ -18,13 +18,17 @@ export function mountLoginMap(app) {
   app.prepend(root);
   globalThis.citadelMap.draw(scene, 'lm-');
   // The map starts under the top bar, so the CITADEL banner at its top isn't hidden behind it.
-  const bar = document.querySelector('.topbar');
-  const fit = () => root.style.setProperty('--login-map-top', `${bar ? bar.getBoundingClientRect().height : 0}px`);
+  // Measured fresh each time: the bar grows by a notch's inset after the page is up, and can be redrawn.
+  const fit = () => {
+    const bar = document.querySelector('.topbar');
+    const h = `${bar ? bar.getBoundingClientRect().height : 0}px`;
+    if (root.style.getPropertyValue('--login-map-top') !== h) root.style.setProperty('--login-map-top', h);
+  };
   fit();
-  if (bar) {
-    const ro = new ResizeObserver(() => (root.isConnected ? fit() : ro.disconnect()));
-    ro.observe(bar);
-  }
+  const ro = new ResizeObserver(() => (root.isConnected ? fit() : ro.disconnect()));
+  ro.observe(document.documentElement);
+  const bar = document.querySelector('.topbar');
+  if (bar) ro.observe(bar);
   watch(root);
 }
 

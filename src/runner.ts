@@ -997,10 +997,9 @@ export class Runner {
     // The running step's start and guessed seconds, so the list row's bar fills as the chat head's does (#573).
     const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
     return {
-      // `status` from the live turns, not the row alone: the row's write waits in the queue (src/db-writer.ts), so under
-      // load this called a minion idle whose turn had already started -- and a turn's token, minted at that start, is the
-      // only one that still works, so anything acting on "idle, nothing queued" got 401s from it (#1618).
-      status: !closed && this.turns.has(ticket.id) ? 'running' : ticket.status,
+      // Whether a turn of its own is running, which view() reports as its status (#1618): a hidden keepalive is not
+      // one of those (it never shows as running, above), and a dismissed minion has nothing live.
+      turn_live: !closed && this.turns.has(ticket.id) && !this.keepalives.has(ticket.id),
       // What steps took against their guesses (#571), which both bars scale the guesses by: the one ratio steps.usual used.
       step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
@@ -1054,6 +1053,12 @@ export class Runner {
     return {
       // A wait's held messages stay in the queue (src/minion-queue.ts): they go into its resume.
       ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id), held_ids: this.queue.heldMail(ticket.id).flatMap((m) => m.id ?? []), queued_ids: this.queue.msgs(ticket.id).flatMap((m) => m.id ?? []), ...shown,
+      // The status from the live turn and the row together, never the row alone: the row's write waits in the queue
+      // (src/db-writer.ts), so under load this called a minion idle whose turn had already started -- and a turn's
+      // token, minted at that start, is the only one that still works, so anything acting on "idle, nothing queued"
+      // got 401s from it (#1618). Combined here, not in live(), so a reader's own fresh row still has the say once the
+      // turn has ended (its copy of live() is posted on each broadcast, src/reader-live.ts).
+      status: shown.turn_live ? 'running' : ticket.status,
       // Messages the loop guard holds for a person's Continue (#1067), for the row's badge and the chat's held-mail card.
       loop_hold: closed ? null : once('loop-holds', () => loopHolds(this.store)).get(ticket.id) ?? null,
       held_mail: this.heldMail(ticket),

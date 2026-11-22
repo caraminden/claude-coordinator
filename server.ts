@@ -2079,7 +2079,9 @@ function closeDown(why: string) {
   for (const [res] of inFlight) if (isEventStream(res)) res.destroy();
   runner.approvals.wakeAll();
   // Nothing exits while a reader thread is still starting: killing one then takes the process down on a signal
-  // instead of exiting 0 (src/front.ts, #1625). Capped, so a reader that never starts only slows the restart down.
+  // instead of exiting 0 (src/front.ts, #1625). Capped, so a reader that never starts only slows the restart down:
+  // the grace timer below can add one more grace on top of its own, which is the headroom this fix needs and still
+  // well inside systemd's default 90 s stop timeout (deploy/claude-coordinator.service sets none).
   const exit = async () => {
     await Promise.race([throughFront?.quiet ?? Promise.resolve(), new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref())]);
     process.exit(0);

@@ -484,3 +484,27 @@ test('the last stall says its cause in words, and a stall just after a boot is s
   assert.equal(stallCauseOf('The event loop was held for 1.5 s: x. Cause: waited for disk (0.1 s on CPU'), 'waited for disk');
   assert.equal(stallCauseOf('The event loop was held for 1.5 s: old line'), null);
 });
+
+test('answer time (#1559): each sample stores its window; three slow ones in a row tell the scheme once, three good ones clear it', async () => {
+  const { store, citadel, josh } = setup('answer');
+  let p95 = 900, now = Date.now() - 3_600_000;
+  const win = () => ({ v: 1, n: 300, fail: 0, p50: 5, p95, p99: p95 * 2, max: p95 * 3, over: 0.1, split: null, load: 20, turns: 4 });
+  const told: string[] = [];
+  const page = new StatusPage({ store, dataDir: root, bootAt: now, commit: 'abc', ownScheme: () => citadel.id, now: () => now, tell: (_id, text) => told.push(text),
+    cpuLedger: async () => null, cache: async () => ({}) as any, mem: async () => ({ total: 8e9, avail: 4e9 }), disk: async () => ({ total: 1e11, free: 5e10 }),
+    answer: { probe: { take: () => win() as any, lastMs: 12 }, turns: () => 4 } });
+  const next = async (v: number) => { p95 = v; now += 300_000; await page.sample(); };
+  await next(900); await next(900);
+  assert.equal(told.length, 0, 'two are not enough');
+  await next(900); await next(900);
+  assert.equal(told.length, 1, 'once, not once per sample');
+  assert.match(told[0], /p95 900 ms/);
+  assert.equal((await page.build(viewer(store, josh.id, true))).citadel.host.answer.alert, true);
+  await next(50); await next(50);
+  assert.equal((await page.build(viewer(store, josh.id, true))).citadel.host.answer.alert, true, 'two good ones do not clear it');
+  await next(50);
+  const a = (await page.build(viewer(store, josh.id, true))).citadel.host.answer;
+  assert.equal(a.alert, false);
+  assert.equal(a.rows.length, 7);
+  assert.equal(a.now, 12);
+});

@@ -10,6 +10,7 @@ import type { Store, Ticket } from './db.ts';
 import type { Runner } from './runner.ts';
 import type { App } from './http.ts';
 import { pacific } from './pacific.ts';
+import { stateWord } from './needs.ts';
 import { repoSlug } from './prlinks.ts';
 import type { GithubEnv } from './scheme-repo.ts';
 
@@ -131,7 +132,7 @@ const ciText = (ci: Facts['ci']): string => {
 export function factsText(f: Facts): string {
   return [
     `#${f.number} ${f.title} (scheme ${f.scheme})`,
-    `status: ${f.status}${f.state ? `, ${f.state}` : ''}${f.note ? ` · note: ${f.note}` : ''}`,
+    `status: ${f.status}${f.state ? `, ${stateWord(f.state)}` : ''}${f.note ? ` · note: ${f.note}` : ''}`,
     f.parkedOn ? `sealed on: ${f.parkedOn}` : f.state === 'parked' ? 'sealed on: nothing wakes it by itself (only a message or Unseal)' : '',
     f.cards.length ? f.cards.map((c) => `waiting on people: ${cardText(c)}`).join('\n') : 'cards waiting on people: none',
     f.waiting ? `waiting now: ${f.waiting}` : '',
@@ -159,7 +160,7 @@ const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` 
 export function handoffSheet(store: Store, runner: Pick<Runner, 'view'>, taskmaster: Ticket): string {
   const mine = store.listTickets(taskmaster.project_id).filter((t) => t.id !== taskmaster.id && t.kind !== 'coordinator' && t.status !== 'closed');
   const rows = mine.map((t) => ({ t, f: storedFacts(store, runner, t) }));
-  const line = ({ f }: { f: ReturnType<typeof storedFacts> }) => `- #${f.number} ${cut(f.title, 80)}: ${f.status}${f.state ? `, ${f.state}` : ''}${f.note ? ` · ${cut(f.note, 100)}` : ''}`;
+  const line = ({ f }: { f: ReturnType<typeof storedFacts> }) => `- #${f.number} ${cut(f.title, 80)}: ${f.status}${f.state ? `, ${stateWord(f.state)}` : ''}${f.note ? ` · ${cut(f.note, 100)}` : ''}`;
   const cards = rows.flatMap(({ f }) => f.cards.map((c) => `- #${f.number}: ${cardText(c)}`)).slice(0, SHEET_MINIONS);
   const parks = rows.filter(({ f }) => f.state === 'parked').map((r) => `${line(r)} (${r.f.parkedOn ? `wakes on: ${r.f.parkedOn}` : 'nothing wakes it by itself'})`);
   const flight = rows.filter(({ f }) => f.status === 'running' || (f.state && f.state !== 'parked')).slice(0, SHEET_MINIONS).map(line);
@@ -189,7 +190,7 @@ export function minionSheet(store: Store, runner: Pick<Runner, 'view'>, t: Ticke
     .filter((x) => x && typeof x.d.text === 'string' && x.d.author && !x.d.from && !x.d.mail && !/^(system|citadel|mandate|github|#)/i.test(x.d.author))
     .slice(0, MINION_PEOPLE).reverse().map((x) => `- ${x!.d.author}, ${pacific(x!.at)}: ${cut(x!.d.text.replace(/\s+/g, ' '), 600)}`);
   return [
-    `State: ${f.status}${f.state ? `, ${f.state}` : ''}${f.note ? ` · note: ${f.note}` : ''}`,
+    `State: ${f.status}${f.state ? `, ${stateWord(f.state)}` : ''}${f.note ? ` · note: ${f.note}` : ''}`,
     f.parkedOn ? `Sealed on: ${f.parkedOn}` : '',
     `Cards waiting on people:\n${f.cards.length ? f.cards.map((c) => `- ${cardText(c)}`).join('\n') : 'none'}`,
     `Branch: ${f.branch ?? 'none'}`,

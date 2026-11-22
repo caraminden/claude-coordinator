@@ -288,9 +288,9 @@ test("a disabled person's held mail is dropped with a line, and never decides or
   store.setSetting(`minion-queue:${hers.id}`, { held: [{ author: 'Josh', text: 'from josh', images: [], parked: '2026-11-21 20:00' }] });
   store.updateUser(josh.id, { disabled_at: Date.now() });
   // Olive unparks it (her line): her message gets its turn, on her login; his is dropped, not carried on hers.
-  runner.send(hers.id, 'Olive', 'Unparked you');
+  runner.send(hers.id, 'Olive', 'Unsealed you');
   await until('her message starts a turn', () => started.length === 1);
-  assert.deepEqual(started, [{ person: olive.id, texts: ['Unparked you'] }]);
+  assert.deepEqual(started, [{ person: olive.id, texts: ['Unsealed you'] }]);
   assert.deepEqual(asked, [olive.id], 'his disabled login is never asked for a place');
   assert.ok(notes(store, hers.id).some((n) => /Josh's login is disabled/.test(n) && /dropped/.test(n)), 'the chat says his message was dropped');
   assert.ok(!runner.queue.peek(hers.id).length && !runner.queue.get(hers.id).taken?.some((m) => m.text === 'from josh'));
@@ -311,7 +311,7 @@ test("a disabled person's held mail is dropped with a line, and never decides or
   assert.ok(runner.unpark(hers.id, 'Olive', 'Olive'));
   await until('the unpark starts a turn', () => started.length === 3);
   assert.equal(started[2].person, olive.id);
-  assert.match(started[2].texts.join('\n'), /Nothing was left for you while you were parked/);
+  assert.match(started[2].texts.join('\n'), /Nothing was left for you while you were sealed/);
 });
 
 test("a wake from no person runs on the minion's own person, not on another person's held mail, signed in or lapsed (#1509 2C2)", async () => {

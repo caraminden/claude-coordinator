@@ -198,7 +198,7 @@ test('a leader dismissed without its work merged holds the chain and tells peopl
   assert.equal(await w.check(), 0);
   assert.equal(held.length, 1, 'told once');
   assert.equal((await w.follow(leader.id, 'merged')).state, 'unshipped', 'nothing new can chain on it');
-  assert.match(w.heldFor(follower)!, /^#\d+ T's work has shipped, and #\d+ T was dismissed without it, so only Unpark starts you$/);
+  assert.match(w.heldFor(follower)!, /^#\d+ T's work has shipped, and #\d+ T was dismissed without it, so only Unseal starts you$/);
   assert.equal(w.wakesOn(follower), null, 'held: nothing wakes it by itself, so the list shows it under Parked (#718)');
 
   live.git('merge', '-q', '--no-ff', '-m', 'merge', leader.branch);
@@ -640,7 +640,7 @@ test('through the server: start_after parks the minion with its brief held; the 
   assert.equal(next.status, 201);
   assert.equal(next.data.state, 'parked');
   assert.equal(next.data.note, `starts when #${leader.number} has shipped`);
-  assert.ok(next.data.notes.some((n: string) => n.startsWith('Parked: it starts by itself')));
+  assert.ok(next.data.notes.some((n: string) => n.startsWith('Sealed: it starts by itself')));
   assert.deepEqual(await said(next.data.id), [], 'its brief is held');
 
   // A note left for it is held (#718) and doesn't hold up the start: it goes in after the brief.

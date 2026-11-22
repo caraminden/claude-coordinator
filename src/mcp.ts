@@ -64,7 +64,7 @@ function C() {
 const MAX_TEXT = 4000;
 /** Cold hold (#413): what the sender is told, and the urgent flag the three message tools share. */
 const COLD = (who: string) => coldToolText(C().MSG, who);
-import { NEEDS, NEED_LINES } from './needs.ts';
+import { NEEDS, NEED_LINES, stateWord } from './needs.ts';
 import { coldToolText, heldToolText, msgFromEnv } from './msg-settings.ts';
 import { pacificDay, pacificStamp } from './pacific.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says, and cannot be urgent.` };
@@ -1353,7 +1353,7 @@ function ticketLine(t: any): string {
     t.effort ? `effort: ${t.effort}` : '',
     t.workflow ? 'workflow: on' : '',
     t.plugin_dirs ? `plugins: ${t.plugin_dirs.split('\n').join(', ')}` : '',
-    `status: ${t.status}${t.state ? `, ${t.state}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
+    `status: ${t.status}${t.state ? `, ${stateWord(t.state)}` : ''}${t.queued ? ` (${t.queued} queued)` : ''}${t.closing ? ' (closes after this turn)' : ''}`,
     t.note ? `note: ${t.note}` : '',
     t.branch ? `branch: ${t.branch}` : '',
     t.worktree ? `worktree: ${t.worktree}` : '',
@@ -2145,7 +2145,7 @@ async function runTool(name: string, args: any): Promise<string> {
       // Unseal (#718; start_now is its old name): the server unseals it first if it's sealed, and this message wakes it.
       const unpark = args.unpark === true || args.start_now === true;
       const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(args.urgent === true ? { urgent: true } : {}), ...(unpark ? { unpark: true } : {}) });
-      if (t.held === 'parked') return `Held for #${t.number}: it is sealed, so the message shows in its chat now and reaches it when it is unsealed or woken (its deploy wait or chained start). Do not resend it; message_ticket with `unpark` wakes it now.\n${ticketLine(t)}`;
+      if (t.held === 'parked') return `Held for #${t.number}: it is sealed, so the message shows in its chat now and reaches it when it is unsealed or woken (its deploy wait or chained start). Do not resend it; message_ticket with \`unpark\` wakes it now.\n${ticketLine(t)}`;
       return t.held === 'cold' ? `${COLD(`#${t.number}`)}\n${ticketLine(t)}` : t.held ? `${HELD()} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
@@ -2294,7 +2294,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('POST', `/api/tickets/${C().TICKET}/minion-message`, { to: n, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.urgent === true ? { urgent: true } : {}), ...(args.unpark === true ? { unpark: true } : {}) });
       const who = `#${r.number} ${r.title}`;
       if (r.held === true) return `${heldToolText(C().MSG, `you and #${r.number}`)} Finish your turn.`;
-      if (r.held === 'parked') return `Held for ${who}: it is sealed, so the message shows in its chat now and reaches it when it is unsealed or woken. Do not resend it; if it is sealed on you, resend with `unpark: true`.`;
+      if (r.held === 'parked') return `Held for ${who}: it is sealed, so the message shows in its chat now and reaches it when it is unsealed or woken. Do not resend it; if it is sealed on you, resend with \`unpark: true\`.`;
       if (r.held === 'cold') return COLD(`#${r.number}`);
       if (r.held === 'mail') return `Left as held mail: ${who} reads it on its next turn, whoever wakes it. Do not resend it.`;
       return `Sent. ${who} runs it now, or after its current turn.`;

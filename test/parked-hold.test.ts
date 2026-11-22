@@ -84,12 +84,12 @@ test("a person's message to a parked minion is held; Unpark wakes it with the he
 
   const prompt = await turn(() => assert.equal(runner.unpark(m.id, 'Cara', 'Cara'), true));
   assert.deepEqual(prompt, [
-    '[Cara]: Unparked you. The 2 messages left for you while you were parked follow. Pick up where you left off.',
-    `[Cara, left while you were parked, ${SENT} UTC]: when you wake, check the logs`,
-    `[Josh, left while you were parked, ${SENT} UTC]: and the tripwire test`,
+    '[Cara]: Unsealed you. The 2 messages left for you while you were sealed follow. Pick up where you left off.',
+    `[Cara, left while you were sealed, ${SENT} UTC]: when you wake, check the logs`,
+    `[Josh, left while you were sealed, ${SENT} UTC]: and the tripwire test`,
   ]);
   assert.notEqual(store.getTicket(m.id)!.state, 'parked');
-  assert.ok(store.listEvents(m.id).some((e) => e.kind === 'note' && JSON.parse(e.data).text === 'Cara unparked this minion.'));
+  assert.ok(store.listEvents(m.id).some((e) => e.kind === 'note' && JSON.parse(e.data).text === 'Cara unsealed this minion.'));
   await idle(m.id);
   assert.deepEqual(held(m.id), [], 'delivered once');
   assert.equal(runner.unpark(m.id, 'Cara', 'Cara'), false, 'no longer parked');
@@ -137,7 +137,7 @@ test("wake_when_live's wake starts a parked minion's turn, its held messages aft
   const prompt = await turn(() => runner.send(m.id, APP_NAME, '`abc1234` is live now: retry the tripwire test'));
   assert.deepEqual(prompt, [
     `[${APP_NAME}]: \`abc1234\` is live now: retry the tripwire test`,
-    `[Cara, left while you were parked, ${SENT} UTC]: also bump the version`,
+    `[Cara, left while you were sealed, ${SENT} UTC]: also bump the version`,
   ]);
   await idle(m.id);
 });
@@ -165,8 +165,8 @@ test('a start_after minion holds messages, and its start delivers them after its
   const prompt = await turn(() => startChained(w.claim(m.id)!, `#${tm.number}'s work is live`, { store, runner, waiters: w }));
   assert.deepEqual(prompt, [
     '[Taskmaster]: brief: build part two',
-    `[Cara, left while you were parked, ${SENT} UTC]: use the new schema`,
-    `[Taskmaster, left while you were parked, ${SENT} UTC]: part one is merged`,
+    `[Cara, left while you were sealed, ${SENT} UTC]: use the new schema`,
+    `[Taskmaster, left while you were sealed, ${SENT} UTC]: part one is merged`,
   ]);
   assert.equal(runner.heldFor(m.id), null);
   await idle(m.id);
@@ -217,7 +217,7 @@ test('through the server: Unpark, the Taskmaster\'s unpark option, and update_ti
     assert.equal(unparked.data.state, null);
     const wake = (await said(a)).at(-1);
     assert.equal(wake.author, 'Cara');
-    assert.match(wake.text, /^Unparked you\. The message left for you while you were parked follows\./);
+    assert.match(wake.text, /^Unsealed you\. The message left for you while you were sealed follows\./);
     assert.equal((await call(`/api/tickets/${a}/unpark`, {})).status, 409, 'unparked once');
     await settled(a);
 
@@ -270,7 +270,7 @@ test('through the server: Unpark, the Taskmaster\'s unpark option, and update_ti
     assert.equal((await call(`/api/tickets/${c}`, { state: null }, 'PATCH', taskmaster)).status, 200);
     await until('the unpark turn', async () => (await said(c)).length > before);
     assert.equal((await said(c)).at(-1).author, APP_NAME);
-    assert.match((await said(c)).at(-1).text, /^Taskmaster unparked you|unparked you/);
+    assert.match((await said(c)).at(-1).text, /^Taskmaster unsealed you|unsealed you/);
     assert.notEqual((await view(c)).state, 'parked');
     await settled(c);
 

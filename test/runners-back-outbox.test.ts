@@ -62,7 +62,7 @@ test('a wait set while runners are down fires on the poll after they return', as
   w.health.wakeParked(project as any, runner(true));
   await w.outbox.poke({ type: 'tick' });
   assert.equal(w.sent.length, 1);
-  assert.match(w.sent[0].text, /^Peek Auras's CI runners are back \(DESKTOP online\): run tools\/land\.sh again\. If land parks/);
+  assert.match(w.sent[0].text, /^Peek Auras's CI runners are back \(DESKTOP online\): run tools\/land\.sh again\. If land seals/);
   w.health.wakeParked(project as any, runner(true));
   await w.outbox.poke({ type: 'tick' });
   assert.equal(w.sent.length, 1, 'once');

@@ -23,3 +23,6 @@ export function checkNeed(body: { need?: unknown; urgent?: unknown }): { need: N
   if (need === 'fyi' && body.urgent === true) return { error: 'urgent wakes the receiver, and a fyi never does: pick the need it really is (ask, decision) or drop urgent' };
   return { need: need as Need };
 }
+
+/** The word people and agents read for a minion's state: 'parked' (the stored value, unchanged) reads "sealed" (Cara, 2026-11-22). */
+export const stateWord = (s: string | null | undefined): string | null | undefined => (s === 'parked' ? 'sealed' : s);

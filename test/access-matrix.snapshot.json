@@ -3364,10 +3364,10 @@
  },
  "POST /api/tickets/:minion1/start": {
   "anon": "401 Not logged in",
-  "person": "409 #1 isn't parked waiting on another minion's work",
-  "member": "409 #1 isn't parked waiting on another minion's work",
+  "person": "409 #1 isn't sealed waiting on another minion's work",
+  "member": "409 #1 isn't sealed waiting on another minion's work",
   "outsider": "404 No such minion",
-  "tmA": "409 #1 isn't parked waiting on another minion's work",
+  "tmA": "409 #1 isn't sealed waiting on another minion's work",
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
@@ -3464,10 +3464,10 @@
  },
  "POST /api/tickets/:minion1/unpark": {
   "anon": "401 Not logged in",
-  "person": "409 #1 isn't parked",
-  "member": "409 #1 isn't parked",
+  "person": "409 #1 isn't sealed",
+  "member": "409 #1 isn't sealed",
   "outsider": "404 No such minion",
-  "tmA": "409 #1 isn't parked",
+  "tmA": "409 #1 isn't sealed",
   "tmB": "403 Outside this Taskmaster's scheme",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
@@ -4284,8 +4284,8 @@
  },
  "POST /api/tickets/:taskmasterA/unpark": {
   "anon": "401 Not logged in",
-  "person": "400 The Taskmaster is never parked",
-  "member": "400 The Taskmaster is never parked",
+  "person": "400 The Taskmaster is never sealed",
+  "member": "400 The Taskmaster is never sealed",
   "outsider": "404 No such minion",
   "tmA": "403 The Taskmaster cannot act on itself",
   "tmB": "403 Outside this Taskmaster's scheme",

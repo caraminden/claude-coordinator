@@ -46,7 +46,7 @@ test('liveFacts reads state, cards, park, branch, change and CI in one go, and f
   assert.equal(f.head, 'abc12345');
   assert.equal((f.ci as any).conclusion, 'success');
   const text = factsText(f);
-  for (const want of ['#7 Fix the thing (scheme Delve)', 'status: idle, parked', "parked on: #6 Leader's work is live", '[open it](#/p/3/t/70?e=5)', 'branch: ticket/7-x @ abc12345', 'change: On main, not deployed', 'PR #12: open', 'newest CI run: tests on ticket/7-x @ abc12345: success']) {
+  for (const want of ['#7 Fix the thing (scheme Delve)', 'status: idle, sealed', "sealed on: #6 Leader's work is live", '[open it](#/p/3/t/70?e=5)', 'branch: ticket/7-x @ abc12345', 'change: On main, not deployed', 'PR #12: open', 'newest CI run: tests on ticket/7-x @ abc12345: success']) {
     assert.ok(text.includes(want), `missing ${want} in:\n${text}`);
   }
 });

@@ -601,7 +601,7 @@ test('wake_when_runners_back (#541): a minion parked on CI hears once, when a ru
   await health.tick(NOW + 10 * MIN);
   assert.equal(sent.length, 1);
   assert.equal(sent[0][0], parked);
-  assert.match(sent[0][1], /^Peek Auras's CI runners are back \(DESKTOP-G248IJ8-linux online\): run tools\/land\.sh again\. If land parks/);
+  assert.match(sent[0][1], /^Peek Auras's CI runners are back \(DESKTOP-G248IJ8-linux online\): run tools\/land\.sh again\. If land seals/);
   assert.deepEqual(runnerWaiters(w.store).map((x) => x.ticket), [other]);
 
   // Without a way to send, nobody is dropped.

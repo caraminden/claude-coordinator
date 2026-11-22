@@ -6,6 +6,7 @@ import { cardHref, cardText } from './card-links.ts';
 import type { Store, Ticket } from './db.ts';
 import { storedFacts } from './live-facts.ts';
 import type { Runner } from './runner.ts';
+import { stateWord } from './needs.ts';
 
 /** An open minion with nothing coming is listed once it has been idle this long (a starting number). */
 export const STUCK_IDLE_MS = 6 * 3_600_000;
@@ -46,7 +47,7 @@ export function stuckItems(store: Store, runner: Pick<Runner, 'view'>, taskmaste
     if (t.kind === 'coordinator' || t.status === 'closed' || store.ownerCoordinator(t)?.id !== taskmaster.id) continue;
     const v = runner.view(t);
     const f = storedFacts(store, { view: () => v }, t);
-    const head = `#${f.number} ${cut(f.title, 70)} (${f.status}${f.state ? `, ${f.state}` : ''}`;
+    const head = `#${f.number} ${cut(f.title, 70)} (${f.status}${f.state ? `, ${stateWord(f.state)}` : ''}`;
     const note = f.note ? ` · note: ${cut(f.note, 100)}` : '';
     const at = new Map(store.openCardsOf(t.id).map((e) => [cardHref(t, e.id), e.created_at]));
     for (const c of f.cards) {

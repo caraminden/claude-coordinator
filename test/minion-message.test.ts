@@ -108,12 +108,12 @@ test('unpark: true wakes a minion parked on the sender, and the Taskmaster gets 
   const P = minion(A.id, 'Waiting on #1');
   store.updateTicket(P.id, { state: 'parked' });
   const plain = await tool(M1.id, 'message_minion', { ticket_id: P.number, text: 'held only' });
-  assert.match(plain.text, /resend with unpark: true/);
+  assert.match(plain.text, /resend with `unpark: true`/);
   assert.equal(store.getTicket(P.id)!.state, 'parked', 'without unpark it stays parked');
   const r = await tool(M1.id, 'message_minion', { ticket_id: P.number, text: 'my work is on main, go ahead', unpark: true });
   assert.equal(r.error, false, r.text);
   assert.equal(store.getTicket(P.id)!.state, null);
-  assert.ok(events(P.id, 'note').some((n) => n.text === '#1 unparked this minion.'));
+  assert.ok(events(P.id, 'note').some((n) => n.text === '#1 unsealed this minion.'));
   assert.ok(events(P.id, 'user_message').some((m) => m.author === '#1 Sender' && m.text === 'my work is on main, go ahead'));
   const copy = events(TM.id, 'minion_copy').at(-1);
   assert.equal(copy.unparked, true);

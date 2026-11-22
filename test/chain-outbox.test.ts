@@ -178,7 +178,7 @@ test('a held chain stays held across a restart, told once, and starts if the wor
   assert.equal(s1.r.held.length, 1);
   assert.match(s1.r.held[0].why, /^#\d+ was dismissed without its work shipping$/);
   assert.equal(rows(follower.id)[0].state, 'held');
-  assert.match(s1.waiters.heldFor(follower.id)!, /so only Unpark starts you$/);
+  assert.match(s1.waiters.heldFor(follower.id)!, /so only Unseal starts you$/);
   assert.equal(s1.waiters.wakesOn(follower.id), null);
   assert.equal(await s1.waiters.check(), 0);
   assert.equal(s1.r.held.length, 1, 'told once');
@@ -192,7 +192,7 @@ test('a held chain stays held across a restart, told once, and starts if the wor
   assert.equal(s2.r.held.length, 0, 'not told again');
   assert.equal(s2.r.sent.length, 0);
   assert.equal(rows(follower.id)[0].state, 'held');
-  assert.match(s2.waiters.heldFor(follower.id)!, /so only Unpark starts you$/);
+  assert.match(s2.waiters.heldFor(follower.id)!, /so only Unseal starts you$/);
 
   merge(leader.branch);
   assert.equal(await s2.waiters.check(), 1);
@@ -215,7 +215,7 @@ test('the old chained-minions key moves into the table in one go, held flags and
   const open = followers.slice(0, 2).map((f) => f.id);
   // The dual read: before the move, the readers see the old key.
   const before = open.map((id) => [s.waiters.heldFor(id), s.waiters.heldBrief(id)?.text]);
-  assert.match(String(before[1][0]), /so only Unpark starts you$/);
+  assert.match(String(before[1][0]), /so only Unseal starts you$/);
   assert.deepEqual(before.map((b) => b[1]), ['one', 'two']);
 
   await s.outbox.boot();

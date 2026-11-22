@@ -342,7 +342,7 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
         ? [`You run with the ${advisedModel(ticket.model).advisor} advisor tool, and this is an advisor trial: call it once with your plan before your first code edit, once with your diff summary before you ship, and again whenever a fix did not hold. A trial minion that never consults it is a failed trial run.`]
         : [],
     // Sealed on start_after (#261): messages wait for its start (#718); a card's answer or a notice still wakes it.
-    held: held ? [`You are parked: your brief is held until ${held}. Handle what woke you (a card's answer, a notice) without starting the work; Unseal on your page (or the Taskmaster's message_ticket with `unpark`) starts you with your brief. End the turn with the state and note you have now.`] : [],
+    held: held ? [`You are sealed: your brief is held until ${held}. Handle what woke you (a card's answer, a notice) without starting the work; Unseal on your page (or the Taskmaster's message_ticket with \`unpark\`) starts you with your brief. End the turn with the state and note you have now.`] : [],
     // The details only while the branch has an open PR (#760): the line changes once when one opens, costing one cache rewrite.
     pr: [openPr
       ? 'Your branch has an open PR: the app messages you as "[GitHub]: ..." on CI, reviews, comments, merge or close, so don\'t wait on CI in a turn or a loop; set state outside and end the turn. `ci-failures [<run id> | <sha> | <branch>]` prints a red run\'s failing tests (`--list`: recent runs).'

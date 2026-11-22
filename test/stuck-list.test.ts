@@ -54,7 +54,7 @@ test('an open minion idle past the threshold with nothing coming is listed with 
 test('a park nothing wakes is listed as such, after the idle threshold', () => {
   const w = world();
   w.minion('Shelved', 8, {}, { state: 'parked' });
-  assert.match(lines(w)[0], /parked, nothing wakes it by itself/);
+  assert.match(lines(w)[0], /sealed, nothing wakes it by itself/);
 });
 
 test('a park whose own change is live is listed after an hour, first', () => {
@@ -63,13 +63,13 @@ test('a park whose own change is live is listed after an hour, first', () => {
   const shipped = w.minion('Shipped and parked', 2, { ship: { stage: 'live', text: 'Live', commit: 'abc' } }, { state: 'parked' });
   const got = lines(w);
   assert.equal(got.length, 2);
-  assert.match(got[0], new RegExp(`^#${shipped.number} Shipped and parked .*: parked, but its own change is live`));
+  assert.match(got[0], new RegExp(`^#${shipped.number} Shipped and parked .*: sealed, but its own change is live`));
 });
 
 test("a park whose leader was dismissed without its work (a held chain: nothing wakes it) is listed with what it was on", () => {
   const w = world();
   w.minion('Follower', 2, { parked_for: "#4 Leader's work is live, and #4 Leader was dismissed without it, so only Unpark starts you", wakes_on: null }, { state: 'parked' });
-  assert.match(lines(w)[0], /parked on #4 Leader's work is live, and #4 Leader was dismissed without it/);
+  assert.match(lines(w)[0], /sealed on #4 Leader's work is live, and #4 Leader was dismissed without it/);
 });
 
 test('a card waiting over a day is listed with who it waits on; a younger one is not, and its minion is not listed as idle', () => {

@@ -247,7 +247,7 @@ test("a failed handoff starts the new session from a facts sheet the server buil
   assert.equal(view.open_cards.length, 1);
   assert.ok(text.includes(view.open_cards[0].href), 'the open card links match the database');
   assert.match(text, new RegExp(`#${asking.number}[^\\n]*ready[^\\n]*asked Cara`));
-  assert.match(text, new RegExp(`Parked minions:\\n- #${parked.number} Waits on a deploy: idle, parked · parked for the fix \\(nothing wakes it by itself\\)`));
+  assert.match(text, new RegExp(`Sealed minions:\\n- #${parked.number} Waits on a deploy: idle, sealed · parked for the fix \\(nothing wakes it by itself\\)`));
   assert.match(text, /Cara: ship the sheet first/);
   await endTurn(id, 'ok');
   await waitIdle(id);
@@ -266,7 +266,7 @@ test('a handoff that came back carries the same sheet beside it, to check it aga
   runner.send(id, 'Cara', 'next');
   await started(id);
   const text = promptText((await lastCall(count)).prompt);
-  assert.match(text, /Nothing open, I think\.[\s\S]*check the handoff above against it[\s\S]*Parked minions:\n- #\d+ Parked one/);
+  assert.match(text, /Nothing open, I think\.[\s\S]*check the handoff above against it[\s\S]*Sealed minions:\n- #\d+ Parked one/);
   await endTurn(id, 'ok');
   await waitIdle(id);
 });

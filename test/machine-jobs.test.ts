@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
-import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, pacificClock, type JobKind } from '../src/machine-jobs.ts';
+import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, notTaken, pacificClock, type JobKind } from '../src/machine-jobs.ts';
 import { writeOffThread } from '../src/db-writer.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, holds, ok, zoneLabel, type Booted } from './helpers.ts';
@@ -557,4 +557,13 @@ test('with the DB writes behind on their worker, a job\'s card still moves for e
     await w.stop();
     store.db.close();
   }
+});
+
+test('the wake names results the server did not take, with where they are on the machine (MA3)', () => {
+  const job = { id: 7, outputs: JSON.stringify([{ path: 'a.json', size: 1, uploaded: true }, { path: 'huge.bin', size: 9, uploaded: false, why: 'HTTP 413: over the cap' }]) } as any;
+  const line = notTaken(job, 'gpu-box');
+  assert.match(line, /huge\.bin \(HTTP 413: over the cap\)/);
+  assert.match(line, /gpu-box, in job folder 7\/out\//);
+  assert.doesNotMatch(line, /a\.json/);
+  assert.equal(notTaken({ id: 8, outputs: JSON.stringify([{ path: 'a', size: 1, uploaded: true }]) } as any, 'gpu-box'), '');
 });

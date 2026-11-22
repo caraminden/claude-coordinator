@@ -227,6 +227,16 @@ export function jobView(j: MachineJob, extra: { machine?: string; waits?: string
 }
 export type JobView = ReturnType<typeof jobView>;
 
+/** The results a job's machine kept because the server didn't take them, named with where they are there (MA3). */
+export function notTaken(job: MachineJob, machine: string): string {
+  let all: unknown = [];
+  try { all = job.outputs ? JSON.parse(job.outputs) : []; } catch {}
+  const left = ((Array.isArray(all) ? all : []) as { path: string; uploaded: boolean; why?: string }[]).filter((o) => !o.uploaded);
+  if (!left.length) return '';
+  const names = left.slice(0, 5).map((o) => `${o.path}${o.why ? ` (${o.why})` : ''}`).join(', ');
+  return ` Not taken, so still only on ${machine}, in job folder ${job.id}/out/ of its jobs folder: ${names}${left.length > 5 ? ` and ${left.length - 5} more` : ''}. Its owner has them; nothing fetches them from here.`;
+}
+
 /** A message for a machine's agent, on its stream (the contract's server-to-agent messages). */
 export type AgentJobMessage =
   | { type: 'job.start'; id: number; kind: Omit<JobKind, 'max_limit_s'>; limit_s: number; inputs: { name: string; size: number; sha256: string }[]; input_token: string; resume: boolean }
@@ -560,7 +570,7 @@ export class MachineJobs {
     this.changed(id);
     if (job.ticket_id !== null && !quiet) {
       const res = job.state === 'done' ? ` Results: ${job.upload_bytes ? `jobs/${id}/ in the scheme's shared folder` : 'none uploaded'}.` : '';
-      this.d.wake(job.ticket_id, `${text}${res} job_status ${id} has the details.`, job.state === 'done');
+      this.d.wake(job.ticket_id, `${text}${res}${notTaken(job, this.machineOf(job).name)} job_status ${id} has the details.`, job.state === 'done');
     }
   }
 
@@ -656,7 +666,7 @@ export class MachineJobs {
     // Running time as the server sees it: report gaps while running, each capped, so a lost agent's silence doesn't count.
     const gap = job.state === 'running' && job.live_at ? Math.min(MAX_REPORT_GAP_S, Math.max(0, (now - job.live_at) / 1000)) : 0;
     const outputs = Array.isArray(body.outputs)
-      ? body.outputs.slice(0, JOB_CAPS.outputs).flatMap((o: any) => (typeof o?.path === 'string' && num(o.size) !== null ? [{ path: o.path.slice(0, 500), size: num(o.size), uploaded: o.uploaded === true }] : []))
+      ? body.outputs.slice(0, JOB_CAPS.outputs).flatMap((o: any) => (typeof o?.path === 'string' && num(o.size) !== null ? [{ path: o.path.slice(0, 500), size: num(o.size), uploaded: o.uploaded === true, ...(o.uploaded !== true && typeof o.why === 'string' ? { why: o.why.slice(0, 300) } : {}) }] : []))
       : undefined;
     const live = {
       gpu_pct: num(body.gpu_pct), vram_mb: num(body.vram_mb), held_vram_mb: num(body.held_vram_mb),

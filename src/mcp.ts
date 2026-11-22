@@ -2242,7 +2242,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return pick.map((j: any) => [
         `#${j.id} ${j.kind.name} on ${j.machine}: ${j.state}${j.waits ? ` (${j.waits})` : ''}${j.paused_by ? ` (paused by ${j.paused_by})` : ''}${j.error ? `; ${j.error}` : ''}`,
         `  ran ${min(j.run_s)} of ${min(j.limit_s)}, GPU busy ${min(j.gpu_busy_s)}${j.gpu_pct !== null ? `, GPU ${j.gpu_pct}% ${j.vram_mb ?? '?'} MB now` : ''}${j.exit_code !== null ? `, exit ${j.exit_code}` : ''}`,
-        ...(j.outputs.length ? [`  outputs: ${j.outputs.map((o: any) => `${o.path} (${o.size} B${o.uploaded ? '' : ', not uploaded'})`).join(', ')}${j.upload_bytes ? ` in the shared folder's jobs/${j.id}/` : ''}`] : []),
+        ...(j.outputs.length ? [`  outputs: ${j.outputs.map((o: any) => `${o.path} (${o.size} B${o.uploaded ? '' : `, not uploaded${o.why ? `: ${o.why}` : ''}, still in job folder ${j.id}/out/ on the machine`})`).join(', ')}${j.upload_bytes ? ` in the shared folder's jobs/${j.id}/` : ''}`] : []),
         ...(args.id !== undefined && j.log_tail ? [`  log:\n${j.log_tail}`] : []),
       ].join('\n')).join('\n');
     }

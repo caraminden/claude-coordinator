@@ -1264,6 +1264,28 @@ export class JobRunner {
     return [...this.jobs.values()].filter((j) => !j.final_sent).slice(0, 100).map((j) => ({ id: Number(j.id), state: j.state }));
   }
 
+  /** For the owner's Machines page: job folders holding results the app never took, which nothing here deletes (MA3). */
+  leftover() {
+    const dir = this.block?.dir;
+    if (!dir) return [];
+    const left = [];
+    try {
+      for (const e of readdirSync(dir)) {
+        if (!JOB_ID.test(e)) continue;
+        try {
+          const j = JSON.parse(readFileSync(join(dir, e, 'job.json'), 'utf8'));
+          if (j.final_sent && (j.outputs ?? []).some((o) => o && o.uploaded === false)) left.push({ id: e, bytes: du(join(dir, e)) });
+        } catch {}
+      }
+    } catch {
+      return [];
+    }
+    if (!left.length) return [];
+    const mb = Math.ceil(left.reduce((n, l) => n + l.bytes, 0) / 1024 ** 2);
+    const ids = left.map((l) => l.id).sort((a, b) => Number(a) - Number(b));
+    return [`jobs: ${left.length} job folder${left.length === 1 ? '' : 's'} (${mb} MB) in ${dir} hold results Citadel never took: ${ids.slice(0, 20).join(', ')}${ids.length > 20 ? ` and ${ids.length - 20} more` : ''}. They count against max_disk_gb and are never deleted for you: copy what you need from each one's out folder, then delete it.`];
+  }
+
   close() {
     this.closed = true;
     clearInterval(this.timer);
@@ -1320,7 +1342,7 @@ export class JobRunner {
       id: Number(job.id), state: job.state, run_s: this.runS(job), gpu_busy_s: Math.round(job.gpu_busy_s),
       gpu_pct: g?.pct ?? null, vram_mb: g?.vram ?? null, log_tail: cleanLog(fileTail(this.dir(job, 'job.log'), JOB_LOG_TAIL * 2)).slice(-JOB_LOG_TAIL),
       ...(job.state === 'paused' && job.paused === 'frozen' && g ? { held_vram_mb: g.vram } : {}),
-      ...(job.outputs.length ? { outputs: job.outputs.map(({ path, size, uploaded }) => ({ path, size, uploaded })) } : {}),
+      ...(job.outputs.length ? { outputs: job.outputs.map(({ path, size, uploaded, why }) => ({ path, size, uploaded, ...(why && !uploaded ? { why } : {}) })) } : {}),
       ...(JOB_ENDED.includes(job.state) ? { exit_code: job.final.exit_code, ...(job.final.error ? { error: job.final.error } : {}) } : {}),
     };
     let res;
@@ -1570,6 +1592,8 @@ export class JobRunner {
         job.final_sent = true;
         this.save(job);
         this.log(`Job ${job.id}: ${job.state}`);
+        // Results the app didn't take stay here: the owner's Machines page lists them (MA3).
+        if (job.outputs.some((o) => !o.uploaded)) this.onLeftover?.();
       }
     } finally {
       job._finishing = false;
@@ -2029,6 +2053,7 @@ async function main() {
   describeWorkspaces();
   // GPU jobs (#858): made even without a jobs block, so a job sent here is refused out loud.
   const runner = new JobRunner({ block: host?.jobsBlock ?? null, appUrl, token, log });
+  runner.onLeftover = () => sendInfo();
 
   /** Tells the app which servers and workspaces this agent offers; sent on connect and when the config changes. */
   async function sendInfo() {
@@ -2038,7 +2063,7 @@ async function main() {
       method: 'POST',
       headers: { ...auth, 'Content-Type': 'application/json' },
       // v says which agent this is: the app shows one without it as set up the old way.
-      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), ...(jobs ? { jobs } : {}), known_jobs: runner.known() }),
+      body: JSON.stringify({ ...(managed ? { v: 2, found: (reported = found()) } : { servers: offered() }), ...(host ? host.summary() : {}), problems: [...(host?.summary().problems ?? []), ...runner.leftover()], ...(jobs ? { jobs } : {}), known_jobs: runner.known() }),
     }).then(async (res) => {
       // fetch doesn't throw on a refusal; a silent one hid #301's 404.
       if (!res.ok) log(`The app refused this computer's workspaces: ${res.status} ${(await res.json().catch(() => ({}))).error ?? ''}`);

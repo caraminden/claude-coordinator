@@ -314,6 +314,27 @@ test('a job runs, reports, and only what stays inside /out uploads; a symlink ou
   await until('the runner hears the app took its last report', () => !r.known().some((k: any) => k.id === msg.id), 6000, statesTail);
 });
 
+test('a result the app refused is reported with why, and its folder is listed for the owner, never deleted (MA3)', async () => {
+  const r = runner();
+  let told = 0;
+  r.onLeftover = () => told++;
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  writeFileSync(join(jobsDir, String(msg.id), 'out', 'huge.bin'), 'x'.repeat(100));
+  exitContainer(msg.id, 0);
+  await until('done', () => lastState(msg.id)?.state === 'done', 6000, statesTail);
+  const huge = lastState(msg.id)!.outputs!.find((o) => o.path === 'huge.bin') as any;
+  assert.equal(huge.uploaded, false);
+  assert.match(huge.why ?? '', /413|cap/);
+  await until('the owner is told', () => told > 0, 6000, statesTail);
+  const lines = r.leftover();
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], new RegExp(`\\b${msg.id}\\b`));
+  assert.match(lines[0], /never deleted/);
+  assert.ok(existsSync(join(jobsDir, String(msg.id), 'out', 'huge.bin')));
+});
+
 test('outFiles never follows a folder link, and lists a broken link', () => {
   const out = mkdtempSync(join(root, 'out-'));
   symlinkSync(join(root, 'missing'), join(out, 'broken'));

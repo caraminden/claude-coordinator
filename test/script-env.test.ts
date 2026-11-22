@@ -40,11 +40,14 @@ test('the list covers everything the scripts export or pass to a child by assign
   const found = new Set<string>();
   for (const f of readdirSync(tools).filter((n) => n === 'citadel-heavy' || n.endsWith('.sh'))) {
     const text = readFileSync(join(tools, f), 'utf8');
-    // `export NAME=...` and `NAME=value command` / `LAND_REBASED=1 exec ...` prefixes on a DEPLOY_/LAND_/CITADEL_ name.
-    for (const m of text.matchAll(/^[^#\n]*?(?:\bexport\s+|(?:^|[;&|]\s*|\bif\s+!\s+|\s)(?=(?:DEPLOY|LAND|CITADEL)_\w+=\S+\s+[./"$\w]))((?:DEPLOY|LAND|CITADEL)_\w+)=/gm)) found.add(m[1]);
+    // `export NAME=...` and `NAME=value command` / `LAND_REBASED=1 exec ...` prefixes on a DEPLOY_/LAND_/CITADEL_ name, the
+    // command on the same line and a quoted value read as one word (a plain `NAME='a b'` sets nothing for a child).
+    for (const m of text.matchAll(/^[^#\n]*?(?:\bexport\s+|(?:^|[;&|]\s*|\bif\s+!\s+|\s)(?=(?:DEPLOY|LAND|CITADEL)_\w+=(?:'[^'\n]*'|"[^"\n]*"|[^\s'"])+[ \t]+[./"$\w]))((?:DEPLOY|LAND|CITADEL)_\w+)=/gm)) found.add(m[1]);
   }
   // CITADEL_NODE and NODE_OPTIONS come from citadel-node, which every test already runs under on purpose.
   found.delete('CITADEL_NODE');
+  // land.local.sh's `CITADEL_TOOLS=$(cd "…" && pwd)`: a plain variable whose `$(…)` has spaces, not a prefix on a command.
+  found.delete('CITADEL_TOOLS');
   for (const name of found) assert.ok((SCRIPT_ENV as readonly string[]).includes(name), `tools/ sets ${name} for its children: add it to SCRIPT_ENV (test/script-env.ts), or say why not`);
 });
 

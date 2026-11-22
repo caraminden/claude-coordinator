@@ -14,7 +14,9 @@
 //   CITADEL_TEST_ALWAYS           land.sh's smoke check -> citadel-test: rerun a failed file without the always-tests (#1012).
 //   CITADEL_HEAVY_WHAT            land.sh's CI fallback -> citadel-heavy: how its slot and history name the suite (#1254).
 //   CITADEL_TEST_CONCURRENCY      land.sh's CI fallback -> run-tests.sh: half the usual files at once, on a quiet perigee (#1254).
-export const SCRIPT_ENV = ['DEPLOY_LOCKED', 'DEPLOY_TESTED', 'DEPLOY_TIMES', 'DEPLOY_QUEUE_TICKET', 'CITADEL_HEAVY_HELD', 'CITADEL_HEAVY_FALLBACK_FILE', 'LAND_REBASED', 'LAND_REDO', 'LAND_RETRIED', 'LAND_RETRY_NOW', 'LAND_FLAKE_KEPT', 'LAND_FIX', 'CITADEL_TEST_PROGRESS', 'CITADEL_TEST_PROGRESS_TO', 'CITADEL_TEST_ALWAYS', 'CITADEL_HEAVY_WHAT', 'CITADEL_TEST_CONCURRENCY'] as const;
+//   LAND_MERGE_DIFF3              the kit core (tools/land-core.sh) -> land_merge -> ship-numbers.ts: git's diff3 merge first (#1323).
+//   LAND_KNOWN_RED, LAND_PARK_RETRIED  the kit core -> its --verify run and land_fallback (#1323).
+export const SCRIPT_ENV = ['DEPLOY_LOCKED', 'DEPLOY_TESTED', 'DEPLOY_TIMES', 'DEPLOY_QUEUE_TICKET', 'CITADEL_HEAVY_HELD', 'CITADEL_HEAVY_FALLBACK_FILE', 'LAND_REBASED', 'LAND_REDO', 'LAND_RETRIED', 'LAND_RETRY_NOW', 'LAND_FLAKE_KEPT', 'LAND_FIX', 'CITADEL_TEST_PROGRESS', 'CITADEL_TEST_PROGRESS_TO', 'CITADEL_TEST_ALWAYS', 'CITADEL_HEAVY_WHAT', 'CITADEL_TEST_CONCURRENCY', 'LAND_MERGE_DIFF3', 'LAND_KNOWN_RED', 'LAND_PARK_RETRIED'] as const;
 
 /**
  * `process.env` without the variables the scripts export and without a person's own DEPLOY_*, LAND_* and

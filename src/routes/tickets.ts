@@ -12,6 +12,7 @@ import { APP_NAME } from '../appname.ts';
 import { AGENT_NAME, type Session } from '../auth.ts';
 import { choicesPage, commentMessage, optionImageProblem, pageTitle } from '../artifacts.ts';
 import { cardHref, cardLabel } from '../card-links.ts';
+import { cardTwin } from '../card-twins.ts';
 import { keyFiles } from '../release-key.ts';
 import { checkNeed } from '../needs.ts';
 import { armForCi, mergeCard, postCard, replyToKey, tellTaskmaster } from '../ci-armed.ts';
@@ -739,6 +740,21 @@ export const ticketRoutes: Route[] = [
       const into = proj && ticket.kind !== 'coordinator' && buildBranch(proj.repo_dir, ticket.build) && app.store.getSetting<number>(buildOwnerKey(proj.id, ticket.build!)) !== ticket.id ? ticket.build! : null;
       const mergeable = questions.length > 0 && !kind && body.when_ci_passes !== true;
       const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
+      // A card that repeats one open or just answered is refused once; not_duplicate posts it. Both are counted (settings
+      // card_twin:refused and card_twin:override) so the false-alarm rate can be read.
+      if (questions.length && !kind) {
+        const bump = (k: string) => app.store.setSetting(`card_twin:${k}`, (app.store.getSetting<number>(`card_twin:${k}`) ?? 0) + 1);
+        const twin = cardTwin(app.store, ticket, card);
+        if (twin && body.not_duplicate !== true) {
+          bump('refused');
+          console.log(`card-twin: refused #${ticket.number ?? ticket.id}`);
+          throw new HttpError(409, twin);
+        }
+        if (twin) {
+          bump('override');
+          console.log(`card-twin: override #${ticket.number ?? ticket.id}`);
+        }
+      }
       // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
       // sees it; its answer still comes back to the asker (Cara, 2026-11-17: "Asker acts on it").
       if (body.for_everyone === true) {

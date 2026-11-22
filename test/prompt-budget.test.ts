@@ -109,7 +109,7 @@ test("the kit's skill and agent descriptions stay within their budget", () => {
 // input schema, in a plain scheme, Citadel's (deploys), one with apps, and both. 12,900 at most before #1275, whose plan and
 // ship tools are held to 3,700 characters (1k tokens at reports/quality-push-2026-11/tokens.md's 3.7 a token, the handoff's bar),
 // plus 150 for hand_off_land's fix_proof (#1398: the proof field Cara's "Fixes ship; data still asks" needs, at its tersest).
-const TOOLS_BUDGET = 16_700;
+const TOOLS_BUDGET = 16_950; // +250 for ask_question's twin-card refusal and its not_duplicate flag (#1508)
 const ADDED_BUDGET = 3_850;
 
 test("a minion's always-loaded tool definitions stay within their budget", () => {

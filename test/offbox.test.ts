@@ -282,7 +282,10 @@ test('the desktop pull fetches app backups into apps\\<app>\\<day>\\ and prunes 
   const old = join(dest, 'apps', 'mandate', '2000-01-01');
   mkdirSync(old, { recursive: true });
   writeFileSync(join(old, '1.db'), 'old');
-  const pull = () => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', join(deploy, 'desktop', 'citadel-pull.ps1'), '-Dest', dest, '-Remote', 'perigee', '-Ssh', ssh, '-Key', 'none', '-Dailies', '7'], { env, encoding: 'utf8' });
+  // pwsh writes caches under $HOME at start; copies of this file run at once share none of them (burn-in).
+  const home = join(root, 'pwsh-home');
+  const pwshEnv = { ...env, HOME: home, XDG_CACHE_HOME: join(home, '.cache'), XDG_DATA_HOME: join(home, '.local/share'), XDG_CONFIG_HOME: join(home, '.config') };
+  const pull = () => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', join(deploy, 'desktop', 'citadel-pull.ps1'), '-Dest', dest, '-Remote', 'perigee', '-Ssh', ssh, '-Key', 'none', '-Dailies', '7'], { env: pwshEnv, encoding: 'utf8' });
   const r = pull();
   assert.equal(r.status, 0, r.stdout + r.stderr);
   for (const line of readFileSync(join(offbox, 'SHA256SUMS'), 'utf8').trim().split('\n')) {
@@ -293,6 +296,7 @@ test('the desktop pull fetches app backups into apps\\<app>\\<day>\\ and prunes 
   assert.match(r.stdout, /Pruned apps\/mandate\/2000-01-01/);
   assert.doesNotMatch(r.stdout, /Skipping unexpected/);
   const again = pull();
+  assert.equal(again.status, 0, again.stdout + again.stderr);
   assert.match(again.stdout, /Done: 0 new, 0 failed/, 'a second run fetches nothing');
   assert.equal(readFileSync(join(dest, 'keys', 'twi-release.pass'), 'utf8'), 'twi password', 'release keys come down to keys\\');
 

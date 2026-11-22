@@ -71,3 +71,19 @@ test('ship check: a branch with no #N titles at all is fine', () => {
   put(cwd, 'b\n', 'just a title');
   assert.equal(check(cwd).status, 0);
 });
+
+test('ship check: with no #N titles, the empty subject is named, not the newest commit (#1626)', () => {
+  const cwd = join(root, 'plain-empty');
+  git(root, 'init', '-q', '-b', 'main', cwd);
+  put(cwd, 'a\n', 'base');
+  git(cwd, 'checkout', '-q', '-b', 'topic');
+  writeFileSync(join(cwd, 'e.txt'), 'e\n');
+  git(cwd, 'add', '-A');
+  git(cwd, 'commit', '-q', '--allow-empty-message', '-m', '');
+  const empty = git(cwd, 'rev-parse', '--short', 'HEAD');
+  put(cwd, 'c\n', 'Fix y');
+  const r = check(cwd);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, new RegExp(`commit ${empty} has an empty subject`));
+  assert.doesNotMatch(r.stdout, /Fix y/);
+});

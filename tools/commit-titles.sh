@@ -8,11 +8,15 @@ base=${1:?usage: commit-titles.sh <base>}
 subjects=$(git log --no-merges --format='%h %s' "$base..HEAD") || exit 2
 numbered='^[0-9a-f]+ (WIP )?#[0-9]+'
 empty='^[0-9a-f]+ *$'
-if grep -qE "$numbered" <<<"$subjects" || grep -qE "$empty" <<<"$subjects"; then
+if grep -qE "$numbered" <<<"$subjects"; then
   bad=$(grep -vE "$numbered" <<<"$subjects" | head -n 1)
   if [ -n "$bad" ]; then
     echo "commit ${bad%% *} (\"${bad#* }\") lost its #N: title, which a rebase continued with GIT_EDITOR=true drops: reword it (git commit --amend, or git rebase -i) to start with #N:, then run this again"
     exit 1
   fi
+elif bad=$(grep -E "$empty" <<<"$subjects" | head -n 1) && [ -n "$bad" ]; then
+  # No title starts "#N" (#1626): only the empty one is the lost title, so name it, not the newest commit.
+  echo "commit ${bad%% *} has an empty subject, which a rebase continued with GIT_EDITOR=true can leave behind when it drops a title: give it a subject (git commit --amend, or git rebase -i), then run this again"
+  exit 1
 fi
 exit 0

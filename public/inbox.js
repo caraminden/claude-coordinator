@@ -335,7 +335,7 @@ export function inboxRow(items) {
     // No one-tap replies on these rows (#130): a stray tap on "Merge it" would ship work nobody opened.
     h('span', { class: 'muted when' }, ago(Math.max(...items.map((i) => i.at)))),
     // Sleep from here (#1636): only a minion of this scheme with something sleep would quiet.
-    !from && !isCoordinator(t) && items.some((i) => !['approval', 'spend', 'quiet', 'loop', 'mention'].includes(i.kind)) ? sleepButton(t) : '');
+    !from && !isCoordinator(t) && items.some((i) => !['approval', 'spend', 'quiet', 'loop'].includes(i.kind)) ? sleepButton(t) : '');
 }
 
 function sleepButton(t) {

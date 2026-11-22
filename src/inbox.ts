@@ -73,8 +73,8 @@ export function inboxItems(store: Store, approvals: Approvals, projectId: number
     }),
     // Messages the loop guard holds (#1067; Josh, 2026-11-19, "Needs-you + chat"), until a person continues them.
     ...[...loopHolds(store)].filter(([id]) => ids.has(id)).map(([ticketId, hold]) => ({ kind: 'loop', ticketId, at: hold.at, card: hold, key: `loop:${ticketId}:${hold.at}` })),
-    // A message that @mentions them (#1149; Josh, 2026-11-20: "Needs you, and counted"), until they open its chat; theirs whoever the minion's assignee.
-    ...openMentions(store, projectId, person, store.seenTimes(person, projectId)).filter((m) => all.some((t) => t.id === m.ticketId))
+    // A message that @mentions them (#1149; Josh, 2026-11-20: "Needs you, and counted"), until they open its chat; theirs whoever the minion's assignee, but not while it's asleep (#1636), like a card to them.
+    ...openMentions(store, projectId, person, store.seenTimes(person, projectId)).filter((m) => all.some((t) => t.id === m.ticketId) && !asleep.has(m.ticketId))
       .map((m) => ({ kind: 'mention', ticketId: m.ticketId, at: m.at, card: { by: m.by, text: m.text }, eventId: m.eventId, key: `mention:${m.eventId}` })),
     // Ready, try and complete are for a person to look at, not answers, so they're not here (#1121; Josh, 2026-11-19: "Answers only").
     // Minions set replies as a turn ends, so a running one is listed with its chips hidden for a moment.

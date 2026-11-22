@@ -7,6 +7,7 @@ import { Approvals } from '../src/approvals.ts';
 import { Store, TYPED_HANDLES_UP_TO } from '../src/db.ts';
 import { directCards, inboxCount, inboxItems } from '../src/inbox.ts';
 import { sleepKey } from '../src/needs.ts';
+import { addMention } from '../src/mentions.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'inbox-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -254,7 +255,7 @@ test('a parked minion waits on something else by design: out of the inbox and it
   assert.equal(inboxCount(store, approvals, p, 'Cara', {}), 2);
 });
 
-test('an asleep minion (#1636) is out of Needs you and its badge, its cards to one person and its replies too; an approval still counts, and waking brings the rest back', () => {
+test('an asleep minion (#1636) is out of Needs you and its badge, its cards and mentions to one person and its replies too; an approval still counts, and waking brings the rest back', () => {
   const store = new Store(join(root, 'asleep.sqlite'));
   store.typedHandlesUpTo = 0;
   const approvals = new Approvals(() => {});
@@ -266,13 +267,14 @@ test('an asleep minion (#1636) is out of Needs you and its badge, its cards to o
   store.updateTicket(offering, { replies: JSON.stringify(['Go']) });
   store.updateTicket(live, { replies: JSON.stringify(['Go']) });
   approvals.request(blocked, 'Bash', { command: 'ls' });
+  addMention(store, 'Cara', { ticketId: asking, projectId: p, eventId: 99, at: Date.now(), by: 'Josh', text: '@Cara look' });
   for (const id of [asking, offering, blocked]) store.setSetting(sleepKey(id), { at: 1, by: 'Cara' });
 
   const kinds = () => inboxItems(store, approvals, p, 'Cara').map((i) => [i.kind, i.ticketId]).sort();
   assert.deepEqual(kinds(), [['approval', blocked], ['replies', live]]);
   assert.equal(inboxCount(store, approvals, p, 'Cara', {}), 2);
   for (const id of [asking, offering]) store.deleteSetting(sleepKey(id));
-  assert.deepEqual(kinds(), [['approval', blocked], ['plan', asking], ['question', asking], ['replies', live], ['replies', offering]].sort());
+  assert.deepEqual(kinds(), [['approval', blocked], ['mention', asking], ['plan', asking], ['question', asking], ['replies', live], ['replies', offering]].sort());
 });
 
 test('a card addressed to one person (#687) is in their list alone, waits past typed messages, and shows in their other schemes too', () => {

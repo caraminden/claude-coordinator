@@ -941,12 +941,13 @@ test("a batch member's ship counts by its refs/shipping name until its own branc
   const m = landOne(repo, at, 'b.txt');
   git(repo, 'update-ref', 'refs/shipping/ticket/2-member', m);
   landOne(repo, at + 1000, 'a.txt', 'ticket/1-head');
-  // A stale name whose branch's tip is in the range already counts by the branch.
+  // A stale name whose branch's tip is in the range already counts by the branch, not by the name.
   landOne(repo, at + 2000, 'c.txt', 'ticket/3-later');
-  git(repo, 'update-ref', 'refs/shipping/ticket/3-later', base);
+  git(repo, 'update-ref', 'refs/shipping/ticket/3-later', m);
   const got = await landedIn(store, store.getProject(p.id)!, base, git(repo, 'rev-parse', 'HEAD'));
   assert.deepEqual(got!.tickets.map((t) => t.id), [head, member, later]);
   assert.deepEqual(got!.ticketFiles.get(member), ['b.txt']);
+  assert.deepEqual(got!.ticketFiles.get(later), ['c.txt']);
 });
 
 test('a CI package numbered by run: what is on main for it waits for CI, a run carries it as "Build <run>", a red run waits on a fix; the app\'s folder stays off it (#764)', async () => {

@@ -416,7 +416,7 @@ test("land-news's earlyCi reads the latest try's early_gate line only", () => {
 test("the kit core's tickets in deploy-queue.sh's queue (#1323): their order line is the 8th, and their phases read as stages", () => {
   const { state, waits, ticket } = setup();
   const [a, b, c] = [minion(), minion(), minion()];
-  ticket(1, a.branch, now / 1000 - 40, 'deploying abc123def456', 30);
+  ticket(1, a.branch, now / 1000 - 40, 'running the guards since 14:01', 30);
   // The core's ticket: pid start, got, label, phase, commit, verdict, base, "order".
   const core = (seq: number, label: string, phase: string) =>
     writeFileSync(join(state, 'queue', String(seq).padStart(10, '0')), `${seq}00 77\n0\n${label}\n${phase}\n${'c'.repeat(40)}\ngreen\n${'b'.repeat(40)}\norder\n`);
@@ -425,6 +425,7 @@ test("the kit core's tickets in deploy-queue.sh's queue (#1323): their order lin
   writeFileSync(join(state, 'queue', '.order'), '# Cara moved #3 to land next\n0000000003\n0000000002\n');
   waits.poll();
   assert.deepEqual(waits.line.map((t) => [t.seq, t.orders]), [[1, true], [3, true], [2, true]], '.order ranks the core tickets');
+  assert.match(waits.wait(c.id)!.text, new RegExp(`2nd in line, behind #${a.number} \\(running the check\\)`), 'the head in its check phase');
   assert.equal(landPhase("waiting for its batch's deploy").stage, 'deploy');
   assert.equal(landPhase('running the check since 14:02').key, 'check');
   assert.equal(landPhase("checked abc123def456: CI runs on its batch's top").key, 'ci');

@@ -3,6 +3,7 @@
 // who sees what has one copy. What those pages show from the main thread's memory (a turn's steps, its approval
 // cards, the ship line, the Status page's live numbers) comes from main's snapshot (#1590, src/reader-live.ts). Anything it can't answer the same way the main thread would (a request it doesn't
 // know, a failure, writes it can't wait out) it hands back, and the front thread asks the main thread instead.
+import { existsSync } from 'node:fs';
 import { parentPort, workerData } from 'node:worker_threads';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Store } from './db.ts';
@@ -30,6 +31,8 @@ export type ReaderData = {
   dataDir: string;
   /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang` or `=slow` in a query ends, hangs or slows (500 ms) this thread mid-request, and `=main` sends it to the main thread. */
   testHooks?: boolean;
+  /** A test server's (CITADEL_READER_BOOT_WAIT): a path this thread waits for while it starts, so a test can stop the server while a reader still is (#1625). */
+  bootWait?: string;
 };
 
 /** The routes readers answer: every GET whose path is one of READER_PATHS. */
@@ -140,6 +143,12 @@ export async function answer(app: App, auth: Auth, routes: ReturnType<typeof rou
 
 if (workerData?.reader) {
   const data = workerData.reader as ReaderData;
+  if (data.testHooks && data.bootWait) {
+    // Blocking, like the real work here (opening the database, the sign-in keys): it holds this thread mid-start.
+    console.log('Reader test hook: starting slowly');
+    const idle = new Int32Array(new SharedArrayBuffer(4));
+    for (const until = Date.now() + 30_000; !existsSync(data.bootWait) && Date.now() < until;) Atomics.wait(idle, 0, 0, 50);
+  }
   const store = new Store(data.dbPath, { reader: true });
   const auth = new Auth(data.password, data.secret, undefined, store);
   // The reads' writes go to the main thread, which makes every write: route counts in batches, and history's page-plan cache.

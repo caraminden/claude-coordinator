@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { Agent, createServer as createHttpServer, request, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { bootServer, freePort, tempRoot, testPins } from './helpers.ts';
+import { bootServer, freePort, tempRoot, testPins, until } from './helpers.ts';
 
 const { MCP_SERVER } = testPins();
 
@@ -89,10 +89,10 @@ test('on SIGTERM the server ends its event streams and exits within the grace pe
   const reading = (async () => {
     for await (const _ of stream.body!);
   })();
-  const closed = new Promise<number | null>((r) => server.once('close', r));
+  const closed = new Promise<string>((r) => server.once('close', (code, signal) => r(signal ? `killed by ${signal}` : `exit ${code}`)));
   server.kill('SIGTERM');
   await reading; // the stream ends rather than hanging on
-  assert.equal(await closed, 0);
+  assert.equal(await closed, 'exit 0', readFileSync(log, 'utf8').split('\n').slice(-20).join('\n'));
   // It left through server.close(), not by its grace timer, which logs how many connections it cut off.
   const out = readFileSync(log, 'utf8');
   assert.match(out, /SIGTERM: finishing requests/);
@@ -133,10 +133,10 @@ test('on SIGTERM the server exits at once despite keep-alive connections and ope
   });
   const streamEnded = new Promise((r) => stream.resume().on('end', r));
 
-  const closed = new Promise<number | null>((r) => server.once('close', r));
+  const closed = new Promise<string>((r) => server.once('close', (code, signal) => r(signal ? `killed by ${signal}` : `exit ${code}`)));
   server.kill('SIGTERM');
   await Promise.all([streamEnded, wsClosed]);
-  assert.equal(await closed, 0);
+  assert.equal(await closed, 'exit 0', readFileSync(log, 'utf8').split('\n').slice(-20).join('\n'));
   agent.destroy();
   // Exiting at once means server.close() finished; sitting out the grace logs how many connections it cut off.
   const out = readFileSync(log, 'utf8');
@@ -170,12 +170,31 @@ test('on SIGTERM the server exits at once despite an app event stream it proxies
   await first; // the app's stream is flowing through the server
   const streamGone = new Promise((r) => stream.on('end', r).on('error', r).on('close', r));
 
-  const closed = new Promise<number | null>((r) => server.once('close', r));
+  const closed = new Promise<string>((r) => server.once('close', (code, signal) => r(signal ? `killed by ${signal}` : `exit ${code}`)));
   server.kill('SIGTERM');
   await streamGone;
-  assert.equal(await closed, 0);
+  assert.equal(await closed, 'exit 0', readFileSync(log, 'utf8').split('\n').slice(-20).join('\n'));
   agent.destroy();
   const out = readFileSync(log, 'utf8');
   assert.match(out, /SIGTERM: finishing requests/);
   assert.doesNotMatch(out, /still open after/, 'it sat out its grace period');
+});
+
+// A reader thread (#1563) opens the database and builds the sign-in keys while it starts, and under load it was still
+// at it when SIGTERM arrived. Terminating one then took the whole process down with it (V8's "Check failed:
+// !is_null()", SIGTRAP), so the server died on a signal instead of exiting 0: what CI saw as `null !== 0` in the tests
+// above, five times in two weeks (#1625). Here a reader stays mid-start until the test lets it go, after the stop.
+test('on SIGTERM the server exits 0 while a reader thread is still starting', async () => {
+  const dir = mkdtempSync(join(root, 'starting-'));
+  const log = join(dir, 'server.log');
+  const release = join(dir, 'reader-may-start');
+  const { proc: server } = await bootServer({ root: dir, log, env: { TURN_UNITS: '0', CITADEL_READER_BOOT_WAIT: release } });
+  tmp.track(server);
+  const closed = new Promise<string>((r) => server.once('close', (code, signal) => r(signal ? `killed by ${signal}` : `exit ${code}`)));
+  await until('a reader thread to be starting', () => readFileSync(log, 'utf8').includes('Reader test hook: starting slowly'));
+  server.kill('SIGTERM');
+  await until('the server to start exiting', () => readFileSync(log, 'utf8').includes('SIGTERM: finishing requests'));
+  writeFileSync(release, ''); // the readers finish starting, and the exit waits for them
+  assert.equal(await closed, 'exit 0', readFileSync(log, 'utf8').split('\n').slice(-20).join('\n'));
+  assert.doesNotMatch(readFileSync(log, 'utf8'), /still open after/, 'it sat out its grace period');
 });

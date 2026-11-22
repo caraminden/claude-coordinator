@@ -297,14 +297,14 @@ test("a guard that names the file behind its failure: the ship that changed that
 // re-recorded replay, and says which files are pinned. The ship that changed one of those is the suspect, not the one that
 // only edited judges.test.ts (or its replay record).
 test("a judge-replay red names the pinned code: the ship that changed it is the suspect, not the one that re-recorded the replay file the test reads (#1538)", async () => {
-  const l = await line([{}, {}, { change: ['test/judge-replays.json', '{"a":2}\n'] }, { change: ['test/pinned-judge.ts', 'export const X = 2;\n'] }, {}], { FAKE_RED_PATH: 'test/pinned-judge.ts', FAKE_RED_NAMES: 'the flake counter code changed since its last replay (pinned code: test/pinned-judge.ts)' }, (r) => {
+  const l = await line([{}, {}, { change: ['test/judge-replays.json', '{"a":2}\n'] }, { change: ['test/pinned-judge.ts', 'export const X = 2;\n'] }, {}], { FAKE_RED_PATH: 'test/pinned-judge.ts', FAKE_REAL_FILE: 'test/judges.test.ts', FAKE_RED_NAMES: 'the flake counter code changed since its last replay (pinned code: test/pinned-judge.ts)' }, (r) => {
     mkdirSync(join(r.source, 'test'), { recursive: true });
     writeFileSync(join(r.source, 'test', 'judge-replays.json'), '{"a":1}\n');
-    r.commit(r.source, 'test/real.test.ts', "import { readFileSync } from 'node:fs';\nreadFileSync('test/judge-replays.json');\n");
+    r.commit(r.source, 'test/judges.test.ts', "import { readFileSync } from 'node:fs';\nreadFileSync('test/judge-replays.json');\n");
   });
   const done = await l.go();
-  assert.match(done[1].stderr, /suspects: #4 \(test\/real\.test\.ts\)/);
-  assert.doesNotMatch(done[1].stderr, /#3 \(/, 'the ship that only edited the judge test is no suspect');
+  assert.match(done[1].stderr, /suspects: #4 \(test\/judges\.test\.ts\)/);
+  assert.doesNotMatch(done[1].stderr, /#3 \(|bisect/, 'the ship that only edited the judge test is no suspect');
   assert.equal(done[3].status, 1, done[3].stderr);
   for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();

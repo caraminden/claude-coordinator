@@ -1722,7 +1722,7 @@ train_guess() {
   done)
   # A judge-replay red (test/judges.test.ts, #1503) names the pinned code that changed: "(pinned code: src/a.ts src/b.ts)".
   # The ship that changed that code is the suspect, not the one that only edited the test or its record (#1538).
-  named+=$'\n'$({ grep -oE 'pinned code: [^)]*' <<<"$failed" || true; } | sed 's/^pinned code: //' | tr ' ' '\n' | grep . | sort -u || true)
+  [ "$f" != test/judges.test.ts ] || named+=$'\n'$({ grep -oE 'pinned code: [^)]*' <<<"$failed" || true; } | sed 's/^pinned code: //' | tr ' ' '\n' | grep . | sort -u || true)
   named=$(grep . <<<"$named" || true)
   if [ -n "$named" ]; then
     hits=$(for ((m = 0; m < ${#chg[@]}; m++)); do

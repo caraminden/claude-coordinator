@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { until } from './wait.ts';
 import { iconSrc, startScheme } from '../public/schemes.js';
 
 const list = (...ids) => ids.map((id) => ({ id }));
@@ -25,7 +26,7 @@ test("a scheme's favicon comes from one batched request for every version the pa
   assert.equal(iconSrc({ id: 1, icon: null }), null);
   assert.equal(iconSrc({ id: 1, icon: 5 }), null); // not here yet: it is asked for
   assert.equal(iconSrc({ id: 2, icon: 6 }), null);
-  await new Promise((r) => setTimeout(r, 10));
+  await until('the batch answered', () => iconSrc({ id: 1, icon: 5 }) !== null);
   assert.deepEqual(asked, ['api/icons?ids=1.5,2.6']);
   assert.equal(iconSrc({ id: 1, icon: 5 }), 'data:a'); // kept: no second request
   assert.equal(iconSrc({ id: 2, icon: 6 }), null);

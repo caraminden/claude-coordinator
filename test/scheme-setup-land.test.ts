@@ -737,3 +737,31 @@ test("--check reads main's .gitattributes, so both appending to a union file is 
   const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh'), '--check'], { cwd: r.wt, encoding: 'utf8', env });
   assert.equal(res.status, 0, res.stderr);
 });
+
+// #1489's lost-title guard (#1617): a branch whose commits all start "#N:" is the normal case, and its grep -v finds nothing,
+// which killed the script under pipefail before it landed anything.
+const commitAs = (r: ReturnType<typeof setup>, file: string, subject: string) => {
+  writeFileSync(join(r.wt, file), 'x\n');
+  git(r.wt, 'add', '-A');
+  git(r.wt, 'commit', '-qm', subject);
+};
+
+test('ships a branch whose only commit has a "#N:" title', () => {
+  const r = setup();
+  commitAs(r, 'b.txt', '#1: x');
+  const res = r.run();
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(r.main, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));
+  assert.equal(git(r.main, 'log', '--format=%s', '-1'), '#1: x');
+});
+
+test('a commit that lost its "#N:" title beside one that has it is refused by name, and nothing lands', () => {
+  const r = setup();
+  const before = git(r.main, 'rev-parse', 'main');
+  commitAs(r, 'b.txt', '#1: x');
+  commitAs(r, 'c.txt', 'no number here');
+  const res = r.run();
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /lost its #N: title/);
+  assert.equal(git(r.main, 'rev-parse', 'main'), before);
+});

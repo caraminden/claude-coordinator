@@ -1838,7 +1838,8 @@ build() {
   # and drops it. A commit with an empty subject, or none starting "#N" while a sibling has one, is refused by name.
   subs=$(git log --no-merges --format='%h %s' "$want..HEAD") || subs=
   if grep -qE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs" || grep -qE '^[0-9a-f]+ *$' <<<"$subs"; then
-    lost=$(grep -vE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs" | head -n 1)
+    # grep -v finding nothing (every title is fine) exits 1, which pipefail would turn into the script's own exit.
+    lost=$(grep -vE '^[0-9a-f]+ (WIP )?#[0-9]+' <<<"$subs" | head -n 1) || lost=''
     [ -z "$lost" ] || refuse "commit ${lost%% *} (\"${lost#* }\") lost its #N: title, which a rebase continued with GIT_EDITOR=true drops, so nothing landed and $branch is back where it was: reword it (git rebase -i, or git commit --amend) to start with #N:, then run this again"
   fi
 

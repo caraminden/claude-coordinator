@@ -17,6 +17,8 @@
   It only knows Peek Auras' four build runners, so it can't touch another scheme's. It never restarts the PC.
   -Test runs Move, Back and Cleanup on a made-up layout (-Base, -DriveRoot) with no services, Defender or drive checks.
 #>
+# No positional parameters: under powershell -File a comma list's extra names bound to -Base and -DriveRoot.
+[CmdletBinding(PositionalBinding = $false)]
 param(
   [Parameter(Mandatory)][ValidateSet('Check', 'MakeDrive', 'Move', 'Back', 'Cleanup', 'RemoveDrive', 'Attach')][string]$Do,
   [ValidateSet('DESKTOP-G248IJ8', 'DESKTOP-G248IJ8-2', 'DESKTOP-G248IJ8-3', 'DESKTOP-G248IJ8-4')][string[]]$Runner = @(),

@@ -570,19 +570,24 @@ the move is left out: it may build cold once.
 
 ### 5a. It helped: move the other three
 
-One at a time, so at least two runners always take jobs. They need about 110 GB more on C: until the old copies go;
+One runner per line (`powershell -File` doesn't read a comma list), one at a time, so at least two runners always take jobs. They need about 110 GB more on C: until the old copies go;
 Check prints the room.
 
 ```powershell-admin
 iwr 'http://perigee.tail59477f.ts.net:8574/ci-runner/dev-drive.ps1' -UseBasicParsing -OutFile "$env:TEMP\dev-drive.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8, DESKTOP-G248IJ8-3, DESKTOP-G248IJ8-4
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8-3
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8-4
 ```
 
 Once they've all run green for a day, the old copies can go (about 35 GB each back on C:). It deletes a runner's old
 copy only where its junction points at R:, and never follows a link inside it. After this, 5b can't run.
 
 ```powershell-admin
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8, DESKTOP-G248IJ8-2, DESKTOP-G248IJ8-3, DESKTOP-G248IJ8-4
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8-2
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8-3
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8-4
 ```
 
 ### 5b. It didn't help: move runner -2 back

@@ -5,7 +5,7 @@ import { createReadStream } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { DesktopError, DesktopFeeds, type PublishAsk } from '../desktop-feed.ts';
-import { HttpError, isSecure, json, readJson, type App, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, publicOrigin, readJson, type App, type Ctx, type Route } from '../http.ts';
 import { resolveTicketFile } from './files.ts';
 
 function desktop(app: App) {
@@ -13,10 +13,9 @@ function desktop(app: App) {
   return app.desktop;
 }
 
-/** Citadel's own address as the caller reached it: a PC's launcher reads the feed back at the same one. */
-export function origin(req: Ctx['req']): string {
-  const domain = process.env.APPS_DOMAIN;
-  return domain ? `https://${domain}` : `${isSecure(req) ? 'https' : 'http'}://${req.headers.host ?? 'localhost'}`;
+/** Citadel's public address (publicOrigin): a PC's launcher reads the feed back at it. */
+export function origin(req: Ctx['req'], preview = false): string {
+  return publicOrigin(req, preview);
 }
 
 async function send(ctx: Ctx, file: string | null, type: string, name: string) {
@@ -57,7 +56,7 @@ export const desktopRoutes: Route[] = [
       if (params.file === 'install.zip') {
         const launcher = await d.launchers.get();
         if (!launcher) throw new HttpError(503, 'The launcher can\'t be built on this server right now');
-        const feedUrl = `${origin(ctx.req)}/api/desktop/${projectId}/${params.app}/feed.json`;
+        const feedUrl = `${origin(ctx.req, ctx.app.preview)}/api/desktop/${projectId}/${params.app}/feed.json`;
         return send(ctx, await d.feeds.install(projectId, params.app, feedUrl, launcher), 'application/zip', `${params.app}.zip`);
       }
       return send(ctx, await d.feeds.zip(projectId, params.app, params.file), 'application/zip', params.file);
@@ -94,7 +93,7 @@ export const desktopRoutes: Route[] = [
       };
       try {
         const out = await d.feeds.publish(ask);
-        const base = origin(ctx.req);
+        const base = origin(ctx.req, ctx.app.preview);
         const said = out.already
           ? `${ask.app} build ${out.build.build} was already published from that run; the feed names it again.${out.ignored ? ` Its ${out.ignored.join(', ')} can't change on a build that's already made, so they stay as they were: publish a new build to change them.` : ''}`
           : `Published ${ask.app} build ${out.build.build} (${out.build.size} bytes, sha256 ${out.build.sha256.slice(0, 12)}…). PCs running it get it on their next start but one.`;

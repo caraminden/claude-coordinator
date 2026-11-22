@@ -2,7 +2,7 @@
 // scheme's owner picks who else is in it.
 import type { User } from '../db.ts';
 import type { IncomingMessage } from 'node:http';
-import { clientIp, HttpError, isSecure, json, ownWrites, readJson, type App, type Route } from '../http.ts';
+import { clientIp, HttpError, isSecure, json, ownWrites, publicOrigin, readJson, type App, type Route } from '../http.ts';
 import { cleanLogin, cleanName, newPasswordHash } from './app.ts';
 import { secretName, secretValue, type SecretScope } from '../secrets.ts';
 import { CONTRAPTION_NAME } from '../contraptions.ts';
@@ -77,17 +77,17 @@ export const peopleRoutes: Route[] = [
       if (app.store.findUser('name', name)) throw new HttpError(409, `There is already someone called ${name}`);
       if (app.store.findUser('login', login)) throw new HttpError(409, `The login ${login} is taken`);
       const user = app.store.createUser({ name, login });
-      return json(res, 201, { person: personView(app, app.store.getUser(user.id)!), token: app.auth.newInvite(user.id) });
+      return json(res, 201, { person: personView(app, app.store.getUser(user.id)!), token: app.auth.newInvite(user.id), origin: publicOrigin(req, app.preview) });
     },
   },
   {
     // A fresh link that sets their password: an invite again, or a reset for someone who forgot theirs.
     method: 'POST', path: '/api/people/:person/invite', ...admin,
-    async handler({ res, app, params }) {
+    async handler({ req, res, app, params }) {
       const user = person(app, params.person);
       const token = app.auth.newInvite(user.id);
       await ownWrites(); // the view shows the invite just made (#1244)
-      return json(res, 200, { person: personView(app, app.store.getUser(user.id)!), token });
+      return json(res, 200, { person: personView(app, app.store.getUser(user.id)!), token, origin: publicOrigin(req, app.preview) });
     },
   },
   {

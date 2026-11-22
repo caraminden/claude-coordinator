@@ -383,6 +383,7 @@ before(async () => {
   for (const name of ['Josh', 'Olive']) {
     const made = await as('Cara', '/api/people', { name });
     assert.equal(made.status, 201);
+    assert.equal(made.data.origin, 'https://citadel.zip', 'an invite link names citadel.zip whichever address it was made on (#1635)');
     const res = await fetch(`${srv.base}/api/invite/${made.data.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: `${name}-password` }) });
     assert.equal(res.status, 200);
     people[name] = { id: made.data.person.id, cookie: res.headers.get('set-cookie')!.split(';')[0] };
@@ -580,4 +581,19 @@ test("turning off kept app chats deletes the person's kept files and no one else
   assert.equal((await as('Josh', '/api/me')).data.keepChats, false);
   await as('Josh', '/api/me/replay', { keep: true }, 'PUT');
   assert.equal((await as('Josh', '/api/me')).data.keepChats, true);
+});
+
+test('publicOrigin: citadel.zip by default, CITADEL_PUBLIC_URL overrides, a preview answers on its own host (#1635)', async () => {
+  const { publicOrigin } = await import('../src/http.ts');
+  const req = { headers: { host: 'cara.apps.webplatformisbestplatform.net', 'x-forwarded-proto': 'https' } } as any;
+  const old = process.env.CITADEL_PUBLIC_URL;
+  try {
+    delete process.env.CITADEL_PUBLIC_URL;
+    assert.equal(publicOrigin(req), 'https://citadel.zip');
+    assert.equal(publicOrigin(req, true), 'https://cara.apps.webplatformisbestplatform.net');
+    process.env.CITADEL_PUBLIC_URL = 'https://example.test/';
+    assert.equal(publicOrigin(req, true), 'https://example.test');
+  } finally {
+    if (old === undefined) delete process.env.CITADEL_PUBLIC_URL; else process.env.CITADEL_PUBLIC_URL = old;
+  }
 });

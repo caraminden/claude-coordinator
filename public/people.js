@@ -103,8 +103,8 @@ export function membersPage() {
 }
 
 /** The link an invite or reset token makes, with a Copy button: shown once, since only its hash is kept. */
-function linkBox(who, token, what) {
-  const url = `${location.origin}${location.pathname}#/invite/${token}`;
+function linkBox(who, token, what, origin = location.origin) {
+  const url = `${origin}${location.pathname}#/invite/${token}`;
   const copy = h('button', { type: 'button', class: 'secondary small' }, 'Copy');
   copy.onclick = async () => {
     copy.textContent = await copyText(url) ? 'Copied' : 'Couldn\'t copy';
@@ -123,7 +123,7 @@ export function peoplePage() {
   const status = h('span', { class: 'muted', role: 'status' });
   const link = h('div');
   const list = h('div', { class: 'people-list settings-rows' });
-  const show = (who, token, what) => link.replaceChildren(linkBox(who, token, what));
+  const show = (who, token, what, origin) => link.replaceChildren(linkBox(who, token, what, origin));
   let shown = [];
   const render = (people) => (shown = people, list.replaceChildren(...people.map((u) => {
     // An admin with no password of their own signs in with the shared one (COORDINATOR_PASSWORD).
@@ -162,7 +162,7 @@ export function peoplePage() {
         type: 'button', class: 'secondary small',
         onclick: async () => {
           const r = await api(`api/people/${u.id}/invite`, { method: 'POST' }).catch(fail);
-          if (r) { show(u, r.token, u.has_password ? 'Password reset' : 'Invite'); render(await api('api/people')); }
+          if (r) { show(u, r.token, u.has_password ? 'Password reset' : 'Invite', r.origin); render(await api('api/people')); }
         },
       }, u.has_password ? 'Reset link' : u.admin ? 'Set-password link' : 'New invite'),
       !self && h('button', { type: 'button', class: 'secondary small', onclick: () => patch({ disabled: !u.disabled }, `${u.disabled ? 'enable' : 'disable'} ${u.name}`) }, u.disabled ? 'Enable' : 'Disable'),
@@ -192,7 +192,7 @@ export function peoplePage() {
     status.textContent = 'Inviting…';
     try {
       const r = await api('api/people', { method: 'POST', body: { name: name.value.trim(), login: login.value.trim() || undefined } });
-      show(r.person, r.token, 'Invite');
+      show(r.person, r.token, 'Invite', r.origin);
       name.value = login.value = '';
       status.textContent = '';
       render(await api('api/people'));

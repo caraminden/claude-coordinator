@@ -232,6 +232,18 @@ export function connection(req: IncomingMessage): { remote?: string; localAddres
   return { remote: String(req.headers[PEER_HEADER] ?? '') || undefined, localAddress: localAddress || undefined, localPort: Number(localPort) || undefined };
 }
 
+/**
+ * Citadel's public address, for a link that goes out to someone else (invites, resets, a machine's setup line, the desktop feed).
+ * CITADEL_PUBLIC_URL overrides it; a dev copy or preview (`preview`) answers with the host it was reached at; else https://citadel.zip,
+ * whichever address the person making the link opened. Links that only work on the page already open stay on location.origin.
+ */
+export function publicOrigin(req: IncomingMessage, preview = false): string {
+  const set = process.env.CITADEL_PUBLIC_URL?.trim().replace(/\/+$/, '');
+  if (set) return set;
+  if (preview) return `${isSecure(req) ? 'https' : 'http'}://${req.headers.host ?? 'localhost'}`;
+  return 'https://citadel.zip';
+}
+
 export function isSecure(req: IncomingMessage): boolean {
   return req.headers['x-forwarded-proto'] === 'https';
 }

@@ -11,7 +11,7 @@ import { testCounts } from '../waits.ts';
 import { ciJobReadRoutes, ciNumbersRoute, ciUploadRoute } from './ci-store.ts';
 import { MACHINE_NAME, RESERVED_NAMES, WS_SUFFIX, cleanLend, storedCheck } from '../machines.ts';
 import type { Machine } from '../db.ts';
-import { HttpError, json, ownWrites, readJson, str, type Ctx, type Route } from '../http.ts';
+import { HttpError, json, publicOrigin, ownWrites, readJson, str, type Ctx, type Route } from '../http.ts';
 import { ensureCoordinatorFor } from './projects.ts';
 import { pickFor } from '../../public/model-table.js';
 
@@ -379,30 +379,30 @@ export const machineRoutes: Route[] = [
       await ownWrites(); // the reply re-reads the machine (#1244)
       app.broadcast({ type: 'machines', machines: app.machines.list() });
       // Shown here, and again only to its owner (GET .../token, #1355).
-      return json(res, 201, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? null });
+      return json(res, 201, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? publicOrigin(req, app.preview) });
     },
   },
   {
     method: 'POST', path: '/api/machines/:machine/token', ...people,
-    handler: managed(async ({ res, app, machine }) => {
+    handler: managed(async ({ req, res, app, machine }) => {
       // A new token locks out whoever holds the old one, the connected agent included.
       const token = app.machines.issueToken(machine.id);
       app.machines.disconnect(machine.id);
       await ownWrites(); // the reply re-reads the machine (#1244)
       // An offline machine's disconnect says nothing, and its row should now offer Show (#1355).
       app.broadcast({ type: 'machines', machines: app.machines.list() });
-      return json(res, 200, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? null });
+      return json(res, 200, { machine: app.machines.view(app.store.getMachine(machine.id)!), token, agent_url: app.machinesUrl?.origin ?? publicOrigin(req, app.preview) });
     }),
   },
   {
     // Its token again, to set up another tool on that computer without a relink (#1355). Only its owner's
     // (Cara, 2026-11-20, "Only its owner"): an admin who can relink a person's machine still can't read its token.
     method: 'GET', path: '/api/machines/:machine/token', ...people,
-    handler: managed(({ res, app, machine, session }) => {
+    handler: managed(({ req, res, app, machine, session }) => {
       if (!(machine.owner_id === null ? session.admin : machine.owner_id === session.uid)) throw new HttpError(403, 'Only its owner can show its token');
       const token = app.machines.shownToken(machine);
       if (!token) throw new HttpError(409, 'Linked before tokens were kept: make a new token once, and it can be shown from then on');
-      return json(res, 200, { token, agent_url: app.machinesUrl?.origin ?? null });
+      return json(res, 200, { token, agent_url: app.machinesUrl?.origin ?? publicOrigin(req, app.preview) });
     }),
   },
   {

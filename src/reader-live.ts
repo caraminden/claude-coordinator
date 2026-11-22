@@ -69,16 +69,25 @@ export function publishLive(d: LiveDeps) {
     lastOther = json;
   };
 
-  // Every minion once, a hundred at a time between other work, then `ready`: until then readers send these pages to main.
+  // Every minion once, fifty at a time between other work, then `ready`: until then readers send these pages to main.
   const seed = async () => {
+    const start = performance.now();
     await others();
     const ids = store.listProjects().flatMap((p) => store.listTickets(p.id).map((t) => t.id));
+    // The longest stretch it held the main thread, which is what people's other requests wait behind.
+    let longest = 0, from = performance.now();
     for (let i = 0; i < ids.length; i++) {
       liveOf(ids[i]);
-      if (i % 100 === 99) await new Promise((r) => setImmediate(r));
+      if (i % 50 === 49) {
+        longest = Math.max(longest, performance.now() - from);
+        await new Promise((r) => setImmediate(r));
+        from = performance.now();
+      }
     }
     flush();
+    longest = Math.max(longest, performance.now() - from);
     d.publish({ ready: true });
+    console.log(`Readers' snapshot: ${ids.length} minions in ${Math.round(performance.now() - start)} ms, at most ${Math.round(longest)} ms at a time`);
   };
 
   let tick = 0;

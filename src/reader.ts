@@ -28,7 +28,7 @@ export type ReaderData = {
   embedUrl: string; embedModel: string; memorySchemes: number[] | null;
   /** DATA_DIR, where the Status page reads backups from. */
   dataDir: string;
-  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang` or `=slow` in a query ends, hangs or slows (500 ms) this thread mid-request. */
+  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang` or `=slow` in a query ends, hangs or slows (500 ms) this thread mid-request, and `=main` sends it to the main thread. */
   testHooks?: boolean;
 };
 
@@ -155,6 +155,7 @@ if (workerData?.reader) {
   const schemes = data.memorySchemes;
   const snap = workerData.snap as Snapshot;
   const status = readerStatus(store, snap, data.dataDir);
+  // No dataDir on purpose: a scheme's first open makes its Taskmaster's folder and row (ensureCoordinator), which throws here and the main thread does.
   const app = {
     store,
     runner: readerRunner(store, snap),
@@ -172,6 +173,7 @@ if (workerData?.reader) {
   parentPort!.on('message', async (m: { snap?: SnapDelta; id: number; method: string; url: string; headers: Record<string, string | string[] | undefined> }) => {
     if (m.snap) return applySnap(snap, m.snap);
     let a: Answer | null = null;
+    if (data.testHooks && /[?&]citadel-test-reader=main\b/.test(m.url)) return parentPort!.postMessage({ id: m.id, answer: null });
     if (data.testHooks && /[?&]citadel-test-reader=exit\b/.test(m.url)) process.exit(1);
     if (data.testHooks && /[?&]citadel-test-reader=hang\b/.test(m.url)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
     if (data.testHooks && /[?&]citadel-test-reader=slow\b/.test(m.url)) {

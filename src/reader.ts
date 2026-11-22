@@ -42,7 +42,9 @@ export const readerRoutes = () => [...ticketRoutes, ...projectRoutes, ...machine
  */
 export function readerRunner(store: Store, snap: Snapshot): Runner {
   return Object.assign(Object.create(Runner.prototype), {
-    store, queue: new MinionQueue(store), resumes: { limit: new WaitList(store, LIMIT_RESUMES) }, stepRatios: new Map(), onLive: () => {},
+    store, queue: new MinionQueue(store), resumes: { limit: new WaitList(store, LIMIT_RESUMES) }, onLive: () => {},
+    // Unused: live() below carries main's ratio as step_ratio, so a reader keeps no cache of its own.
+    stepRatio: () => 1,
     live: (t: Ticket) => {
       const live = snap.ready ? snap.live[t.id] : undefined;
       if (!live) throw new Error(`No live state for minion ${t.id} yet`);
@@ -161,7 +163,8 @@ if (workerData?.reader) {
     runner: readerRunner(store, snap),
     memory: { embed: llamaEmbed(data.embedUrl), model: data.embedModel, indexed: (id: number) => !schemes || schemes.includes(id) },
     builds: { get: (id: number) => snap.builds[id] ?? [] },
-    previews: { buildScheme: () => (snap.ownScheme == null ? null : { id: snap.ownScheme }) },
+    // None in a preview server, as main has none there.
+    previews: { buildScheme: () => (!snap.previews || snap.ownScheme == null ? null : { id: snap.ownScheme }) },
     // None yet: main answers (its own would never be missing).
     get status() {
       const page = status();
@@ -170,6 +173,9 @@ if (workerData?.reader) {
     },
   } as unknown as App;
   const routes = router(readerRoutes());
+  // A history page or one event reads only the minion's row, which the route loads through view(): the row as it is
+  // stands in, so these answer before main's first snapshot, as they did in slice 1.
+  const rowOnly = Object.assign(Object.create(app), { runner: { view: (t: Ticket) => t } }) as App;
   parentPort!.on('message', async (m: { snap?: SnapDelta; id: number; method: string; url: string; headers: Record<string, string | string[] | undefined> }) => {
     if (m.snap) return applySnap(snap, m.snap);
     let a: Answer | null = null;
@@ -182,7 +188,7 @@ if (workerData?.reader) {
     }
     try {
       // Never older than the person's own last write: what the main thread sent the writer has run, or the main thread answers.
-      if (writesCaughtUp(data.shared)) a = await answer(app, auth, routes, m);
+      if (writesCaughtUp(data.shared)) a = await answer(/\/events(?:\/\d+)?(?:\?|$)/.test(m.url) ? rowOnly : app, auth, routes, m);
     } catch (err) {
       console.error(`Reader: ${m.method} ${m.url.split('?')[0]}: ${(err as Error)?.stack ?? err}`);
     }

@@ -23,6 +23,8 @@ export type LiveDeps = {
   runner: Runner;
   builds: (projectId: number) => unknown;
   ownScheme: () => number | null;
+  /** Whether this server makes build previews (none in a preview server). */
+  previews: boolean;
   status: StatusPage;
   /** The Status page's in-memory inputs, as server.ts gives them to its StatusPage. */
   statusInputs: { bootAt: number; commit: string; probing: boolean; lastMs: () => number | null; storms: () => unknown; desktops: () => unknown; diskUse: (row: ContraptionRow) => DiskUse | null };
@@ -63,13 +65,14 @@ export function publishLive(d: LiveDeps) {
       disk: Object.fromEntries(store.listContraptions().map((r) => [r.name, s.diskUse(r)])), units: units.rows, jobs: jobList(),
     };
     const projects = store.listProjects();
-    const delta: SnapDelta = { status, builds: Object.fromEntries(projects.map((p) => [p.id, d.builds(p.id)])), ownScheme: d.ownScheme() };
+    const delta: SnapDelta = { status, builds: Object.fromEntries(projects.map((p) => [p.id, d.builds(p.id)])), ownScheme: d.ownScheme(), previews: d.previews };
     const json = JSON.stringify(delta);
     if (json !== lastOther) d.publish(delta);
     lastOther = json;
   };
 
   // Every minion once, fifty at a time between other work, then `ready`: until then readers send these pages to main.
+  let seeded = false;
   const seed = async () => {
     const start = performance.now();
     await others();
@@ -87,6 +90,7 @@ export function publishLive(d: LiveDeps) {
     flush();
     longest = Math.max(longest, performance.now() - from);
     d.publish({ ready: true });
+    seeded = true;
     console.log(`Readers' snapshot: ${ids.length} minions in ${Math.round(performance.now() - start)} ms, at most ${Math.round(longest)} ms at a time`);
   };
 
@@ -96,6 +100,8 @@ export function publishLive(d: LiveDeps) {
     if (busy) return;
     busy = true;
     try {
+      // A first pass that failed is tried again, or these pages would stay on main until a restart.
+      if (!seeded) return await seed();
       await others();
       for (const id of runner.runningIds()) liveOf(id);
       if (++tick % SWEEP_ALL === 0) {
@@ -112,7 +118,11 @@ export function publishLive(d: LiveDeps) {
     }
   };
 
-  const ready = seed().catch((err) => console.error(`Readers' snapshot: the first pass failed: ${(err as Error)?.stack ?? err}`));
+  // Under the sweep's own flag, so a slow first pass isn't started twice.
+  busy = true;
+  const ready = seed()
+    .catch((err) => console.error(`Readers' snapshot: the first pass failed (tried again on the next sweep): ${(err as Error)?.stack ?? err}`))
+    .finally(() => (busy = false));
   const timer = setInterval(() => void sweep(), d.sweepMs ?? SWEEP_MS);
   timer.unref();
   return { ready, stop: () => clearInterval(timer) };

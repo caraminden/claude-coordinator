@@ -2001,7 +2001,7 @@ if (process.env.CITADEL_FRONT !== '0') {
   });
   // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
   publishLive({
-    publish: throughFront.publish, store, runner, builds: (id) => builds.get(id), ownScheme: () => ownScheme()?.id ?? null, status,
+    publish: throughFront.publish, store, runner, builds: (id) => builds.get(id), ownScheme: () => ownScheme()?.id ?? null, previews: !!previews, status,
     statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, storms: () => memoryStorms.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
     ...(SETTLED_ROUTE && Number(process.env.CITADEL_READER_SWEEP_MS) ? { sweepMs: Number(process.env.CITADEL_READER_SWEEP_MS) } : {}),
   });

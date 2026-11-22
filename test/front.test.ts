@@ -253,7 +253,7 @@ test('a long TMPDIR with no XDG_RUNTIME_DIR still gets the server listening thro
   }
 });
 
-test("a running turn, a queued message and an approval card: the readers' list, minion page and Status show what main shows", { timeout: 120_000 }, async () => {
+test("a running turn, a queued message and an approval card: the readers' list, minion page and Status show each caller what main shows", { timeout: 120_000 }, async () => {
   const forever = join(root, 'claude-forever');
   writeFileSync(forever, `#!${process.execPath}\nprocess.stdin.resume();\nsetInterval(() => {}, 1000);\n`);
   chmodSync(forever, 0o755);
@@ -262,6 +262,15 @@ test("a running turn, a queued message and an approval card: the readers' list, 
   const live = await bootServer({ root: home, env: { ...KNOBS, CLAUDE_BIN: forever, NODE_NO_WARNINGS: '1', CITADEL_READER_SWEEP_MS: '600000', TMPDIR: undefined, HOME: home }, log: join(root, 'live.log') });
   try {
     const project = (await live.call('/api/projects', { name: 'Live' })).data;
+    // Max a member who isn't an admin, Olive in no scheme: what the list and Status show depends on who asks.
+    const ids: Record<string, number> = {};
+    for (const name of ['Max', 'Olive']) {
+      const invited = await live.call('/api/people', { name });
+      ids[name] = invited.data.person.id;
+      await fetch(`${live.base}/api/invite/${invited.data.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'a-long-password' }) });
+    }
+    assert.equal((await live.call(`/api/projects/${project.id}/members`, { person: ids.Max })).status, 200);
+    const callers = { cara: live.cookie, max: await signIn(live, 'Max', 'a-long-password'), olive: await signIn(live, 'Olive', 'a-long-password') };
     const made = (await live.call(`/api/projects/${project.id}/tickets`, { message: 'tidy up' })).data;
     const t = made.ticket ?? made;
     const minion = { Authorization: `Bearer ${agentToken(live.data, t.id)}`, 'Content-Type': 'application/json' };
@@ -273,7 +282,7 @@ test("a running turn, a queued message and an approval card: the readers' list, 
       method: 'POST', headers: minion, body: JSON.stringify({ tool_name: 'Bash', input: { command: `cp ${bak} "$TMPDIR/" && rm ${bak}`, description: 'Move the stale copy Cara named out of the data dir' } }),
     })).json();
     assert.ok(card.id, JSON.stringify(card));
-    const page = (p: string, main = false) => get(live, main ? `${p}${p.includes('?') ? '&' : '?'}citadel-test-reader=main` : p, live.cookie);
+    const page = (p: string, main = false, cookie = live.cookie) => get(live, main ? `${p}${p.includes('?') ? '&' : '?'}citadel-test-reader=main` : p, cookie);
     // Main's own answer has the three: the turn running, the message queued, the card waiting.
     const first = await page(`/api/tickets/${t.id}`, true);
     const viaMainNow = JSON.parse(first.body).ticket;
@@ -284,15 +293,16 @@ test("a running turn, a queued message and an approval card: the readers' list, 
     assert.ok(viaMainNow.open_cards.some((c: { kind: string }) => c.kind === "approval"), JSON.stringify(viaMainNow.open_cards));
     // The scheme's first open makes its Taskmaster, a write: the main thread's (a reader hands it over).
     assert.equal((await page(`/api/projects/${project.id}`, true)).status, 200);
-    for (const p of [`/api/tickets/${t.id}`, `/api/projects/${project.id}`, `/api/projects/${project.id}?tickets=open`, '/api/status']) {
+    for (const [who, cookie] of Object.entries(callers)) for (const p of [`/api/tickets/${t.id}`, `/api/projects/${project.id}`, `/api/projects/${project.id}?tickets=open`, '/api/status']) {
       // The reader first, so its copy can't have been refreshed by main's answer to the same page.
-      const reader = await page(p);
-      const main = await page(p, true);
-      assert.ok(reader.reader && !main.reader, `${p} ${readFileSync(join(root, 'live.log'), 'utf8').split('\n').filter((l) => /Reader/.test(l)).slice(-3).join(' / ')}`);
-      assert.equal(reader.status, 200, p);
+      const reader = await page(p, false, cookie);
+      const main = await page(p, true, cookie);
+      assert.ok(reader.reader && !main.reader, `${who} ${p}`);
+      assert.equal(reader.status, main.status, `${who} ${p}`);
+      if (who !== 'olive') assert.equal(reader.status, 200, `${who} ${p}`);
       // The Status page's clock is each answer's own.
       const sansNow = (body: string) => ({ ...JSON.parse(body), now: 0 });
-      assert.deepEqual(sansNow(reader.body), sansNow(main.body), p);
+      assert.deepEqual(sansNow(reader.body), sansNow(main.body), `${who} ${p}`);
     }
   } finally {
     await live.stop();

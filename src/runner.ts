@@ -997,6 +997,8 @@ export class Runner {
     // The running step's start and guessed seconds, so the list row's bar fills as the chat head's does (#573).
     const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
     return {
+      // What steps took against their guesses (#571), which both bars scale the guesses by: the one ratio steps.usual used.
+      step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
       // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
       step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
@@ -1051,7 +1053,6 @@ export class Runner {
       // Messages the loop guard holds for a person's Continue (#1067), for the row's badge and the chat's held-mail card.
       loop_hold: closed ? null : once('loop-holds', () => loopHolds(this.store)).get(ticket.id) ?? null,
       held_mail: this.heldMail(ticket),
-      step_ratio: ratio,
       // When it resumes by itself after the usage limit, if it waits for that.
       limit_resume_at: limit?.at ?? null,
       // With several accounts all limited, each one's reset (#819), for the banner.

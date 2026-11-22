@@ -48,15 +48,16 @@ export const upgrades = (req: IncomingMessage, appsDomain: string | null) => (re
  * scheme. Main posts what changed (publish); the front thread keeps the whole and passes each change on to the readers.
  * `ready`: main has posted every minion once, so a minion missing from `live` is new and its page is main's to answer.
  */
-export type Snapshot = { ready: boolean; live: Record<number, unknown>; status: Record<string, any> | null; builds: Record<number, unknown>; ownScheme: number | null };
-export type SnapDelta = { ready?: true; live?: Record<number, unknown>; status?: Record<string, unknown>; builds?: Record<number, unknown>; ownScheme?: number | null };
-export const emptySnapshot = (): Snapshot => ({ ready: false, live: {}, status: null, builds: {}, ownScheme: null });
+export type Snapshot = { ready: boolean; live: Record<number, unknown>; status: Record<string, any> | null; builds: Record<number, unknown>; ownScheme: number | null; previews: boolean };
+export type SnapDelta = { ready?: true; live?: Record<number, unknown>; status?: Record<string, unknown>; builds?: Record<number, unknown>; ownScheme?: number | null; previews?: boolean };
+export const emptySnapshot = (): Snapshot => ({ ready: false, live: {}, status: null, builds: {}, ownScheme: null, previews: false });
 export function applySnap(s: Snapshot, d: SnapDelta) {
   if (d.ready) s.ready = true;
   if (d.live) Object.assign(s.live, d.live);
   if (d.status) s.status = d.status;
   if (d.builds) Object.assign(s.builds, d.builds);
   if (d.ownScheme !== undefined) s.ownScheme = d.ownScheme;
+  if (d.previews !== undefined) s.previews = d.previews;
 }
 
 type Answer = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };

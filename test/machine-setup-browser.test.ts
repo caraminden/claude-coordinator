@@ -159,7 +159,7 @@ test('a CI runner host is added from its own button and gets its own install lin
   assert.deepEqual(await page.eval<string[]>('[...document.querySelectorAll("#machine-setup .chip")].map((b) => b.textContent)'), ['Windows', 'Linux in WSL']);
   assert.equal(await pressed(), 'Windows');
   const [line] = await shown();
-  assert.ok(line.startsWith(`$u = '${srv.base}';`), line);
+  assert.ok(line.startsWith("$u = 'https://citadel.zip';"), line); // the setup line names Citadel's public address, not the host it was made on (#1635)
   assert.match(line, /-MachineToken 'ccm_\d+_[\w-]+'$/);
   await page.eval('[...document.querySelectorAll("#machine-setup .chip")].find((b) => b.textContent === "Linux in WSL").click()');
   await wait('the Linux line', 'document.querySelector("#machine-setup [aria-pressed=true]")?.textContent === "Linux in WSL"');

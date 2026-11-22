@@ -640,6 +640,25 @@ export class CiHealth {
     return this.guarded(now, async () => (await this.read(`repos/${slug}/actions/workflows/${encodeURIComponent(workflow)}/runs?branch=${encodeURIComponent(branch)}&per_page=20`, this.deps.as(p), true))?.workflow_runs ?? null);
   }
 
+  /**
+   * The runs created since `since` (rounded down to the hour, so the read costs a 304 inside the hour), every workflow and
+   * branch, oldest pages last: the Test health tab's land reds (#1607, src/land-reds.ts). At most `pages` pages of 100.
+   */
+  async runsSince(p: Project, since: number, pages = 3, now = Date.now()): Promise<Run[] | null> {
+    const slug = repoSlug(p.repo_url);
+    if (!slug || now < this.pausedUntil) return null;
+    const from = new Date(Math.floor(since / 3_600_000) * 3_600_000).toISOString().replace('.000Z', 'Z');
+    return this.guarded(now, async () => {
+      const all: Run[] = [];
+      for (let page = 1; page <= pages; page++) {
+        const got: Run[] = (await this.read(`repos/${slug}/actions/runs?created=%3E%3D${from}&per_page=100&page=${page}`, this.deps.as(p), true))?.workflow_runs ?? [];
+        all.push(...got);
+        if (got.length < 100) break;
+      }
+      return all;
+    });
+  }
+
   /** A run's jobs (a finished run's are kept), or null as workflowRuns. */
   async runJobs(p: Project, run: Run, now = Date.now()): Promise<Job[] | null> {
     const slug = repoSlug(p.repo_url);

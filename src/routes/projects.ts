@@ -31,6 +31,7 @@ import { postCard } from '../ci-armed.ts';
 import { pacific } from '../pacific.ts';
 import { checkAudits } from '../standard-audits.ts';
 import { FLAKE_WINDOW_MS, PROOF_RUNS, fileChangedAt, flakeBrief } from '../flakes.ts';
+import { LAND_REDS_MS, landReds, readRetro } from '../land-reds.ts';
 import { describeCron, loadTemplates, renderTemplate, templateFields, templateVars, type Schedule } from '../schedules.ts';
 import { turnEnv, turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
@@ -1417,7 +1418,11 @@ export const projectRoutes: Route[] = [
         const fix = fx && { state: fx.state, minion: ft?.number ?? null, owner: ft?.person_id == null ? null : store.getUser(ft.person_id)?.name ?? null, startedAt: fx.started_at, heldAt: fx.held_at, cleanRuns: fx.clean_runs, need: PROOF_RUNS, reopened: fx.reopened };
         return { ...f, ...app.store.flakeMessages(project.id, f.file, Date.now() - FLAKE_WINDOW_MS), before, changedAt: at, fix: fix ?? null, minion: open.find((t) => t.title === title)?.number ?? ft?.number ?? null, lastMinion: f.ticketId == null ? null : store.getTicket(f.ticketId)?.number ?? null };
       });
-      json(res, 200, { fast: project.land_mode === 'fast' ? app.fastMode?.view(project.id) ?? null : null, flakes, now: Date.now() });
+      // The last day's land runs, each red one under its cause (#1607); null when GitHub can't be read.
+      const since = Date.now() - LAND_REDS_MS;
+      const runs = await app.ciHealth?.runsSince(project, since) ?? null;
+      const landRed = runs && landReds(runs, await readRetro(projectSharedDir(app.dataDir, project.id), since, Date.now()), since);
+      json(res, 200, { fast: project.land_mode === 'fast' ? app.fastMode?.view(project.id) ?? null : null, flakes, landReds: landRed, now: Date.now() });
     },
   },
   // The first message "Start a minion to fix it" shows for a flaky file, for the person to read and confirm (#1063).

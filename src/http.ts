@@ -339,7 +339,7 @@ export interface App {
   /** Closed minions' processes (src/reaper.ts, #1365): what runs from which minion, for the host load; absent in tests that don't need it. */
   reaper?: Pick<Reaper, 'running'>;
   /** The CI page's snapshot (#968); absent in tests that don't need it. */
-  ciHealth?: Pick<CiHealth, 'snapshot' | 'redBrief' | 'named'>;
+  ciHealth?: Pick<CiHealth, 'snapshot' | 'redBrief' | 'named' | 'runsSince'>;
   /** The Status page's data and perigee's memory and disk sampler (#1123); absent in tests that don't need it. */
   status?: StatusPage;
   /** Big uploads in chunks, for the shared folder and contraptions (src/chunked-uploads.ts, #832). */

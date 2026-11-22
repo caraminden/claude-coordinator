@@ -2,7 +2,7 @@
 // its known reds for the scheme, and its flakiest test files of the last 14 days (src/flakes.ts counts them from the events land.sh
 // and fast mode's runs leave). Each file offers "Start a minion to fix it", which shows the brief first and starts a bug minion.
 import { ago, api, h, pacificStamp } from './base.js';
-import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
+import { emptyCard, hueRow, meter, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
 import { openDialog } from './ui/dialog.js';
 
@@ -103,11 +103,59 @@ function flakeBlock(s, flakes, refresh) {
   return block('Flaky tests', flakes.length ? 'waiting' : 'done', row);
 }
 
+// Land runs' reds by cause (#1607, src/land-reds.ts): the raw red rate, and the part a ship's own change caused.
+// cause -> [hue, word, what it means]
+const CAUSE = {
+  change: ['danger', 'change', "pinned on a ship's change, or refused at CI"],
+  flaky: ['waiting', 'flaky', 'passed alone, a burn-in race or a known flake'],
+  main: ['held', "main's red", 'main was red on the same test'],
+  unknown: ['held', 'unknown', 'nothing in the retro log (a time-out)'],
+};
+const pct = (n, of) => (of ? Math.round((100 * n) / of) : 0);
+
+function landRedsBlock(s, lr) {
+  const key = `health-landreds-${s.id}`;
+  const title = 'Land runs, last 24 hours';
+  if (!lr) {
+    const [row] = settingsRow({ key, icon: 'chart', hue: 'held', title, summary: [toneChip('neutral', 'Not read'), 'no GitHub runs to count'] },
+      emptyCard('Not read', "This scheme has no GitHub repo, or GitHub reads are paused for now.", { mark: '–', hue: 'held' }));
+    return block('Land runs', 'held', row);
+  }
+  const done = lr.green + lr.red;
+  const raw = pct(lr.red, done);
+  const own = pct(lr.causes.change, done);
+  // A scheme whose ship script writes no retro log reads every red as unknown: no rate to claim then.
+  const unread = lr.causes.unknown * 2 >= lr.red && lr.red > 0;
+  const tone = unread ? 'neutral' : own >= 25 ? 'danger' : own > 0 ? 'warn' : 'ok';
+  const hue = { danger: 'danger', warn: 'waiting', ok: 'done', neutral: 'held' }[tone];
+  const causes = Object.keys(CAUSE).filter((c) => lr.causes[c]).map((c) => {
+    const [h2, word, why] = CAUSE[c];
+    const n = lr.causes[c];
+    return hueRow({ hue: h2, lead: String(n), meta: meter(n / lr.red, `${pct(n, lr.red)}% of reds`) }, h('strong', {}, word),
+      h('span', { class: 'ci-detail-line muted' }, why, c === 'change' && lr.riders ? ` · ${lr.riders} by another ship on the train` : ''));
+  });
+  const reds = [...lr.reds].reverse().map((r) => {
+    const [h2, word] = CAUSE[r.cause] ?? CAUSE.unknown;
+    const n = r.branch.match(/^ticket\/(\d+)-/)?.[1];
+    return hueRow({ hue: h2, meta: r.url ? h('a', { href: r.url, target: '_blank', rel: 'noopener' }, 'run') : null },
+      h('span', {}, n ? h('a', { href: `#/p/${s.id}/t/${n}` }, h('strong', {}, `#${n}`)) : h('strong', {}, r.branch), ` · ${word}`),
+      h('span', { class: 'ci-detail-line muted' }, `${when(Date.parse(r.at))} · ${r.why}${r.rider ? ' (another ship on its train)' : ''}`));
+  });
+  const [row] = settingsRow({ key, icon: 'chart', hue: lr.red ? hue : 'done', title,
+    summary: done ? [toneChip(tone, unread ? `${lr.causes.unknown} reds unread` : `${own}% from a change`), `${raw}% red · ${lr.red} of ${done} runs`] : [toneChip('neutral', 'None'), 'no land runs finished'] },
+  done ? statTiles([String(lr.runs), 'land runs', 'running'], [`${raw}%`, 'red', lr.red ? 'waiting' : 'done'], [`${own}%`, "red from a ship's change", hue]) : null,
+  causes.length ? h('div', { class: 'hue-rows' }, ...causes) : null,
+  reds.length ? showFirst({ key, items: reds, n: 5, noun: 'red runs' })
+    : emptyCard(done ? 'No red land runs' : 'No land runs', done ? 'Every ship that finished its CI run went green.' : 'No ship ran its tests on GitHub in the last 24 hours.'),
+  h('p', { class: 'look-prose' }, "Each red run counts under one cause, read from the lines the ship script writes to the retro log. The red rate from a change leaves out flaky runs and main's own reds."));
+  return block('Land runs', lr.red ? hue : 'done', row);
+}
+
 /** The tab's sections for scheme `s`; `data` is its /test-health read, null until it arrives. */
 export function testHealth(s, data, refresh) {
   if (data?.error) return [h('p', { class: 'muted' }, "Couldn't read test health. Pick the tab again to retry.")];
   if (!data) return [h('p', { class: 'muted' }, 'Reading test health…')];
-  return [fastBlock(s, data.fast, data.now), flakeBlock(s, data.flakes, refresh)];
+  return [fastBlock(s, data.fast, data.now), landRedsBlock(s, data.landReds), flakeBlock(s, data.flakes, refresh)];
 }
 
 export const readHealth = (id) => api(`api/projects/${id}/test-health`);

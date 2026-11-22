@@ -76,6 +76,13 @@ test('a scheme favicon goes to its people only, inert, and is left out when ther
   assert.equal(refused.status, 404);
   assert.equal((await refused.json()).error, 'No such scheme');
 
+  // The batch answers every key in one request: a data URL for the member's icon, null for one with none or not theirs (#1543).
+  const batch = async (ids: string, cookie: string) => (await fetch(`${srv.base}/api/icons?ids=${ids}`, { headers: { Cookie: cookie } })).json();
+  const mine = await batch(`${withIcon.id}.1,${plain.id}.1`, member.cookie);
+  assert.deepEqual(mine.icons, { [`${withIcon.id}.1`]: `data:image/svg+xml;base64,${Buffer.from(SVG).toString('base64')}`, [`${plain.id}.1`]: null });
+  assert.deepEqual((await batch(`${withIcon.id}.1`, outsider.cookie)).icons, { [`${withIcon.id}.1`]: null });
+  assert.equal((await fetch(`${srv.base}/api/icons?ids=x`, { headers: { Cookie: member.cookie } })).status, 400);
+
   // No file, a file too big, and a symlink out of the repo all answer 404; the list says there is none.
   for (const [p, why] of [[plain, 'has no'], [huge, 'is over 256 KB'], [linked, 'points outside']] as const) {
     const r = await get(p.id, srv.cookie);

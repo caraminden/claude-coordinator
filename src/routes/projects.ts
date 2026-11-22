@@ -594,6 +594,28 @@ export const projectRoutes: Route[] = [
     },
   },
   {
+    // Many schemes' favicons in one answer (#1543): ?ids=<id>.<v>,… (what the list's `icon` field makes the icon URL's ?v=). Each key
+    // answers a `data:` URL for an SVG, the icon route's URL for any other type (kept off the JSON), or null (none, or not theirs).
+    // The page keeps the answers by key, so a new version is the only thing it asks for again.
+    method: 'GET', path: '/api/icons', who: ['person'],
+    async handler({ res, url, session, app: { store, contraptions } }) {
+      const keys = (url.searchParams.get('ids') ?? '').split(',').filter(Boolean);
+      if (keys.length > 200 || !keys.every((k) => /^\d{1,9}\.\d{1,20}$/.test(k))) throw new HttpError(400, 'ids must be a list of <scheme>.<version>');
+      const mine = new Map(visibleSchemes(store, session).map((p) => [p.id, p]));
+      const user = typeof session.uid === 'number' ? store.getUser(session.uid) : undefined;
+      const identityFor = (c: { name: string }) => user && contraptions.enabled(c.name, user.id) ? contraptions.signIdentity(c.name, user) : null;
+      const icons: Record<string, string | null> = {};
+      for (const key of keys) {
+        const [id, v] = key.split('.');
+        const p = mine.get(Number(id));
+        const icon = p ? await readIcon(p.id, p.repo_dir, store, identityFor) : null;
+        icons[key] = !icon || 'missing' in icon ? null
+          : icon.type === 'image/svg+xml' ? `data:image/svg+xml;base64,${icon.body.toString('base64')}` : `api/projects/${id}/icon?v=${v}`;
+      }
+      return json(res, 200, { icons });
+    },
+  },
+  {
     // What a scheme being set up can adapt (#172): names and descriptions from every scheme's .claude/ and the kit, never file bodies.
     method: 'GET', path: '/api/catalogue', who: PEOPLE_AND_TASKMASTER,
     handler: ({ res, app, session, caller }) => {

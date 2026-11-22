@@ -11,7 +11,47 @@ export function startScheme(projects, lastId) {
   return projects[0]?.id ?? null;
 }
 
-/** Where a scheme's favicon is served (#222), its version in the URL so a new one isn't cached; null when it has none. */
+// The favicons the page has, by `<id>.<version>` (the icon URL's ?v=), kept in localStorage so a returning browser asks for none (#1543).
+// A key the page lacks is asked for once, with every other missing one, in one api/icons request; the imgs fill in when it answers.
+const KEEP = 'scheme-icon:';
+const got = new Map();
+const none = new Set(); // asked for, answered null: not asked again this visit
+let owed = new Set();
+
+const keyOf = (p) => `${p.id}.${p.icon}`;
+const keep = (k) => { try { return localStorage.getItem(KEEP + k); } catch { return null; } };
+
+/** The favicon's src for scheme `p` once the page has it; null when it has none or the batch hasn't answered yet (the imgs fill in then). */
 export function iconSrc(p) {
-  return p.icon == null ? null : `api/projects/${p.id}/icon?v=${p.icon}`;
+  if (p.icon == null) return null;
+  const k = keyOf(p);
+  const src = got.get(k) ?? keep(k);
+  if (src) { got.set(k, src); return src; }
+  if (!none.has(k) && !owed.has(k)) { owed.add(k); if (owed.size === 1) setTimeout(fetchOwed, 0); }
+  return null;
+}
+
+async function fetchOwed() {
+  const keys = [...owed];
+  owed = new Set();
+  let icons;
+  try {
+    const res = await fetch(`api/icons?ids=${keys.join(',')}`);
+    if (!res.ok) throw new Error(String(res.status));
+    ({ icons } = await res.json());
+  } catch {
+    for (const k of keys) none.add(k); // a failed batch isn't retried at once: the next page load asks again
+    return;
+  }
+  for (const k of keys) {
+    const src = icons[k];
+    if (!src) { none.add(k); continue; }
+    got.set(k, src);
+    const id = k.split('.')[0];
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) { const o = localStorage.key(i); if (o?.startsWith(`${KEEP}${id}.`)) localStorage.removeItem(o); }
+      localStorage.setItem(KEEP + k, src);
+    } catch { /* full or blocked: it is asked for again next visit */ }
+    for (const el of document.querySelectorAll(`[data-scheme-icon="${id}"]`)) { el.src = src; el.hidden = false; }
+  }
 }

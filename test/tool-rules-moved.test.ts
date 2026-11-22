@@ -165,4 +165,6 @@ test('the four descriptions are one sentence each, and "put it first" lives in t
   const option = ask.inputSchema.properties.questions.items.properties.options.items.properties;
   assert.match(option.recommended.description, /listed first/);
   assert.match(option.image.description, /pictured options show as a gallery/);
+  // A start that waits on a ship must say so in the message itself, so start_after is read before the send (#1573's move10 case).
+  assert.match(tools.find((t: any) => t.name === 'message_coordinator').inputSchema.properties.need.description, /start: start a minion \(one that waits on a ship: name it, for create_ticket's start_after\)/);
 });

@@ -178,7 +178,7 @@ function mergeHead(m, desc, call) {
  * undoes that if the server refuses. A ship go, a job's go and a kit sync keep their own buttons; a notice has Got it.
  */
 function dismissButton(ticketId, card, shut, reopen) {
-  const btn = h('button', { type: 'button', class: 'small secondary dismiss', title: 'Dismiss: this card is no longer relevant' }, 'Dismiss');
+  const btn = h('button', { type: 'button', class: 'small secondary dismiss', title: 'Dismiss: this card is no longer relevant' }, 'Dismiss card');
   btn.hidden = !!(card.kind || card.job || card.kitSync || card.notice || card.memory);
   btn.addEventListener('click', () => {
     let unanswer = () => {}; // #1409: the lists drop it at the click

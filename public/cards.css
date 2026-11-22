@@ -195,6 +195,7 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 .card-reply[open] > summary { margin-bottom: 0.25rem; }
 
 /* Dismiss (#1593): quiet, so it never competes with the answer buttons. */
-.qcard button.dismiss { padding: 0.25rem 0.1rem; min-height: 0; border: 0; background: none; color: var(--muted, inherit); font: inherit; text-decoration: underline; cursor: pointer; }
+.qcard button.dismiss { padding: 0 0.5rem; min-height: 24px; border: 0; background: none; color: var(--muted, inherit); font: inherit; text-decoration: underline; cursor: pointer; }
+@media (max-width: 700px) { .qcard button.dismiss { min-height: 40px; } }
 .qcard button.dismiss:hover { color: var(--accent); }
 .qcard button.dismiss[hidden] { display: none; }

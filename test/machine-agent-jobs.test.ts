@@ -88,6 +88,9 @@ const app = {
   logs: new Map<number, string>(),
   inputs: new Map<string, Buffer>(),
   stateStatus: 202,
+  // A report this says yes to is taken (it is in `states`) and then left unanswered until `held` is called.
+  hold: null as ((s: State) => boolean) | null,
+  held: [] as (() => void)[],
   uploadStatus: 201,
   rejected: 0,
 };
@@ -108,7 +111,9 @@ const server = createServer(async (req, res) => {
     return data ? res.writeHead(200).end(data) : send(404, { error: 'no such input' });
   }
   if (url.pathname === '/api/machines/job-state') {
-    app.states.push(JSON.parse(body.toString()));
+    const state = JSON.parse(body.toString());
+    app.states.push(state);
+    if (app.hold?.(state)) await new Promise<void>((go) => app.held.push(go));
     return send(app.stateStatus, { ok: true });
   }
   if (url.pathname === '/api/machines/job-upload') {
@@ -718,4 +723,20 @@ test('a GPU sample that never comes back is given up on, and the ticks go on', a
   await until('two ticks report without GPU numbers', () => statesOf(msg.id).filter((s: any) => s.state === 'running' && s.gpu_pct === null).length >= 3, undefined, statesTail);
   await r.handle({ type: 'job.stop', id: msg.id });
   await until('stopped', () => lastState(msg.id)?.state === 'stopped', undefined, statesTail);
+});
+
+test('a report the app leaves unanswered does not hold the next tick, or the time limit', async () => {
+  const r = runner();
+  const msg = start({ limit_s: 1 });
+  // The first running report is the launch's own; the next is the first tick's, and the app never answers it.
+  app.hold = (s) => s.id === msg.id && s.state === 'running' && statesOf(msg.id).filter((x) => x.state === 'running').length > 1;
+  try {
+    await r.handle(msg);
+    await until('failed at its limit', () => lastState(msg.id)?.state === 'failed', undefined, statesTail);
+    assert.match(lastState(msg.id)!.error!, /time limit of 0 min/);
+    assert.equal(app.held.length, 1, 'one tick report was left unanswered, and no second one joined it');
+  } finally {
+    app.hold = null;
+    for (const go of app.held.splice(0)) go();
+  }
 });

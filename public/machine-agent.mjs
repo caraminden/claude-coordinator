@@ -1258,8 +1258,8 @@ export class JobRunner {
     this.children = new Set();
     this.ticks = 0;
     this.lastSample = Date.now();
-    // One tick at a time (#1550): a tick that outlasts the interval (a slow nvidia-smi, the app not answering) was joined
-    // by the next, each starting its own nvidia-smi and reports, which under load slowed every later one.
+    // One tick at a time (#1550): a tick that outlasts the interval (a slow nvidia-smi) was joined by the next, each
+    // starting its own nvidia-smi and reports, which under load slowed every later one.
     this.timer = setInterval(() => {
       if (this.ticking) return;
       this.ticking = true;
@@ -1729,7 +1729,7 @@ export class JobRunner {
   async tick() {
     const live = [...this.jobs.values()].filter((j) => ['starting', 'running', 'paused'].includes(j.state) && !j.final);
     const now = Date.now();
-    // shortcut: a tick longer than two intervals (the app not answering) leaves gpu_busy_s short by the rest of it; count from the tick's end if that number is ever more than a display.
+    // shortcut: a tick longer than two intervals (a slow nvidia-smi) leaves gpu_busy_s short by the rest of it; count from the tick's end if that number is ever more than a display.
     const dt = Math.min(now - this.lastSample, 2 * this.tickMs) / 1000;
     this.lastSample = now;
     const slow = ++this.ticks % DISK_CHECK_TICKS === 0;
@@ -1753,7 +1753,10 @@ export class JobRunner {
         }
       }
       this.save(j);
-      await this.report(j);
+      // Not waited for: a report the app leaves unanswered must not hold the next tick's limits. One per job at a time.
+      if (j._reporting) continue;
+      j._reporting = true;
+      this.report(j).catch((err) => this.log(`Jobs: ${err.message}`)).finally(() => (j._reporting = false));
     }
   }
 

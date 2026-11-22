@@ -250,7 +250,6 @@ test('one secret name saved by two people, or for two schemes, stays each owner\
   assert.equal(secrets.get('person', a.id, 'SHARED_NAME'), 'x-value-1');
   assert.equal(secrets.remove('scheme', a.id, 'SHARED_NAME'), true);
   assert.equal(secrets.get('person', a.id, 'SHARED_NAME'), 'x-value-1');
-  own.close();
 });
 
 test('a contraption reads a secret by name for one of its people: theirs first, then its home scheme\'s', async () => {

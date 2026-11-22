@@ -183,6 +183,7 @@ const commit = (dir: string, file: string, text: string) => {
 test('adopt_app: registers an app at the repo root or in a folder, on for the members, with no minion, and reports its deploy', async () => {
   commit(join(root, 'trips'), 'apps/old-trips/citadel-app.json', JSON.stringify({ start: ['node', 'server.ts'] }));
   commit(join(root, 'trips'), 'apps/old-trips/public/icon.svg', '<svg/>');
+  commit(join(root, 'plain'), 'docs/icon.svg', '<svg/>'); // not where an app serves one: no icon
   commit(join(root, 'plain'), 'citadel-app.json', MANIFEST_JSON);
   const s0 = db();
   const before = s0.listTickets(Trips.id).length;

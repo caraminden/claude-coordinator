@@ -189,9 +189,10 @@ export async function adoptApp(app: App, project: Project, caller: Ticket, body:
     } catch (err) {
       throw new HttpError(400, `${where} on main isn't a usable manifest: ${(err as Error).message}`);
     }
-    // /icon.svg only when the folder has one; else empty, and the deploy fills it from the app's web manifest (or says what is missing).
-    const files = (await run('git', ['ls-tree', '-r', '--name-only', 'main', '--', subdir ?? '.'], { cwd: project.repo_dir })).stdout.split('\n');
-    const icon = files.some((f) => f.split('/').pop() === 'icon.svg') ? '/icon.svg' : '';
+    // /icon.svg only when the folder serves one at its usual places (its top or public/); else empty, and the deploy fills it from the app's web manifest (or says what is missing).
+    const at = (f: string) => (subdir ? `${subdir}/${f}` : f);
+    const found = (await run('git', ['ls-tree', '--name-only', 'main', '--', at('icon.svg'), at('public/icon.svg')], { cwd: project.repo_dir })).stdout.trim();
+    const icon = found ? '/icon.svg' : '';
     port = await freeAppPort(new Set([...store.listContraptions().map((c) => c.port), ...making.ports]));
     making.ports.add(port);
     app.contraptions.register({

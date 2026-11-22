@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { dayZone } from '../src/host-signals.ts';
-import { bootServer, ok, REPO, tempRoot, TEST_ZONE } from './helpers.ts';
+import { bootServer, ok, REPO, tempRoot, TEST_ZONE, zoneDay } from './helpers.ts';
 import { until } from './wait.ts';
 
 test('a booted server reads no host signal, and its day and hour in the zone the test handed it', async () => {
@@ -86,7 +86,6 @@ test('a server booted just after midnight reads that day: restarts before it cou
   const tmp = tempRoot('midnight-');
   const now = Date.now();
   const zone = midnightZone(now);
-  const day = (ms: number) => new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(ms);
   const midnight = now - (now % 3_600_000); // a whole-hour zone's midnight is the top of the UTC hour
   assert.equal(new Date(midnight).toLocaleString('en-CA', { timeZone: zone, hourCycle: 'h23' }).slice(-8), '00:00:00', zone);
   // Two restarts on the record: ten minutes before that midnight, and at it. The server's own boot adds a third, today.
@@ -99,7 +98,7 @@ test('a server booted just after midnight reads that day: restarts before it cou
     const srv = await bootServer({ root: tmp.dir, env: { CITADEL_ZONE: zone } });
     try {
       const status = ok(await srv.call('/api/status'));
-      assert.deepEqual(status.days.slice(-2), [day(midnight - 60_000), day(midnight)], `the last two days in ${zone}`);
+      assert.deepEqual(status.days.slice(-2), [zoneDay(midnight - 60_000, zone), zoneDay(midnight, zone)], `the last two days in ${zone}`);
       assert.deepEqual(status.citadel.uptime.restarts.slice(-2), [1, 2], 'yesterday\'s restart, then today\'s two (the one at midnight and this boot)');
       await srv.settled();
     } finally {

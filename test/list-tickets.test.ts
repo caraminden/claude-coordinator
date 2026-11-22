@@ -5,10 +5,9 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { after, before, test } from 'node:test';
 import { Auth } from '../src/auth.ts';
-import { pacificDay } from '../src/pacific.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { buildOwnerKey, Store } from '../src/db.ts';
-import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs, tempRoot } from './helpers.ts';
+import { bootServer, PASSWORD, REPO, SECRET, type Booted, stopProcs, tempRoot, zoneDay } from './helpers.ts';
 
 // A minion lists its own scheme's minions, read-only (#143): list_tickets through the real MCP server,
 // and the route behind it, which gives a minion only the line's fields and never another scheme.
@@ -46,7 +45,7 @@ for (const t of [M2, GONE]) {
 }
 
 // A contraption of scheme A with errors yesterday (Pacific), for the morning count (#835).
-const yesterday = new Date(Date.parse(`${pacificDay(Date.now())}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+const yesterday = new Date(Date.parse(`${zoneDay()}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10); // in the server's zone (#1536)
 const app = new Contraptions(store, 's'.repeat(40), join(root, 'keys')).register({ name: 'peek', title: 'Peek', port: 9401, icon: null, home_scheme: A.id, open_paths: '[]', default_model: null, turn_cap: null });
 for (let i = 0; i < 3; i++) store.addContraptionError(app.id, yesterday, 'tool', 'Bash: exit #', 'Bash: exit 1', Date.now() - 86_400_000);
 

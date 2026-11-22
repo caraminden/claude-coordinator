@@ -219,6 +219,8 @@ export const withoutTurnNote = (content: any[]): any[] => content.filter((c) => 
  * the runner's env picks it instead, to run every booted server across a day boundary on purpose.
  */
 export const TEST_ZONE = knownZone(process.env.CITADEL_ZONE) ? process.env.CITADEL_ZONE : dayZone(Date.now());
+/** `ms` as its day ("2026-11-21") in a test server's zone, TEST_ZONE by default: the day that server calls today. */
+export const zoneDay = (ms = Date.now(), zone = TEST_ZONE) => new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(ms);
 /** A zone's short name at `ms` ("PST", "GMT-4"): what a server in that zone labels its times with. */
 export const zoneLabel = (zone: string, ms = Date.now()) => new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' }).formatToParts(ms).find((p) => p.type === 'timeZoneName')!.value;
 export const PASSWORD = 'test-password-123';

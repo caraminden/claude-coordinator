@@ -32,7 +32,9 @@ dependency: offer it once, with the test you would write, and leave the call to 
   test goes red on its own. Pass them in as a fixed value: an injected `now`, a pressure file.
   Pin the code under test and the test's own fixtures to the same value; pinning only one side
   makes a new mismatch. (Citadel: `bootServer` pins pressure, load, memory and cgroups through
-  `src/host-signals.ts`; a test that spawns the server itself sets `CITADEL_HOST_SIGNALS: 'fixed'`.)
+  `src/host-signals.ts`, and hands the server `TEST_ZONE` for its day and hour; a fixture that
+  reads the server's day or hour uses `zoneDay()` or `pacificClock(now, srv.zone)`. A test that
+  spawns the server itself sets `CITADEL_HOST_SIGNALS: 'fixed'` and `CITADEL_ZONE: TEST_ZONE`.)
 - **Its expected value comes from somewhere else**: the rule, the spec, a worked literal. Never
   recompute it the way the code does.
 - **One behaviour per test, named for the behaviour** (`rejects a reply with no body`), not for

@@ -46,7 +46,7 @@ export function commandOutput(log: string): { lines: string[]; code: number | nu
   const to = lines.findIndex((l, i) => i > from && l.includes(END));
   if (to < 0) return { lines: lines.slice(from + 1), code: null };
   const at = lines[to].indexOf(END);
-  const code = Number(/^(\d+) ===/.exec(lines[to].slice(at + END.length))?.[1]);
+  const code = Number(/(\d+)/.exec(lines[to].slice(at + END.length))?.[1]);
   const out = lines.slice(from + 1, to);
   if (at > 0) out.push(lines[to].slice(0, at));
   else if (out.length && out[out.length - 1] === '') out.pop();

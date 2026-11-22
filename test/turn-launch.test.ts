@@ -228,12 +228,9 @@ test("a resumed turn is sent this turn's system prompt, not its session's first 
   }
 });
 
-// #1188: only the schemes in EXCLUDE_DYNAMIC_PROMPT_SCHEMES get the flag; project 2 is Citadel's own scheme.
-test('--exclude-dynamic-system-prompt-sections is on for project 2 and off for every other scheme', async () => {
-  const flag = '--exclude-dynamic-system-prompt-sections';
-  while (!store.getProject(3)) store.createProject(`P${store.listProjects().length + 1}`, null);
-  assert.ok(((await launch({ project: 2 })) as any).spec.args.includes(flag));
-  assert.ok(!((await launch({ project: 3 })) as any).spec.args.includes(flag));
+// #1188: the flag measured no drop in first-turn cache writes, so no scheme runs with it; the switch stays for a re-try.
+test('--exclude-dynamic-system-prompt-sections is off for every scheme while EXCLUDE_DYNAMIC_PROMPT_SCHEMES is empty', async () => {
+  assert.ok(!((await launch({ project: 2 })) as any).spec.args.includes('--exclude-dynamic-system-prompt-sections'));
 });
 
 // The advisor trial (#817): a minion set to Sonnet with an Opus advisor launches as Sonnet and gets

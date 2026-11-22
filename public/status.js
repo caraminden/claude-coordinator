@@ -345,7 +345,8 @@ function cacheTile(host, now, verdict) {
   if (!l || l.db_size == null) return tile('File cache', 'No reading yet', 'Read every 5 minutes', null, { key: 'cache', chart: '' });
   const pct = Math.round(((l.db_cached ?? 0) / l.db_size) * 100);
   const rows = [['Discarded by the kernel', MB(l.kswapd_rate)], ['Re-read, whole box', MB(l.refault_rate)], ['Re-read, the server', MB(l.server_refault_rate)],
-    ['Disk read', l.pgpgin_rate == null ? '-' : `${(l.pgpgin_rate / 1024).toFixed(1)} MB/s`], ['Failed huge pages', l.thp_fallback_rate == null ? '-' : `${l.thp_fallback_rate}/s`]];
+    ['Disk read', l.pgpgin_rate == null ? '-' : `${(l.pgpgin_rate / 1024).toFixed(1)} MB/s`], ['Failed huge pages', l.thp_fallback_rate == null ? '-' : `${l.thp_fallback_rate}/s`],
+    ['Warmer, last pass', l.warm_mb == null ? 'off or no pass yet' : `${l.warm_ms} ms, ${l.warm_mb} MB${l.warm_backoffs ? `, ${l.warm_backoffs} backoffs` : ''}`]];
   return tile('File cache', `${pct}% in memory`, `Database ${bytes(l.db_cached ?? 0)} of ${bytes(l.db_size)}`,
     h('div', {}, hourLine(host.cache, 1, { from, to: now, label: 'share of the database in memory each hour, at its lowest', rule: 25, tip: (v) => `${v}% in memory at its lowest` }),
       h('ul', { class: 'st-list' }, ...rows.map(([k, v]) => h('li', {}, k, h('span', {}, v))))),

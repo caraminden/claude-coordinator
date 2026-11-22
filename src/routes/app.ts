@@ -1,5 +1,6 @@
 // The app as a whole: signing in and out, health for tools/deploy.sh, who you are, the event stream,
 // costs and which minion owns each PR.
+import { WARMER_SETTING } from '../db-warmer.ts';
 import { hashPassword, looksLikeUrl, NOT_PEOPLE, type Session } from '../auth.ts';
 import { costDays, FABLE_CAP_KEY, fableMeter, hostWeek, spendSplit, weekLimit, whereItWent } from '../costs.ts';
 import { fallbacks } from '../fallbacks.ts';
@@ -164,6 +165,13 @@ export const appRoutes: Route[] = [
     if (typeof pct !== 'number' || !Number.isFinite(pct) || pct < 0 || pct > 100) throw new HttpError(400, 'pct is the cap as a percent of the weekly plan, 0 to 100');
     store.setSetting(FABLE_CAP_KEY, pct);
     return json(res, 200, fableMeter(store));
+  } },
+  // The database warmer (#1560, src/db-warmer.ts) on or off with no restart: its worker follows this setting within 5 s. Admins only.
+  { method: 'PUT', path: '/api/admin/db-warmer', who: ['person'], access: 'admin', handler: async ({ req, res, app: { store } }) => {
+    const on = (await readJson(req))?.on;
+    if (typeof on !== 'boolean') throw new HttpError(400, 'on is true or false');
+    store.setSetting(WARMER_SETTING, on);
+    return json(res, 200, { on });
   } },
   // Where your own spend went this week (#905): yours only, so any person (Cara, 2026-11-17: "Per person only"); a Taskmaster
   // reads its asker's (usage_split).

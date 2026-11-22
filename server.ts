@@ -149,6 +149,7 @@ import { skillRoutes } from './src/routes/skills.ts';
 import { KIT_DIR, listSkills, warmUsage } from './src/skills.ts';
 import { themeCss } from './src/theme.ts';
 import { checkpointOffThread } from './src/checkpoint.ts';
+import { warmDatabase } from './src/db-warmer.ts';
 import { writeOffThread } from './src/db-writer.ts';
 import { busySource, settled } from './src/settled.ts';
 import { moveToNoCow } from './src/db-nocow.ts';
@@ -263,6 +264,8 @@ const writer = writeOffThread(store, { delayMs: Math.min(Number(process.env.CITA
 // Off the event loop: a checkpoint fsyncs, and a stalled disk made one hold every request for seconds (#680).
 if (writer) writerQueued = writer.queued;
 checkpointOffThread(store);
+// Reads the database into memory every 5 s on a worker, so the box can't evict it (#1560); the `db-warmer` setting turns it off.
+const dbWarmer = warmDatabase(store);
 // A thread's turn-token nonces live in settings, so turns that run through a restart keep theirs; a closed one's are dead.
 const auth = new Auth(process.env.COORDINATOR_PASSWORD ?? '', process.env.SESSION_SECRET ?? '', {
   get: (id) => {
@@ -1733,6 +1736,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, path: stri
 const memoryStorms = new MemoryStorms({ record: (at, storm) => store.addHealthEvent('memory-high', at, BOOT_COMMIT ?? null, JSON.stringify(storm)) });
 // The Status page (#1123): perigee's memory and disk every 5 minutes, and this start recorded with why it happened.
 const status = new StatusPage({
+  warm: () => dbWarmer?.stats() ?? null,
   storms: () => memoryStorms.current(),
   store, dataDir: DATA_DIR, bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', ownScheme: () => ownScheme()?.id ?? null,
   ciSnapshot: (canSee) => ciHealth.snapshot(canSee), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row),

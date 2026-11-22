@@ -195,6 +195,8 @@ export interface StatusDeps {
   cpuLedger?: () => Promise<unknown>;
   /** The file-cache reading (#1501); the real kernel counters and fincore unless a test says otherwise. */
   cache?: (now: number) => Promise<import('./cache-health.ts').CacheReading>;
+  /** The database warmer's last pass (#1560, src/db-warmer.ts); null with no warmer. */
+  warm?: () => { ms: number; mb: number; backoffs: number } | null;
 }
 
 /** One tile as a person saw it when they pressed Investigate (#1273): what the Taskmaster is sent. */
@@ -233,8 +235,9 @@ export class StatusPage {
       const at = this.now();
       this.cacheSampler ??= new CacheSampler({ dbPath: join(this.deps.dataDir, 'coordinator.db') });
       const cache = await (this.deps.cache ?? ((n) => this.cacheSampler!.read(n)))(at).catch(() => null);
+      const w = this.deps.warm?.() ?? null;
       const s: HostSample = {
-        ...cache, at, mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
+        ...cache, ...(w && w.mb > 0 ? { warm_ms: w.ms, warm_mb: w.mb, warm_backoffs: w.backoffs } : {}), at, mem_total: mem.total, mem_avail: Number.isFinite(mem.avail) ? mem.avail : 0,
         disk_total: disk.total, disk_free: disk.free, load1: loadavg()[0], rss: process.memoryUsage.rss(), cpu_psi: psi.cpu, mem_psi: psi.mem,
         io_psi: psi.io, swap_used: Number.isFinite(mem.swap) ? mem.swap : null,
         cpu_ledger: ledger ? JSON.stringify(ledger) : null,

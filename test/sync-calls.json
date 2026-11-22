@@ -28,6 +28,7 @@
  "src/contraptions.ts": 7,
  "src/credentials.ts": 1,
  "src/db-nocow.ts": 32,
+ "src/db-warmer.ts": 4,
  "src/decisions-load.ts": 5,
  "src/emulator-lease.ts": 4,
  "src/events-db.ts": 1,

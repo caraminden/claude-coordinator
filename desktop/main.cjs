@@ -1,5 +1,7 @@
-// Citadel's Windows desktop app (#1186): one Electron window on Citadel's other address, so copying from it never
-// trips Defender's ClickFix check, which fires on any copy made on a citadel.zip page (#1185's report). Links to other
+// Citadel's Windows desktop app (#1186): one Electron window, so it is not Chrome. It was first kept off citadel.zip
+// because Defender's ClickFix check fires on copies made on a citadel.zip page in Chrome (#1185's report); #1640 moved
+// it onto citadel.zip (Cara, 2026-11-22). KNOWN: the check fires in Chrome. UNTESTED: whether it fires in this
+// Electron window, so #1640 asks Cara after publishing; if it does, put the old address back in START and ALIASES. Links to other
 // sites open in the default browser; files download here, with the usual Save dialog. #1148's launcher installs and
 // updates it: it starts this build, and this build says it started by writing the file CITADEL_STARTED_FILE names.
 // Settings and the sign-in cookie live in %APPDATA%\Citadel (Electron's userData), never in the read-only build folder.
@@ -10,9 +12,9 @@ const { dirname, join } = require('node:path');
 const { route } = require('./route.cjs');
 const { reloadKey } = require('./keys.cjs');
 
-const START = new URL(process.env.CITADEL_URL || 'https://cara.apps.webplatformisbestplatform.net/c/');
+const START = new URL(process.env.CITADEL_URL || 'https://citadel.zip/c/');
 /** Citadel's other addresses: a link to one of these opens here, on START's host, rather than in a browser. */
-const ALIASES = ['citadel.zip'];
+const ALIASES = ['cara.apps.webplatformisbestplatform.net'];
 /** The strip the window controls sit in, as tall as Edge's installed-app title bar so the page's top bar fits it. */
 const STRIP = 33;
 /** index.html's theme colours for the title bar overlay, used until the page reports its own (preload.cjs). */

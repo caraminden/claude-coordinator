@@ -300,8 +300,9 @@ test("a running turn, a queued message and an approval card: the readers' list, 
       assert.ok(reader.reader && !main.reader, `${who} ${p}`);
       assert.equal(reader.status, main.status, `${who} ${p}`);
       if (who !== 'olive') assert.equal(reader.status, 200, `${who} ${p}`);
-      // The Status page's clock is each answer's own.
-      const sansNow = (body: string) => ({ ...JSON.parse(body), now: 0 });
+      // The Status page's clock is each answer's own. While a card waits on a person, main's quiet check moves the
+      // turn's activity clock on a timer with no broadcast (Runner.checkQuiet), which only the sweep carries.
+      const sansNow = (body: string) => ({ ...JSON.parse(body, (k, v) => (k === 'activity' && v ? { ...v, at: 0 } : v)), now: 0 });
       assert.deepEqual(sansNow(reader.body), sansNow(main.body), `${who} ${p}`);
     }
   } finally {

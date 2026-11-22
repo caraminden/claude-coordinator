@@ -11,6 +11,7 @@ import { after, test } from 'node:test';
 import { APP_NAME } from '../src/appname.ts';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
+import { READ_WAIT_MS } from '../src/db-writer.ts';
 import { COLD_HOLD_MAX_MS, LOOP_LIMIT, Runner } from '../src/runner.ts';
 import { LiveWaiters, startChained } from '../src/wake.ts';
 import { bootServer, jsonLines, withoutTurnNote, lines, PASSWORD, SECRET, stopTurns, testPins, until } from './helpers.ts';
@@ -278,6 +279,39 @@ test('through the server: Unpark, the Taskmaster\'s unpark option, and update_ti
     assert.equal((await view(e)).wakes_on, null, 'parked by hand: nothing wakes it');
     assert.equal((await call(`/api/tickets/${e}/wake`, { reason: 'the fix in #9 goes live' })).status, 201);
     assert.equal((await view(e)).wakes_on, 'the fix in #9 goes live');
+  } finally {
+    await stop();
+  }
+});
+
+// #1585: an unpark clears the state with a write the worker may run later than the READ_WAIT_MS a read waits for it
+// (src/db-writer.ts), so on a busy box the waking message re-read the minion as parked and was held, and the reply
+// still said parked. This server holds every write longer than that, so a re-read that doesn't wait goes red every run.
+test('through a server whose writes lag: the waking message and the reply see the unpark', async () => {
+  const { call, as, stop } = await bootServer({ root: join(root, 'slow'), env: { CITADEL_DB_WRITE_DELAY_MS: String(READ_WAIT_MS * 2) } });
+  try {
+    const auth = new Auth(PASSWORD, SECRET);
+    const { data: p } = await call('/api/projects', { name: 'Scheme' });
+    const tm = as({ token: auth.agentToken((await call(`/api/projects/${p.id}`)).data.coordinator.id) });
+    const view = async (id: number) => (await call(`/api/tickets/${id}`)).data.ticket;
+    const last = async (id: number) => (await call(`/api/tickets/${id}/events?after=0`)).data.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data)).at(-1);
+    const { data: m } = await call(`/api/projects/${p.id}/tickets`, { title: 'M', message: 'brief' });
+    const park = async () => {
+      await until('the turn to end', async () => (await view(m.id)).status !== 'running');
+      assert.equal((await call(`/api/tickets/${m.id}`, { state: 'parked' }, 'PATCH')).status, 200);
+    };
+
+    await park();
+    assert.equal((await call(`/api/tickets/${m.id}/unpark`, {})).data.state, null, "Unpark's reply shows it unparked");
+
+    await park();
+    const tmWake = await tm(`/api/tickets/${m.id}/messages`, { text: 'go now', unpark: true });
+    assert.notEqual(tmWake.data.held, 'parked', "the Taskmaster's waking message isn't held");
+    assert.ok(!(await last(m.id)).parked);
+
+    await park();
+    assert.notEqual((await call(`/api/tickets/${m.id}/messages`, { text: 'now please', unpark: true })).data.held, 'parked', "a person's Send and unpark isn't held");
+    assert.ok(!(await last(m.id)).parked);
   } finally {
     await stop();
   }

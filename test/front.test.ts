@@ -32,6 +32,8 @@ const thread = (projectId: number, title: string) => {
 };
 const M1 = thread(A.id, 'One');
 const MB = thread(B.id, 'Other');
+// Written by /api/test/half-step, the whole-step test's.
+const STEPS = thread(A.id, 'Steps');
 const events = ['first', 'second', 'third'].map((text) => store.addEvent(M1.id, 'note', { text }));
 const other = store.addEvent(MB.id, 'note', { text: 'elsewhere' });
 
@@ -141,6 +143,26 @@ test('while the main thread is busy for 2 s, the slice still answers within 100 
   const read = Date.now();
   assert.equal((await blocked).status, 200);
   assert.ok(unblocked > read, 'the main thread was still busy when the reads were answered');
+});
+
+test('a reader never sees half of one main step: two writes in one run of the main thread, a pause between them', { timeout: 60_000 }, async () => {
+  const title = async () => {
+    const got = await get(srv, `/api/tickets/${STEPS.id}`, srv.cookie);
+    return { title: JSON.parse(got.body).ticket.title as string, reader: got.reader };
+  };
+  await until('a reader answers for the minion', async () => (await title()).reader);
+  const step = fetch(`${srv.base}/api/test/half-step?ticket=${STEPS.id}&ms=1500`);
+  const seen: string[] = [];
+  const t0 = Date.now();
+  // timing-ok: reads spread over the step's 1.5 s pause, which the first write has long run within
+  while (Date.now() - t0 < 1200) seen.push((await title()).title);
+  assert.equal((await step).status, 200);
+  assert.ok(!seen.includes('half'), `a read saw half the step: ${[...new Set(seen)].join(', ')}`);
+  // Once the step is whole, readers answer again, with all of it.
+  await until('a reader answers with the whole step', async () => {
+    const t = await title();
+    return t.reader && t.title === 'whole';
+  });
 });
 
 test('a reader that dies mid-request is replaced, and its request answered by the main thread', { timeout: 60_000 }, async () => {

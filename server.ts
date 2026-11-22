@@ -1875,6 +1875,15 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
       while (Date.now() < until);
       return json(res, 200, {});
     }
+    // test/front.test.ts: one step of the main thread that writes, pauses, then writes again; no reader may see the half.
+    if (SETTLED_ROUTE && req.url?.startsWith('/api/test/half-step')) {
+      const q = requestUrl(req).searchParams, id = Number(q.get('ticket'));
+      store.updateTicket(id, { title: 'half' });
+      const until = Date.now() + Math.min(Number(q.get('ms')) || 0, 5000);
+      while (Date.now() < until);
+      store.updateTicket(id, { title: 'whole' });
+      return json(res, 200, {});
+    }
     // test/front.test.ts: the client addresses this thread sees, which a client must not be able to set.
     if (SETTLED_ROUTE && req.url?.startsWith('/api/test/peer')) return json(res, 200, connection(req));
     // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.

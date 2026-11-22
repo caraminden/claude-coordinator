@@ -71,7 +71,8 @@ export type Writer = {
   queued(): number;
   /** Stop the worker: writes run on the store's connection again. */
   stop(): Promise<number>;
-  /** [0]: the last write run, [1]: the worker's state, [2]: the last write sent. Reader threads wait on it (src/reader.ts). */
+  /** [0]: the last write run, [1]: the worker's state, [2]: the last write sent, [3]: steps closed, [4]: steps opened.
+   * Reader threads wait on it (src/reader.ts). */
   shared: BigInt64Array;
 };
 
@@ -85,8 +86,9 @@ export type Writer = {
 export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, drainMs = DRAIN_MS } = {}): Writer | null {
   if (!store.statePath) return null;
   const db = store.db;
-  // [0]: the last write run, [1]: 1 once the worker is ready, -1 once it is gone, [2]: the last write sent.
-  const shared = new BigInt64Array(new SharedArrayBuffer(24));
+  // [0]: the last write run, [1]: 1 once the worker is ready, -1 once it is gone, [2]: the last write sent,
+  // [3]: the steps whose every write has run (the worker's), [4]: the steps this thread has opened.
+  const shared = new BigInt64Array(new SharedArrayBuffer(40));
   const worker = new Worker(new URL(import.meta.url), { workerData: { writer: { path: store.path, shared, delayMs } } });
   worker.on('error', (err) => console.error(`DB write worker failed: ${err?.stack ?? err}`));
   // Its start is a few ms of opening the file; waiting here keeps the boot's own writes in order.
@@ -109,6 +111,19 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   // get-then-set (merge goes, turn nonces) would write back a list without the update before it.
   const unwritten = new Map<string, { seq: number; json: string | null }>();
   const applied = () => Number(Atomics.load(shared, 0));
+  // A step is one run of this thread's code (#1628): each write commits alone, so a reader thread reads only where no
+  // step is half written, between one step's last write and the next one's first (src/reader.ts, atWholeStep). Its
+  // first write of any kind opens it, before anything commits; the worker closes it after the step's last write.
+  let stepOpen = false;
+  const openStep = () => {
+    if (stepOpen || !alive) return;
+    stepOpen = true;
+    const n = Atomics.add(shared, 4, 1n) + 1n;
+    queueMicrotask(() => {
+      stepOpen = false;
+      try { worker.postMessage({ step: n }); } catch { /* gone: readers stop waiting on steps once it is */ }
+    });
+  };
   const unlist = busySource(() => (alive && seq > applied() ? [`${seq - applied()} queued DB writes`] : []));
 
   const waitFor = (target: number, ms: number) => {
@@ -167,7 +182,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   const prepare = db.prepare.bind(db);
   db.prepare = ((sql: string, ...rest: any[]) => {
     const st = prepare(sql, ...rest) as StatementSync;
-    const before = WRITE_SQL.test(sql) ? () => beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`) : beforeRead;
+    const before = WRITE_SQL.test(sql) ? () => (openStep(), beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`)) : beforeRead;
     for (const m of ['run', 'get', 'all', 'iterate'] as const) {
       const f = (st as any)[m].bind(st);
       (st as any)[m] = (...a: any[]) => {
@@ -179,6 +194,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   }) as typeof db.prepare;
   const exec = db.exec.bind(db);
   db.exec = ((sql: string) => {
+    openStep();
     if (!db.isTransaction) beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`);
     return exec(sql);
   }) as typeof db.exec;
@@ -200,6 +216,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     const f = obj[method];
     if (typeof f !== 'function') throw new Error(`db-writer: no ${name} to run on the server's thread`);
     obj[method] = function (this: unknown, ...args: any[]) {
+      openStep();
       beforeWrite(name);
       inline++;
       // Only its synchronous part: memory.index awaits embeddings for minutes, and other writes meanwhile go to the worker.
@@ -211,6 +228,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     const f = obj[method];
     if (typeof f !== 'function') throw new Error(`db-writer: no ${name} to send to the write worker`);
     obj[method] = function (this: unknown, ...args: any[]) {
+      openStep();
       // Inside a transaction or another write on this thread it runs with that, or the worker would wait on our lock.
       if (!alive || inline || db.isTransaction) return f.apply(this, args);
       const n = seq + 1;
@@ -282,12 +300,15 @@ if (!isMainThread && workerData?.writer) {
     Atomics.store(shared, 1, -1n);
     Atomics.notify(shared, 1);
     Atomics.notify(shared, 0);
+    Atomics.notify(shared, 3);
   });
   const store = new Store(path, { writer: true });
   Atomics.store(shared, 1, 1n);
   Atomics.notify(shared, 1);
   const pause = delayMs ? new Int32Array(new SharedArrayBuffer(4)) : null;
-  parentPort!.on('message', ({ seq, name, args }: { seq: number; name: string; args: unknown[] }) => {
+  parentPort!.on('message', ({ seq, name, args, step }: { seq: number; name: string; args: unknown[]; step?: bigint }) => {
+    // Every write of the step was sent before this, so all of them have run.
+    if (step) return (Atomics.store(shared, 3, step), Atomics.notify(shared, 3));
     if (pause) Atomics.wait(pause, 0, 0, delayMs);
     let error: string | undefined;
     try {

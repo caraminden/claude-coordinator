@@ -61,10 +61,8 @@ const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
 // Nothing queued too: a message that came in during a turn waits out its save with the minion not running, and the
 // next turn's token would log out the one live() last saw.
-// Asked of the main thread: a reader (#1590) reads the database between two writes of one main-thread step, so it can
-// see the turn ended with its queue already taken and the next turn not yet marked running.
 const idle = () => until('the turn to end', async () => {
-  const { ticket: t } = await call('Cara', `/api/tickets/${ticket.id}?citadel-test-reader=main`);
+  const { ticket: t } = await call('Cara', `/api/tickets/${ticket.id}`);
   return t.status !== 'running' && t.queued === 0;
 });
 const events = async (kind: string) => (await call('Cara', `/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === kind).map((e: any) => JSON.parse(e.data));

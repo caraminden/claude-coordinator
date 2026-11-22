@@ -9,6 +9,7 @@ import { READ_WAIT_MS, SLOW_DRAIN_MS, VALUE_WRITES, WRITES, writeOffThread, type
 import { Store } from '../src/db.ts';
 import { json, ownWrites, writes } from '../src/http.ts';
 import { attachEventsIfThere } from '../src/events-db.ts';
+import { atWholeStep } from '../src/reader.ts';
 import { until } from './wait.ts';
 
 
@@ -69,6 +70,41 @@ test('a read right after a write sees it, and writes land in the order they were
   const t = ticket(store);
   store.updateTicket(t.id, { title: 'renamed' });
   assert.equal(store.getTicket(t.id)!.title, 'renamed');
+});
+
+// #1628: a reader thread reads in a transaction begun at a whole step of the server's thread (src/reader.ts).
+const stepsClosed = (w: Writer) => until('the steps close', () => Atomics.load(w.shared, 3) >= Atomics.load(w.shared, 4));
+
+test('a reader pinned at a whole step keeps the main, state and chat files as they were, until it ends', async () => {
+  const { store, w } = open();
+  const t = ticket(store);
+  await stepsClosed(w);
+  const reader = new Store(store.path, { reader: true });
+  const states = () => (reader.db.prepare('SELECT count(*) AS n FROM state.claude_state').get() as { n: number }).n;
+  const before = reader.listEvents(t.id).length;
+  assert.notEqual(atWholeStep(reader.db, w.shared), null);
+  store.updateTicket(t.id, { title: 'later' });
+  store.addEvent(t.id, 'note', { text: 'later' });
+  store.db.prepare('INSERT INTO state.claude_state (path, project_id, size, mtime, data) VALUES (?, ?, 0, 0, ?)').run('x', t.project_id, new Uint8Array());
+  assert.ok(w.drain());
+  assert.deepEqual([reader.getTicket(t.id)!.title, reader.listEvents(t.id).length, states()], ['a minion', before, 0]);
+  reader.db.exec('ROLLBACK');
+  assert.deepEqual([reader.getTicket(t.id)!.title, reader.listEvents(t.id).length, states()], ['later', before + 1, 1]);
+});
+
+test('a step the server\'s thread opened holds readers off until its last write has run, then they see all of it', async () => {
+  const { store, w } = open(200);
+  const t = ticket(store);
+  await stepsClosed(w);
+  const reader = new Store(store.path, { reader: true });
+  store.updateTicket(t.id, { title: 'one' });
+  store.updateTicket(t.id, { status: 'running' });
+  // Held 200 ms on the writer: no whole step within a reader's wait.
+  assert.equal(atWholeStep(reader.db, w.shared, 20), null);
+  await until('the step closes', () => atWholeStep(reader.db, w.shared, 20) !== null);
+  const seen = reader.getTicket(t.id)!;
+  reader.db.exec('ROLLBACK');
+  assert.deepEqual([seen.title, seen.status], ['one', 'running']);
 });
 
 test('a get-then-set of a setting on a stalled disk keeps every update', () => {

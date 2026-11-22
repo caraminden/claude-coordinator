@@ -8,7 +8,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Store } from './db.ts';
 import { Auth } from './auth.ts';
 import { acceptsGzip, HttpError, isSecure, json, ownPath, requestUrl, router, type App } from './http.ts';
+import type { DatabaseSync } from 'node:sqlite';
 import { READ_WAIT_MS } from './db-writer.ts';
+import { CHAT } from './events-db.ts';
 import { llamaEmbed } from './memory.ts';
 import { ticketRoutes } from './routes/tickets.ts';
 import { projectRoutes } from './routes/projects.ts';
@@ -66,17 +68,31 @@ export function readerStatus(store: Store, snap: Snapshot, dataDir: string): () 
   }));
 }
 
-/** Wait on this thread until every write sent so far has run, at most `ms`. False if they hadn't. */
-export function writesCaughtUp(shared: BigInt64Array | null, ms = READ_WAIT_MS): boolean {
-  if (!shared || Atomics.load(shared, 1) !== 1n) return true; // no write worker: the main thread writes in place
-  const target = Atomics.load(shared, 2);
+/** The steps the main thread has opened (src/db-writer.ts); 0 with no write worker, where it writes in place. */
+export const stepsOpened = (shared: BigInt64Array | null) => (shared && Atomics.load(shared, 1) === 1n ? Atomics.load(shared, 4) : 0n);
+
+/**
+ * Begin a read transaction on `db` at a whole step of the main thread's (#1628): every write of every step it opened
+ * so far has run and none of a later one's has, so a read never sees half of one (a turn's queue taken but the next
+ * turn not yet running). Waits at most `ms`; the steps it is at, or null if no whole step came (the main thread answers).
+ */
+export function atWholeStep(db: DatabaseSync, shared: BigInt64Array | null, ms = READ_WAIT_MS): bigint | null {
+  // One read of each file starts its snapshot: the transaction keeps the three as they were here.
+  const pin = () => (db.exec('BEGIN'), db.prepare(`SELECT (SELECT count(*) FROM main.sqlite_master), (SELECT count(*) FROM state.sqlite_master), (SELECT count(*) FROM ${CHAT}.sqlite_master)`).get());
+  if (!shared || Atomics.load(shared, 1) !== 1n) return (pin(), 0n);
   const until = Date.now() + ms;
-  for (let done = Atomics.load(shared, 0); done < target; done = Atomics.load(shared, 0)) {
+  for (;;) {
+    const opened = Atomics.load(shared, 4), closed = Atomics.load(shared, 3);
+    if (closed >= opened) {
+      pin();
+      // No step opened while it pinned, so nothing committed since the check.
+      if (Atomics.load(shared, 4) === opened) return opened;
+      db.exec('ROLLBACK');
+    }
     const left = until - Date.now();
-    if (left <= 0 || Atomics.load(shared, 1) !== 1n) return Atomics.load(shared, 0) >= target;
-    Atomics.wait(shared, 0, done, left);
+    if (left <= 0 || Atomics.load(shared, 1) !== 1n) return null;
+    Atomics.wait(shared, 3, closed, left);
   }
-  return true;
 }
 
 type Answer = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
@@ -176,6 +192,36 @@ if (workerData?.reader) {
   // A history page or one event reads only the minion's row, which the route loads through view(): the row as it is
   // stands in, so these answer before main's first snapshot, as they did in slice 1.
   const rowOnly = Object.assign(Object.create(app), { runner: { view: (t: Ticket) => t } }) as App;
+  // The requests running at once share one read transaction at a whole step; one that needs a newer step (main opened
+  // one since) waits a moment for them to finish, or the main thread answers it.
+  let tx: { at: bigint; refs: number; done: Promise<void>; end: () => void } | null = null;
+  const inWholeStep = async <T>(run: () => Promise<T>): Promise<T | null> => {
+    const until = Date.now() + READ_WAIT_MS;
+    while (tx && tx.at < stepsOpened(data.shared)) {
+      const left = until - Date.now();
+      if (left <= 0) return null;
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([tx.done, new Promise((r) => (timer = setTimeout(r, left)))]);
+      clearTimeout(timer);
+    }
+    if (!tx) {
+      const at = atWholeStep(store.db, data.shared);
+      if (at === null) return null;
+      let end!: () => void;
+      tx = { at, refs: 0, done: new Promise<void>((r) => (end = r)), end };
+    }
+    const mine = tx;
+    mine.refs++;
+    try {
+      return await run();
+    } finally {
+      if (--mine.refs === 0) {
+        tx = null;
+        try { store.db.exec('ROLLBACK'); } catch { /* already ended */ }
+        mine.end();
+      }
+    }
+  };
   parentPort!.on('message', async (m: { snap?: SnapDelta; id: number; method: string; url: string; headers: Record<string, string | string[] | undefined> }) => {
     if (m.snap) return applySnap(snap, m.snap);
     let a: Answer | null = null;
@@ -187,8 +233,8 @@ if (workerData?.reader) {
       await new Promise((r) => setTimeout(r, 500));
     }
     try {
-      // Never older than the person's own last write: what the main thread sent the writer has run, or the main thread answers.
-      if (writesCaughtUp(data.shared)) a = await answer(/\/events(?:\/\d+)?(?:\?|$)/.test(m.url) ? rowOnly : app, auth, routes, m);
+      // Never older than the person's own last write, nor half of one main step: or the main thread answers.
+      a = await inWholeStep(() => answer(/\/events(?:\/\d+)?(?:\?|$)/.test(m.url) ? rowOnly : app, auth, routes, m));
     } catch (err) {
       console.error(`Reader: ${m.method} ${m.url.split('?')[0]}: ${(err as Error)?.stack ?? err}`);
     }

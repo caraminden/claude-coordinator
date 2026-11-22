@@ -958,6 +958,7 @@ test('batches: a scheme that sets no LAND_BATCH batches up to 4 (#1321), and the
     c.verdict(t5, GREEN);
     assert.equal(await all[4].exit, 0, all[4].stderr());
     assert.equal(all[4].stderr().trimEnd().split('\n').pop(), `ship: landed ${t5} batch 1 of 1 deploy none`);
+    assert.deepEqual(c.sent(all[4]), [t5], "one run, on main's new tip: never on a member that landed but hadn't left the line yet");
     assert.deepEqual(c.landed(), ['f1.txt: 1', 'f2.txt: 2', 'f3.txt: 3', 'f4.txt: 4', 'f5.txt: 5']);
   } finally {
     c.stop();

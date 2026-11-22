@@ -1942,6 +1942,10 @@ while :; do
   else
     want='' # too far back to build yet, or the one ahead has nothing built
   fi
+  # A new commit ahead that is already in main: a batch member that landed and is leaving the line. It lacks the rest
+  # of its batch, so building on it would spend a CI run on a commit that can't land: wait, as for nothing built.
+  # (One it already built on stays: main may have just moved to its batch, whose landing the next look sees.)
+  [ -z "$want" ] || [ "$want" = "$base" ] || [ "$Q_AHEAD" = 0 ] || ! git merge-base --is-ancestor "$want" "refs/heads/$BRANCH" 2>/dev/null || want=''
 
   if [ -z "$want" ]; then
     # What it was built on is gone: wait for the one ahead to build again. Unless that was main's tip: the one

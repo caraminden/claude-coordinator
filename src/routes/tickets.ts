@@ -814,6 +814,38 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    method: 'POST', path: '/api/tickets/:ticket/dismiss', who: ['person'], refuse: 'Only people dismiss cards',
+    async handler(ctx) {
+      const { req, res, app, session, ticket } = ctx;
+      const { id } = ticket;
+      const { store, runner } = app;
+      // A person dismisses an open question or plan card that is no longer relevant (Cara, 2026-11-22: "there should be a way
+      // to dismiss a card that is no longer relevant"). Whoever may answer it may dismiss it ('person' is the rule /answer uses).
+      const want = String((await readJson(req)).cardId ?? '');
+      const event = store.openCardsOf(id).find((e) => JSON.parse(e.data).id === want);
+      if (!event) throw new HttpError(404, 'No such open card: it was answered, settled or dismissed already');
+      const card = JSON.parse(event.data);
+      // Ship and merge go cards keep their own buttons; a job's go, a notice's Got it and a memory tidy have their own way out.
+      if (card.kind || card.job || card.kitSync || card.notice || card.memory) throw new HttpError(409, 'This card is answered with its own buttons, not dismissed');
+      if (deciding.has(event.id)) throw new HttpError(409, 'A person is answering that card right now');
+      const result = { at: Date.now(), by: session.name };
+      if (event.kind === 'plan') {
+        store.setEventData(event.id, { ...card, status: 'dismissed', ...result });
+        runner.emit(id, 'plan_result', { id: card.id, status: 'dismissed', ...result });
+      } else {
+        store.setEventData(event.id, { ...card, settled: { ...result, dismissed: true } });
+        runner.emit(id, 'question_result', { id: card.id, settled: { ...result, dismissed: true } });
+      }
+      // The minion hears it as it hears an answer (a Taskmaster's card for everyone: its asker), so one waiting only on this card moves on.
+      const asker = card.asker != null ? store.getTicket(card.asker) : undefined;
+      const to = asker && asker.status !== 'closed' ? asker.id : id;
+      deliverAnswer(app, to, session.name, `${session.name} dismissed your card "${cardLabel(event.kind, card)}" as no longer relevant. Nothing was answered: move on without it.`, {});
+      runner.broadcastTicket(id);
+      personWrote(ctx);
+      return json(res, 200, ticketView(app, id));
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/strike', who: ['self'], refuse: 'Only a thread itself can strike its words',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
@@ -847,7 +879,7 @@ export const ticketRoutes: Route[] = [
         throw new HttpError(409, 'That question has already been answered');
       }
       const data = JSON.parse(card.data);
-      if (data.settled) throw new HttpError(409, data.settled.by ? `${data.settled.by} already marked this seen` : 'Claude took this as answered in the chat');
+      if (data.settled) throw new HttpError(409, data.settled.dismissed ? `${data.settled.by} dismissed this card` : data.settled.by ? `${data.settled.by} already marked this seen` : 'Claude took this as answered in the chat');
       if (data.doc) throw new HttpError(409, 'This card is answered on its page: open it and press Send there');
       if (data.secret) throw new HttpError(409, 'This card takes a secret: type it into its field and press Save');
       // A notice (#687): Got it takes it out of the addressee's list, and sends the asker nothing.
@@ -1036,6 +1068,7 @@ export const ticketRoutes: Route[] = [
       const fixed = card.machine || card.releaseKey || card.hostTool;
       const notes = body.verdict === 'approve' ? null : (fixed || ins) && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
       if (card.status === 'withdrawn') throw new HttpError(409, 'Its minion withdrew this card: nothing to answer');
+      if (card.status === 'dismissed') throw new HttpError(409, `${card.by} dismissed this card`);
       if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : card.hostTool ? `A newer proposal for ${card.hostTool.package} replaced this one` : 'A newer plan replaced this one');
       if (ins && card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'saved' : card.status === 'rejected' ? 'cancelled' : 'sent back'} this edit`);
       if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : card.hostTool ? 'this tool' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);

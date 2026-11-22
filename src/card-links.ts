@@ -81,6 +81,7 @@ export function settledHow(kind: string, data: any, reply: any, result: any, dis
   if (result?.via) return `allowed on ${result.by}'s go "${clip(result.via.text)}" at ${clock(result.at)}`;
   if (result?.state) return `${result.state}${result.by ? ` by ${result.by}` : ''} at ${clock(result.at)}`;
   if (reply) return `${reply.author} wrote in its chat at ${clock(reply.at)}: "${clip(reply.text)}"`;
+  if (data?.settled?.dismissed) return `dismissed by ${data.settled.by} at ${clock(data.settled.at)}`;
   if (data?.settled?.sent) return `picks sent by ${data.settled.by} at ${clock(data.settled.at)}`;
   if (data?.settled?.by) return `seen by ${data.settled.by} at ${clock(data.settled.at)}`;
   if (data?.settled?.at) return `settled by its minion at ${clock(data.settled.at)}`;

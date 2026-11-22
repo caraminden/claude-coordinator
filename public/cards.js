@@ -173,8 +173,28 @@ function mergeHead(m, desc, call) {
   ];
 }
 
+/**
+ * Dismiss (#1593): a small secondary button for a card that is no longer relevant. `shut` shows it dismissed at once, `reopen`
+ * undoes that if the server refuses. A ship go, a job's go and a kit sync keep their own buttons; a notice has Got it.
+ */
+function dismissButton(ticketId, card, shut, reopen) {
+  const btn = h('button', { type: 'button', class: 'small secondary dismiss', title: 'Dismiss: this card is no longer relevant' }, 'Dismiss');
+  btn.hidden = !!(card.kind || card.job || card.kitSync || card.notice || card.memory);
+  btn.addEventListener('click', () => {
+    let unanswer = () => {}; // #1409: the lists drop it at the click
+    optimistic({
+      key: `card:${card.id}`,
+      apply: () => { unanswer = answerNow(ticketId, card.id); shut(); },
+      send: () => api(`api/tickets/${ticketId}/dismiss`, { method: 'POST', body: { cardId: card.id } }),
+      undo: () => { unanswer(); reopen(); },
+      label: 'dismiss the card',
+    }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
+  });
+  return btn;
+}
+
 // A plan only moves forward: pending, then sent back, then superseded; approved (and a machine's notes rejected) is final.
-const PLAN_RANK = { pending: 0, revising: 1, approved: 2, rejected: 2, superseded: 2, withdrawn: 2 };
+const PLAN_RANK = { pending: 0, revising: 1, approved: 2, rejected: 2, superseded: 2, withdrawn: 2, dismissed: 2 };
 
 /** "✓ Approved by Cara · Tue 14:05", "✎ Cara asked for changes", "✗ Rejected by Cara", "Superseded by a newer plan". */
 /** A held instructions edit's outcome (#1162). */
@@ -184,6 +204,7 @@ function insOutcome(r) {
   if (r.status === 'revising') return `✎ ${r.by} sent it back to work in${when}`;
   if (r.status === 'rejected') return `✗ Cancelled by ${r.by}${when}`;
   if (r.status === 'withdrawn') return `Withdrawn by its minion${when}`;
+  if (r.status === 'dismissed') return `Dismissed by ${r.by}${when}`;
   return 'Superseded by a newer edit';
 }
 
@@ -193,6 +214,7 @@ function planOutcome(r, machine) {
   if (r.status === 'revising') return `✎ ${r.by} asked for changes${when}`;
   if (r.status === 'rejected') return `✗ Rejected by ${r.by}${when}`;
   if (r.status === 'withdrawn') return `Withdrawn by its minion${when}`;
+  if (r.status === 'dismissed') return `Dismissed by ${r.by}${when}`;
   return machine ? 'Superseded by a newer proposal' : 'Superseded by a newer plan';
 }
 
@@ -269,8 +291,25 @@ export function planCard(ticketId, card, opts = {}) {
     h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : t ? 'Host tool' : mem ? 'Memory' : ins ? 'Instructions' : 'Plan'), card.summary),
     h('div', { class: 'pbody' }, m ? notesBody(card) : mem ? memoryBody(card, ticketId) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
     notes, why,
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), drop, revise, approve, cancel, sendNotes));
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), dismiss, drop, revise, approve, cancel, sendNotes));
   let rank = 0;
+  const dismiss = dismissButton(ticketId, card, () => {
+    deciding = true;
+    editing(false);
+    approve.hidden = revise.hidden = drop.hidden = dismiss.hidden = true;
+    el.classList.add('answered');
+    why.hidden = true;
+    status.textContent = `Dismissed by ${me}`;
+  }, () => {
+    deciding = false;
+    if (rank) return;
+    el.classList.remove('answered');
+    approve.hidden = revise.hidden = false;
+    drop.hidden = !ins;
+    dismiss.hidden = !!(card.memory);
+    why.hidden = !hint;
+    status.textContent = '';
+  });
   const editing = (on) => {
     notes.hidden = cancel.hidden = sendNotes.hidden = !on;
     approve.hidden = revise.hidden = on;
@@ -292,7 +331,7 @@ export function planCard(ticketId, card, opts = {}) {
         unanswer = answerNow(ticketId, card.id);
         deciding = true;
         editing(false);
-        approve.hidden = revise.hidden = drop.hidden = true;
+        approve.hidden = revise.hidden = drop.hidden = dismiss.hidden = true;
         el.classList.add('answered');
         why.hidden = true;
         status.textContent = verdict === 'approve' ? (k ? 'Making the key…' : t && t.source !== 'pacman' ? 'Installing…' : ins ? 'Saved' : 'Approved') : verdict === 'reject' ? 'Cancelled' : fixed ? 'Rejected' : 'Revision sent';
@@ -305,6 +344,7 @@ export function planCard(ticketId, card, opts = {}) {
         el.classList.remove('answered');
         approve.hidden = revise.hidden = false;
         drop.hidden = !ins;
+        dismiss.hidden = !!card.memory;
         why.hidden = !hint;
         status.textContent = '';
         if (verdict === 'revise') editing(true);
@@ -332,7 +372,7 @@ export function planCard(ticketId, card, opts = {}) {
       editing(false);
       el.classList.add('answered', `p-${r.status}`);
       why.hidden = true;
-      approve.hidden = revise.hidden = drop.hidden = true;
+      approve.hidden = revise.hidden = drop.hidden = dismiss.hidden = true;
       status.textContent = ins ? insOutcome(r) : planOutcome(r, fixed);
       if (r.by) head.done(`${r.status === 'approved' ? 'approved' : 'sent back'} by ${r.by}`);
     },
@@ -597,7 +637,19 @@ export function questionCard(ticketId, card, opts = {}) {
   picker.addEventListener('change', () => { atts.add(picker.files); picker.value = ''; });
   const attach = h('button', { type: 'button', class: 'secondary small add-image', title: 'Attach images or files', 'aria-label': 'Attach images or files', onclick: () => picker.click() }, h('span', { 'aria-hidden': 'true' }, '📎'), h('span', { class: 'wide-only' }, ' Attach'));
   attach.hidden = !!card.job; // a machine job's go card answers with its pick only
-  const row = h('div', { class: 'row' }, attach, status, h('span', { class: 'spacer' }), progress, sendBtn);
+  const dismiss = dismissButton(ticketId, card, () => {
+    lock(true);
+    dismiss.hidden = true;
+    status.textContent = `Dismissed by ${me}`;
+    head.done('dismissed');
+  }, () => {
+    if (confirmed) return;
+    lock(false);
+    dismiss.hidden = false;
+    status.textContent = '';
+    refresh();
+  });
+  const row = h('div', { class: 'row' }, attach, status, h('span', { class: 'spacer' }), progress, dismiss, sendBtn);
   el.addEventListener('paste', (e) => {
     const files = e.target.closest?.('.other') ? pastedFiles(e.clipboardData) : [];
     if (answered || !files.length) return;
@@ -645,25 +697,27 @@ export function questionCard(ticketId, card, opts = {}) {
       });
       for (const btn of el.querySelectorAll('.opt:not(.pic)')) btn.disabled = true;
       sendBtn.hidden = true;
+      dismiss.hidden = true;
       status.textContent = `Answered by ${author}`;
       head.done(`answered by ${author}`);
       refresh();
     },
     // The minion took a typed reply as the answer (settle_question).
-    markSettled() {
+    markSettled(settled) {
       answered = confirmed = true;
       el.classList.add('answered');
       for (const input of el.querySelectorAll('.opt:not(.pic), .other')) input.disabled = true;
       for (const other of el.querySelectorAll('.other')) other.hidden = true;
       sendBtn.hidden = true;
+      dismiss.hidden = true;
       attach.hidden = true;
-      status.textContent = 'Answered in the chat';
-      head.done('settled in the chat');
+      status.textContent = settled?.dismissed ? `Dismissed by ${settled.by}` : 'Answered in the chat';
+      head.done(settled?.dismissed ? `dismissed by ${settled.by}` : 'settled in the chat');
       if (pictures) refreshViewerBar();
     },
   };
   view.cards.set(card.id, handle);
-  if (card.settled) handle.markSettled();
+  if (card.settled) handle.markSettled(card.settled);
   return el;
 }
 
@@ -716,10 +770,22 @@ function secretCard(ticketId, card, opts) {
   const save = h('button', { type: 'button', class: 'small', disabled: true }, 'Save');
   const status = h('span', { class: 'muted' }, scope === 'scheme' ? 'Every turn in this scheme gets it' : 'Saved as yours: turns that run as you get it');
   // Its own form, so a manager doesn't pair this password field with another text box as a login (#934).
+  const dismiss = dismissButton(ticketId, card, () => {
+    done = true;
+    save.disabled = input.disabled = dismiss.hidden = true;
+    el.classList.add('answered');
+    status.textContent = `Dismissed by ${me}`;
+  }, () => {
+    done = false;
+    input.disabled = dismiss.hidden = false;
+    save.disabled = !input.value;
+    el.classList.remove('answered');
+    status.textContent = scope === 'scheme' ? 'Every turn in this scheme gets it' : 'Saved as yours: turns that run as you get it';
+  });
   const field = h('form', { class: 'row secret-row', autocomplete: 'off', onsubmit: (e) => e.preventDefault() }, input, save);
   const el = h('div', { class: 'qcard secret' }, head.el,
     h('div', { class: 'qtitle' }, 'A secret, saved as ', h('code', {}, name), why ? h('div', { class: 'desc' }, why) : ''),
-    field, h('div', { class: 'row' }, status));
+    field, h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), dismiss));
   let done = false;
   input.addEventListener('input', () => { save.disabled = done || !input.value; });
   const submit = () => {
@@ -746,9 +812,10 @@ function secretCard(ticketId, card, opts) {
       done = true;
       input.value = '';
       field.hidden = true;
+      dismiss.hidden = true;
       el.classList.add('answered');
-      status.textContent = settled?.saved ? `Saved by ${settled.by}` : 'Settled in the chat';
-      head.done(settled?.saved ? `saved by ${settled.by}` : 'settled in the chat');
+      status.textContent = settled?.dismissed ? `Dismissed by ${settled.by}` : settled?.saved ? `Saved by ${settled.by}` : 'Settled in the chat';
+      head.done(settled?.dismissed ? `dismissed by ${settled.by}` : settled?.saved ? `saved by ${settled.by}` : 'settled in the chat');
     },
   };
   view.cards.set(card.id, handle);
@@ -770,15 +837,25 @@ function docCard(ticketId, card, opts) {
   // it loads; a page that can't be shot drops it and the card is just the button.
   const preview = h('a', { class: 'doc-preview', href, tabindex: '-1', 'aria-hidden': 'true' },
     h('img', { src: `api/tickets/${ticketId}/doc-preview?path=${encodeURIComponent(card.doc.path)}`, alt: '', onerror: () => preview.remove() }));
-  const el = h('div', { class: 'qcard doc' }, head.el, h('div', { class: 'qtitle' }, card.doc.title), preview, open, status);
+  const dismiss = dismissButton(ticketId, card, () => {
+    dismiss.hidden = true;
+    el.classList.add('answered');
+    status.textContent = `Dismissed by ${me}`;
+  }, () => {
+    dismiss.hidden = false;
+    el.classList.remove('answered');
+    status.textContent = 'Pick on the page, then press Send there';
+  });
+  const el = h('div', { class: 'qcard doc' }, head.el, h('div', { class: 'qtitle' }, card.doc.title), preview, open, status, h('div', { class: 'row' }, h('span', { class: 'spacer' }), dismiss));
   const handle = {
     el,
     markSettled(settled) {
       el.classList.add('answered');
       open.classList.add('secondary');
       open.textContent = 'Open the page';
-      status.textContent = settled?.sent ? `Picks sent by ${settled.by}` : 'Answered in the chat';
-      head.done(settled?.sent ? `picks sent by ${settled.by}` : 'settled in the chat');
+      dismiss.hidden = true;
+      status.textContent = settled?.dismissed ? `Dismissed by ${settled.by}` : settled?.sent ? `Picks sent by ${settled.by}` : 'Answered in the chat';
+      head.done(settled?.dismissed ? `dismissed by ${settled.by}` : settled?.sent ? `picks sent by ${settled.by}` : 'settled in the chat');
     },
   };
   view.cards.set(card.id, handle);

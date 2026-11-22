@@ -113,9 +113,12 @@ test('a machine lends what is ticked in its row from what its agent found, with 
   const boxes = `[...${row('tick-box')}.querySelectorAll('.machine-lends label')]`;
   assert.deepEqual(await page.eval<string[]>(`${boxes}.map((l) => l.textContent + ':' + l.querySelector('input').checked)`), ['godot-ai · from Claude Code\'s config:false', 'vault:false']);
   assert.doesNotMatch(await page.eval<string>('document.body.textContent'), /sk-secret-123/);
+  const saved = ['(l) => l?.server === "godot-ai"', '(l) => !!l?.workspaces.includes("vault")'];
   for (const n of [0, 1]) {
     await page.eval(`${boxes}[${n}].querySelector('input').click()`);
-    await wait(`tick ${n} to save`, `${boxes}[${n}]?.querySelector('input').checked === true`);
+    await wait(`tick ${n} to show`, `${boxes}[${n}]?.querySelector('input').checked === true`);
+    // The box ticks at once and its save goes behind (optimistic): wait for the server to hold it, not the box.
+    await wait(`tick ${n} to save`, `fetch('api/machines').then((r) => r.json()).then((l) => (${saved[n]})(l.find((m) => m.name === 'tick-box').lend))`);
   }
   for (const end = Date.now() + 20_000; (await machine('tick-box')).status !== 'ready';) {
     if (Date.now() > end) throw new Error(`never Ready: ${JSON.stringify(await machine('tick-box'))}`);

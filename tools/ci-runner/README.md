@@ -507,113 +507,31 @@ run refuses the landing; it never falls back. Two exceptions (ADR 0006): a red i
 `flake rerun` line in the retro log; a run cut off before any test failed (#1377; killed from outside too, #1393) gets the same one fresh run and a
 `cut-off rerun` line, and cut off again it is no answer, which falls back. `LAND_CI=0 tools/land.sh` skips CI, for when the runner itself is broken.
 
-## A Dev Drive for Peek's build runners (#1344)
+## Runner folders stay on C: (the Dev Drive was retired, #1344)
 
-A trial (Cara, 2026-11-20 16:37 PST: "G. Dev Drive on the desktop: Go"): one of Peek Auras' build runners,
-`DESKTOP-G248IJ8-2`, keeps its work on a [Dev Drive](https://learn.microsoft.com/en-us/windows/dev-drive/) (ReFS, and
-fewer file system filters than C:). If its Test and Build release steps get 5% or more faster over a day, against the
-other three, those move too; if not, it moves back.
+Every runner's folders are real folders on C:. No junction or symlink under a runner folder, apart from the runner's
+own `bin` and `externals`.
 
-How: the runner's four work folders (`_work`, which holds the checkout and cargo's `target`, then `cargo`, `rustup`
-and `mise`) are copied to `R:\peek-auras-2`, and each old path becomes a junction to its copy. The runner, its `.env`
-and the workflows keep the same paths, so nothing else changes and cargo's warm `target` stays warm. The old folders
-stay beside them as `<name>.pre-devdrive` until the trial ends; that's how it moves back. The Dev Drive is a 200 GB
-virtual disk that grows as it fills (`C:\DevDrive\ci-runners.vhdx`, about 40 GB per runner), attached at boot by a
-SYSTEM task.
+From Nov 20 to Nov 22, 2026, Peek Auras' four build runners kept `_work`, `cargo`, `rustup` and `mise` on a
+[Dev Drive](https://learn.microsoft.com/en-us/windows/dev-drive/), R:, through junctions at the old paths. It was
+retired (Cara, 2026-11-22: "Delete it all", "Stay on C:") because:
 
-What it doesn't change: Defender already skips these folders (#286), so the new folders get the same exclusion and
-the trial measures the drive alone. Nothing here restarts the PC, touches another scheme's runner, or edits a `.env`.
+- **No gain was measured.** After a day, runner -2 on R: was 6 to 9% faster than the other three by median, but slower
+  by mean on release builds, with day-to-day noise of about 25%. The Defender exclusions (#286) already give most of
+  what a Dev Drive buys.
+- **It didn't survive a reboot.** Windows doesn't re-attach a virtual disk at boot. The SYSTEM task that was meant to
+  do it failed with no log after the reboot on Nov 22. The runners started anyway, and every job failed with ENOTDIR on
+  the dangling junctions. Junctions also break checkout's token match, because git sees the R: path and not the C:
+  path the runner reports (Peek #862).
 
-Every step runs `dev-drive.ps1` from this folder in **PowerShell as administrator** on the desktop; open that window
-once and keep it for the whole step. The script knows only Peek's four build runners, so it can't reach another
-scheme's. Its header lists every step. Two things it refuses: running Move, Back or Cleanup within half an hour of a
-boot (Citadel's keep-runners task starts stopped runners then, and could start one mid-copy), and a drive at R: that
-isn't the `ci-runners` ReFS one.
+Peek's write-up: `r-drive-2026-11-22.md` in the Citadel scheme's shared folder, `inbox/Peek-Auras/`.
 
-This is the one exception to the hard rules above for Peek's runners: it stops and starts them, on Cara's go.
+A retry would need all four of these:
 
-### 1. Check the PC can do it (changes nothing)
-
-```powershell-admin
-iwr 'http://perigee.tail59477f.ts.net:8574/ci-runner/dev-drive.ps1' -UseBasicParsing -OutFile "$env:TEMP\dev-drive.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Check
-```
-
-`fsutil devdrv query` should say developer volumes are enabled; if it says they aren't supported, Windows is older than
-22621.2338 and the trial stops here. It should say `R: is free`, and C: needs the free room it names.
-
-### 2. Make the Dev Drive (once)
-
-```powershell-admin
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do MakeDrive
-```
-
-The last line should call R: a trusted developer volume. A SYSTEM task, `Attach CI Dev Drive`, attaches the disk again
-at boot, before the runner services start (they start delayed).
-
-### 3. Move runner -2 onto it
-
-It waits for the runner's current job to end, then stops the runner (GitHub gives its next job to another runner
-meanwhile), copies, links and starts it again. Copying about 35 GB takes a few minutes. If a job lands in the
-seconds between the wait and the stop, that job is cancelled; its ship just runs again.
-
-```powershell-admin
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8-2
-```
-
-The table at the end should list four junctions. Each folder moves on its own and the runner starts again even after
-an error, so a stop halfway leaves it working: what moved points at R:, the rest is where it was. Running the line
-again carries on where it stopped.
-
-### 4. Measure (the minion)
-
-After a day, the minion reads every green Test and Build release step of `windows.yml` with `gh` and compares runner
--2 with the other three, the day before and the day after (each runner's ratio to the others, since their medians
-already differ by up to 15% on the same day), with how many runs each number comes from. The first run on -2 after
-the move is left out: it may build cold once.
-
-### 5a. It helped: move the other three
-
-One runner per line (`powershell -File` doesn't read a comma list), one at a time, so at least two runners always take jobs. They need about 110 GB more on C: until the old copies go;
-Check prints the room.
-
-```powershell-admin
-iwr 'http://perigee.tail59477f.ts.net:8574/ci-runner/dev-drive.ps1' -UseBasicParsing -OutFile "$env:TEMP\dev-drive.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8-3
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Move -Runner DESKTOP-G248IJ8-4
-```
-
-Once they've all run green for a day, the old copies can go (about 35 GB each back on C:). It deletes a runner's old
-copy only where its junction points at R:, and never follows a link inside it. After this, 5b can't run.
-
-```powershell-admin
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8-2
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8-3
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Cleanup -Runner DESKTOP-G248IJ8-4
-```
-
-### 5b. It didn't help: move runner -2 back
-
-Only before any Cleanup. The old folders come back (a day stale, so its next build recompiles what changed), then the
-Dev Drive goes. Removing a junction removes only the link, never what it points at.
-
-```powershell-admin
-iwr 'http://perigee.tail59477f.ts.net:8574/ci-runner/dev-drive.ps1' -UseBasicParsing -OutFile "$env:TEMP\dev-drive.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Back -Runner DESKTOP-G248IJ8-2
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do RemoveDrive
-```
-
-### If R: is missing
-
-After a power cut, jobs on a moved runner fail at checkout if the task didn't attach the disk. Attach it by hand
-(nothing else needs doing; the runners pick it up on their next job):
-
-```powershell-admin
-iwr 'http://perigee.tail59477f.ts.net:8574/ci-runner/dev-drive.ps1' -UseBasicParsing -OutFile "$env:TEMP\dev-drive.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\dev-drive.ps1" -Do Attach
-```
+- No junctions. Point the runner's `.runner` `workFolder` and its env at the drive.
+- keep-runners attaches the drive before it starts any runner, and logs any error from the attach.
+- One deliberate, tested reboot before anything relies on the drive.
+- A week-long A/B against runners on C:, not a single day.
 
 ## Check it
 

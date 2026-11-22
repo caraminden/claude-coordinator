@@ -1698,9 +1698,7 @@ function darkManifest(assets: Map<string, Buffer>) {
 // at each request, so they are always the deployed checkout's. Nothing in them is secret.
 const RUNNER_FILES = new Set(['install-runner-agent.ps1', 'add-runner.ps1', 'list-runners.ps1', 'remove-runner.ps1', 'start-runner.ps1', 'sample-load.ps1',
   // The Linux agent in WSL (#510).
-  'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh', 'keep-wsl-up.ps1', 'keep-runners.ps1',
-  // Moving Peek Auras' build runners onto a Dev Drive (#1344).
-  'dev-drive.ps1']);
+  'install-runner-agent.sh', 'add-runner.sh', 'list-runners.sh', 'remove-runner.sh', 'keep-wsl-up.ps1', 'keep-runners.ps1']);
 // The same for the Android emulator's distro on that desktop (#533): deploy/desktop/android/setup.sh and what it downloads.
 const ANDROID_FILES: Record<string, string> = { 'setup.sh': 'deploy/desktop/android/setup.sh', 'citadel-android': 'tools/citadel-android', 'install-sdk.sh': 'tools/android/install-sdk.sh' };
 const SETUP_PATH = /^\/(ci-runner|android-desktop)\//;

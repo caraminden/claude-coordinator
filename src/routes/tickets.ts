@@ -119,10 +119,11 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
       runner.emit(id, 'note', { text: `${who} ${text} ${next}.` });
     }
     runner.broadcastTicket(id);
-    // A result or a blocker is worth a ping; whoever set it by hand already knows.
+    // A result or a blocker is worth a ping; whoever set it by hand already knows. The state and note are the ones
+    // just written, never read back: a read that gives up on the write queue (src/db-writer.ts) answers from the row
+    // before them, which said the old note or, for a state of null, dropped the ping altogether (#1634).
     if (fields.state && NOTIFY_STATES[fields.state]) {
-      const after = store.getTicket(id)!;
-      app.notify(id, { kind: 'state', state: after.state, note: after.note }, caller ? null : name);
+      app.notify(id, { kind: 'state', state: fields.state, note: 'note' in fields ? fields.note ?? null : stored.note }, caller ? null : name);
     }
   }
   if (unparks) {

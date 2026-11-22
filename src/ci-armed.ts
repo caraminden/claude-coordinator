@@ -184,9 +184,11 @@ export function registerCiArmed(getApp: () => App, store: Store, outbox: Outbox)
     }
     // A card is people's turn to answer, which the list shows by itself; a message alone leaves the merge to a person.
     const state: TicketState | null = armed.card ? null : 'ready';
-    app.store.updateTicket(ticket.id, { state, note: `CI passed on ${short(armed.sha)}: ${armed.card ? 'card posted' : 'told the Taskmaster'}` });
+    const note = `CI passed on ${short(armed.sha)}: ${armed.card ? 'card posted' : 'told the Taskmaster'}`;
+    app.store.updateTicket(ticket.id, { state, note });
     app.runner.broadcastTicket(ticket.id);
-    if (state && NOTIFY_STATES[state]) app.notify(ticket.id, { kind: 'state', state, note: app.store.getTicket(ticket.id)!.note });
+    // The note just written, never read back (#1634): a read that gives up on the write queue answers from the row before it.
+    if (state && NOTIFY_STATES[state]) app.notify(ticket.id, { kind: 'state', state, note });
     return { state: 'accepted' };
   }
 }

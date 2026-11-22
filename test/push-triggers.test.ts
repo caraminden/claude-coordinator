@@ -6,6 +6,7 @@ import { createServer as createHttpsServer } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { READ_WAIT_MS } from '../src/db-writer.ts';
 import { holds, agentToken, bootServer, until, stopTurns, stopProcs, ok, type Booted } from './helpers.ts';
 
 // When the real server sends pushes: a stand-in push service (https, self-signed) records what
@@ -62,15 +63,17 @@ function decrypt(name: string, body: Buffer) {
   return JSON.parse(Buffer.concat([d.update(data.subarray(0, -16)), d.final()]).subarray(0, -1).toString());
 }
 
-/** Subscribe a stand-in browser for `who`; the push service answers 410 for names ending in "gone". */
-async function subscribe(who: string, name: string) {
+/** A new stand-in browser called `name`, as a PUT body; its keys are kept for decrypt(). */
+function device(name: string) {
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();
   browsers[name] = { ecdh, auth: randomBytes(16).toString('base64url'), endpoint: `${pushBase}/${name}` };
-  return call(who, '/api/push/subscription', {
-    method: 'PUT',
-    body: { subscription: { endpoint: browsers[name].endpoint, keys: { p256dh: ecdh.getPublicKey().toString('base64url'), auth: browsers[name].auth } } },
-  });
+  return { subscription: { endpoint: browsers[name].endpoint, keys: { p256dh: ecdh.getPublicKey().toString('base64url'), auth: browsers[name].auth } } };
+}
+
+/** Subscribe a stand-in browser for `who`; the push service answers 410 for names ending in "gone". */
+async function subscribe(who: string, name: string) {
+  return call(who, '/api/push/subscription', { method: 'PUT', body: device(name) });
 }
 
 /** Pushes that arrived since `from`, as { browser: message }, once `count` have. */
@@ -137,8 +140,10 @@ test('pushes go out for questions, results, blockers and failed turns, to everyo
   const asked = await call(`agent:${t.id}`, `/api/tickets/${t.id}/questions`, { method: 'POST', body: { questions: [{ question: 'Tabs or list?', options: [{ label: 'Tabs', recommended: true }, { label: 'List' }] }] } });
   let got = await pushes(n, 3);
   // Clicking it opens the chat at the card (#236).
+  // An event's own row can still be in the server's write queue when its push arrives (src/db-writer.ts), so wait for it.
   const eventOf = async (ticketId: number, kind: string, match = (_: any) => true) =>
-    (await call('Cara', `/api/tickets/${ticketId}/events`)).events.filter((e: any) => e.kind === kind && match(JSON.parse(e.data))).at(-1).id;
+    (await until(`a ${kind} event on #${ticketId}`, async () =>
+      (await call('Cara', `/api/tickets/${ticketId}/events`)).events.filter((e: any) => e.kind === kind && match(JSON.parse(e.data))).at(-1))).id;
   const card = await eventOf(t.id, 'question', (d) => d.id === asked.id);
   assert.deepEqual(got.cara, { title: '#1 Build it', body: 'Tabs or list?', tag: `thread-${t.id}`, url: `${url}?e=${card}` });
   assert.deepEqual(got.josh, got.cara);
@@ -284,4 +289,34 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
   const last = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e: any) => e.kind === 'user_message').at(-1);
   assert.equal(JSON.parse(last.data).text, '@Josh and @Cara, a look please');
   assert.equal(JSON.parse(last.data).mentions, undefined);
+});
+
+test("a state ping says the state and note just set, with the server's DB writes behind (#1634)", async () => {
+  // Every write on this server waits longer on the write worker than a read waits for the queue (src/db-writer.ts's
+  // READ_WAIT_MS), so a read-back of the row answers from before them, as it did on a loaded CI runner: the ping then
+  // said the note before this one, or never went out at all, the state read back still being the null before 'ready'.
+  const slow = await bootServer({ env: { CLAUDE_BIN: fakeClaude, NODE_TLS_REJECT_UNAUTHORIZED: '0', NODE_NO_WARNINGS: '1', CITADEL_DB_WRITE_DELAY_MS: String(READ_WAIT_MS * 2) } });
+  procs.push(slow.proc);
+  try {
+    const cara = slow.as({ cookie: slow.cookie });
+    const invite = ok(await cara('/api/people', { name: 'Josh' }, 'POST'));
+    const signup = await fetch(`${slow.base}/api/invite/${invite.token}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: 'joshs-own-password' }),
+    });
+    const josh = slow.as({ cookie: signup.headers.get('set-cookie')!.split(';')[0] });
+    const project = ok(await cara('/api/projects', { name: 'Slow' }, 'POST'));
+    ok(await cara(`/api/projects/${project.id}/members`, { person: invite.person.id }, 'POST'));
+    const t = ok(await cara(`/api/projects/${project.id}/tickets`, { message: 'build it', title: 'Slow writes' }, 'POST'));
+    await until('the first turn to end', async () => ok(await cara(`/api/tickets/${t.id}`)).ticket.status === 'idle');
+    // Cara owns the minion and sets the state by hand, so the ping is Josh's, on a device that hears everything (#690).
+    ok(await josh('/api/push/subscription', device('slow'), 'PUT'));
+    ok(await josh('/api/push/subscription', { endpoint: browsers.slow.endpoint, projectId: project.id, everything: true }, 'PATCH'));
+    const n = received.length;
+    ok(await cara(`/api/tickets/${t.id}`, { state: 'ready', note: 'read it when you can' }, 'PATCH'));
+    const got = await pushes(n, 1);
+    assert.deepEqual(Object.keys(got), ['slow']);
+    assert.equal(got.slow.body, 'read it when you can');
+  } finally {
+    await slow.stop();
+  }
 });

@@ -190,10 +190,18 @@ function secretAsk(raw: any): SecretAsk {
  */
 /** The shells a command block on a card (or in a reply) is tagged with: the Citadel-wide "Commands people run" rule. */
 const SHELL_TAGS = ['powershell', 'powershell-admin', 'wsl', 'fish', 'bash', 'cmd'];
-/** Whether a card's text opens a fenced block with no tag: every other fence line opens one, and an opener needs its info string. */
+/** Whether a card's text opens a fenced block with no tag. A block closes on a bare fence at least as long as its opener, so fences inside a longer one (````md around ```bash) are its text. */
 export function untaggedFence(text: string): boolean {
-  const fences = text.split('\n').map((l) => /^\s*```(.*)$/.exec(l)).filter((m) => m !== null);
-  return fences.some((m, i) => i % 2 === 0 && !m[1].trim());
+  let open = 0;
+  for (const line of text.split('\n')) {
+    const m = /^\s*(`{3,})(.*)$/.exec(line);
+    if (!m) continue;
+    if (!open) {
+      if (!m[2].trim()) return true;
+      open = m[1].length;
+    } else if (m[1].length >= open && !m[2].trim()) open = 0;
+  }
+  return false;
 }
 
 async function cleanQuestions(app: App, ticket: Ticket, raw: unknown) {

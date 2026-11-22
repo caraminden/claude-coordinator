@@ -64,9 +64,9 @@ test('ask_question: a plain card says to end the turn, how to link it ("below", 
   const said = ok(await tool(newMinion('Cards'), 'ask_question', { questions: [{ question: 'Tabs or a list?', options: opts }] }));
   assert.match(said, /End your turn now with a short reply; the answers will come as the next message/);
   assert.match(said, /\[the card below\]\(#\/p\/\d+\/t\/\d+\?e=\d+\) \("below" this turn, "above" later\)/);
-  assert.match(said, /A plain card you ask later this turn joins this one \(up to 8 questions in all\), so people see one card with one Send/);
+  assert.match(said, /A plain card you ask later this turn, while this one is still unanswered, joins it \(up to 8 questions in all\), so people see one card with one Send/);
   // A ship card never joins another, so it doesn't say so.
-  assert.doesNotMatch(ok(await tool(newMinion('Ship card'), 'ask_question', { questions: [{ question: 'Ship it?', options: [{ label: 'Ship', recommended: true }, { label: 'Wait' }] }], kind: 'ship' })), /joins this one/);
+  assert.doesNotMatch(ok(await tool(newMinion('Ship card'), 'ask_question', { questions: [{ question: 'Ship it?', options: [{ label: 'Ship', recommended: true }, { label: 'Wait' }] }], kind: 'ship' })), /joins it/);
 });
 
 test('ask_question: doc or secret with questions is refused, saying to pass it alone', async () => {
@@ -97,6 +97,9 @@ test('untaggedFence reads only opening fences', () => {
   assert.equal(untaggedFence('```\nls\n```'), true);
   assert.equal(untaggedFence('```wsl\nls\n```\n```\npwd\n```'), true);
   assert.equal(untaggedFence('no code at all, `inline` only'), false);
+  // A longer fence holds shorter ones as its text, tagged or not, until a bare fence as long closes it.
+  assert.equal(untaggedFence('````md\n```bash\nx\n```\n````'), false);
+  assert.equal(untaggedFence('````md\n```\nx\n```\n````\n```\nls\n```'), true);
 });
 
 test("ask_question: a repeat card's refusal says to retry with not_duplicate", async () => {
@@ -116,6 +119,10 @@ test('message_coordinator: a fyi says what a fyi is, never shipped or acknowledg
   assert.doesNotMatch(start, /not a fyi/);
   const ask = ok(await tool(newMinion('Ask'), 'message_coordinator', { need: 'ask', text: 'Which model for the next step?' }));
   assert.doesNotMatch(ask, /start_after|not a fyi/);
+  // Whatever the need, the result says never to report shipping, acknowledgements or progress.
+  assert.match(ask, /Never send that you shipped or are live/);
+  // A start left as held mail still names start_after.
+  assert.match(ok(await tool(newMinion('Held start'), 'message_coordinator', { need: 'start', wake: false, text: 'Please start handoffs/y.md.' })), /Left as held mail.*start_after/);
 });
 
 test("hand_off_land's answer says what happens next, never parks, and what to do on a failure", () => {
@@ -155,5 +162,7 @@ test('the four descriptions are one sentence each, and "put it first" lives in t
     assert.equal(d.replace(/\([^)]*\)/g, '').split(/\.(\s|$)/).filter((x: string) => x.trim()).length, 1, `${name}: ${d}`);
   }
   const ask = tools.find((t: any) => t.name === 'ask_question');
-  assert.match(ask.inputSchema.properties.questions.items.properties.options.items.properties.recommended.description, /listed first/);
+  const option = ask.inputSchema.properties.questions.items.properties.options.items.properties;
+  assert.match(option.recommended.description, /listed first/);
+  assert.match(option.image.description, /pictured options show as a gallery/);
 });

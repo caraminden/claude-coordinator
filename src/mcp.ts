@@ -269,7 +269,7 @@ const ASK_QUESTION = () => ({
                     type: 'string',
                     maxLength: 1000,
                     description:
-                      'Optional picture: a path in your working directory or shared folder to a png, jpg, gif, webp, avif, svg, mp4, webm or mov, shown as a thumbnail.',
+                      'Optional picture: a path in your working directory or shared folder to a png, jpg, gif, webp, avif, svg, mp4, webm or mov, shown as a thumbnail; pictured options show as a gallery.',
                   },
                   recommended: { type: 'boolean', description: 'true on the option you recommend, listed first; the card labels it "(Recommended)". Leave the words out of the label.' },
                 },
@@ -2190,8 +2190,8 @@ async function runTool(name: string, args: any): Promise<string> {
       const everyone = args.for_everyone === true ? { for_everyone: true } : {};
       const { id: questionId, href, armed, merged } = await call('POST', `/api/tickets/${C().TICKET}/questions`, { questions: args.questions, ...(args.not_duplicate === true ? { not_duplicate: true } : {}), ...(args.kind ? { kind: args.kind } : {}), ...direct, ...ci, ...everyone });
       if (armed) return `${armed} End your turn now with a short reply that says the card comes once CI passes, and set state outside.`;
-      if (merged) return `Your earlier question card of this turn was still unanswered, so these questions joined it (up to 8 questions in all): people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href})). End your turn now with a short reply; the answers will come as the next message.`;
-      return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})${args.for_everyone === true ? '' : ' ("below" this turn, "above" later)'}` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.${args.kind ? '' : ' A plain card you ask later this turn joins this one (up to 8 questions in all), so people see one card with one Send.'}`;
+      if (merged) return `Your earlier question card of this turn was still unanswered, so these questions joined it (up to 8 questions in all): people see one card with one Send and answer all of them in one message. Its link is ${href} (the same one; link it, e.g. [the card below](${href}), "below" this turn, "above" later). End your turn now with a short reply; the answers will come as the next message.`;
+      return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})${args.for_everyone === true ? '' : ' ("below" this turn, "above" later)'}` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.${args.kind ? '' : ' A plain card you ask later this turn, while this one is still unanswered, joins it (up to 8 questions in all), so people see one card with one Send.'}`;
     }
     case 'settle_question': {
       const { settled } = await call('POST', `/api/tickets/${C().TICKET}/settle`, { questionId: args.question_id ?? null });
@@ -2294,10 +2294,11 @@ async function runTool(name: string, args: any): Promise<string> {
       if (r.armed) return `${r.armed} End your turn with state outside.`;
       if (r.held) return `${HELD()} Finish your turn.`;
       // Rules its description held before #1575, where they apply (message_minion's pointer is in the minion prompt).
-      const fyi = args.need === 'fyi' ? " A fyi is for status, shipped, live or tracking: anything with no action. If you need anything done it is not a fyi, so send it again with the need that fits; otherwise do not resend it. Never send that you shipped or are live (the server's shipped line already tells it), nor acknowledgements or progress." : '';
+      const fyi = args.need === 'fyi' ? ' A fyi is for status, shipped, live or tracking: anything with no action. If you need anything done it is not a fyi, so send it again with the need that fits; otherwise do not resend it.' : '';
+      const never = " Never send that you shipped or are live (the server's shipped line already tells it), nor acknowledgements or progress.";
       const start = args.need === 'start' ? ' If the work should start only once something ships, say what: the Taskmaster starts it with create_ticket\'s start_after when the work is planned.' : '';
-      if (r.mail) return `Left as held mail: it shows in the Taskmaster's chat now, and the Taskmaster reads it on its next turn, whoever wakes it.${fyi || ' Do not resend it.'}`;
-      return `Sent. The Taskmaster runs it now, or after its current turn.${fyi}${start}`;
+      if (r.mail) return `Left as held mail: it shows in the Taskmaster's chat now, and the Taskmaster reads it on its next turn, whoever wakes it.${fyi || ' Do not resend it.'}${start}${never}`;
+      return `Sent. The Taskmaster runs it now, or after its current turn.${fyi}${start}${never}`;
     }
     case 'message_minion': {
       const n = Number(args.ticket_id);

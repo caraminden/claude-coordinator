@@ -143,3 +143,39 @@ test('on SIGTERM the server exits at once despite keep-alive connections and ope
   assert.match(out, /SIGTERM: finishing requests/);
   assert.doesNotMatch(out, /still open after/, 'it sat out its grace period');
 });
+
+// Every event stream holds its connection until the exit cuts it, not only pages' /api/stream: an app's own stream
+// through /apps/, a machine session, a contraption's event route. Before #1578 those sat out the whole 5 s grace on
+// every restart ("exiting with N connection(s) still open after 5 s" on all 14 in the journal, Nov 21-22).
+test('on SIGTERM the server exits at once despite an app event stream it proxies', async () => {
+  const contraption = createHttpServer((req, res) => {
+    if (req.url?.split('?')[0].endsWith('/events')) return void res.writeHead(200, { 'Content-Type': 'text/event-stream' }).write('data: hi\n\n');
+    res.end('ok');
+  });
+  const contraptionPort = await tmp.serve(contraption);
+  const log = join(mkdtempSync(join(root, 'log-')), 'server.log');
+  const { base, cookie, call, proc: server } = await bootServer({ root: mkdtempSync(join(root, 'sse-')), log, env: { TURN_UNITS: '0' } });
+  tmp.track(server);
+  const made = await call('/api/contraptions', { name: 'stub', title: 'Stub', port: contraptionPort, open_paths: ['/events'] });
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+  const agent = new Agent({ keepAlive: true });
+  const stream = await new Promise<IncomingMessage>((open, reject) => {
+    const req = request(`${base}/apps/stub/events`, { agent, headers: { Cookie: cookie } }, open);
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(stream.statusCode, 200);
+  assert.match(String(stream.headers['content-type']), /text\/event-stream/);
+  const first = new Promise((r) => stream.once('data', r));
+  await first; // the app's stream is flowing through the server
+  const streamGone = new Promise((r) => stream.on('end', r).on('error', r).on('close', r));
+
+  const closed = new Promise<number | null>((r) => server.once('close', r));
+  server.kill('SIGTERM');
+  await streamGone;
+  assert.equal(await closed, 0);
+  agent.destroy();
+  const out = readFileSync(log, 'utf8');
+  assert.match(out, /SIGTERM: finishing requests/);
+  assert.doesNotMatch(out, /still open after/, 'it sat out its grace period');
+});

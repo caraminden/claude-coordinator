@@ -1841,6 +1841,8 @@ const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|r
 // Requests not yet answering, for settled() (src/settled.ts). Busy only until its headers go out: send() holds those until
 // the request's own writes land, and a stream (an agent's connect, a page's events) stays open by design once it answers.
 const inFlight = new Map<ServerResponse, string>();
+// writeHead(status, headers) leaves getHeader() blind, so read the head as sent.
+const isEventStream = (res: ServerResponse) => res.headersSent && !res.writableEnded && /^content-type:\s*text\/event-stream/im.test(String((res as any)._header ?? ''));
 busySource(() => [...inFlight].filter(([res]) => !res.headersSent).map(([, what]) => `request ${what}`));
 // A test server's "is everything you were doing finished?" (#1437, test/helpers.ts settled()): only with CITADEL_TEST_SETTLED=1.
 const SETTLED_ROUTE = process.env.CITADEL_TEST_SETTLED === '1';
@@ -1997,6 +1999,9 @@ process.on('SIGTERM', () => {
   server.close(() => process.exit(0));
   for (const c of clients.keys()) c.end();
   for (const s of upgraded) s.destroy();
+  // Every other event stream too (an app's through /apps/, a machine session, a contraption route): none ends by itself, so
+  // each held the whole grace (#1578). The exit cuts them anyway; their callers reconnect to the next server.
+  for (const [res] of inFlight) if (isEventStream(res)) res.destroy();
   runner.approvals.wakeAll();
   // A kept-alive connection (Caddy's) stays open after answering a request that was running at close(),
   // until its keep-alive timeout: close each one as soon as it goes idle.
@@ -2004,7 +2009,8 @@ process.on('SIGTERM', () => {
   every('close idle connections', 50, () => server.closeIdleConnections());
   setTimeout(() => {
     server.getConnections((_err, n) => {
-      console.log(`SIGTERM: exiting with ${n} connection(s) still open after ${SHUTDOWN_GRACE_MS / 1000} s`);
+      const open = [...inFlight].map(([res, what]) => `${what}${res.headersSent ? ' (answering)' : ''}`).slice(0, 10).join(', ');
+      console.log(`SIGTERM: exiting with ${n} connection(s) still open after ${SHUTDOWN_GRACE_MS / 1000} s${open ? `: ${open}` : ''}`);
       process.exit(0);
     });
   }, SHUTDOWN_GRACE_MS).unref();

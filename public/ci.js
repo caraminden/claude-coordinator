@@ -3,7 +3,7 @@
 // scheme with CI. Overview: its open problems with what, why and the fix, each workflow's verdict on main, its runners and
 // what they run, the queue, and the CI desktop's load (collapsed); History: recent runs (#1019). It reads /api/ci
 // (src/ci-health.ts snapshot) and changes nothing. The CI chip beside Releases (and the top bar's) opens it, its dot the worst it shows.
-import { ago, api, h, icon, view, pacificStamp, whenShown } from './base.js';
+import { ago, api, h, icon, view, pacificStamp, poller } from './base.js';
 import { hostLoadBlock } from './ci-host.js';
 import { emptyCard, hueRow, showFirst, statTiles, toneChip } from './look.js';
 import { settingsRow } from './settings.js';
@@ -463,8 +463,8 @@ export function releasesShell() {
     },
   };
   let tried = false;
-  const load = async () => {
-    if (tried && !el.isConnected) return;
+  const refresh = poller(async () => {
+    if (tried && !el.isConnected) return false;
     tried = true;
     try {
       ciRead = await readCi();
@@ -474,17 +474,15 @@ export function releasesShell() {
     } catch (err) {
       if (!ciRead && CI_TABS.has(tab)) body.replaceChildren(h('p', { class: 'error' }, `Couldn't read CI: ${err.message}`));
     }
-    setTimeout(() => whenShown(load), REFRESH_MS);
-  };
+  }, REFRESH_MS);
   draw();
   readTab();
-  load();
+  refresh.now();
   return el;
 }
 
 // The chips (the shelf's and the top bar's): Releases and CI share one /api/ci read a minute, each dot its own side of it.
 const chips = new Set();
-let chipTimer = null, chipBusy = false; // a chip made while a read runs or is due takes its answer: no second read
 const plainCount = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Each chip's dot and words from the last read: CI's runners and desktops, or what holds up deploys (holdsDeploys and the releases' own). */
@@ -524,20 +522,16 @@ function paintChips() {
 // Releases arriving move the Releases dot and the page's list at once, between reads.
 onReleasesRedraw(() => { paintChips(); if (shell?.el.isConnected) shell.drawList(); });
 
-async function readChips() {
-  chipTimer = null;
+const chipPoll = poller(async () => {
   paintChips();
-  if (!chips.size) return;
-  chipBusy = true;
+  if (!chips.size) return false;
   try {
     ciRead = await readCi();
     paintChips();
   } catch {
     // The last colour stays: the next minute asks again.
   }
-  chipBusy = false;
-  chipTimer = setTimeout(() => whenShown(readChips), 60_000);
-}
+}, 60_000);
 
 function chip(kind, label, page, projectId) {
   const c = h('a', { class: `ci-chip ${kind}-chip`, 'data-kind': kind, hidden: kind === 'ci', href: projectId ? `#/p/${projectId}/${page}` : '#/',
@@ -546,7 +540,7 @@ function chip(kind, label, page, projectId) {
   chips.add(c);
   paintChip(c);
   if (projectId === null) c.dataset.placed = '1';
-  if (!chipTimer && !chipBusy) chipTimer = setTimeout(readChips, 0);
+  chipPoll.now();
   return c;
 }
 

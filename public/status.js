@@ -3,7 +3,7 @@
 // tiles, each with its last 8 days. It reads /api/status (src/status-page.ts) every 30 s and changes
 // nothing. Every tile keeps its size whatever its numbers say, so a re-read moves nothing. The Status chip beside
 // CI's opens that tab, its dot the worst verdict it shows.
-import { ago, api, h, view, whenShown, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
+import { ago, api, h, view, poller, pacificStamp, pacificIso, pacificClockBare, pacificClock } from './base.js';
 import { toast } from './ui/status.js';
 import { hueRow, schemeTag, toneChip } from './look.js';
 import { optimistic } from './ui/optimistic.js';
@@ -531,12 +531,10 @@ export function statusPane(onData = () => {}) {
       h('p', { class: 'st-why' }, ...(v.reasons.length ? why : [app ? 'Running, deployed and quiet.' : 'Up, no failed service, no long stalls, memory, disk and CI fine.'])),
       h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : [...citadelTiles(citadel, days, now, shipTimes, draw), lines])));
   };
-  let timer = null, busy = false, tried = false;
-  const load = async () => {
-    timer = null;
-    if (tried && !el.isConnected) return; // read again once the tab shows again; the first read may start before the page is attached
+  let tried = false;
+  const refresh = poller(async () => {
+    if (tried && !el.isConnected) return false; // read again once the tab shows again; the first read may start before the page is attached
     tried = true;
-    busy = true;
     try {
       data = await api('api/status');
       if (data) { draw(); onData(data); }
@@ -544,13 +542,11 @@ export function statusPane(onData = () => {}) {
     } catch (err) {
       if (!data) detail.replaceChildren(h('p', { class: 'error' }, `Couldn't read status: ${err.message}`));
     }
-    busy = false;
-    timer = setTimeout(() => whenShown(load), REFRESH_MS);
-  };
+  }, REFRESH_MS);
   /** Show it for `to` (a scheme's id or 'all'), once it's on the page: the first call reads, and the reads go on while it shows. */
   el.show = (to) => {
     if (to !== scope) { scope = to; picked = 'citadel'; if (data) draw(); }
-    if (!timer && !busy) load();
+    refresh.now();
   };
   return el;
 }
@@ -562,18 +558,15 @@ export function worstOf(data) {
 
 // The chips (the shelf's and the top bar's) share one read a minute, like CI's.
 const chips = new Set();
-let chipTimer = null, chipBusy = false; // a chip made while a read runs or is due takes its answer: no second read
 let chipRead = null;
 const paintChip = (c, { title, tone }) => {
   c.title = title;
   c.setAttribute('aria-label', title);
   c.querySelector('.dot').className = `dot ${DOT[tone]}`;
 };
-async function readChips() {
-  chipTimer = null;
+const chipPoll = poller(async () => {
   for (const c of chips) if (!c.isConnected && c.dataset.placed) chips.delete(c);
-  if (!chips.size) return;
-  chipBusy = true;
+  if (!chips.size) return false;
   try {
     const data = await api('api/status');
     if (data) {
@@ -584,9 +577,7 @@ async function readChips() {
   } catch {
     // The last colour stays: the next minute asks again.
   }
-  chipBusy = false;
-  chipTimer = setTimeout(() => whenShown(readChips), 60_000);
-}
+}, 60_000);
 
 /** The Status chip: a dot and "Status", opening the page for the scheme on screen (or `projectId`). */
 export function statusChip(projectId = null) {
@@ -596,6 +587,6 @@ export function statusChip(projectId = null) {
   c.dataset.placed = '1';
   chips.add(c);
   if (chipRead) paintChip(c, chipRead);
-  if (!chipTimer && !chipBusy) chipTimer = setTimeout(readChips, 0);
+  chipPoll.now();
   return c;
 }

@@ -77,6 +77,24 @@ export function whenShown(fn) {
   });
 }
 /**
+ * One poller for a page's refresh loop or a chip set's shared read: `read` runs, then again `every` ms later once the tab
+ * is shown (whenShown), never twice at once. A read that returns `false` stops the loop (its element or chips are gone);
+ * a throw is the read's own business (catch inside it). `now()` starts a read at once unless one is running or due, so
+ * whoever joins while a read runs takes its answer: no second read (#1610).
+ */
+export function poller(read, every) {
+  let timer = null, busy = false;
+  const tick = async () => {
+    timer = null;
+    busy = true;
+    let go = true;
+    try { go = (await read()) !== false; } catch { /* the next tick asks again */ }
+    busy = false;
+    if (go) timer = setTimeout(() => whenShown(tick), every);
+  };
+  return { now() { if (!timer && !busy) timer = setTimeout(tick, 0); } };
+}
+/**
  * Whether a tab coming back may have missed stream news, so must resync (#1528): it was hidden a minute or more, the
  * browser froze it meanwhile, or the stream said nothing while it was hidden (`heardAt`, its last message: a dead
  * stream can still read OPEN).

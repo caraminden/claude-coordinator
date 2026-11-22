@@ -2,7 +2,7 @@
 // Importing it here is itself the check that it needs no document at load.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { account, ago, api, missedNews, newsArrived, whenShown, baseName, costText, fileExt, fileHref, fileKind, fileUrl, formatSize, isLocalPath, isSeen, joinPath, listGroupsOf, me, setAccount, setView, sharedHref, sharedUrl, shortPath, statusLabel, taskmasterName, threadFullName, threadHref, threadLabel, threadTitleParts, uploadUrl } from '../public/base.js';
+import { account, ago, api, missedNews, newsArrived, poller, whenShown, baseName, costText, fileExt, fileHref, fileKind, fileUrl, formatSize, isLocalPath, isSeen, joinPath, listGroupsOf, me, setAccount, setView, sharedHref, sharedUrl, shortPath, statusLabel, taskmasterName, threadFullName, threadHref, threadLabel, threadTitleParts, uploadUrl } from '../public/base.js';
 
 test('joinPath resolves a relative link against its folder', () => {
   const rows = [
@@ -246,4 +246,34 @@ test('whenShown: runs at once in a shown tab, and only once the tab is next show
   assert.deepEqual(ran, ['no document', 'poll'], 'once');
   whenShown(() => ran.push('shown tab'));
   assert.deepEqual(ran, ['no document', 'poll', 'shown tab']);
+});
+
+test('poller: one read at a time, a joiner during a read takes it, it waits while hidden and stops on false (#1610)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const listeners = new Set();
+  globalThis.document = { hidden: false, addEventListener: (_, f) => listeners.add(f), removeEventListener: (_, f) => listeners.delete(f) };
+  t.after(() => { delete globalThis.document; });
+  const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+  let reads = 0, release = null, alive = true;
+  const p = poller(() => { reads++; return new Promise((r) => { release = () => r(alive ? undefined : false); }); }, 60_000);
+  p.now(); p.now();
+  t.mock.timers.tick(0);
+  assert.equal(reads, 1, 'two now() calls before the timer fire one read');
+  p.now(); t.mock.timers.tick(0);
+  assert.equal(reads, 1, 'now() during a read starts no second one');
+  document.hidden = true;
+  release(); await flush();
+  t.mock.timers.tick(60_000);
+  assert.equal(reads, 1, 'due but hidden: waits');
+  p.now(); t.mock.timers.tick(0);
+  assert.equal(reads, 1, 'now() while a read is due starts no second one');
+  document.hidden = false; for (const f of [...listeners]) f();
+  assert.equal(reads, 2, 'read once shown');
+  alive = false;
+  release(); await flush();
+  t.mock.timers.tick(120_000);
+  assert.equal(reads, 2, 'false stops the loop');
+  p.now(); t.mock.timers.tick(0);
+  assert.equal(reads, 3, 'now() restarts a stopped one');
+  release(); await flush();
 });

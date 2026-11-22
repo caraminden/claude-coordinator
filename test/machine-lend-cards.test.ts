@@ -7,6 +7,7 @@ import { after, before, test } from 'node:test';
 import { agentToken, bootServer, ok, stopProcs, tempRoot, until, type Booted } from './helpers.ts';
 import { machineFakes } from './machine-fakes.ts';
 import { lendLines, lendPatch } from '../src/machine-lend.ts';
+import { Store } from '../src/db.ts';
 
 // propose_machine_lend (#1638; Cara, 2026-11-22, "Propose, card, link", "Who can save the page", "Both", "Machine
 // switches"): a minion or Taskmaster asks for a machine's lending to change, a card shows it, and Approve by the
@@ -33,6 +34,7 @@ const call = async (who: string, path: string, opts: { method?: string; body?: u
 
 let project: any;
 let minion: any;
+let joshs: any;
 let taskmaster: any;
 let box: any;
 let output: () => string;
@@ -55,6 +57,8 @@ before(async () => {
     const res = await fetch(`${srv.base}/api/invite/${made.token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: `${name}-password-1` }) });
     cookies[name] = res.headers.get('set-cookie')!.split(';')[0];
     await call('Cara', `/api/projects/${project.id}/members`, { method: 'POST', body: { person: made.person.id } });
+    // Their turns run on the server's (stand-in) login, so their asks start turns.
+    new Store(join(srv.data, 'coordinator.db')).updateUser(made.person.id, { server_login: 1 });
   }
   // An admin's shared machine with a real agent that found two workspaces and an MCP server.
   const dir = join(root, 'box');
@@ -68,6 +72,8 @@ before(async () => {
   await call('Josh', '/api/machines', { method: 'POST', body: { name: 'josh-box' } });
   minion = await call('Cara', `/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'use box' } });
   await idle(minion);
+  joshs = await call('Josh', `/api/projects/${project.id}/tickets`, { method: 'POST', body: { message: 'use my box' } });
+  await idle(joshs);
   ({ coordinator: taskmaster } = await call('Cara', `/api/projects/${project.id}`));
 });
 
@@ -93,7 +99,8 @@ test('a minion\'s call posts a card with the change and what it lends after; bad
   assert.match(c.plan, /After this it lends: workspaces w\./);
   assert.match(c.plan, new RegExp(`\\[box on the Machines page\\]\\(#/p/${project.id}/machines/box\\)`));
 
-  await assert.rejects(propose({ machine: 'nope' }), /404 No machine called nope; there are box, josh-box/);
+  await assert.rejects(propose({ machine: 'nope' }), /404 No machine called nope; there are box$/);
+  await assert.rejects(propose({ machine: 'josh-box', here: true }), /404 No machine called josh-box/, 'someone else\'s own machine is out of sight, as everywhere (#306)');
   await assert.rejects(propose({ machine: 'box', tick: ['zz'] }), /400 box has no workspace called zz; it has w, x/);
   await assert.rejects(propose({ machine: 'box', server: 'zz' }), /400 box has no MCP server called zz; it found own/);
   await assert.rejects(propose({ machine: 'box', tick: ['w'], untick: ['w'] }), /400 A workspace is in both tick and untick/);
@@ -117,12 +124,17 @@ test('only its owner or an admin approves: Approve saves it as the page would, a
   await assert.rejects(verdict('Cara', minion, c.id, 'approve'), /409 Cara already approved this change/);
   await idle(minion);
 
-  // Someone else's machine: its owner or an admin, nobody else.
-  const theirs = await propose({ machine: 'josh-box', here: true });
-  await assert.rejects(verdict('Dana', minion, theirs.id, 'approve'), /403 Only Josh, who owns josh-box, or an admin can change what it lends/);
-  await verdict('Dana', minion, theirs.id, 'revise', 'Not now');
-  assert.equal(await lastMessage(minion), 'Rejected your proposed lending for josh-box; nothing changed.\n\nNot now');
-  await idle(minion);
+  // Josh's own machine, from a minion he asked: he or an admin approves, nobody else.
+  const theirs = await propose({ machine: 'josh-box', here: true }, joshs);
+  assert.equal(theirs.owner, 'Josh');
+  await assert.rejects(verdict('Dana', joshs, theirs.id, 'approve'), /403 Only Josh, who owns josh-box, or an admin can change what it lends/);
+  await verdict('Josh', joshs, theirs.id, 'revise', 'Not now');
+  assert.equal(await lastMessage(joshs), 'Rejected your proposed lending for josh-box; nothing changed.\n\nNot now');
+  await idle(joshs);
+  const again = await propose({ machine: 'josh-box', here: true }, joshs);
+  await verdict('Josh', joshs, again.id, 'approve');
+  assert.deepEqual((await call('Josh', '/api/machines')).find((m: any) => m.name === 'josh-box').projects, [project.id]);
+  await idle(joshs);
 });
 
 test('the Taskmaster can ask too, and a newer proposal for the machine supersedes its open one', async () => {

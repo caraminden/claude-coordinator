@@ -1054,10 +1054,13 @@ export const ticketRoutes: Route[] = [
       const why = body.why === undefined ? '' : str(body.why, 'Why', 500);
       const project = store.getProject(ticket.project_id)!;
       // Any machine by name, lent here or not: asking for one not lent yet is the point. Approving is who can save it on the page.
-      const machine = store.listMachines().find((m) => m.name === name);
+      // Someone else's own machine stays out of sight (#306): only shared ones and the turn's asker's own.
+      const asker = store.turnAsker(ticket.id);
+      const seen = store.listMachines().filter((m) => m.owner_id === null || m.owner_id === asker);
+      const machine = seen.find((m) => m.name === name);
       const view = machine && app.machines.view(machine);
       if (!machine || !view || view.runners) {
-        const names = store.listMachines().filter((m) => !app.machines.view(m).runners).map((m) => m.name);
+        const names = seen.filter((m) => !app.machines.view(m).runners).map((m) => m.name);
         throw new HttpError(404, machine ? `${name} is a CI runner host: it lends no tools` : `No machine called ${name}; there are ${names.join(', ') || 'none'}`);
       }
       // An online agent says what it has, so a typo is caught here, not after a person approves it. Offline, nobody knows.

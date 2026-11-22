@@ -3122,6 +3122,16 @@
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/machine-lend": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion or Taskmaster itself can propose machine lending in its chat",
+  "member": "403 Only the minion or Taskmaster itself can propose machine lending in its chat",
+  "outsider": "403 Only the minion or Taskmaster itself can propose machine lending in its chat",
+  "tmA": "403 Only the minion or Taskmaster itself can propose machine lending in its chat",
+  "tmB": "403 Only the minion or Taskmaster itself can propose machine lending in its chat",
+  "m1": "400 Machine is required",
+  "m2": "403 A minion may only update itself"
+ },
  "POST /api/tickets/:minion1/machine-notes": {
   "anon": "401 Not logged in",
   "person": "403 Only the minion itself can propose a machine's notes in its chat",
@@ -3939,6 +3949,16 @@
   "outsider": "404 No such minion",
   "tmA": "403 Only a person can leave a minion",
   "tmB": "403 Only a person can leave a minion",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/machine-lend": {
+  "anon": "401 Not logged in",
+  "person": "403 Only the minion or Taskmaster itself can propose machine lending in its chat",
+  "member": "403 Only the minion or Taskmaster itself can propose machine lending in its chat",
+  "outsider": "403 Only the minion or Taskmaster itself can propose machine lending in its chat",
+  "tmA": "400 Machine is required",
+  "tmB": "403 Only the minion or Taskmaster itself can propose machine lending in its chat",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

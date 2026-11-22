@@ -461,7 +461,9 @@ export const machineRoutes: Route[] = [
     handler: (ctx) => {
       const machines = taskmasterMachines(ctx);
       // The names of the rest (#1638): one not lent here yet is what propose_machine_lend asks for.
-      const others = ctx.app.store.listMachines().filter((m) => !machines.some((x) => x.id === m.id) && !ctx.app.machines.view(m).runners)
+      // Someone else's own machine stays out of sight, as it does everywhere (#306).
+      const asker = ctx.app.store.turnAsker(ctx.caller!.id);
+      const others = ctx.app.store.listMachines().filter((m) => (m.owner_id === null || m.owner_id === asker) && !machines.some((x) => x.id === m.id) && !ctx.app.machines.view(m).runners)
         .map((m) => ({ name: m.name, owner_name: m.owner_id === null ? null : ctx.app.store.getUser(m.owner_id)?.name ?? null }));
       return json(ctx.res, 200, { machines, others });
     },

@@ -236,6 +236,10 @@ run.
   A ship that would wait more than 120 s for the running check, going by the last check's time, joins unchecked.
 - Not for a light lane (it runs no CI), a branch on a taken-back commit, or a branch that doesn't rebase cleanly (its
   rebase in line reports that). No guard tests run on the check's commit; `guards()` runs them in line.
+- The brief's done line asked for the boot check too. It stays in line: `tools/boot-check.ts` boots a copy of the live
+  database, which only perigee has, so the desktop's check can't run it. A stop mid-check (a trap) still cancels the run
+  and deletes its worktree and branches, and the poll takes only a `check/<branch>` run newer than any GitHub already had
+  on that commit, so a hand-off again with no change never reads an old run as this one's.
 - Each check logs `own check · <branch> · <verdict> · <s>` to the retro log: that is how its cost and catch get counted
   against the p90 handoff-to-live time and desktop CI-hours (the brief's bar: p90 down, CI-hours within about 1.7×).
 - Off: `LAND_OWN_CHECK=0`, `<state>/own-check-off`, or no runner carrying the label.

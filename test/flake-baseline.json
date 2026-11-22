@@ -101,7 +101,7 @@
  },
  "citadel-android.test.ts": {
   "shortUntil": {
-   "n": 10,
+   "n": 8,
    "ok": 0
   },
   "elapsed": {

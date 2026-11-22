@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ioStalledUs, namedStacks, openersOf, stallCause, stallSpan, summarizeWaits, watchLoopLag, type Reading } from '../src/loop-lag.ts';
+import { ioStalledUs, mostlyRecorder, namedStacks, openersOf, stallCause, stallSpan, summarizeWaits, watchLoopLag, type Reading } from '../src/loop-lag.ts';
 import { until } from './wait.ts';
 
 const spin = (ms: number) => {
@@ -182,4 +182,35 @@ test('namedStacks weights by time, so a gap with no samples counts for the frame
   };
   assert.equal(namedStacks([profile], 0, 100_000), '90% slowRead (src/x.ts:20) < job (src/x.ts:5) < (anonymous) (src/x.ts:1); 10% fast (src/x.ts:10) < job (src/x.ts:5) < (anonymous) (src/x.ts:1)');
   assert.equal(namedStacks([profile], 0, 100_000, 3, true), '100% job (src/x.ts:5)');
+});
+
+test('a stall that is mostly the recorder\'s own roll is its own, so it sets off no take (#1572)', () => {
+  assert.equal(mostlyRecorder([[1000, 1600]], 1000, 1700), true);
+  assert.equal(mostlyRecorder([[1000, 1100]], 1000, 1700), false, 'a roll inside a longer real stall');
+  assert.equal(mostlyRecorder([], 1000, 1700), false);
+  assert.equal(mostlyRecorder([[0, 500]], 1000, 1700), false, 'a roll before the stall');
+});
+
+test('console profiles handed over overlapping give each window its profile with no gap, and no Profiler.stop (#1572)', async () => {
+  const { Session } = await import('node:inspector/promises');
+  const s = new Session();
+  s.connect();
+  const done = new Map<string, any>();
+  s.on('Profiler.consoleProfileFinished', (m: any) => done.set(m.params.title, m.params.profile));
+  try {
+    await s.post('Profiler.enable');
+    console.profile('t0');
+    spin(60);
+    console.profile('t1');
+    console.profileEnd('t0');
+    spin(60);
+    console.profile('t2');
+    console.profileEnd('t1');
+    const a = done.get('t0'), b = done.get('t1');
+    assert.ok(a.samples.length > 0 && b.samples.length > 0);
+    assert.ok(Math.abs(a.endTime - b.startTime) < 5000, 'the next profile starts where the last ends');
+    console.profileEnd('t2');
+  } finally {
+    s.disconnect();
+  }
 });

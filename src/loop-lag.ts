@@ -268,8 +268,21 @@ export async function openersOf(files: string[]): Promise<string[]> {
 }
 
 /**
+ * Whether the recorder's own work (its roll spans, hrtime microseconds) covers most of a stall's window, so the stall
+ * is the recorder's own and must not set off another take.
+ */
+export function mostlyRecorder(spans: Array<[number, number]>, from: number, to: number): boolean {
+  let own = 0;
+  for (const [a, b] of spans) own += Math.max(0, Math.min(b, to) - Math.max(a, from));
+  return own * 2 >= to - from;
+}
+
+/**
  * The always-on sampler: `take` hands over the profile so far and starts the next, one take at a time. The roll's
  * profile is kept until the next take, so a stall that spans a roll is still found in it.
+ * A roll starts the next console profile BEFORE it ends the last one (#1572): V8 builds its profiler (a walk over every
+ * compiled function, ~0.4 s at 100k of them, however little was sampled) only when the first profile starts, so an
+ * overlapping hand-over costs about nothing where Profiler.stop then Profiler.start froze the loop for ~0.5 s each time.
  */
 class Sampler {
   private session: Session | null = new Session();
@@ -277,20 +290,33 @@ class Sampler {
   private rolled: Profile | null = null;
   private fresh?: NodeJS.Timeout;
   private log: (text: string) => void;
+  private title = 'loop-lag-0';
+  private count = 0;
+  private finished = new Map<string, Profile>();
+  /** When the recorder itself held the loop (its start, its rolls), hrtime microseconds: the last few. */
+  spans: Array<[number, number]> = [];
 
   constructor(log: (text: string) => void) {
     this.log = log;
     this.chain = (async () => {
       const s = this.session!;
       s.connect();
+      s.on('Profiler.consoleProfileFinished', (m: any) => this.finished.set(m.params.title, m.params.profile));
       await s.post('Profiler.enable');
       await s.post('Profiler.setSamplingInterval', { interval: SAMPLE_US });
-      await s.post('Profiler.start');
+      this.timed(() => console.profile(this.title));
       this.fresh = setInterval(() => void this.next().then((p) => (this.rolled = p)), FRESH_MS).unref();
     })().catch((err) => {
       this.log(`The event-loop sampler did not start (${err?.message ?? err}): stall lines won't say what ran.`);
       this.stop();
     });
+  }
+
+  private timed(fn: () => void) {
+    const t = process.hrtime.bigint();
+    fn();
+    this.spans.push([Number(t / 1000n), Number(process.hrtime.bigint() / 1000n)]);
+    if (this.spans.length > 8) this.spans.shift();
   }
 
   /** The profiles covering the time since the take before the last roll: none while the sampler is down. */
@@ -306,9 +332,13 @@ class Sampler {
       const s = this.session;
       if (!s) return null;
       try {
-        const { profile } = await s.post('Profiler.stop');
-        await s.post('Profiler.start');
-        return profile as unknown as Profile;
+        const old = this.title;
+        this.title = `loop-lag-${++this.count}`;
+        this.timed(() => { console.profile(this.title); console.profileEnd(old); });
+        const profile = this.finished.get(old) ?? null;
+        this.finished.delete(old);
+        if (!profile) throw new Error('V8 gave no profile');
+        return profile;
       } catch (err: any) {
         this.log(`The event-loop sampler stopped (${err?.message ?? err}): stall lines won't say what ran.`);
         this.stop();
@@ -361,7 +391,9 @@ export function watchLoopLag(log: (text: string) => void = console.warn, every =
     // A blocked write is the disk (this) or another process's lock (the openers): only the second waits on a busy timeout.
     const disk = io != null && ioFrom != null ? ` Disk: the box was fully stalled on I/O for ${((io - ioFrom) / 1e6).toFixed(1)} s of it.` : '';
     const to = Number(now / 1000n);
-    void Promise.all([sampler?.take() ?? [], held >= 2000 && files.length ? openersOf(files) : []]).then(([ps, who]) => {
+    // A stall that is the recorder's own work (its start or a roll) gets its line but no take of its own.
+    const own = !!sampler && mostlyRecorder(sampler.spans, from, to);
+    void Promise.all([own ? [] : sampler?.take() ?? [], held >= 2000 && files.length ? openersOf(files) : []]).then(([ps, who]) => {
       const ran = namedStacks(ps, from, to);
       const inWork = namedStacks(ps, from, to, 3, true);
       log(`${line}${inWork ? ` In: ${inWork}.` : ''}${ran ? ` Running: ${ran}` : ''}${disk}${who.length ? ` Also open on the database: ${who.join('; ')}.` : ''}`);

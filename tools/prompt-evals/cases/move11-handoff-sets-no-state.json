@@ -22,12 +22,12 @@
       "why": "ship through hand_off_land"
     },
     {
-      "noText": "\"state\":\\s*\"(ready|outside|complete|pending-deploy|try|parked)\"",
+      "noText": "\"state\":\\s*\"(ready|outside|complete|pending-deploy|try|parked|sealed)\"",
       "why": "after a hand-off, set no state"
     },
     {
       "noCall": "set_thread_status",
-      "input": "\"state\":\"(ready|outside|complete|pending-deploy|try|parked)\"",
+      "input": "\"state\":\"(ready|outside|complete|pending-deploy|try|parked|sealed)\"",
       "why": "after a hand-off, set no state"
     }
   ]

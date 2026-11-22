@@ -70,6 +70,7 @@ import { MinionQueue, migrateQueues, queueKey, type OwedResume, type Steer } fro
 import { ACCOUNT_ERROR, isNetworkFailure, outcome, RETRIES, retriesOf, type Outcome, type Retries, type RetryKind, type TurnEnd } from './turn-outcome.ts';
 import { KILL_HOLD_MAX_MS, LIMIT_RESUMES, nextLimitResume, Resumes, type KillResume, type LimitedAccount, type LimitResume, type NetResume } from './resumes.ts';
 import { realClock, type Clock, type ClockTimer } from './clock.ts';
+import { stateWord } from './needs.ts';
 
 const MAX_TOOL_OUTPUT = 20_000;
 /** How many of a thread's newest replies and messages strike_text searches for the quote (#622). */
@@ -2681,7 +2682,7 @@ export class Runner {
     if (this.store.getSetting(freshKey(t.id))) return 'fresh';
     // Outside (#1274): a day of gate counts found it turned away 120 of 233 due minions, nearly all in the ship line,
     // and about 30 a day of them were woken cold by their ship's result an hour or more later.
-    if (!(t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${t.state}`;
+    if (!(t.state === null || t.state === 'ready' || t.state === 'try' || t.state === 'outside' || this.store.openCardsOf(t.id).length)) return `state ${stateWord(t.state)}`;
     if (!inWindow(now)) return 'hours';
     // Codex keeps no Claude cache.
     const person = this.turnPerson(t, p, []);

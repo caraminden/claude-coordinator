@@ -31,7 +31,7 @@
   "checks": [
     {
       "noCall": "set_thread_status",
-      "input": "\"state\"\\s*:\\s*\"parked\"",
+      "input": "\"state\"\\s*:\\s*\"(parked|sealed)\"",
       "why": "nothing outside the minion was holding the follow-up"
     },
     {

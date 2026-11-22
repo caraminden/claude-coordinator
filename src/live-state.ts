@@ -2,6 +2,7 @@
 // already stores, so a Taskmaster can tell "hung" from "busy" in a container turn as on the host.
 // Runs inside the pinned MCP server, so it imports only ./ files (turn-launch.ts pinnedCopy).
 import { hideTokens } from './hide-tokens.ts';
+import { stateWord } from './needs.ts';
 
 interface EventRow { kind: string; data: string; created_at: number }
 interface Call { name: string; input: any; at: number; grunt: string | null; id: string; result?: { at: number; error: boolean; text: string } }
@@ -100,7 +101,7 @@ export function liveState(ticket: any, events: EventRow[], now = Date.now()): st
       waits.push(`the model: ${lastAt ? `${ago(now - lastAt)} since the turn's last event` : 'no events from this turn yet'}`);
     }
   } else {
-    waits.push(`nothing: no turn is running (${ticket.state ? `state ${ticket.state}` : 'its turn ended'})`);
+    waits.push(`nothing: no turn is running (${ticket.state ? `state ${stateWord(ticket.state)}` : 'its turn ended'})`);
   }
   if (ticket.wait?.text) waits.push(`${ticket.wait.kind}: ${ticket.wait.text} (for ${ago(now - ticket.wait.since)})`);
   if (ticket.limit_resume_at) waits.push(`the usage limit: resumes at ${new Date(ticket.limit_resume_at).toISOString()}`);

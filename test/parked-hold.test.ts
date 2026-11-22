@@ -199,7 +199,8 @@ test('through the server: Unpark, the Taskmaster\'s unpark option, and update_ti
     const parkedMinion = async (title: string) => {
       const { data: t } = await call(`/api/projects/${p.id}/tickets`, { title, message: `brief for ${title}` });
       await settled(t.id);
-      assert.equal((await call(`/api/tickets/${t.id}`, { state: 'parked' }, 'PATCH')).status, 200);
+      // 'sealed' is the same state; it is stored as 'parked'
+      assert.equal((await call(`/api/tickets/${t.id}`, { state: 'sealed' }, 'PATCH')).status, 200);
       assert.equal((await view(t.id)).state, 'parked');
       return t.id as number;
     };

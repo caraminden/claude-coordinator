@@ -714,6 +714,12 @@ if [ -n "$adr_onto" ] && [ -f "$tools/ship-numbers.ts" ]; then
   fi
 fi
 
+# Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true used to read "#N: ..." as a comment
+# and drop it. One line naming the first commit that lost its title while a sibling kept theirs; a plain scheme has none.
+if [ "$mode" != build ] && [ -x "$tools/commit-titles.sh" ]; then
+  lost=$("$tools/commit-titles.sh" "$([ "$mode" = into ] && echo "refs/heads/$build" || echo main)" 2>&1) || refuse "$lost. Nothing landed"
+fi
+
 # The undo guard (#677, after Peek Auras #361's tools/undo-guard.sh): prints, and exits 1 on, the commits among
 # <onto>'s last 60 that this branch reverts without seeing them. A stale squash does that behind a clean
 # fast-forward with CI green: `git reset --soft main` from a branch that started further back keeps its old files

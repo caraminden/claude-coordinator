@@ -248,6 +248,13 @@ A workflow that keeps a file from a run (a build, reports, a release) uploads it
 store, never with `actions/upload-artifact`: the `citadel:ci-store` skill has the script and the
 rules for what may be kept.
 
+A scheme's test workflow also sends its suite's wall time, so the CI page's Numbers tab can flag slow
+creep: copy `ci-numbers.sh` from the `citadel:ci-store` skill to `tools/ci-numbers.sh`, give the job
+`id-token: write`, time the test step (`started=$SECONDS` before it, the seconds after it on a green
+run) and add a last step `if: success()` with `continue-on-error: true` running
+`tools/ci-numbers.sh suite-time=${secs}s`. Citadel's own `.github/workflows/tests.yml` is the example.
+A scheme's existing workflows are left alone.
+
 Write no workflow the plan doesn't ask for. If the repo has workflows, add the scheme's runner
 yourself: call the `ci_runners` tool with `op: "add"` (one runner unless the plan names a count,
 at most 4). Citadel's runner agent on the desktop installs it, and the tool waits until GitHub

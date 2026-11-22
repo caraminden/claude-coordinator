@@ -212,13 +212,6 @@ jobs:
           sleep 1; kill "$tailer" # tail prints what it has read: a second for the last lines
           [ "$rc" != 0 ] || grep -q '^ℹ skipped 0$' "$RUNNER_TEMP/tests.log" || { echo "tests were skipped on this runner (the lines with ﹣ above): install what they need"; exit 1; }
           exit "$rc"
-      # The full suite's failed files, each rerun alone once to label it flake or real (tools/run-tests.sh), in a step of
-      # their own so land.sh sees them start (#1374): on Nov 20 a busy desktop's full suite ended past the reruns'
-      # deadline, so no flake was rerun and each red counted as real. At its LAND_CI_TIMEOUT land.sh waits LAND_CI_RERUN
-      # (RERUN_WINDOW here, the same number) more for a run in this step, and only then. Its clock starts here, at or
-      # before land.sh's (steps run back to back on one runner, and land.sh only extends once the full suite has ended),
-      # and the reruns end 30 s short of the window, for the job's end and land.sh's next look: a real red is red in time. It never turns
-      # a red run green: land.sh gives a red of flakes only its one fresh run.
       # Numbers per run for the CI page's Numbers tab (higher is worse; a step up wakes the Taskmaster). Never fails the job.
       # A ship's own check keeps none: its suite ran niced and narrower, so its time isn't main's line's.
       - name: Keep the run's numbers
@@ -227,11 +220,15 @@ jobs:
         run: |
           [ -s "$RUNNER_TEMP/suite-secs" ] || exit 0
           nums=("suite-time=$(cat "$RUNNER_TEMP/suite-secs")s")
-          # the slowest test file: its line in the spec output is `✔ test/x.test.ts (123.4ms)`
-          slow=$(sed -n 's/^[✔✖] test\/.*(\([0-9.]*\)ms)$/\1/p' "$RUNNER_TEMP/tests.log" | sort -g | tail -1)
-          [ -z "$slow" ] || nums+=("slowest-test-file=${slow}ms")
           nums+=("front-end-size=$(find public -type f -printf '%s\n' | awk '{s+=$1} END {print s}')B")
           tools/ci-numbers.sh "${nums[@]}" || true
+      # The full suite's failed files, each rerun alone once to label it flake or real (tools/run-tests.sh), in a step of
+      # their own so land.sh sees them start (#1374): on Nov 20 a busy desktop's full suite ended past the reruns'
+      # deadline, so no flake was rerun and each red counted as real. At its LAND_CI_TIMEOUT land.sh waits LAND_CI_RERUN
+      # (RERUN_WINDOW here, the same number) more for a run in this step, and only then. Its clock starts here, at or
+      # before land.sh's (steps run back to back on one runner, and land.sh only extends once the full suite has ended),
+      # and the reruns end 30 s short of the window, for the job's end and land.sh's next look: a real red is red in time. It never turns
+      # a red run green: land.sh gives a red of flakes only its one fresh run.
       - name: rerun failed files alone
         if: ${{ failure() && steps.suite.conclusion == 'failure' }}
         env:

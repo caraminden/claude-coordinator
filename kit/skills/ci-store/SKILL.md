@@ -105,6 +105,8 @@ permission as an upload:
         run: tools/ci-numbers.sh startup=412ms frame-p95=16.4ms apk-size=12.5MB
 ```
 
+- Worth sending from any scheme: the test suite's wall time (`suite-time=187s`), timed around the test step on a green run.
+  Citadel's `tests.yml` does (`suite-time`, `front-end-size`).
 - Each number is `name=value[unit]`: the name is letters, digits and `. _ + -` (one series per
   name, per scheme), the unit the letters (or `%`, `/`) after the value. `--file bench.txt` reads
   one a line as `name value [unit]`, `#` for a comment, for a bench that writes its own file.

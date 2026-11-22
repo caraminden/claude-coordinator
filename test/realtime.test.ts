@@ -57,8 +57,13 @@ console.log(JSON.stringify(out));
 process.exit(0);
 `;
 
-test('main thread is SCHED_RR 1; every other thread and child stay SCHED_OTHER; off puts it back', { skip: !canRt && 'no real-time priority on this box' }, () => {
+test('main thread is SCHED_RR 1; every other thread and child stay SCHED_OTHER; off puts it back', () => {
   const out = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', SCRIPT], { encoding: 'utf8', timeout: 30_000 }).trim().split('\n').pop()!);
+  if (!canRt) {
+    // A box that won't allow it (a CI runner without the limit): the process ran on, at normal priority.
+    assert.equal(out.main.policy, SCHED_OTHER);
+    return;
+  }
   assert.deepEqual(out.main, { prio: 1, policy: SCHED_RR });
   assert.ok(out.others.length > 1, 'the process has other threads');
   assert.deepEqual([...new Set(out.others)], [SCHED_OTHER]);

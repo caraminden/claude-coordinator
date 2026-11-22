@@ -1302,7 +1302,7 @@ export class JobRunner {
     if (!left.length) return [];
     const mb = Math.ceil(left.reduce((n, l) => n + l.bytes, 0) / 1024 ** 2);
     const ids = left.map((l) => l.id).sort((a, b) => Number(a) - Number(b));
-    return [`jobs: ${left.length} job folder${left.length === 1 ? '' : 's'} (${mb} MB) in ${dir} hold results Citadel never took: ${ids.slice(0, 20).join(', ')}${ids.length > 20 ? ` and ${ids.length - 20} more` : ''}. They count against max_disk_gb and are never deleted for you: copy what you need from each one's out folder, then delete it.`];
+    return [`jobs: ${left.length} job folder${left.length === 1 ? '' : 's'} (${mb} MB) in the jobs folder hold results Citadel never took: ${ids.slice(0, 8).join(', ')}${ids.length > 8 ? ` and ${ids.length - 8} more` : ''}. They count against max_disk_gb and are never deleted for you: copy what you need from each one's out folder, then delete it.`];
   }
 
   close() {
@@ -1355,7 +1355,7 @@ export class JobRunner {
   }
 
   /** Tells the app where a job stands. True once the app has heard it, refusal included; false if it couldn't be reached or took none of it. */
-  async report(job, extra = {}) {
+  async report(job) {
     const g = job._gpu;
     const body = {
       id: Number(job.id), state: job.state, run_s: this.runS(job), gpu_busy_s: Math.round(job.gpu_busy_s),
@@ -1363,7 +1363,8 @@ export class JobRunner {
       ...(job.state === 'paused' && job.paused === 'frozen' && g ? { held_vram_mb: g.vram } : {}),
       ...(job.outputs.length ? { outputs: job.outputs.map(({ path, size, uploaded, why }) => ({ path, size, uploaded, ...(why && !uploaded ? { why } : {}) })) } : {}),
       ...(JOB_ENDED.includes(job.state) ? { exit_code: job.final.exit_code, ...(job.final.error ? { error: job.final.error } : {}) } : {}),
-      ...extra,
+      // Sent on every report until the app has heard it, so a lost one can't leave it showing paused (MA2).
+      ...(job.pause_failed && job.state === 'running' ? { pause_failed: job.pause_failed } : {}),
     };
     let res;
     try {
@@ -1382,7 +1383,9 @@ export class JobRunner {
     // The app ended it, never started it, or doesn't know it: it must not keep running here.
     if ((res.statusCode === 409 || res.statusCode === 404) && !job.final) this.stop(job, 'stopped', 'the app ended it');
     if (res.statusCode === 413) this.log(`Job ${job.id}: the app refused its ${job.state} report as too big`);
-    return res.statusCode < 500 && res.statusCode !== 413;
+    const heard = res.statusCode < 500 && res.statusCode !== 413;
+    if (heard && body.pause_failed) job.pause_failed = null;
+    return heard;
   }
 
   /** A job.start this agent won't run: the app hears why, and nothing is made on disk. */
@@ -1548,7 +1551,8 @@ export class JobRunner {
         job.since = Date.now();
         this.save(job);
         this.log(`Job ${job.id}: podman stop failed, still running: ${r.out.slice(-300)}`);
-        return this.report(job, { pause_failed: `podman stop failed: ${r.out.slice(-300)}` });
+        job.pause_failed = `podman stop failed: ${r.out.slice(-300)}`;
+        return this.report(job);
       });
     }
     const r = await this.exec(this.podman, ['pause', this.name(job)]);
@@ -1556,7 +1560,8 @@ export class JobRunner {
       job.since = Date.now();
       job.want = null;
       this.log(`Job ${job.id}: podman pause failed: ${r.out.slice(-300)}`);
-      return this.report(job, { pause_failed: `podman pause failed: ${r.out.slice(-300)}` });
+      job.pause_failed = `podman pause failed: ${r.out.slice(-300)}`;
+      return this.report(job);
     }
     job.state = 'paused';
     job.paused = 'frozen';

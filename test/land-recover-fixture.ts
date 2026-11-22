@@ -25,7 +25,7 @@ const env = {
   // deploy.sh's own waits, turned down as test/land-deploy.test.ts does (#1615; a real landing here took 6 s of 1 s sleeps):
   // five health asks 0.2 s apart, a 0.2 s settle and a 0.2 s look at the line. The live grace keeps how long a deploy
   // watches for live (HEALTHY_WAIT * 2 + SETTLE + LIVE_GRACE s) at the 20 s it was.
-  DEPLOY_HEALTHY_WAIT: '5', DEPLOY_TEST_HEALTH_POLL: '0.2', DEPLOY_SETTLE: '0.2', DEPLOY_TEST_LIVE_GRACE: '10', DEPLOY_QUEUE_STALL: '120', DEPLOY_QUEUE_POLL: '0.2', DEPLOY_IDLE_TRIES: '30', DEPLOY_TEST_TIMEOUT: '120', DEPLOY_BACKUPS: '3',
+  DEPLOY_HEALTHY_WAIT: '5', DEPLOY_TEST_HEALTH_POLL: '0.2', DEPLOY_SETTLE: '0.2', DEPLOY_TEST_LIVE_GRACE: '10', DEPLOY_TEST_LIVE_POLL: '0.2', DEPLOY_TEST_IDLE_RECHECK: '0.2', DEPLOY_QUEUE_STALL: '120', DEPLOY_QUEUE_POLL: '0.2', DEPLOY_IDLE_TRIES: '30', DEPLOY_TEST_TIMEOUT: '120', DEPLOY_BACKUPS: '3',
   GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null',
 };
 export const until = (what: string, cond: () => boolean, ms = 60_000) => waitUntil(what, cond, ms);

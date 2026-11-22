@@ -55,6 +55,8 @@ BACKUPS=${DEPLOY_BACKUPS:-3} # pre-deploy copies of the database to keep
 HEALTH_TIMEOUT=${DEPLOY_TEST_HEALTH_TIMEOUT:-3} # seconds one /api/health ask waits for its answer
 HEALTH_POLL=${DEPLOY_TEST_HEALTH_POLL:-1} # seconds before each of healthy()'s HEALTHY_WAIT asks
 LIVE_GRACE=${DEPLOY_TEST_LIVE_GRACE:-15} # seconds a deploy watches for live past its restart's own waits
+LIVE_POLL=${DEPLOY_TEST_LIVE_POLL:-1} # seconds between a deploy's looks for live; a test's fraction keeps the watch's length (#1615)
+IDLE_RECHECK=${DEPLOY_TEST_IDLE_RECHECK:-2} # seconds the restart waits before it asks again that no turn started (#1615)
 REPORT_PAUSE=${DEPLOY_TEST_REPORT_PAUSE:-} # set: every pause between a report's tries, in place of the 1, 2, 4 s backoff
 
 say() { echo "deploy: $*" >&2; }
@@ -386,7 +388,7 @@ restart() {
   while [ -z "$NOW" ] && [ ! -e "$STATE/now" ]; do
     n=$(interruptible)
     if [ "$n" = 0 ]; then
-      sleep 2
+      sleep "$IDLE_RECHECK"
       n=$(interruptible)
       [ "$n" = 0 ] && break
     fi
@@ -745,8 +747,8 @@ deploy() {
   # this turn carries on through the restart. A rollback fails this deploy (#553), so land.sh takes the commit off main.
   local bad was limit=$((HEALTHY_WAIT * 2 + ${SETTLE%.*} + LIVE_GRACE)) # whole seconds: a test's SETTLE can be a fraction
   was=$(cat "$STATE/bad" 2>/dev/null || true)
-  for _ in $(seq "$limit"); do
-    sleep 1
+  for _ in $(seq "$(awk -v l="$limit" -v p="$LIVE_POLL" 'BEGIN { print int(l / p + 0.5) }')"); do
+    sleep "$LIVE_POLL"
     # A roll back's verdict is its own restart's, read below (#1271): the checkout and last-good move once that lets go.
     if [ -n "$TO" ]; then
       systemctl --user is-active -q "$UNIT" 2>/dev/null || break

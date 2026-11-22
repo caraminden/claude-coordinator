@@ -9,7 +9,7 @@ import { Lanes } from '../src/lanes.ts';
 /** The lanes under test: the real `src/lanes.ts`, or another copy of it (LANES_UNDER_TEST), to prove the test fails on a known bug. */
 const { Lanes: Under } = process.env.LANES_UNDER_TEST ? await import(process.env.LANES_UNDER_TEST) as { Lanes: typeof Lanes } : { Lanes };
 
-export const seed = Number(process.env.FC_SEED ?? 20261122);
+const seed = Number(process.env.FC_SEED ?? 20261122);
 const params = { seed, numRuns: 200, endOnFailure: false };
 
 type Step = { key: number; nest: number[]; hops: number };

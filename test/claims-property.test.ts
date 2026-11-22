@@ -75,7 +75,7 @@ test('a claim has one holder, nobody both holds and waits, nobody waiting is los
             break;
           }
           case 'staleRelease': {
-            // The route's guard (?holder=<n>, src/routes/projects.ts): a Release made against a holder that has since changed does nothing.
+            // The route's guard (?holder=<n>, src/routes/projects.ts) is copied here, so this checks that Claims.passOn moves the claim exactly once and the model agrees, not the route itself (that lives in test/claims.test.ts's route cases).
             const current = claims.get(1, NAME);
             if (current && current.holder === c.saw) {
               claims.passOn(1, NAME, 'released', now);

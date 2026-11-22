@@ -97,6 +97,7 @@ export const RULE_HOMES: RuleHome[] = [
     home: { kind: 'repo', file: 'src/mcp.ts', anchor: 'const EDIT_INSTRUCTIONS' },
     pointer: 'the edit_instructions description',
     phrases: ['is an agent instruction change', 'label it at least medium', 'keep its dated quotes'],
+  },
   // Six Citadel-wide Settings sections moved to where their job starts (#1576, moves 13 to 18 of #1277's ablation;
   // Cara, 2026-11-22: "Moving" on all 18 moves).
   {

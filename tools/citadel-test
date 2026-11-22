@@ -78,9 +78,10 @@ if [[ $conc =~ ^[1-9][0-9]*$ ]]; then
   [ -n "${CITADEL_TEST_CONCURRENCY:-}" ] || [ "$conc" -ge $((($(nproc 2>/dev/null || echo 2) + 1) / 2)) ] || say "memory room is short ($("$root/tools/mem-room" mb) MB free for heavy work): running $conc worker(s) at a time"
 fi
 log=${TMPDIR:-/tmp}/citadel-test.log
-err=$(mktemp) out=$(mktemp)
-trap 'rm -f "$err" "$out"' EXIT
+err=$(mktemp) out=$(mktemp) failed=$(mktemp); export CITADEL_TEST_FAILED_FILE=$failed
+trap 'rm -f "$err" "$out" "$failed"' EXIT
 start=$SECONDS
+load0=$(cut -d' ' -f1 "${CITADEL_TEST_LOADAVG:-/proc/loadavg}" 2>/dev/null)
 # The spec output goes to the log, the short version to stdout, and node's own stderr (the leak guard says its
 # piece there) to a file read after. --test-force-exit as in tools/run-tests.sh, so a local run matches the gate's.
 # The per-test limit too (CITADEL_TEST_TIMEOUT seconds, #999).
@@ -100,7 +101,7 @@ stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit "${workers[
   "${opts[@]}" "${files[@]}" >"$out" 2>"$err"
 status=$?
 if [ ${#second[@]} -gt 0 ] && [ $status -ne 124 ]; then
-  out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2"' EXIT
+  out2=$(mktemp); trap 'rm -f "$err" "$out" "$out2" "$failed"' EXIT
   stop_at "$limit" "$root/tools/citadel-node" --test --test-force-exit "${workers[@]}" --test-timeout=$((${CITADEL_TEST_TIMEOUT:-60} * 1000)) --test-global-setup="$root/test/leak-guard.ts" \
     --test-reporter=spec --test-reporter-destination="$log.2" --test-reporter="$reporter" --test-reporter-destination=stdout \
     "${second[@]}" >"$out2" 2>>"$err"
@@ -119,4 +120,27 @@ if [ -s "$err" ]; then
 fi
 [ $status -eq 124 ] || [ $status -eq 137 ] && echo "✖ stopped at the time limit, ${limit} s (--timeout <seconds> to change it), after $((SECONDS - start)) s"
 echo "full output: $log"
+
+# On a red, one line per failed file when it applies (#1650; Cara, 2026-11-22: "On a red, says if the file is a known flake or the
+# box is overloaded, and to rerun it alone once"): tools/known-flakes.ts's answer and the load during the run. Text only: the exit
+# code is the tests' own, and nothing reruns. A broken test (red in 20%+ of recent runs) is said broken, never a flake.
+if [ $status -ne 0 ] && [ $status -ne 124 ] && [ $status -ne 137 ] && [ -s "$failed" ]; then
+  load1=$(cut -d' ' -f1 "${CITADEL_TEST_LOADAVG:-/proc/loadavg}" 2>/dev/null)
+  cores=${CITADEL_TEST_CORES:-$(nproc 2>/dev/null || echo 1)}
+  load=$(awk -v a="${load0:-0}" -v b="${load1:-0}" 'BEGIN { print (a > b ? a : b) }')
+  busy=; awk -v l="$load" -v c="$cores" 'BEGIN { exit !(l >= c) }' && busy="load was $load on $cores cores during the run"
+  mapfile -t red < <(sort -u "$failed")
+  verdicts=$(LAND_FLAKE_DB=${LAND_FLAKE_DB:-$HOME/.local/share/claude-coordinator/coordinator.db} "$root/tools/citadel-node" --no-warnings "$root/tools/known-flakes.ts" "$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" "${red[@]}" 2>/dev/null) || true
+  hints=
+  for f in "${red[@]}"; do
+    v=$(grep -F -m1 -e "$f (" -e "not a flake: $f " <<<"$verdicts")
+    why=${v#"$f ("}; why=${why%)}
+    case $v in
+      "broken test, not a flake"*) hints+="  $f: broken, not a flake (${v#broken test, not a flake: $f }); don't rerun and ignore it, fix it or tell the Taskmaster${busy:+ ($busy)}"$'\n' ;;
+      "$f (not seen"*|'') [ -n "$busy" ] && hints+="  $f: $busy. Rerun this file alone once; a green rerun is needed before you ignore it"$'\n' ;;
+      *) hints+="  $f: known flake (tools/known-flakes.ts: $why)${busy:+; $busy}. Rerun this file alone once; a green rerun is needed before you ignore it"$'\n' ;;
+    esac
+  done
+  [ -n "$hints" ] && printf '\nBefore chasing a red your change may not have caused:\n%s' "$hints"
+fi
 exit $status

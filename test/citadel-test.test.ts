@@ -185,3 +185,53 @@ test('workers follow the memory room: a short room says so and runs fewer files 
   const pinned = await run([f], noList, { CITADEL_MEM_ROOM_MB: '700', CITADEL_TEST_CONCURRENCY: '3' });
   assert.doesNotMatch(pinned.out, /memory room is short/, 'an explicit CITADEL_TEST_CONCURRENCY wins');
 });
+
+// #1650 (Cara, 2026-11-22: "On a red, says if the file is a known flake or the box is overloaded, and to rerun it alone once"):
+// a hint under a red, text only. tools/known-flakes.ts reads a retro log made here; the load and cores are set by env.
+const stampOf = (ms: number) => { const d = new Date(ms).toISOString(); return `${d.slice(11, 19)}Z`; };
+function hintRun(failFile: string, retro: string[], load = '0.50', cores = '8') {
+  const shared = join(tmp, `shared-${Math.random().toString(36).slice(2)}`);
+  const day = new Date().toISOString().slice(0, 10);
+  mkdirSync(join(shared, 'retro-log', day), { recursive: true });
+  writeFileSync(join(shared, 'retro-log', day, 'land.md'), retro.join('\n') + '\n');
+  const loadFile = join(tmp, `loadavg-${Math.random().toString(36).slice(2)}`);
+  writeFileSync(loadFile, `${load} 1.00 1.00 1/100 1234\n`);
+  return run([failFile], noList, { COORDINATOR_SHARED_DIR: shared, CITADEL_TEST_LOADAVG: loadFile, CITADEL_TEST_CORES: cores, LAND_FLAKE_DB: join(tmp, 'none.db') });
+}
+const red = () => file(`hint-${Math.random().toString(36).slice(2)}.test.ts`, `test('breaks', () => { assert.equal(1, 2); });`);
+const sighting = (f: string, branch: string, ago = 60_000) => `- ${stampOf(Date.now() - ago)} · flake · ${relative(repo, f)} · load 3 · ${branch} · in CI`;
+
+test('a red that is a known flake says so, to rerun it alone once, and keeps the exit code', async () => {
+  const f = red();
+  const r = await hintRun(f, [sighting(f, 'ticket/7-a', 2 * 86_400_000), sighting(f, 'ticket/8-b', 3 * 86_400_000)]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`${relative(repo, f).replace(/[.]/g, '\\.')}: known flake \\(tools/known-flakes\\.ts: seen on 2 other branches in 14 days\\)\\. Rerun this file alone once; a green rerun is needed before you ignore it`));
+  assert.doesNotMatch(r.out, /load was/);
+});
+
+test('a red on a loaded box says the load, with or without a known flake', async () => {
+  const f = red();
+  const r = await hintRun(f, [], '12.40', '8');
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /: load was 12\.40 on 8 cores during the run\. Rerun this file alone once; a green rerun is needed/);
+  assert.doesNotMatch(r.out, /known flake/);
+});
+
+test('a broken test is said broken, never a flake', async () => {
+  const f = red();
+  const timing = (i: number) => `- ${stampOf(Date.now() - (i + 1) * 60_000)} · timing · ticket/${100 + i}-r · line 0 · rebase 1 · ci-queue 8 · ci-run 107 · fallback - · deploy 7 · live 42 · landed`;
+  const r = await hintRun(f, [...Array.from({ length: 10 }, (_, i) => timing(i)), ...[1, 2, 3].map((i) => sighting(f, `ticket/${10 + i}-o`, i * 60_000))]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /: broken, not a flake \(red in 3 of 11 runs in the last 6 h\); don't rerun and ignore it/);
+  assert.doesNotMatch(r.out, /known flake/);
+});
+
+test('a plain red on a quiet box, and a green run, get no hint', async () => {
+  const f = red();
+  const r = await hintRun(f, []);
+  assert.equal(r.code, 1, r.out);
+  assert.doesNotMatch(r.out, /Before chasing|known flake|load was/);
+  const g = await run([file('hint-green.test.ts', `test('ok', () => {});`)], noList, { CITADEL_TEST_LOADAVG: join(tmp, 'none.txt'), CITADEL_TEST_CORES: '1' });
+  assert.equal(g.code, 0, g.out);
+  assert.doesNotMatch(g.out, /Before chasing/);
+});

@@ -2,6 +2,7 @@
 // A line of counts; for each failed test its file and line, its name and the assertion message with the
 // expected/actual diff, capped; a file that crashed before its tests ran shows what it printed; and a run stopped
 // from outside (the time limit) names the tests still running. The full spec output goes to a log beside it.
+import { appendFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 
 type Err = { message?: string; failureType?: string; stack?: string; cause?: unknown };
@@ -72,6 +73,10 @@ export default async function* summary(source: AsyncIterable<{ type: string; dat
           })
           .join('')}`
       : `${failed ? '✖' : '✔'} ${counts} in ${((total?.duration_ms ?? 0) / 1000).toFixed(1)} s\n`;
+    // tools/citadel-test reads the failed files from here, for its hint on a red (#1650); nothing about the summary changes.
+    if (process.env.CITADEL_TEST_FAILED_FILE && !still) {
+      try { appendFileSync(process.env.CITADEL_TEST_FAILED_FILE, [...new Set(failures.map((f) => rel(f.file)))].map((f) => `${f}\n`).join('')); } catch {}
+    }
     for (const f of failures.slice(0, DETAILED)) {
       // A file that failed outside any test (it threw while loading, or its process died): what it printed says why.
       const printed = f.own ? (stderr.get(f.file) ?? []) : [];

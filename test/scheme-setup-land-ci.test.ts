@@ -563,17 +563,21 @@ test('CI gate: an old red run of the same commit is not believed just after the 
     // Main hasn't moved, so the commit CI gets is the branch's own: red from an earlier try.
     const sha = git(c.wt, 'rev-parse', 'HEAD').slice(0, 12);
     c.verdict(sha, RED);
+    // The fakes' answers are there before the landing starts: it parks CI_START (1 s) after its push on whatever it
+    // reads then, and a test process the box starved for that second wrote them too late (#1551).
+    writeFileSync(join(c.ci, 'busy'), '2\n');
     const a = c.land(1, { LAND_CI_GRACE: '600', LAND_CI_START: '1' });
     assert.equal(await c.tip(a), sha, 'it starts a new run');
-    writeFileSync(join(c.ci, 'busy'), '2\n');
     await until('it to see the runners are busy', () => /runners are busy with other runs: still waiting/.test(a.stderr()));
     assert.equal(a.child.exitCode, null, 'neither refused on the old red nor parked');
     c.verdict(sha, GREEN);
     assert.equal(await a.exit, 0, a.stderr());
     // A verdict command that can't answer: it parks saying that, not that the runners are off.
     c.commit(c.wt, 'g.txt', 'more\n');
+    const next = git(c.wt, 'rev-parse', 'HEAD').slice(0, 12); // the branch is on main again, so CI gets this commit too
+    c.verdict(next, 5);
     const b = c.land(1, { LAND_CI_START: '1' });
-    c.verdict(await c.tip(b), 5);
+    assert.equal(await c.tip(b), next);
     assert.equal(await b.exit, 75, b.stderr());
     assert.match(b.stderr(), /CI gave no answer about [0-9a-f]{12} for 1 min \(exit 5 from "\$CI_FAKE"; above\)/);
   } finally {

@@ -124,7 +124,7 @@ function repo(workflow = true) {
 }
 const run = (r: ReturnType<typeof repo>, mode: string, extra: NodeJS.ProcessEnv = {}, cwd = r.d) => spawnSync(heavy, ['sh', '-c', 'echo ran here; exit 5'], {
   cwd, encoding: 'utf8', timeout: 30_000,
-  env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_DIR: r.gh, FAKE_GH_MODE: mode, CITADEL_HEAVY_DIR: join(r.gh, 'locks'), CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: undefined, CITADEL_HEAVY_PRIORITY: undefined, CITADEL_HEAVY_CI_POLL: '0.05', CITADEL_HEAVY_PRESSURE: join(root, 'no-psi'), CITADEL_HEAVY_WHO: 'Peek #9', ...extra },
+  env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_DIR: r.gh, FAKE_GH_MODE: mode, CITADEL_HEAVY_DIR: join(r.gh, 'locks'), CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: undefined, CITADEL_HEAVY_PRIORITY: undefined, CITADEL_HEAVY_CI_POLL: '0.05', CITADEL_HEAVY_PRESSURE: join(root, 'no-psi'), CITADEL_HEAVY_JUDGE: undefined, CITADEL_HEAVY_GUESS: 'heavy', CITADEL_HEAVY_WHO: 'Peek #9', ...extra },
 });
 
 test('a job runs the working copy on CI, prints its output, exits with its status and leaves the branch alone', () => {
@@ -226,7 +226,7 @@ test('from a subfolder it runs there on CI, with every edit in the repo and no u
 // Long jobs (#1363): --long only queues; the server's pump (src/long-jobs.ts, test/long-jobs.test.ts) starts and watches them.
 test('--long pushes the snapshot, writes the job for the server and returns at once without dispatching', () => {
   const r = repo();
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_DIR: r.gh, CITADEL_HEAVY_DIR: join(r.gh, 'locks'), CITADEL_HEAVY_HERE: undefined, CITADEL_HEAVY_WHO: 'Peek #9 (cara)', COORDINATOR_TICKET: '42' };
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_GH_DIR: r.gh, CITADEL_HEAVY_DIR: join(r.gh, 'locks'), CITADEL_HEAVY_HERE: undefined, CITADEL_HEAVY_JUDGE: undefined, CITADEL_HEAVY_GUESS: 'heavy', CITADEL_HEAVY_WHO: 'Peek #9 (cara)', COORDINATOR_TICKET: '42' };
   const res = spawnSync(heavy, ['--long', 'sh', '-c', 'echo ran here; exit 5'], { cwd: r.d, encoding: 'utf8', timeout: 30_000, env });
   assert.equal(res.status, 0, res.stderr);
   const id = res.stdout.trim();

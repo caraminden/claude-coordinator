@@ -398,8 +398,9 @@ test("a deploy build holds one heavy slot for all its steps and goes ahead of mi
   writeFileSync(join(heavyDir, 'slots'), '1\n');
   const heavyJob = (who: string, script: string) => {
     // Not CITADEL_HEAVY_HELD: a suite run under citadel-heavy has it set, and a job with it runs at once, never in line.
+    // CITADEL_HEAVY_GUESS: a job with no past runs would else run at once, without a slot (#1629).
     // CITADEL_HEAVY_HERE: the repo has a citadel-heavy workflow, so a plain job would go to its CI runners (#1160) and never take this folder's slot.
-    const child = tmp.spawn(opts().heavy, ['sh', '-c', script], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_WHO: who }, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = tmp.spawn(opts().heavy, ['sh', '-c', script], { env: { ...process.env, CITADEL_HEAVY_HELD: undefined, CITADEL_HEAVY_HERE: '1', CITADEL_HEAVY_WHO: who, CITADEL_HEAVY_JUDGE: undefined, CITADEL_HEAVY_GUESS: 'heavy' }, stdio: ['ignore', 'ignore', 'pipe'] });
     let err = '';
     child.stderr!.on('data', (b) => (err += b));
     return { err: () => err, done: new Promise((ok) => child.on('close', ok)) };

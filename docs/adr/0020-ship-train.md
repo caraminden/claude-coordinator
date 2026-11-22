@@ -210,3 +210,32 @@ first, the train came out different, or the early run went red (it runs again, a
 - A conflict in the early stack isn't reported there: that ship's own rebase reports it once the train has shipped. A
   fix recorded with conflict prep is replayed in the early stack too.
 - Off: `LAND_EARLY=0`, or `<state>/early-off`.
+
+## A ship's own check (#1567)
+
+Cara, 2026-11-21, on #1549's choices page, on A: "Go. Can you prove to me this actually results in more ship
+throughput? im worried because we are already hammering my PC pretty bad when things back up...maybe we could do this
+as long as my PC isnt too busy?"; 2026-11-22, on #1549's second card: "Gated, after C and B".
+
+A train's red costs every ship on it a round, so a ship red on its own is cheapest caught before it joins one. After
+the smoke check and before the line (`queue_lock`), a plain land sources `tools/own-check.sh`. Its branch, rebased onto
+main in a scratch worktree, is pushed as `check/<branch>` with `check-base/<branch>` beside it. That ref runs the whole
+of `tests.yml` (burn-in, suite, reruns alone) on the one runner labelled `citadel-ci-linux-check`, in the
+`citadel-check` concurrency group, niced and at 8 files at once. So it never takes a land's runner or cancels a land's
+run.
+
+- A red that is the ship's own is refused before the line: a burn-in red, or files that failed again alone in CI and,
+  run alone on perigee, fail with the ship and pass on main (as `train_alone` decides on a train). Anything else (flakes,
+  a cut-off run, main's own red, a setup step, no runner within 180 s, a run past 900 s, GitHub not answering) joins the
+  line, where CI decides as before.
+- A green check's rebase goes to `<state>/own-checked`, which `stacked_of` reads with the early stacks. So when main
+  hasn't moved and nobody rides with it, the ship's commit in line is the checked one, and `ci_gate` takes the check's
+  run as its CI: no second run.
+- Gated, so the desktop runs at most one check beside a land's run. There is no check with nobody in line (its run in
+  line would start as soon as a check's), none without an online check runner, and one at a time (`<state>/own-check.lock`).
+  A ship that would wait more than 120 s for the running check, going by the last check's time, joins unchecked.
+- Not for a light lane (it runs no CI), a branch on a taken-back commit, or a branch that doesn't rebase cleanly (its
+  rebase in line reports that). No guard tests run on the check's commit; `guards()` runs them in line.
+- Each check logs `own check · <branch> · <verdict> · <s>` to the retro log: that is how its cost and catch get counted
+  against the p90 handoff-to-live time and desktop CI-hours (the brief's bar: p90 down, CI-hours within about 1.7×).
+- Off: `LAND_OWN_CHECK=0`, `<state>/own-check-off`, or no runner carrying the label.

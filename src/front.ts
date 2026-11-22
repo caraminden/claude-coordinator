@@ -99,6 +99,9 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
 
 if (!isMainThread && workerData?.front) runFront(workerData.front as FrontOptions & { sock: string });
 
+/** Bodies up to this size are read whole before going to the main thread (pass, in runFront). */
+const SMALL_BODY = 1024 * 1024;
+
 function runFront(opts: FrontOptions & { sock: string }) {
   const toMain = new Agent({ keepAlive: true });
   const answerMs = opts.answerMs ?? READER_ANSWER_MS, stuckMs = opts.stuckMs ?? READER_STUCK_MS;
@@ -135,8 +138,18 @@ function runFront(opts: FrontOptions & { sock: string }) {
     });
     // A client that goes (a closed page's live stream) closes the main thread's side too.
     res.once('close', () => { if (!res.writableFinished) up.destroy(); });
-    up.flushHeaders(); // the head goes now: main may answer from it alone (an upload refused by its size) before any body comes
-    req.pipe(up);
+    // A small body goes with its head in one write: main may refuse from the head alone and close, and a body written
+    // after that would fail the request here (a 502) before main's answer is read. Anything else streams, its head
+    // sent at once, since main may answer from it alone (an upload refused by its size) before any body comes.
+    const size = Number(req.headers['content-length']);
+    if (size > 0 && size <= SMALL_BODY) {
+      const chunks: Buffer[] = [];
+      req.on('data', (c: Buffer) => chunks.push(c));
+      req.once('end', () => up.end(Buffer.concat(chunks)));
+    } else {
+      up.flushHeaders();
+      req.pipe(up);
+    }
   };
 
   // Readers: started here, so their answers never wait on the main thread.

@@ -87,6 +87,7 @@ test('the settings reach the tool text through the turn env, and no number is ty
   assert.match(heldToolText(s, 'x'), /\(4 messages in 20 minutes\)/);
   const src = readFileSync(new URL('../src/mcp.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /idle over \d+ minutes|within \d+ hours|After \d+ messages|in \d+ minutes, the next|allows in \d+ minutes/);
+  assert.doesNotMatch(src, /urgent/, 'the message tools offer no urgent flag since #1603: an idle receiver wakes anyway');
 });
 
 test("a scheme's own loop count and window hold the next message; the chat's row, card and Needs you show it until Continue", () => {

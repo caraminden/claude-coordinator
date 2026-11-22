@@ -1,6 +1,6 @@
 # A message meant to wake its reader wakes it: no cold hold
 
-Status: accepted, 2026-11-22. Decided on #1603's card. Supersedes the cold hold of #413. Data: the shared folder's `reports/held-mail-2026-11.md`.
+Status: accepted, 2026-11-22. Decided on #1603's card. Supersedes the cold hold of #413, and with it ADR 0015's "unless it is cold" for the budget alert: that alert now wakes an idle Taskmaster too. Data: the shared folder's `reports/held-mail-2026-11.md`.
 
 Since #413, a machine message (minion to Taskmaster, Taskmaster to minion, minion to minion, Taskmaster to Taskmaster)
 sent to a session idle over 55 minutes was held as mail, and the sweep woke the session after 3 hours, unless the
@@ -17,5 +17,5 @@ sender passed `urgent`. The idea was to save the cost of reloading a cold contex
 - **`urgent` does nothing now.** The tools no longer offer it; the server still accepts it, so old prompts don't break.
 - **Unchanged:** a parked minion still holds everything until it is unparked or woken, the loop guard still holds
   runaway exchanges, card answers and a person's own messages always run, and keepalives keep their gates (#1274).
-- **Draining:** mail held before the change keeps its 3-hour delivery. The sweep, the Held list's Deliver now and the
+- **Draining:** mail held before the change keeps its scheme's hold cap (3 hours unless the scheme set another). The sweep, the Held list's Deliver now and the
   `msg_cold_min` / `msg_hold_h` columns stay, but their settings are gone from the rules page. Nothing is migrated.

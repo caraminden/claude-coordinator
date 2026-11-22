@@ -130,7 +130,8 @@ test('need (#851): a fyi to the coordinator is held mail that starts no turn; a 
   const r = await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'landed, nothing needed', need: 'fyi', wake: true } });
   assert.equal(r.mail, true);
   await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'x' } }), /400 need is required/);
-  await assert.rejects(call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'x', need: 'fyi', urgent: true } }), /400 urgent wakes/);
+  // An older client's urgent changes nothing (#1603): a fyi is still held mail, not refused.
+  assert.equal((await call(`/api/tickets/${ticket.id}/coordinator`, { method: 'POST', token: live(), body: { text: 'x', need: 'fyi', urgent: true } })).mail, true);
   assert.equal(turns().length, before);
   const evs = (await call(`/api/tickets/${ticket.id}/events?after=0`)).map((e: any) => ({ kind: e.kind, data: JSON.parse(e.data) }));
   assert.ok(evs.some((e: any) => e.kind === 'note' && e.data.need === 'fyi'));

@@ -184,14 +184,18 @@ test('need (#851): a fyi is held mail even with wake: true, is stored on the eve
   assert.equal(got[0].mail, true);
   assert.equal(got[0].need, 'fyi');
 
-  await assert.rejects(send({ need: 'fyi', urgent: true }), /400 urgent wakes the receiver/);
   await assert.rejects(send({}), /400 need is required: one of start .*fyi/);
   await assert.rejects(send({ need: 'whatever' }), /400 need is required/);
   assert.equal((await events()).length, 1);
+  // An older client's urgent changes nothing (#1603): a fyi is still held mail, not refused.
+  await send({ need: 'fyi', urgent: true });
+  got = await events();
+  assert.equal(got.length, 2);
+  assert.equal(got[1].mail, true);
 
   // Another need keeps today's wake rules: it is delivered, with the need on the event.
   await send({ need: 'decision', wake: false });
   got = await events();
-  assert.equal(got.length, 2);
-  assert.equal(got[1].need, 'decision');
+  assert.equal(got.length, 3);
+  assert.equal(got[2].need, 'decision');
 });

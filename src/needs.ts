@@ -14,13 +14,12 @@ export const NEED_LINES: Record<Need, string> = {
   fyi: 'status, shipped, live, tracking, no action',
 };
 
-/** Why this body's `need` is refused (missing, unknown, or urgent on a fyi; the text names the field and the values), or null with the need. */
-export function checkNeed(body: { need?: unknown; urgent?: unknown }): { need: Need } | { error: string } {
+/** Why this body's `need` is refused (missing or unknown; the text names the field and the values), or null with the need. `urgent` changes nothing since #1603. */
+export function checkNeed(body: { need?: unknown }): { need: Need } | { error: string } {
   const need = typeof body.need === 'string' ? body.need.trim().toLowerCase() : '';
   if (!(NEEDS as readonly string[]).includes(need)) {
     return { error: `need is required: one of ${NEEDS.map((n) => `${n} (${NEED_LINES[n]})`).join('; ')}. Resend the message with it.` };
   }
-  if (need === 'fyi' && body.urgent === true) return { error: 'urgent wakes the receiver, and a fyi never does: pick the need it really is (ask, decision) or drop urgent' };
   return { need: need as Need };
 }
 

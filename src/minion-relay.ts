@@ -81,20 +81,20 @@ export class Relay {
     this.d = d;
   }
 
-  /**
-   * A message between a minion and its Taskmaster, either way (`to` is the receiving ticket). Up to
-   * LOOP_LIMIT per LOOP_WINDOW_MS go through; after that each is held, with a note in both chats asking
-   * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
-   * 'mail' when sent with wake: false. A message meant to wake its receiver wakes it, idle or not: the cold hold
-   * (#413) saved about $10-18 a week and stalled half its act-now messages over an hour (#1603). `urgent` is still
-   * accepted, and changes nothing now.
-   */
   /** The message settings of the scheme a ticket belongs to. */
   settings(ticketId: number): MsgSettings {
     const t = this.d.store.getTicket(ticketId);
     return msgSettings(t && this.d.store.getProject(t.project_id));
   }
 
+  /**
+   * A message between a minion and its Taskmaster, either way (`to` is the receiving ticket). Up to
+   * LOOP_LIMIT per LOOP_WINDOW_MS go through; after that each is held, with a note in both chats asking
+   * a person to continue, until continueLoop. Returns whether it was held: true by the loop guard,
+   * 'mail' when sent with wake: false, 'parked' when the receiver is parked (it waits for an unpark or a wake).
+   * A message meant to wake its receiver wakes it, idle or not: the cold hold (#413) saved about $10-18 a week
+   * and stalled half its act-now messages over an hour (#1603). `urgent` is still accepted, and changes nothing now.
+   */
   relay(minionId: number, to: number, author: string, text: string, _urgent = false, wake = true, need?: string, sender?: number): boolean | 'mail' | 'parked' {
     const minion = this.d.store.getTicket(minionId)!;
     const from = to === minionId ? sender ?? this.d.store.ownerCoordinator(minion)?.id : minionId;

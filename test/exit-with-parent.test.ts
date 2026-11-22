@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { bootServer, listeningPort, PASSWORD, procsUnder, REPO, SECRET, tempRoot, until } from './helpers.ts';
+import { bootServer, listeningPort, TEST_ZONE, PASSWORD, procsUnder, REPO, SECRET, tempRoot, until } from './helpers.ts';
 
 // A server a test started goes when the test's process does (#1546), and so does what it started.
 const tmp = tempRoot('exit-with-parent-');
@@ -37,8 +37,9 @@ test('a test process killed from outside leaves no server and no turn supervisor
   // A stand-in for a test run: it boots the server (on the same env as bootServer) and a stand-in supervisor, then waits to be killed.
   const parent = tmp.spawn(process.execPath, ['-e', `
     const { spawn } = require('node:child_process');
+    const TEST_ZONE = ${JSON.stringify(TEST_ZONE)};
     const env = { PATH: process.env.PATH, HOME: process.env.HOME, CITADEL_EXIT_WITH_PARENT: '1', CITADEL_HOST_SIGNALS: 'fixed', PORT: '0', DATA_DIR: ${JSON.stringify(data)}, CLAUDE_BIN: '/bin/false', CLAUDE_CONFIG_DIR: ${JSON.stringify(join(root, 'claude'))}, COORDINATOR_PASSWORD: ${JSON.stringify(PASSWORD)}, SESSION_SECRET: ${JSON.stringify(SECRET)} };
-    const server = spawn(process.execPath, [${JSON.stringify(join(REPO, 'server.ts'))}], { stdio: ['ignore', 'inherit', 'ignore'], env: { ...env, CITADEL_HOST_SIGNALS: 'fixed' } });
+    const server = spawn(process.execPath, [${JSON.stringify(join(REPO, 'server.ts'))}], { stdio: ['ignore', 'inherit', 'ignore'], env: { ...env, CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE } });
     require('node:fs').writeFileSync(${JSON.stringify(tmp.path('killed.pid'))}, String(server.pid));
     // Detached, in a group of its own, as a supervisor in its unit is.
     spawn('sh', ['-c', 'sleep 300; :', 'supervisor', ${JSON.stringify(join(data, 'turns/.supervisor/v1'))}], { stdio: 'ignore', detached: true }).unref();

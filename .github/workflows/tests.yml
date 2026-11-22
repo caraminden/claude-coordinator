@@ -158,6 +158,8 @@ jobs:
       # burn-in not at all (land.sh says so).
       - name: burn in new and changed tests
         if: ${{ startsWith(github.ref, 'refs/heads/land/') }}
+        env:
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache # each source file compiled once per job, not once per process (#1565)
         run: |
           base=origin/land-base/${GITHUB_REF_NAME#land/}
           if ! git rev-parse -q --verify "$base^{commit}" >/dev/null; then
@@ -176,10 +178,13 @@ jobs:
         # A run that isn't a land's runs niced, so a landing that starts beside it gets the CPU first.
         env:
           CITADEL_TEST_CONCURRENCY: ${{ vars.CI_RUNNER != 'github' && '16' || '' }}
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
           NICENESS: ${{ !startsWith(github.ref, 'refs/heads/land/') && '10' || '0' }}
           LAND_REF: ${{ startsWith(github.ref, 'refs/heads/land/') && '1' || '' }}
         run: |
           rc=0
+          # Each file's seconds in this runner's last run, so the next starts the longest first (tools/suite-runner.ts, #1565).
+          mkdir -p "$HOME/.cache" && export CITADEL_TEST_TIMES=$HOME/.cache/citadel-test-times.tsv
           # Its failed files are rerun alone in the next step, not here (#1374): run-tests.sh leaves them in reruns.
           echo "nproc $(nproc), $([ -n "$CITADEL_TEST_CONCURRENCY" ] && echo "$CITADEL_TEST_CONCURRENCY" || echo $((($(nproc) + 1) / 2))) test files at once"
           # The log streams while the suite runs (#560): a run cancelled at land.sh's cap used to show nothing,

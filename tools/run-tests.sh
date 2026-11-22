@@ -36,7 +36,7 @@
 # scope is bound to it, so stopping that unit still stops the tests, as before. DEPLOY_TEST_CPU_WEIGHT sets the
 # weight (empty: no scope). Without a user systemd to ask (no bus, no such slice) it runs as before, unweighted.
 #
-# While the full run goes, <log without .log>.progress holds its file counts (#545: tools/citadel-node and
+# While the full run goes, <log without .log>.progress holds its file counts (#545: tools/suite-runner.ts and
 # tools/progress-reporter.ts), for the landing's wait in Citadel; it goes once the full run ends, before any rerun.
 #
 # In CI the reruns are a step of their own (#1374), so land.sh can see them start and wait for them: on Nov 20 the full
@@ -61,7 +61,7 @@ tools=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 weight=${DEPLOY_TEST_CPU_WEIGHT-500}
 # npm test's leak guard, on the full run only: green tests that leave processes running are a red run (a rerun only labels).
 guard=()
-[ -r test/leak-guard.ts ] && guard=(--test-global-setup=test/leak-guard.ts)
+[ -r test/leak-guard.ts ] && guard=(--global-setup test/leak-guard.ts)
 cgroup=$(sed -n 's|^0::||p' /proc/self/cgroup 2>/dev/null)
 scope=(systemd-run --user --scope --quiet --collect --slice=citadel.slice -p "CPUWeight=$weight")
 # Only a unit below the user manager: a login's session-N.scope belongs to the system manager, which --user can't bind to.
@@ -239,8 +239,9 @@ unset CITADEL_TEST_PROGRESS # the reruns below count nothing
 rm -f "$progress" "$progress.tmp"
 trap 'rm -f "$failed" "$progress" "$progress.tmp"' EXIT
 started=$SECONDS
-CITADEL_TEST_PROGRESS=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" --test --test-concurrency="$concurrency" --test-force-exit --test-timeout="$test_limit" "${guard[@]}" --test-reporter=spec --test-reporter-destination=stdout \
-  --test-reporter="$tools/failed-files-reporter.ts" --test-reporter-destination="$failed" "${targets[@]}" >>"$log" 2>&1
+# node --test with its files started longest first (tools/suite-runner.ts, #1565): the same tests, limits and reporters.
+CITADEL_TEST_PROGRESS_TO=$progress timeout -k 30 "$limit" "${scope[@]}" "$tools/citadel-node" "$tools/suite-runner.ts" --concurrency "$concurrency" --timeout "$test_limit" "${guard[@]}" \
+  --failed-to "$failed" -- "${targets[@]}" >>"$log" 2>&1
 rc=$?
 rm -f "$progress" "$progress.tmp"
 load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null) || load='?'

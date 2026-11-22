@@ -87,7 +87,7 @@ async function run(files: string[], extra: Record<string, string> = {}, prep?: (
   const dir = join(root, String(++n));
   mkdirSync(join(dir, 'tools'), { recursive: true });
   mkdirSync(join(dir, 'test'));
-  for (const f of ['run-tests.sh', 'parse-check.ts', 'deploy-queue.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
+  for (const f of ['run-tests.sh', 'parse-check.ts', 'deploy-queue.sh', 'failed-files-reporter.ts', 'progress-reporter.ts', 'suite-runner.ts', 'citadel-node', 'citadel-node.cjs']) copyFileSync(join(tools, f), join(dir, 'tools', f));
   // A name with no fixture of its own always fails.
   for (const f of files) writeFileSync(join(dir, 'test', f), FIXTURES[f] ?? FIXTURES['always.test.mjs']);
   prep?.(dir);

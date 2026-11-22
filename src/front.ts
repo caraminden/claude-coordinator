@@ -53,6 +53,12 @@ export type FrontOptions = {
   answerMs?: number; stuckMs?: number;
 };
 
+/** Where the socket's folder goes: XDG_RUNTIME_DIR, else tmpdir(), else /tmp when that makes the path pass a unix socket's 107 bytes (a CI runner's long TMPDIR). */
+export function socketBase(env = process.env, tmp = tmpdir()) {
+  const base = env.XDG_RUNTIME_DIR || tmp;
+  return Buffer.byteLength(join(base, 'citadel-XXXXXX', 'main.sock')) > 107 ? '/tmp' : base;
+}
+
 /**
  * Serve `server` (the main thread's) through a front thread: it listens on a local socket, and the front thread on
  * the real one. `onListening` gets the port the front thread bound. `onUsage`/`onSetting` take the counts and cache
@@ -61,7 +67,7 @@ export type FrontOptions = {
  */
 export function listenThroughFront(server: Server, opts: FrontOptions, on: { listening: (port: number) => void; usage: (args: unknown[]) => void; setting: (key: string, value: unknown) => void }) {
   // A private folder (0700) for the socket: only this account can reach it, so only the front thread sets the peer header.
-  const dir = mkdtempSync(join(process.env.XDG_RUNTIME_DIR || tmpdir(), 'citadel-'));
+  const dir = mkdtempSync(join(socketBase(), 'citadel-'));
   const sock = join(dir, 'main.sock');
   process.once('exit', () => rmSync(dir, { recursive: true, force: true }));
   let stopping = false;

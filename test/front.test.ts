@@ -232,3 +232,15 @@ test('a write the writer is still holding is never missed: the read waits for it
     await slow.stop();
   }
 });
+
+test('a long TMPDIR with no XDG_RUNTIME_DIR still gets the server listening through the front (the socket path stays under 107 bytes)', async () => {
+  const long = join(root, 'long-' + 'x'.repeat(100), 'heavy-tmp');
+  mkdirSync(long, { recursive: true });
+  const srv = await bootServer({ root: join(root, 'longtmp'), env: { TMPDIR: long, XDG_RUNTIME_DIR: '' } });
+  try {
+    const res = await fetch(`${srv.base}/api/tickets/${M1.id}/events`);
+    assert.ok(res.status > 0);
+  } finally {
+    await srv.stop();
+  }
+});

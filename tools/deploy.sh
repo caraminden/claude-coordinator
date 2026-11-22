@@ -8,7 +8,7 @@
 # 2. A change to public/ only: SIGHUP, and the server reloads its front end. No restart, no killed turns.
 # 3. Anything else: queues the fixed-name restart unit, which restarts straight away (running turns
 #    carry on in their own units and the new server re-attaches; it only waits while turns a restart
-#    would cut off are running, see interruptible, or for 60 s on a server that is up but doesn't answer), waits up to 45 s for a healthy server, checks it is still
+#    would cut off are running, see interruptible, or for 60 s on a server that is up but doesn't answer), waits up to 60 s for a healthy server, checks it is still
 #    healthy 30 s later, and tags it last-good. If the new code doesn't come up or stay up, it rolls the checkout back to last-good and restarts
 #    again. It reports how it went in the deploying minion's chat (failures as errors, which push) and
 #    in the journal. Before restarting it copies the database to backups/pre-deploy-<commit>.db (newest
@@ -43,7 +43,7 @@ NOW=${DEPLOY_NOW:-} # set: restart without waiting for interruptible turns (--no
 TO='' # --to <commit>: roll back to it (#1016)
 PIN=${DEPLOY_PIN:-} # the queued restart of a roll back: the commit it rolls back from, for <state>/bad once it is live
 WANT=${DEPLOY_TARGET:-} # and the commit it rolls back to (#1271)
-HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-45} # a start answers in ~1 s; one that migrates waits for it: dropping events_old took ~11 s on a copy (#1169 ship 3)
+HEALTHY_WAIT=${DEPLOY_HEALTHY_WAIT:-60} # a start answers in ~1 s; one that migrates waits for it: dropping events_old took 12-29 s on copies (#1169 ship 3)
 SETTLE=${DEPLOY_SETTLE:-30} # after the first healthy answer, check again this much later (#520); tests use fractions
 REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a deploy report
 REPORT_RETRY=${DEPLOY_REPORT_RETRY:-60} # and how long to keep trying one that never reached it

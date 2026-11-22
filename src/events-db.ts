@@ -171,7 +171,7 @@ function saidDrop(d: DropOld | null): string | null {
 /**
  * The server's move, on a worker thread before it opens the database: the event loop keeps pinging systemd's watchdog
  * (60 s, deploy/claude-coordinator.service.d/watchdog.conf) through a move that took ~30 s on a copy. Then the same
- * worker drops the main file's old copy (dropEventsOld: ~11 s on a copy of the live file). Resolves to what it did, or
+ * worker drops the main file's old copy (dropEventsOld: 12-29 s on copies of the live file). Resolves to what it did, or
  * null when there was nothing to do.
  */
 export function moveEventsOffThread(dbPath: string): Promise<string | null> {

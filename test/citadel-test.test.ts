@@ -110,12 +110,26 @@ test('a process a test leaves running is reported and the run fails', async () =
   assert.match(r.out, /The tests left 1 process\(es\) running \(now killed\)[^]*setTimeout.*leak\/x/);
 });
 
-test('no files, or a folder, is refused: the full suite is the land gate\'s', async () => {
-  for (const args of [[], ['test/']]) {
-    const r = await run(args);
-    assert.equal(r.code, 2, r.out);
-    assert.match(r.out, /land gate's job/);
-  }
+test("a folder is refused: the full suite is the land gate's", async () => {
+  const r = await run(['test/']);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /land gate's job/);
+});
+
+// #1621: no files is --affected, with the repo-wide guards on top. Against HEAD so the answer doesn't depend on main.
+test('no files runs --affected, the same as asking for it', async (t) => {
+  const dirty = await new Promise<string>((res) => { let o = ''; const c = spawn('git', ['status', '--porcelain'], { cwd: repo }); c.stdout.on('data', (b) => (o += b)); c.on('close', () => res(o)); });
+  if (dirty.trim()) return t.skip('the tree has changes, so --affected would run their tests');
+  const bare = await run(['--base', 'HEAD']);
+  assert.equal(bare.code, 0, bare.out);
+  assert.match(bare.out, /affected: nothing has changed from HEAD/);
+  assert.doesNotMatch(bare.out, /name the test files/);
+});
+
+// #1621: the guards that read every file are picked by no map, so they ride on every run.
+test('the repo-wide list holds the guards that read every file', () => {
+  const always = readFileSync(join(repo, 'tools', 'always-tests.txt'), 'utf8').split('\n');
+  for (const t of ['sync-calls', 'judges', 'one-until', 'script-env', 'host-signals-guards']) assert.ok(always.includes(`test/${t}.test.ts`), `${t} runs on every citadel-test run`);
 });
 
 // #768: the repo-wide tests ride along, so their failures show before the land.

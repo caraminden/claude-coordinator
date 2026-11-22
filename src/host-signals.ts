@@ -1,5 +1,5 @@
 // The box's own signals (#1485): CPU, memory and IO pressure, load, memory, CPU counters, cgroups, and the zone that
-// decides which day and hour it is. The server reads them only through here (test/host-signals.test.ts checks), so a
+// decides which day and hour it is. The server reads them only through here (test/host-signals-guards.test.ts checks), so a
 // server a test boots (CITADEL_HOST_SIGNALS=fixed, bootServer's default) never sees the real box: a busy box paused a
 // test server's indexers (#1301) and a test went red after midnight (#1421). Pinned, it reads fixed text for the files
 // below, finds no other /proc or /sys file (so no cgroup), and reads its day and hour in the zone the test hands it

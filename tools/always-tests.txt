@@ -1,9 +1,15 @@
 # Test files tools/citadel-test adds to every run, whatever files it is given (#768). Put a test here when it is fast
 # and pins a repo-wide snapshot or budget that a change anywhere can break (a route, an MCP tool, a prompt line, a
 # schema bump, a pipeline path), so the failure shows before the land, not in it. One path per line.
+# The guards that read every file (#1621: Nov 21-22's 12 guard reds were tests no map picks) are here: sync-calls, judges,
+# one-until, script-env and the host-signals guards (test/host-signals-guards.test.ts, the static half of host-signals.test.ts).
 # Not one that takes over 5 CPU-seconds (#1544): a slow one goes on tools/affected-map.txt by the paths that can break it
 # (test/access-matrix.test.ts did, and was over half of every minion's test CPU). land.sh's quick check follows the map for it.
 test/prompt-budget.test.ts
 test/schema-compat.test.ts
 test/pipeline-files.test.ts
 test/sync-calls.test.ts
+test/judges.test.ts
+test/one-until.test.ts
+test/script-env.test.ts
+test/host-signals-guards.test.ts

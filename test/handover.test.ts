@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline';
 import { after, test } from 'node:test';
 import { COLD, handOver, handoverState, standby } from '../src/handover.ts';
 import { SCHEMA_VERSION } from '../src/db.ts';
-import { bootServer, PASSWORD, SECRET, tempRoot, until } from './helpers.ts';
+import { bootServer, PASSWORD, SECRET, tempRoot, TEST_ZONE, until } from './helpers.ts';
 
 const REPO = join(import.meta.dirname, '..');
 const tmp = tempRoot('handover-');
@@ -122,7 +122,7 @@ test('a copy that dies after go makes the old server exit, so systemd restarts t
 test('a standby copy of the real server does nothing before go, and goes when the old server does', async () => {
   const data = join(tmp.dir, 'standby-data');
   const copy = tmp.spawn(process.execPath, [join(REPO, 'server.ts')], {
-    env: { ...process.env, DATA_DIR: data, PORT: '0', COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET, CITADEL_HANDOVER: String(SCHEMA_VERSION) },
+    env: { ...process.env, DATA_DIR: data, PORT: '0', COORDINATOR_PASSWORD: PASSWORD, SESSION_SECRET: SECRET, CITADEL_HANDOVER: String(SCHEMA_VERSION), CITADEL_HOST_SIGNALS: 'fixed', CITADEL_ZONE: TEST_ZONE },
     stdio: ['ignore', 'inherit', 'inherit', 'ignore', 'pipe'],
   });
   const ctl = copy.stdio[4]!;

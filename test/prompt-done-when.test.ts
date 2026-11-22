@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { systemPrompt } from '../src/prompts.ts';
+import { DONE_LINES } from '../src/done-lines.ts';
 
 const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any;
 const ticket = { id: 929, number: 415, title: 'x', kind: 'ticket', branch: 'ticket/415-x' } as any;
@@ -31,8 +32,9 @@ test('the Taskmaster prompt says a brief covers what happens to things saved bef
   assert.ok(!build('ticket').includes('saved before the change'));
 });
 
-test('a minion prompt carries the done-lines rule; the Taskmaster prompt does not (#1115)', () => {
-  assert.match(build('ticket'), /Done lines \(#1115\): on a feature, before any code/);
-  assert.match(build('ticket'), /Bugs, chores and research write none/);
+test('the done-lines rule (#1115) left every prompt for set_properties\' feature reply and a feature\'s first turn (#1574)', () => {
+  assert.ok(!build('ticket').includes('Done lines (#1115)'));
   assert.ok(!build('coordinator').includes('Done lines (#1115)'));
+  assert.match(DONE_LINES, /^Done lines \(#1115\): on a feature, before any code/);
+  assert.match(DONE_LINES, /Bugs, chores and research write none\.$/);
 });

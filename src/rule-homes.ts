@@ -74,4 +74,28 @@ export const RULE_HOMES: RuleHome[] = [
     pointer: "the model table (the Taskmaster's, public/model-table.js)",
     phrases: ['sonnet 5 5 medium', 'sonnet 5 5 low', 'opus 5 5 high', 'opus 5 5 medium', 'fable 5 2 medium'],
   },
+  // #1574 moved these out of every minion's prompt to where their job meets them. Strike, wake_when_live and
+  // relay_when_live live in their own tool descriptions; they aren't registered, since the Taskmaster prompt keeps its
+  // own strike line and the other two descriptions sit inline in a tool list a code anchor can't cut out alone.
+  {
+    id: 'done-lines',
+    title: 'Done lines on a feature',
+    home: { kind: 'repo', file: 'src/done-lines.ts', anchor: 'export const DONE_LINES' },
+    pointer: "the done-lines rule (set_properties' reply on a feature)",
+    phrases: ['before any code write 3 to 7', 'a report not a card', 'naming any not met', 'bugs chores and research write none'],
+  },
+  {
+    id: 'dev-copy',
+    title: 'Running a dev copy of Citadel',
+    home: { kind: 'repo', file: '.claude/rules/dev-copy.md', section: 'A dev copy of Citadel' },
+    pointer: 'the dev-copy rule (.claude/rules/dev-copy.md)',
+    phrases: ['new seed states go in tools dev seeds ts', 'which opens the live database', 'its header lists the steps'],
+  },
+  {
+    id: 'settings-edit',
+    title: 'A Settings text edit ships like code',
+    home: { kind: 'repo', file: 'src/mcp.ts', anchor: 'const EDIT_INSTRUCTIONS' },
+    pointer: 'the edit_instructions description',
+    phrases: ['is an agent instruction change', 'label it at least medium', 'keep its dated quotes'],
+  },
 ];

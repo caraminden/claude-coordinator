@@ -116,6 +116,19 @@ test('set_properties refuses a missing or empty properties', async () => {
   refused(mine, /properties is required/);
 });
 
+test('a minion that sets its own type to feature reads the done-lines rule in the reply; other sets do not (#1574)', async () => {
+  const own = store.createTicket({ project_id: Citadel.id, kind: 'ticket', title: 'Feature work', permission_mode: 'default', created_by: 'Cara' });
+  const bug = await tool(own, 'thread', 'set_properties', { properties: { type: 'bug' } });
+  assert.ok(!bug.isError, bug.text);
+  assert.doesNotMatch(bug.text, /Done lines/);
+  const feature = await tool(own, 'thread', 'set_properties', { properties: { type: 'feature' } });
+  assert.ok(!feature.isError, feature.text);
+  assert.match(feature.text, /Done lines \(#1115\): on a feature, before any code/);
+  // The Taskmaster setting it hears nothing: the minion's first turn carries the rule instead.
+  const tm = await tool(TM, 'coordinator', 'set_properties', { ticket_id: own.number, properties: { type: 'feature' } });
+  assert.doesNotMatch(tm.text, /Done lines/);
+});
+
 test('update_ticket, set_thread_status and update_schedule refuse when given nothing to change', async () => {
   const title = store.getTicket(Minion.id)!.title;
   refused(await tool(TM, 'coordinator', 'update_ticket', { ticket_id: Minion.number }), /at least one of/);

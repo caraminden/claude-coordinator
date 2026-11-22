@@ -94,7 +94,7 @@ const errors: string[] = [];
 const runner = new Runner(store, () => {}, (t) => ({ COORDINATOR_API: 'http://127.0.0.1:8573', COORDINATOR_TOKEN: `token-${t.id}` }), fake);
 runner.onTurnError = (_id, text) => errors.push(text);
 
-async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; workflow?: number } = {}, repoDir?: string, projectId?: number) {
+async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { model?: string; effort?: string; workflow?: number } = {}, repoDir?: string, projectId?: number, props: Record<string, string> = {}) {
   writeFileSync(join(root, 'mcp-status'), mcpStatus);
   // A scheme has one Taskmaster, so each turn gets a scheme of its own unless it names one.
   const project = projectId ? store.getProject(projectId)! : store.createProject(`P${Math.random()}`, null);
@@ -104,6 +104,7 @@ async function turn(kind: 'ticket' | 'coordinator', mcpStatus: string, set: { mo
   mkdirSync(cwd, { recursive: true });
   store.setTicketDir(t.id, cwd, null);
   if (Object.keys(set).length) store.updateTicket(t.id, set as any);
+  if (Object.keys(props).length) store.props.set('minion', t.id, project.id, props, 'Cara');
   errors.length = 0;
   runner.send(t.id, 'Cara', 'go');
   while (runner.isRunning(t.id)) await wait(20);
@@ -432,6 +433,13 @@ test('create_ticket lists properties but still starts a minion when a stale sess
   }
 });
 
+test('a feature minion\'s first turn opens with the done-lines rule, moved out of every minion\'s prompt (#1574)', async () => {
+  const feature = await turn('ticket', 'connected', {}, undefined, undefined, { type: 'feature' });
+  assert.match(feature.message, /Done lines \(#1115\): on a feature, before any code/);
+  assert.doesNotMatch(feature.system, /Done lines \(#1115\)/);
+  assert.doesNotMatch((await turn('ticket', 'connected', {}, undefined, undefined, { type: 'bug' })).message, /Done lines/);
+});
+
 test("only the scheme whose code this server runs hears about deploys, pending-deploy and previews", async () => {
   const repo = join(root, 'served-repo');
   mkdirSync(repo, { recursive: true });
@@ -443,7 +451,8 @@ test("only the scheme whose code this server runs hears about deploys, pending-d
     const served = await turn('ticket', 'connected', {}, repo);
     assert.equal(served.env.COORDINATOR_DEPLOYS, '1');
     assert.match(served.system, /deployed and waiting in pending-deploy/);
-    assert.match(served.system, /use `citadel-dev-copy start\|seed\|env\|stop`.*Stop your other processes by pid/);
+    // The dev-copy line moved to .claude/rules/dev-copy.md (#1574); the kill-by-pid line stays in every prompt.
+    assert.match(served.system, /Stop your processes by pid/);
     for (const other of [await turn('ticket', 'connected'), await turn('ticket', 'connected', {}, join(root, 'big-scheme', 'repo'))]) {
       assert.equal(other.env.COORDINATOR_DEPLOYS, undefined);
       assert.doesNotMatch(other.system, /deploy\.sh|pending-deploy|citadel-dev-copy/);

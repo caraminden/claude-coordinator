@@ -23,6 +23,7 @@ import { checkChanges, countLine } from '../src/memory-curator.ts';
 import { templateBlobs } from '../src/kit-sync.ts';
 import { addMention } from '../src/mentions.ts';
 import { heldPlan, settingsOverlaps } from '../src/instructions-save.ts';
+import { lendAfter, lendLines, type LendChange } from '../src/machine-lend.ts';
 
 export interface SeedCtx { store: Store; project: Project; dataDir: string; who: string }
 
@@ -927,6 +928,29 @@ mock.boards('#takes', { boards: [
       chat(c, t, 1).said(`[The artifact](${file})`);
       c.store.syncArtifacts(t, [{ path: 'wco-artifact.html', size: page.length, mtime: Date.now() }]);
       return `#/p/${c.project.id}`;
+    },
+  },
+  'machine-lend': {
+    about: "a minion's pending propose_machine_lend card: lend a seeded box to this scheme and tick a workspace, with what it lends after and a link to the box on the Machines page (#1638)",
+    seed(c) {
+      const name = `seeded-box-${hex().slice(0, 4)}`;
+      const m = c.store.createMachine(name, hex(), c.who);
+      const lend = { server: 'godot-ai', workspaces: ['art'] };
+      c.store.updateMachine(m.id, { lend: JSON.stringify(lend) });
+      const t = minion(c, 'Render the sprite sheets on the box', { note: 'needs the box lent here' });
+      const change: LendChange = { here: true, tick: ['cantrips'] };
+      const now = { projects: [], lend, workspace_tools: false, always_on: false };
+      const scheme = { id: c.project.id, name: c.project.name };
+      const lines = lendLines(change, now, scheme, name);
+      const after = lendAfter(change, now, c.project.id);
+      const why = 'The sprite renders run in the cantrips folder on the box, and this scheme has no machine yet.';
+      const page = `#/p/${c.project.id}/machines/${name}`;
+      const e = c.store.addEvent(t.id, 'plan', {
+        id: hex(), status: 'pending', summary: `Lend ${name} to ${c.project.name}`,
+        plan: [...lines, '', `After this it lends: the godot-ai MCP server; workspaces ${after.workspaces.join(', ')}.`, '', why, '', `[${name} on the Machines page](${page})`].join('\n'),
+        machineLend: { id: m.id, name, owner: null, scheme, change, lines, after, why, page },
+      });
+      return route(c, t, e.id);
     },
   },
   'gpu-jobs': {

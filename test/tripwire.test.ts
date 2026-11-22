@@ -691,7 +691,7 @@ test('every kill-by-name refusal names a way to stop your own server that the tr
 test('git habits: path checkouts and moves over uncommitted changes, read from the real repo', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-git-'));
   // The real home: a turn's TMPDIR is under it (#218), where cfg's /home/u would make the scratch another person's.
-  const c = { ...cfg, home: homedir(), data: tmp };
+  const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp };
   const wt = join(tmp, 'projects/2/tickets/9');
   const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
   try {
@@ -754,7 +754,7 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
 
 test('a soft or mixed reset onto a commit the branch lacks is refused: the next commit would revert it (Peek Auras #309)', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-squash-'));
-  const c = { ...cfg, home: homedir(), data: tmp };
+  const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp }; // a home of its own: with $HOME's, a TMPDIR beside it (burn-in's RUNNER_TEMP) reads as another person's home
   const wt = join(tmp, 'projects/2/tickets/9');
   const sh = (cmd: string) => execSync(cmd, { cwd: wt, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } }).toString().trim();
   try {
@@ -1061,7 +1061,7 @@ test('env: names only pass, values stay refused, and the message says how to che
 
 test('git: --ours and --theirs mid-merge, and any checkout in a clone under the turn\'s TMPDIR (#485)', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-485-'));
-  const c = { ...cfg, home: homedir(), data: tmp, env: { TMPDIR: join(tmp, 'projects/2/tmp/9') } };
+  const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp, env: { TMPDIR: join(tmp, 'projects/2/tmp/9') } };
   const wt = join(tmp, 'projects/2/tickets/9');
   const clone = join(tmp, 'projects/2/tmp/9/clone');
   const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };

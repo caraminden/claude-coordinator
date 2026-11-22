@@ -45,7 +45,8 @@ function seed(n: number): string {
   return root;
 }
 
-const boot = (root: string, env: NodeJS.ProcessEnv = {}) => bootServer({ root, env: { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${COUNTER}`, ...env } });
+// The main thread answers (the front's off switch): the counter counts its statements, and readers (#1590) run the same views.
+const boot = (root: string, env: NodeJS.ProcessEnv = {}) => bootServer({ root, env: { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${COUNTER}`, CITADEL_FRONT: '0', ...env } });
 let s10: Booted, s60: Booted, off: Booted;
 before(async () => {
   const r60 = seed(60);

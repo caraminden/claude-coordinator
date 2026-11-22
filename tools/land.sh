@@ -11,6 +11,8 @@
 # 0. The smoke check (#1012), before it gets in line, so what fails in seconds never holds the line: a trial rebase
 #    (git merge-tree), tools/parse-check.ts, and through tools/citadel-test the always-tests plus the test files the
 #    branch changes. A fail says "smoke: …", logs a smoke line to the retro log and no timing line. See smoke() below.
+#    Then, with others in line and the one check runner free, its own check (#1567, tools/own-check.sh): its CI on that
+#    runner before it joins the line, so a ship red on its own goes back to its minion without holding anyone up.
 # 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here. If the rebase
 #    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
 #    Then refuses a branch that removes what a recent landing added without naming it (a stale squash: undo_guard).
@@ -337,10 +339,11 @@ rerere_on() {
   done
   return 1
 }
-# <onto> <commit>: the stack the early next train (early_next, below) made of that commit on that one, if it is still there.
+# <onto> <commit>: the stack the early next train (early_next, below) or a ship's own check (tools/own-check.sh) made of
+# that commit on that one, if it is still there.
 stacked_of() {
   local c
-  c=$(awk -v k="$1 $2" '$1 " " $2 == k { print $3; exit }' "$state/stacked" 2>/dev/null) && [ -n "$c" ] && git cat-file -e "$c^{commit}" 2>/dev/null && echo "$c"
+  c=$({ cat "$state/stacked" "$state/own-checked" 2>/dev/null || true; } | awk -v k="$1 $2" '$1 " " $2 == k { print $3; exit }') && [ -n "$c" ] && git cat-file -e "$c^{commit}" 2>/dev/null && echo "$c"
 }
 # <onto>: whether the rebase onto <onto>, which trial() says stops, goes through with the fixes recorded with git rerere.
 # Replayed in a scratch worktree, so no ref or worktree of the minion's moves. shortcut: a checkout each time (about 1 s
@@ -622,6 +625,8 @@ if [ -z "$resumed" ]; then
       waited_on=$now under=$(under_of)
       early_check main "waiting in line"
     }
+    # A ship's own check (#1567): with others in line and the check runner free, its CI runs first on that runner.
+    [ "$mode" != land ] || [ ! -f "$tools/own-check.sh" ] || { . "$tools/own-check.sh"; own_check; }
     queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
     unset -f queue_wait_check
     [ "$mode" != land ] || train_verdict held # its train's front let go of the lock before this read the verdict

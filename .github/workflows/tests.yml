@@ -1,12 +1,16 @@
 # The full suite, on Cara's desktop (the Linux runner in WSL: tools/ci-runner/README.md) instead of perigee (#523).
 # tools/land.sh pushes the rebased commit to land/<branch> and waits for this run on that exact commit; when no
 # runner is online or it doesn't answer in time, land.sh runs the suite on perigee itself.
+# A ship's own check (#1567, tools/own-check.sh): before it joins the line, land.sh pushes its rebased commit to
+# check/<branch> while the check runner is free. That run is a ship's run in every step, niced and on the runner with
+# the check label only, so it is never a second land run and never on GitHub's own runners; a green one is the
+# ship's run in line too when its commit comes out the same.
 # A land that touches no pipeline file leaves out the pipeline's own test files (#581, tools/pipeline-files.txt), so the
 # whole suite also runs on main every night, pipeline tests included.
 name: tests
 on:
   push:
-    branches: ['land/**']
+    branches: ['land/**', 'check/**']
   schedule:
     - cron: '30 13 * * *' # the quietest hour for lands: no commit reached main at 13:xx UTC in the 14 days to 2026-11-12
   workflow_dispatch:
@@ -14,9 +18,11 @@ on:
 # One suite at a time on the desktop, however many runners there are: two at once (2026-11-11, load 30-35 on its 32
 # threads) failed in a different file every run. Landings come one at a time anyway. Any other run (the nightly, or one
 # started by hand) has a group of its own: a run waiting in a group cancels the one waiting before it, which would be a
-# landing's. It waits for the lands instead, and yields the CPU to one that starts while it runs (below).
+# landing's. It waits for the lands instead, and yields the CPU to one that starts while it runs (below). A ship's own
+# check (check/**) is one at a time in a group of its own: at most one of them beside a land's run (Cara, 2026-11-22,
+# "Gated, after C and B": one extra runner, used only when free).
 concurrency:
-  group: ${{ startsWith(github.ref, 'refs/heads/land/') && 'citadel-tests' || 'citadel-off-land' }}
+  group: ${{ startsWith(github.ref, 'refs/heads/land/') && 'citadel-tests' || (startsWith(github.ref, 'refs/heads/check/') && 'citadel-check' || 'citadel-off-land') }}
   cancel-in-progress: false
 
 # actions: read for the wait for the lands' runs (below).
@@ -29,12 +35,13 @@ jobs:
   test:
     # A land's run takes either Linux runner; any other (the nightly, one started by hand) only the one with the side
     # label, as flake-proof.yml's proofs do, so the other is always free for a land (#1240). Its wait for the lands
-    # below holds its runner, which on the lands' runner would keep the land it waits for from starting.
-    runs-on: ${{ vars.CI_RUNNER == 'github' && 'ubuntu-latest' || (startsWith(github.ref, 'refs/heads/land/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]')) }}
+    # below holds its runner, which on the lands' runner would keep the land it waits for from starting. A ship's own
+    # check takes only the runner with the check label, never GitHub's own (whatever CI_RUNNER says) nor a land's.
+    runs-on: ${{ startsWith(github.ref, 'refs/heads/check/') && fromJSON('["self-hosted", "citadel-ci-linux-check"]') || (vars.CI_RUNNER == 'github' && 'ubuntu-latest' || (startsWith(github.ref, 'refs/heads/land/') && fromJSON('["self-hosted", "citadel-ci-linux"]') || fromJSON('["self-hosted", "citadel-ci-linux", "citadel-ci-linux-side"]'))) }}
     # land.sh gives up on the run 9 minutes after a runner starts it (LAND_CI_TIMEOUT, #1361; 6 until #1606), the clock step's up to 2 min included, or 3 more
     # (LAND_CI_RERUN) for a run rerunning its failed files alone (#1374), plus its burn-in's time (up to 2.5 min, #1443); this only stops one nobody waits for. The suite's own limit is run-tests.sh's 10 minutes; a run that isn't a land's waits
     # up to 30 more for the lands.
-    timeout-minutes: ${{ startsWith(github.ref, 'refs/heads/land/') && 16 || 45 }}
+    timeout-minutes: ${{ (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/')) && 16 || 45 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -132,7 +139,7 @@ jobs:
       # more (12 with reruns alone, plus the burn-in's up to 3, #1606), and GitHub keeps some abandoned
       # runs "queued" for good (seven from 2026-11-11 evening, their branches long gone, on 2026-11-12).
       - name: wait for the lands
-        if: ${{ !startsWith(github.ref, 'refs/heads/land/') }}
+        if: ${{ !startsWith(github.ref, 'refs/heads/land/') && !startsWith(github.ref, 'refs/heads/check/') }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -155,15 +162,15 @@ jobs:
       # The burn-in (#1443): a ship's new and changed test files, and up to 3 tests tools/affected-map.txt maps its changed
       # source files to or that import them (#1456), each run as 10 copies at once before the full suite (tools/burn-in.sh). A failed copy fails the run
       # here, with that copy's output, and land.sh refuses the ship on it as its own red, never a flake. land.sh pushes the
-      # ship's base (main as it was) as land-base/<branch> beside land/<branch>, so only this ship's changes count; at its
+      # ship's base (main as it was) as land-base/<branch> beside land/<branch> (check-base/ beside check/), so only this ship's changes count; at its
       # CI limit it gives the run this step's time more, once. With no runner the ship's suite runs on perigee, and the
       # burn-in not at all (land.sh says so).
       - name: burn in new and changed tests
-        if: ${{ startsWith(github.ref, 'refs/heads/land/') }}
+        if: ${{ startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') }}
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache # each source file compiled once per job, not once per process (#1565)
         run: |
-          base=origin/land-base/${GITHUB_REF_NAME#land/}
+          base=origin/${GITHUB_REF_NAME%%/*}-base/${GITHUB_REF_NAME#*/}
           if ! git rev-parse -q --verify "$base^{commit}" >/dev/null; then
             echo "burn-in: no $base ref from land.sh, so it compares with GitHub's main, which may lack the last ship or two"
             base=$(git merge-base HEAD origin/main)
@@ -177,12 +184,13 @@ jobs:
         # Files at once on the desktop (#564). run-tests.sh's half-the-cores default ran 8 once #552 capped the VM at 16
         # processors, and the suite went from about 60 s to 150 s with the tests' own time unchanged: they mostly wait
         # on servers and timers. GitHub's 4-core runners keep the default.
-        # A run that isn't a land's runs niced, so a landing that starts beside it gets the CPU first.
+        # A run that isn't a land's runs niced, so a landing that starts beside it gets the CPU first. A ship's own check
+        # runs half as many files at once too (#1567): it shares the 16 processors with a land's run more often than not.
         env:
-          CITADEL_TEST_CONCURRENCY: ${{ vars.CI_RUNNER != 'github' && '16' || '' }}
+          CITADEL_TEST_CONCURRENCY: ${{ startsWith(github.ref, 'refs/heads/check/') && '8' || (vars.CI_RUNNER != 'github' && '16' || '') }}
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
           NICENESS: ${{ !startsWith(github.ref, 'refs/heads/land/') && '10' || '0' }}
-          LAND_REF: ${{ startsWith(github.ref, 'refs/heads/land/') && '1' || '' }}
+          LAND_REF: ${{ (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/')) && '1' || '' }}
         run: |
           rc=0
           # Each file's seconds in this runner's last run, so the next starts the longest first (tools/suite-runner.ts, #1565).
@@ -211,8 +219,9 @@ jobs:
       # and the reruns end 30 s short of the window, for the job's end and land.sh's next look: a real red is red in time. It never turns
       # a red run green: land.sh gives a red of flakes only its one fresh run.
       # Numbers per run for the CI page's Numbers tab (higher is worse; a step up wakes the Taskmaster). Never fails the job.
+      # A ship's own check keeps none: its suite ran niced and narrower, so its time isn't main's line's.
       - name: Keep the run's numbers
-        if: ${{ success() }}
+        if: ${{ success() && !startsWith(github.ref, 'refs/heads/check/') }}
         continue-on-error: true
         run: |
           [ -s "$RUNNER_TEMP/suite-secs" ] || exit 0
@@ -226,7 +235,7 @@ jobs:
         if: ${{ failure() && steps.suite.conclusion == 'failure' }}
         env:
           NICENESS: ${{ !startsWith(github.ref, 'refs/heads/land/') && '10' || '0' }}
-          LAND_REF: ${{ startsWith(github.ref, 'refs/heads/land/') && '1' || '' }}
+          LAND_REF: ${{ (startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/')) && '1' || '' }}
           RERUN_WINDOW: 180
         run: |
           [ -s "$RUNNER_TEMP/reruns" ] || { echo "the full suite left nothing to rerun alone"; exit 0; }

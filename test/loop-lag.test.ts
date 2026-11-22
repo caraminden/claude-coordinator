@@ -11,8 +11,9 @@ const spin = (ms: number) => {
   const until = performance.now() + ms;
   while (performance.now() < until); // synchronous work, as a git call on the event loop is
 };
-const waitFor = async (ok: () => boolean, ms = 5000) => {
-  await until('the condition', async () => ok(), ms);
+// `seen`: the lines logged so far, printed when it times out, so a red run says what came instead.
+const waitFor = async (ok: () => boolean, seen?: string[], ms = 5000) => {
+  await until('the condition', async () => ok(), ms, seen && (() => `logged:\n${seen.join('\n') || '(nothing)'}`));
 };
 
 test('a stall of the event loop is logged with its length, and a free loop logs nothing', async () => {
@@ -25,7 +26,7 @@ test('a stall of the event loop is logged with its length, and a free loop logs 
     assert.deepEqual(logged.filter((l) => /Cause: own work/.test(l)), [], 'nothing in the process held it');
     const before = logged.length;
     spin(400);
-    await waitFor(() => logged.length > before);
+    await waitFor(() => logged.length > before, logged);
     const line = logged[before]; // the first tick after the spin measures it; any later line is the box's own stall
     const held = Number(line.match(/held for (\d+\.\d) s/)?.[1]);
     assert.ok(held >= 0.3, `it logs the stall's length: ${line}`); // longer on a busy box, never shorter
@@ -46,7 +47,7 @@ test('with the sampler on, a stall names the code that held the loop (#609)', as
     // On a loaded box other real stalls get lines too (waiting for the CPU, the sampler's own start): this one is
     // the line that names the function that held the loop, and it gets exactly one (#1424).
     const ours = () => logged.filter((l) => /holdTheLoopForTest \(test\/loop-lag\.test\.ts:\d+\)/.test(l));
-    await waitFor(() => ours().length > 0);
+    await waitFor(() => ours().length > 0, logged);
     assert.equal(ours().length, 1, logged.join('\n'));
     assert.match(ours()[0], /held for \d+\.\d s \([^)]+\): .* Running: \d+% /);
   } finally {
@@ -127,7 +128,7 @@ test('a real stall line carries its cause and the writer backlog (P2)', async ()
   try {
     await new Promise((r) => setTimeout(r, 100));
     spin(400);
-    await waitFor(() => logged.length > 0);
+    await waitFor(() => logged.length > 0, logged);
     assert.match(logged[0], /held for \d+\.\d s \([^)]+\): the server answered nobody meanwhile\. Cause: (own work|waited for CPU|waited for disk|waited for memory|unclear) \(.*; 7 writes queued on the write worker\)\./, logged[0]);
   } finally {
     watch.stop();
@@ -140,7 +141,7 @@ test('a stall line states its own start and end clock time, measured when it was
   try {
     const before = Date.now();
     spin(400);
-    await waitFor(() => logged.length > 0);
+    await waitFor(() => logged.length > 0, logged);
     const m = /held for \d+\.\d s \((\d\d):(\d\d):(\d\d) to (\d\d):(\d\d):(\d\d) P[SD]T\)/.exec(logged[0]);
     assert.ok(m, logged[0]);
     assert.match(stallSpan(before, before + 1000), /^\d\d:\d\d:\d\d to \d\d:\d\d:\d\d P[SD]T$/);
@@ -168,7 +169,7 @@ test('a hold of the main thread is sampled from /proc by a worker: the line name
     // Blocked off-CPU, as on a disk wait: the thread sleeps in the kernel.
     logged.length = 0;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700);
-    await waitFor(() => logged.some((l) => /Main thread waited on: S/.test(l)));
+    await waitFor(() => logged.some((l) => /Main thread waited on: S/.test(l)), logged);
   } finally {
     watch.stop();
   }

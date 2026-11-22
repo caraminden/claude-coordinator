@@ -106,7 +106,7 @@ test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't;
   const ask = async (ticketId: number) => {
     const res = await fetch(`${srv.base}/api/tickets/${ticketId}/questions`, {
       method: 'POST', headers: { Authorization: `Bearer ${agentToken(data, ticketId)}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ questions: [{ question: 'Who takes the pipeline lane next?', options: [{ label: 'Josh', recommended: true }, { label: 'Cara' }] }] }),
+      body: JSON.stringify({ not_duplicate: true, questions: [{ question: 'Who takes the pipeline lane next?', options: [{ label: 'Josh', recommended: true }, { label: 'Cara' }] }] }),
     });
     assert.equal(res.status, 201);
     return ((await res.json()) as { id: string }).id;

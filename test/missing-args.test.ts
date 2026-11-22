@@ -195,7 +195,7 @@ test('"is too long": the limit is in the schema, and the error names it', async 
 });
 
 test('"needs a recommended option": a recommendation written into the label or description counts', async () => {
-  const card = (options: object[]) => tool(Minion, 'thread', 'ask_question', { questions: [{ question: 'Which?', options }] });
+  const card = (options: object[]) => tool(Minion, 'thread', 'ask_question', { questions: [{ question: 'Which?', options }], not_duplicate: true }); // the same question each time on purpose (#1508's twin check)
   for (const options of [
     [{ label: 'Stitched (rec.)', description: 'Free.' }, { label: 'Written', description: 'Costs.' }],
     [{ label: 'Exe', description: 'Recommended. Built here.' }, { label: 'CI', description: 'Slower.' }],

@@ -84,7 +84,7 @@ test('a question card refuses pictures outside those folders, missing or not pic
 });
 
 const askWith = (options: object[], multiSelect = false) => call(`/api/tickets/${ticket.id}/questions`, {
-  method: 'POST', token: live(), body: { questions: [{ question: 'Tabs or list?', multiSelect, options }] },
+  method: 'POST', token: live(), body: { not_duplicate: true, questions: [{ question: 'Tabs or list?', multiSelect, options }] },
 });
 
 test('every question on a card recommends an option', async () => {

@@ -742,6 +742,7 @@ export const ticketRoutes: Route[] = [
       const card = { questions, ...(mergeable ? { mergeable: true as const } : {}), ...(kind ? { kind } : {}), ...(into ? { into } : {}), ...(to ? { to } : {}), ...(notice ? { notice } : {}), ...(doc ? { doc } : {}), ...(secret ? { secret } : {}) };
       // A card that repeats one open or just answered is refused once; not_duplicate posts it. Both are counted (settings
       // card_twin:refused and card_twin:override) so the false-alarm rate can be read.
+      const checkTwin = () => {
       if (questions.length && !kind) {
         const bump = (k: string) => app.store.setSetting(`card_twin:${k}`, (app.store.getSetting<number>(`card_twin:${k}`) ?? 0) + 1);
         const twin = cardTwin(app.store, ticket, card);
@@ -755,16 +756,19 @@ export const ticketRoutes: Route[] = [
           console.log(`card-twin: override #${ticket.number ?? ticket.id}`);
         }
       }
+      };
       // For everyone (#921): a person's Taskmaster asks a scheme-wide question in the Overlord's chat, where every member
       // sees it; its answer still comes back to the asker (Cara, 2026-11-17: "Asker acts on it").
       if (body.for_everyone === true) {
         if (ticket.kind !== 'coordinator' || !questions.length || to || body.when_ci_passes === true) throw new HttpError(400, 'for_everyone is a Taskmaster\'s question card, with no to or when_ci_passes');
+        checkTwin();
         const overlord = ticket.coordinator_of != null ? app.store.getOverlord(ticket.project_id) : undefined;
         if (overlord) {
           const forAll = { ...card, asker: ticket.id };
           return json(res, 201, mergeCard(app, overlord, ticket, forAll) ?? postCard(app, overlord, forAll));
         }
       }
+      if (body.for_everyone !== true) checkTwin();
       // Held until CI passes on the pushed commit (#715): posted then with no turn, or now if it already passed.
       const armed = body.when_ci_passes === true ? await armForCi(app, ticket, { card }) : null;
       if (armed) return json(res, 202, { armed });

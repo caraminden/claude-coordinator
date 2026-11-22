@@ -22,11 +22,13 @@ const setup = (name: string) => {
   const r = new Runner(s, () => {}, () => ({}), '/bin/false');
   return { s, r, p, lord: s.getOverlord(p.id)!, josh: s.coordinatorFor(p.id, josh.id)! };
 };
+const turn = (r: Runner, at: number) => { (r as any).turnStartedAt = () => at; };
 const mine = (s: Store, id: number) => s.eventsBetween(id, 0, Number.MAX_SAFE_INTEGER, true);
 
 test("the Overlord's everyone card carries its turn's reply, and the update shows in Mine", () => {
   const { s, r, lord } = setup('lord');
   const card = ask(r, lord.id);
+  turn(r, 0);
   say(r, lord.id, 'Restart them with:\n\n```powershell\nStart-Service x\n```');
   (r as any).carryReply(lord.id);
   assert.match(JSON.parse(s.getEvent(card.id)!.data).reply, /Start-Service x/);
@@ -37,21 +39,32 @@ test("the Overlord's everyone card carries its turn's reply, and the update show
 test("a person's Taskmaster asking for everyone: the Overlord's card carries the asker's reply", () => {
   const { s, r, lord, josh } = setup('asker');
   const card = ask(r, lord.id, { asker: josh.id });
+  turn(r, 0);
   say(r, josh.id, 'Steps are above the card.');
   (r as any).carryReply(josh.id);
   assert.equal(JSON.parse(s.getEvent(card.id)!.data).reply, 'Steps are above the card.');
   s.db.close();
 });
 
-test("a card from another turn or a one-person card gets no reply", () => {
+test("a card from an earlier turn, another asker's card or a one-person card gets no reply", () => {
   const { s, r, lord, josh } = setup('other');
+  const old = ask(r, lord.id, { id: 'old', asker: josh.id });
+  s.db.prepare('UPDATE events SET created_at = created_at - 5000 WHERE id = ?').run(old.id);
   const card = ask(r, lord.id, { asker: josh.id });
   const own = ask(r, josh.id, { id: 'c2' });
+  turn(r, Date.now() - 1000);
   say(r, lord.id, 'Unrelated Overlord words');
   (r as any).carryReply(lord.id); // the Overlord's turn didn't ask josh's card
+  assert.equal(JSON.parse(s.getEvent(card.id)!.data).reply, undefined);
   say(r, josh.id, 'Hello');
   (r as any).carryReply(josh.id);
   assert.equal(JSON.parse(s.getEvent(own.id)!.data).reply, undefined, "Josh's own card is only in his chat");
+  assert.equal(JSON.parse(s.getEvent(old.id)!.data).reply, undefined, 'a card from before this turn started');
   assert.equal(JSON.parse(s.getEvent(card.id)!.data).reply, 'Hello');
+  (r as any).turnStartedAt = () => null;
+  const later = ask(r, lord.id, { id: 'later', asker: josh.id });
+  say(r, josh.id, 'More');
+  (r as any).carryReply(josh.id);
+  assert.equal(JSON.parse(s.getEvent(later.id)!.data).reply, undefined, 'no known turn start: nothing written');
   s.db.close();
 });

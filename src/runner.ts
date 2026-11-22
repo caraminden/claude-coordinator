@@ -2886,7 +2886,8 @@ export class Runner {
     const chat = this.isOverlord(me) ? me : me.coordinator_of != null ? this.store.getOverlord(me.project_id) : undefined;
     if (!chat) return;
     const from = chat.id === me.id ? undefined : me.id;
-    const started = this.turnStartedAt(ticketId) ?? 0;
+    const started = this.turnStartedAt(ticketId);
+    if (started == null) return; // no known turn start: never guess which cards were its own
     const cards = this.store.eventsOfKinds(chat.id, ['question', 'plan']).filter((e) => {
       const d = JSON.parse(e.data);
       return d.everyone === true && d.asker === from && d.reply == null && !d.settled && e.created_at >= started;
@@ -2901,8 +2902,9 @@ export class Runner {
     }
     if (!reply) return;
     for (const e of cards) {
-      this.store.setEventData(e.id, { ...JSON.parse(e.data), reply });
-      this.emit(chat.id, 'card_reply', { event: e.id, id: JSON.parse(e.data).id, reply });
+      const d = JSON.parse(e.data);
+      this.store.setEventData(e.id, { ...d, reply });
+      this.emit(chat.id, 'card_reply', { event: e.id, id: d.id, reply, ...(d.asker != null ? { asker: d.asker } : {}) });
     }
     this.broadcastTicket(chat.id);
   }

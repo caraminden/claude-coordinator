@@ -1049,6 +1049,7 @@ function drawEvent(event, scroll) {
     const bubble = log.querySelector(`[data-event="${data.id}"]`);
     if (bubble) showTakenBack(bubble, data.by, false);
   } else if (event.kind === 'question') {
+    if (data.reply) nodes.push(cardReply(data.reply, event.ticket_id));
     nodes.push(stamped(questionCard(event.ticket_id, data, { at: event.created_at }), event));
   } else if (event.kind === 'job') {
     // The card follows the bottom of the chat (Cara's pick, 2026-11-17): each time the job starts, pauses or ends
@@ -1063,7 +1064,12 @@ function drawEvent(event, scroll) {
   } else if (event.kind === 'approval') {
     nodes.push(stamped(approvalCard(event.ticket_id, data), event));
   } else if (event.kind === 'plan') {
+    if (data.reply) nodes.push(cardReply(data.reply, event.ticket_id));
     nodes.push(stamped(planCard(event.ticket_id, data, { at: event.created_at }), event));
+  } else if (event.kind === 'card_reply') {
+    // The reply an everyone card belongs to (#1581), added once its turn ends; a page that drew the card from history has it already.
+    const card = log.querySelector(`[data-eid="${data.event}"]:not(.card-reply)`);
+    if (card && !card.previousElementSibling?.matches('.card-reply')) card.before(cardReply(data.reply, event.ticket_id));
   } else if (event.kind === 'question_more') {
     view.cards.get(data.id)?.extend(data.questions);
   } else if (event.kind === 'question_result') {
@@ -1344,6 +1350,14 @@ function addTracked(group, bubble) {
 }
 
 /** The time a message or card was posted, after its who-line; the full date shows on hover. */
+/** The reply an everyone card was asked in, above the card wherever it shows (#1581); a long one starts collapsed. */
+function cardReply(text, ticketId) {
+  const long = text.length > 500 || text.split('\n').length > 8;
+  const el = h('details', { class: 'card-reply' }, h('summary', {}, 'The reply this card belongs to'), markdown(text, ticketId));
+  el.open = !long;
+  return el;
+}
+
 function stamped(el, event) {
   if (!event.created_at) return el;
   const d = new Date(event.created_at);

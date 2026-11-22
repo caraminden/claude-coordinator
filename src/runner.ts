@@ -2875,6 +2875,38 @@ export class Runner {
     }
   }
 
+  /**
+   * An everyone card carries the reply its turn wrote (#1581): the card shows in every member's Mine, but its writer's chat (a
+   * person's Taskmaster) or the turn's words (the Overlord's) don't, so "steps in my reply above" pointed at text people couldn't see.
+   * Called as a turn ends: the turn's last words go into each still-unreplied everyone card it asked, and `card_reply` tells open pages.
+   */
+  carryReply(ticketId: number) {
+    const me = this.store.getTicket(ticketId);
+    if (!me || me.kind !== 'coordinator') return;
+    const chat = this.isOverlord(me) ? me : me.coordinator_of != null ? this.store.getOverlord(me.project_id) : undefined;
+    if (!chat) return;
+    const from = chat.id === me.id ? undefined : me.id;
+    const started = this.turnStartedAt(ticketId) ?? 0;
+    const cards = this.store.eventsOfKinds(chat.id, ['question', 'plan']).filter((e) => {
+      const d = JSON.parse(e.data);
+      return d.everyone === true && d.asker === from && d.reply == null && !d.settled && e.created_at >= started;
+    });
+    if (!cards.length) return;
+    let reply = '';
+    for (const w of this.store.wordsBy(ticketId, 6)) {
+      const d = JSON.parse(w.data);
+      if (w.kind !== 'claude' || w.created_at < started) continue;
+      reply = (d.message?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n\n').trim();
+      if (reply) break;
+    }
+    if (!reply) return;
+    for (const e of cards) {
+      this.store.setEventData(e.id, { ...JSON.parse(e.data), reply });
+      this.emit(chat.id, 'card_reply', { event: e.id, id: JSON.parse(e.data).id, reply });
+    }
+    this.broadcastTicket(chat.id);
+  }
+
   /** A card's answer kept in its chat without waking it: a for-everyone card's answer wakes its asker instead (#921). */
   recordAnswer(ticketId: number, author: string, text: string, extra: object) {
     this.emit(ticketId, 'user_message', { author, text: hideTokens(text), ...extra });
@@ -3997,6 +4029,7 @@ export class Runner {
       this.broadcastTicket(ticketId);
     }
     if (ev.type === 'result') this.savePlan(ticketId, progress, row.id);
+    if (ev.type === 'result' && !ev.is_error) this.carryReply(ticketId);
     if (ev.type === 'user' && (ev.message?.content ?? []).some?.((b: any) => typeof b?.text === 'string' && b.text.includes(SENT_BACK)) && !this.sentBack.has(ticketId)) {
       this.sentBack.add(ticketId);
       this.saveTurn(ticketId, { sentBack: true });

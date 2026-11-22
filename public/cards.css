@@ -188,3 +188,8 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 /* Pictures pasted into a card's answer box: the composer's strip, kept clear of the Send row; no × once answered. */
 .qcard .attachments { margin: 0.5rem 0 0; }
 .qcard.answered .attachments .remove { display: none; }
+
+/* The reply an everyone card belongs to, above the card (#1581): a long one starts collapsed. */
+.card-reply { border-left: 3px solid var(--line); padding: 0.45rem 0.75rem; margin: 0.25rem 0; font-size: 0.95em; }
+.card-reply > summary { cursor: pointer; color: var(--muted); padding: 0.1rem 0; }
+.card-reply[open] > summary { margin-bottom: 0.4rem; }

@@ -1826,7 +1826,6 @@ train_alone() {
 train_pin() {
   local f=$1 lo=-1 hi=${#train_n[@]} mid wt r=0 before
   wt=$(mktemp -d "${TMPDIR:-/tmp}/land-pin.XXXXXX") && git worktree add -q --detach "$wt" "$tip" 2>/dev/null || return 0
-  : >"$state/train-pin.log"
   train_alone "$wt" "$tip" "$f" || r=$?
   if [ "$r" = 1 ]; then
     r=0
@@ -1879,9 +1878,13 @@ train_release() {
   for n in "${held_n[@]}"; do read -r v _ 2>/dev/null <"$train_dir/$n" && [ "$v" = riding ] && rm -f "$train_dir/$n"; done
   held_n=() held_br=() held_was=() held_files=() held_run=() held_log=() train_held=' ' train_held_tips=''
 }
+# All of a round's failing files are judged before anyone is refused (#1564, Cara 2026-11-21, C "Go"): their runs alone
+# go in parallel (LAND_PIN_JOBS at once), and a file no ship can be pinned on no longer sends the whole train to the
+# bisect while other files have confirmed causes. Those leave now, the open file rides on, and only a red again on it
+# brings the bisect. With no confirmed cause, an open file sends the train to the bisect as before.
 train_suspects() {
-  local round prev=' ' f m i t v kind line sure_line held_line pin real=() hits=() keep=() was=() chg=() rules_say=1
-  local -A sus=() sure=()
+  local round prev=' ' unres=' ' f m i k t v kind line sure_line held_line pin pd real=() hits=() keep=() was=() chg=() open=() rules_say=1
+  local -A sus=() sure=() pins=()
   for ((round = 1; round <= 3; round++)); do
     mapfile -t real < <(train_real) || true
     if [ ${#real[@]} = 0 ]; then
@@ -1892,15 +1895,24 @@ train_suspects() {
     train_settle $(train_failing)
     for f in "${real[@]}"; do
       [[ $prev != *" $f "* ]] || { say "red again on $f with the likely causes off the train, so the guess was wrong: the bisect looks for the ship"; return 1; }
+      [[ $unres != *" $f "* ]] || { say "red again on $f, which no ship could be pinned on, now that the confirmed causes are off the train: the bisect looks for the ship"; return 1; }
     done
-    sus=() sure=()
+    sus=() sure=() pins=() open=()
     train_chg
+    if [ -z "$burn_red" ]; then # a burn-in red names the file a ship added or changed itself (#1443): no run alone
+      say "suspects: running ${real[*]} alone on the train's commits here, ${LAND_PIN_JOBS:-3} at a time, to find the ship that turns each red"
+      : >"$state/train-pin.log"
+      pd=$(mktemp -d "${TMPDIR:-/tmp}/land-pins.XXXXXX")
+      for ((k = 0; k < ${#real[@]}; k++)); do
+        while [ "$(jobs -rp | wc -l)" -ge "${LAND_PIN_JOBS:-3}" ]; do wait -n || true; done
+        (set +e; train_pin "${real[$k]}") >"$pd/$k" 2>/dev/null &
+      done
+      wait || true
+      for ((k = 0; k < ${#real[@]}; k++)); do pins[${real[$k]}]=$(cat "$pd/$k" 2>/dev/null); done
+      rm -rf "${pd:?}"
+    fi
     for f in "${real[@]}"; do
-      pin=''
-      if [ -z "$burn_red" ]; then # a burn-in red names the file a ship added or changed itself (#1443): no run alone
-        say "suspects: running $f alone on the train's commits here to find the ship that turns it red"
-        pin=$(train_pin "$f")
-      fi
+      pin=${pins[$f]:-}
       if [ -n "$pin" ]; then
         hits=("$pin") sure[$pin]=1
       else
@@ -1908,24 +1920,39 @@ train_suspects() {
         [ -z "$burn_red" ] || for m in "${hits[@]}"; do sure[$m]=1; done
       fi
       if [ ${#hits[@]} = 0 ]; then
-        say "suspects: no ship on the train touched $f or what it imports, so the bisect looks for the ship"
-        return 1
+        open+=("$f")
+        continue
       fi
       for m in "${hits[@]}"; do sus[$m]+="${sus[$m]:+, }$f"; done
     done
-    if [ -n "${sus[0]:-}" ] && [ -z "${sure[0]:-}" ]; then
-      say "suspects: $branch itself is only a guess from the files for ${sus[0]}, and it can't wait off its own train, so the bisect looks for the ship"
-      return 1
-    fi
     line='' v=''
     for m in $(printf '%s\n' "${!sus[@]}" | sort -n); do
-      [ -z "${sure[$m]:-}" ] || continue
-      t=${train_br[$((m - 1))]} && [[ ! $t =~ ^ticket/([0-9]+)- ]] || t="#${BASH_REMATCH[1]}"
-      line+="${line:+, }$t" v+="${v:+, }${sus[$m]}"
+      [ -n "${sure[$m]:-}" ] || [ "$m" = 0 ] || line+="${line:+, }$(train_label "$m")" v+="${v:+, }${sus[$m]}"
     done
-    if [[ $line == *,* ]]; then # a green run without them all couldn't tell which one did it
-      say "suspects: the files name more than one ship ($line) for $(tr ' ' '\n' <<<"${v//, / }" | sort -u | paste -sd ' ' | sed 's/ /, /g'), tests perigee cannot fail alone, and a green run without them all could not tell which did it, so the bisect looks for the ship"
-      return 1
+    if [ ${#sure[@]} = 0 ]; then # nothing confirmed: the bisect, as before #1564
+      if [ ${#open[@]} -gt 0 ]; then
+        say "suspects: no ship on the train touched ${open[0]} or what it imports, so the bisect looks for the ship"
+        return 1
+      fi
+      if [ -n "${sus[0]:-}" ]; then
+        say "suspects: $branch itself is only a guess from the files for ${sus[0]}, and it can't wait off its own train, so the bisect looks for the ship"
+        return 1
+      fi
+      if [[ $line == *,* ]]; then # a green run without them all couldn't tell which one did it
+        say "suspects: the files name more than one ship ($line) for $(tr ' ' '\n' <<<"${v//, / }" | sort -u | paste -sd ' ' | sed 's/ /, /g'), tests perigee cannot fail alone, and a green run without them all could not tell which did it, so the bisect looks for the ship"
+        return 1
+      fi
+    elif { [ -n "${sus[0]:-}" ] && [ -z "${sure[0]:-}" ]; } || [[ $line == *,* ]]; then
+      # Confirmed causes, plus a guess that can't be held (the front, or more than one ship): the guessed files stay open.
+      for m in "${!sus[@]}"; do
+        [ -z "${sure[$m]:-}" ] || continue
+        for f in ${sus[$m]//,/ }; do [[ " ${open[*]} " == *" $f "* ]] || open+=("$f"); done
+        unset 'sus[$m]'
+      done
+    fi
+    if [ ${#open[@]} -gt 0 ]; then
+      say "suspects: no ship could be pinned on $(printf '%s\n' "${open[@]}" | paste -sd ' ' | sed 's/ /, /g'), so they stay on the train while the confirmed causes leave; if it is red on them again, the bisect looks for the ship"
+      unres+="${open[*]} "
     fi
     line='' sure_line='' held_line=''
     for m in $(printf '%s\n' "${!sus[@]}" | sort -n); do
@@ -1935,7 +1962,7 @@ train_suspects() {
     done
     say "suspects: $line: CI is red on the ship train ($ci_url) in those tests.${sure_line:+ Run alone here, they failed with $sure_line and passed on the train before it, so that is the cause: back to its minion with the failure.}${held_line:+ $held_line: perigee cannot fail those tests alone, so the files are only a guess: they wait off the train, and are refused only if it does better without them.} The next ships in line take their places"
     retro_log "ship train suspects · $label · $line${sure_line:+ · failed alone here: $sure_line} · $ci_url"
-    prev+="${real[*]} "
+    for f in "${real[@]}"; do [[ " ${open[*]} " == *" $f "* ]] || prev+="$f "; done
     keep=()
     for ((i = 0; i < ${#train_n[@]}; i++)); do
       v=${sus[$((i + 1))]:-}

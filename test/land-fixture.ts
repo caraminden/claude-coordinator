@@ -102,6 +102,8 @@ export const issued = (state: string) => (existsSync(join(state, 'queue', '.seq'
 // a commit with that file is red until a red run's log is read, then green (a train's flake-only red, #1346);
 // FAKE_STEPS: the run's full suite and rerun steps as land.sh asks at its CI limit (#1374), "<name><tab><status><tab><conclusion>" lines;
 // FAKE_BURN: the burn-in step as land.sh asks at its CI limit (#1443), "<status><tab><started_at><tab><completed_at>";
+// FAKE_REAL: "<test file>=<path> ...": a run is red when its commit has any of the paths, and its log names each such test file
+// a real failure (failed again alone), or with FAKE_LOG=burn a burn-in failure: a train with several bad ships (#1564);
 // FAKE_LOG=burn: a red's log is the burn-in's: test/real.test.ts failed 3 of 10 copies at once (with a quoted run-tests.sh line);
 // FAKE_CUT="<skip> <count>": of the finished runs GitHub lists, each commit and run id counted once in order, the <count>
 // after the first <skip> are red with a log cut off before any test failed (#1377); FAKE_LOG=hung: a red whose log is a
@@ -141,6 +143,7 @@ case "$*" in
     # (a commit GitHub hasn't got yet has no run)
     if [ -n "\${FAKE_RED_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_RED_PATH" 2>/dev/null && st=red || st=green; fi
     if [ -n "\${FAKE_RED_TEXT:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" grep -qF "\$FAKE_RED_TEXT" "$sha" 2>/dev/null && st=red || st=green; fi
+    if [ -n "\${FAKE_REAL:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; st=green; for e in \$FAKE_REAL; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && st=red; done; fi
     if [ -n "\${FAKE_FLAKY_PATH:-}" ]; then git -C "${hub}" cat-file -e "$sha^{commit}" 2>/dev/null || exit 0; git -C "${hub}" cat-file -e "$sha:\$FAKE_FLAKY_PATH" 2>/dev/null && [ ! -e "${calls}.flaky" ] && st=red; fi
     [ -z "\${FAKE_CI_GATE:-}" ] || [ -e "\$FAKE_CI_GATE" ] || st=running
     if [ "$lag" = 0 ] && [ "$n" -gt 0 ] && { [ -n "$(git -C "${hub}" for-each-ref --points-at "$sha" refs/heads/land/ 2>/dev/null)" ] || [ -z "\${FAKE_OLD_RUN:-}" ]; }; then
@@ -189,6 +192,17 @@ case "$*" in
       exit 0
     fi
     [ "$3" = 7 ] || [ -z "\${FAKE_LOG_RERUN:-}" ] || FAKE_LOG=\$FAKE_LOG_RERUN
+    if [ -n "\${FAKE_REAL:-}" ]; then # each test file whose path the run's commit has failed for real (#1564)
+      rl=''; for e in \$FAKE_REAL; do git -C "${hub}" cat-file -e "$sha:\${e#*=}" 2>/dev/null && rl="$rl \${e%%=*}"; done
+      echo "not ok 1 - the red test's output (run $3)"
+      if [ "\${FAKE_LOG:-}" = burn ]; then
+        for f in $rl; do printf '%b burn-in: %s: failed in 3 of 10 copies at once (copies 2 5 9), in 14 s\n' "$p" "$f"; done
+      else
+        printf '%b run-tests: %s test file(s) failed; rerunning each alone once to tell load from a real failure (the run fails either way; output in /tmp/tests-rerun.log)\n' "$p" "$(wc -w <<<"$rl")"
+        for f in $rl; do printf '%b run-tests: %s: failed again alone: a real failure\n' "$p" "$f"; done
+      fi
+      exit 0
+    fi
     if [ "\${FAKE_LOG:-}" = burn ]; then # the burn-in step's log: a land test burned in quotes run-tests.sh's lines
       printf '%b burn-in: test/real.test.ts, copy 2 of 10 (its output from the failing tests on):\n' "$p"
       echo "not ok 1 - the red test's output (run $3)"

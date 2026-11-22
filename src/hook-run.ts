@@ -157,7 +157,8 @@ export async function hookRun(stdin: string, cfg: HookRunConfig, softUntil = SOF
   return mergeResults(results);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// In a function, never awaited at the top level: a thread that loads this module would abort the process if it were terminated mid-start (test/worker-tla.test.ts).
+if (process.argv[1] === fileURLToPath(import.meta.url)) void (async () => {
   let stdin = '';
   try {
     stdin = readFileSync(0, 'utf8');
@@ -165,4 +166,4 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     // Read as no call: the hard checks then decide as they did on an unreadable call.
   }
   emit(await hookRun(stdin, JSON.parse(process.argv[2]) as HookRunConfig));
-}
+})();

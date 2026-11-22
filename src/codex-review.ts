@@ -446,7 +446,8 @@ function tail(s: string): string {
   return t ? `\n${t}` : '';
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// In a function, never awaited at the top level: a thread that loads this module would abort the process if it were terminated mid-start (test/worker-tla.test.ts).
+if (process.argv[1] === fileURLToPath(import.meta.url)) void (async () => {
   const args = process.argv.slice(2);
   const imgs = args.includes('--check') ? { paths: [] } : images(args, process.cwd());
   if ('error' in imgs) {
@@ -489,4 +490,4 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   (r.code ? process.stderr : process.stdout).write(r.text + '\n');
   if (r.usage) process.stderr.write(`Codex usage: ${r.usage}\n`);
   process.exit(r.code);
-}
+})();

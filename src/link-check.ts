@@ -256,11 +256,12 @@ export async function check(input: { stop_hook_active?: boolean; last_assistant_
   return { decision: 'block', reason: `${SENT_BACK}\n${links}${pages}${choice}${ask}${close}${wait}${wording}${scheme}${card}Write the reply again in full, or, if nothing above needs changing, answer with just ${KEEP}: your first reply then stands as written.` };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// In a function, never awaited at the top level: a thread that loads this module would abort the process if it were terminated mid-start (test/worker-tla.test.ts).
+if (process.argv[1] === fileURLToPath(import.meta.url)) void (async () => {
   try {
     const verdict = await check(JSON.parse(readFileSync(0, 'utf8')), JSON.parse(process.argv[2]));
     if (verdict) process.stdout.write(JSON.stringify(verdict));
   } catch {
     // A check that can't run never holds up the turn.
   }
-}
+})();

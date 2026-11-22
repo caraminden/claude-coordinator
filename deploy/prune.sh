@@ -67,7 +67,8 @@ if [[ $apply == 1 && $total -gt 0 ]]; then
     if ((t > 250000 && size > lo)); then size=$((size / 2)); elif ((t < 100000 && size < hi)); then size=$((size * 2)); fi
     sleep "$PAUSE"
   }
-  took() { awk -v w="$1" -v n=$n -v u=$longest -v e="$2" 'BEGIN { printf "%s in %d steps, the longest %.2f s%s\n", w, n, u / 1e6, e }'; n=0 longest=0; }
+  # Printed by bash itself: a line from a child as short-lived as awk lost its unit in the journal (#1480).
+  took() { printf '%s in %d steps, the longest %d.%02d s%s\n' "$1" $n $((longest / 1000000)) $((longest % 1000000 / 10000)) "$2"; n=0 longest=0; }
 
   # The rows, listed once (a read: no lock), deleted in batches of about `size` bytes of data and at most 1000 rows.
   # The closed check again in each: a minion reopened since the list keeps its state.

@@ -1866,14 +1866,14 @@ train_alone() {
   [ -e "$1/$3" ] || return 0
   (cd "$1" && timeout -k 10 "${LAND_PIN_LIMIT:-120}" nice -n 19 "$tools/citadel-node" --test --test-force-exit --test-timeout=60000 "$3") >>"$state/train-pin.log" 2>&1 9>&- 7>&- 6>&- </dev/null
 }
-# <test file>: the train member (0: this one, 1 on: its riders) that turns it red run alone here: it fails at the train's
-# top and passes on main, so the train's prefixes are bisected with that one file, and the answer is run once more on
-# each side (red with it, green just before it) so one load failure can't pin an innocent ship. Nothing when it passes
-# at the top here (a test only CI's machine fails), fails on main too, a step gives no answer, or the recheck disagrees:
-# the files decide then.
+# <test file> <scratch worktree>: the train member (0: this one, 1 on: its riders) that turns it red run alone here: it
+# fails at the train's top and passes on main, so the train's prefixes are bisected with that one file, and the answer
+# is run once more on each side (red with it, green just before it) so one load failure can't pin an innocent ship.
+# Nothing when it passes at the top here (a test only CI's machine fails), fails on main too, a step gives no answer, or
+# the recheck disagrees: the files decide then. The caller adds and removes the worktree, one at a time.
 train_pin() {
-  local f=$1 lo=-1 hi=${#train_n[@]} mid wt r=0 before
-  wt=$(mktemp -d "${TMPDIR:-/tmp}/land-pin.XXXXXX") && git worktree add -q --detach "$wt" "$tip" 2>/dev/null || return 0
+  local f=$1 wt=$2 lo=-1 hi=${#train_n[@]} mid r=0 before
+  [ -n "$wt" ] || return 0
   train_alone "$wt" "$tip" "$f" || r=$?
   if [ "$r" = 1 ]; then
     r=0
@@ -1889,7 +1889,6 @@ train_pin() {
       if [ "$r" = 1 ]; then r=0 && train_alone "$wt" "$before" "$f" && echo "$hi"; fi
     fi
   fi
-  git worktree remove --force "$wt" >/dev/null 2>&1 || true
 }
 # Every file the full run failed in $failed, whatever its rerun showed (a held ship's test not rerun is no pass).
 train_failing() {
@@ -1931,7 +1930,7 @@ train_release() {
 # bisect while other files have confirmed causes. Those leave now, the open file rides on, and only a red again on it
 # brings the bisect. With no confirmed cause, an open file sends the train to the bisect as before.
 train_suspects() {
-  local round prev=' ' unres=' ' f m i k t v kind line sure_line held_line pin pd real=() hits=() keep=() was=() chg=() open=() rules_say=1
+  local round prev=' ' unres=' ' f m i k t v kind line sure_line held_line pin pd real=() wts=() hits=() keep=() was=() chg=() open=() rules_say=1
   local -A sus=() sure=() pins=()
   for ((round = 1; round <= 3; round++)); do
     mapfile -t real < <(train_real) || true
@@ -1950,13 +1949,20 @@ train_suspects() {
     if [ -z "$burn_red" ]; then # a burn-in red names the file a ship added or changed itself (#1443): no run alone
       say "suspects: running ${real[*]} alone on the train's commits here, ${LAND_PIN_JOBS:-3} at a time, to find the ship that turns each red"
       : >"$state/train-pin.log"
-      pd=$(mktemp -d "${TMPDIR:-/tmp}/land-pins.XXXXXX")
+      pd=$(mktemp -d "${TMPDIR:-/tmp}/land-pins.XXXXXX") wts=()
+      # The worktrees are added here, one at a time, not in the jobs: git's admin files don't take parallel adds.
+      for ((k = 0; k < ${#real[@]}; k++)); do
+        wts[$k]=$(mktemp -d "${TMPDIR:-/tmp}/land-pin.XXXXXX") && git worktree add -q --detach "${wts[$k]}" "$tip" 2>/dev/null || { rmdir "${wts[$k]}" 2>/dev/null; wts[$k]=''; }
+      done
       for ((k = 0; k < ${#real[@]}; k++)); do
         while [ "$(jobs -rp | wc -l)" -ge "${LAND_PIN_JOBS:-3}" ]; do wait -n || true; done
-        (set +e; train_pin "${real[$k]}") >"$pd/$k" 2>/dev/null &
+        (set +e; train_pin "${real[$k]}" "${wts[$k]}") >"$pd/$k" 2>/dev/null &
       done
       wait || true
-      for ((k = 0; k < ${#real[@]}; k++)); do pins[${real[$k]}]=$(cat "$pd/$k" 2>/dev/null); done
+      for ((k = 0; k < ${#real[@]}; k++)); do
+        pins[${real[$k]}]=$(cat "$pd/$k" 2>/dev/null)
+        [ -z "${wts[$k]}" ] || git worktree remove --force "${wts[$k]}" >/dev/null 2>&1 || true
+      done
       rm -rf "${pd:?}"
     fi
     for f in "${real[@]}"; do

@@ -12,6 +12,7 @@ import { after, before, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { hashPassword } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
+import { Secrets } from '../src/secrets.ts';
 import { looksSecret } from '../public/secret-check.js';
 import { agentToken, bootServer, jsonLines, PASSWORD, SECRET, stopProcs, stopTurns, until, type Booted } from './helpers.ts';
 
@@ -224,6 +225,32 @@ test('people list, replace and delete their own secrets; a scheme\'s are its mem
   assert.deepEqual((await ok('/api/secrets')).person, []);
   assert.equal((await call('/api/secrets', { method: 'DELETE', body: { scope: 'person', name: 'SITE_PW' } })).status, 404);
   await ok('/api/secrets', { method: 'PUT', body: { scope: 'person', name: 'SITE_PW', value: VALUE } });
+});
+
+test('one secret name saved by two people, or for two schemes, stays each owner\'s: reads and deletes never cross', () => {
+  // Its own database, so the server's rows don't mix in.
+  const own = new Store(join(root, 'owners.db'));
+  const secrets = new Secrets(own, SECRET);
+  const a = own.createUser({ name: 'Ann', login: 'ann' });
+  const b = own.createUser({ name: 'Bo', login: 'bo' });
+  for (const [scope, x, y] of [['person', a.id, b.id], ['scheme', 1001, 1002]] as const) {
+    // x saves first, so a lookup that ignores the owner finds x's row for y.
+    secrets.put(scope, x, 'SHARED_NAME', 'x-value-1', null);
+    secrets.put(scope, y, 'SHARED_NAME', 'y-value-2', null);
+    assert.equal(secrets.get(scope, x, 'SHARED_NAME'), 'x-value-1', `${scope}: first owner reads their own`);
+    assert.equal(secrets.get(scope, y, 'SHARED_NAME'), 'y-value-2', `${scope}: second owner reads their own`);
+    // y deleting theirs leaves x's.
+    assert.equal(secrets.remove(scope, y, 'SHARED_NAME'), true);
+    assert.equal(secrets.get(scope, y, 'SHARED_NAME'), null);
+    assert.equal(secrets.get(scope, x, 'SHARED_NAME'), 'x-value-1', `${scope}: deleting one owner's secret deleted the other's`);
+    assert.deepEqual(secrets.list(scope, x).map((s) => s.name), ['SHARED_NAME']);
+  }
+  // A person's and a scheme's with the same owner id and name are separate rows too.
+  secrets.put('scheme', a.id, 'SHARED_NAME', 'scheme-value', null);
+  assert.equal(secrets.get('person', a.id, 'SHARED_NAME'), 'x-value-1');
+  assert.equal(secrets.remove('scheme', a.id, 'SHARED_NAME'), true);
+  assert.equal(secrets.get('person', a.id, 'SHARED_NAME'), 'x-value-1');
+  own.close();
 });
 
 test('a contraption reads a secret by name for one of its people: theirs first, then its home scheme\'s', async () => {

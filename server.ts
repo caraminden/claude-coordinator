@@ -217,13 +217,13 @@ async function loadAssets() {
   assets.set('theme.css', Buffer.from(themeCss(assets.get('style.css')!.toString('utf8'))));
   // Built before anything is swapped, so a bad manifest leaves the old front end whole.
   const dark = darkManifest(assets);
-  ASSETS = assets;
-  ASSET_VERSION = createHash('sha256').update([...assets.values()].join('\0')).digest('hex').slice(0, 12);
+  const version = createHash('sha256').update([...assets.values()].join('\0')).digest('hex').slice(0, 12);
   // The page knows its own version (#1144): one the service worker kept from before a ship reloads into the new one.
-  assets.set('index.html', Buffer.from(assets.get('index.html')!.toString('utf8').replace('%ASSET_VERSION%', ASSET_VERSION)));
+  assets.set('index.html', Buffer.from(assets.get('index.html')!.toString('utf8').replace('%ASSET_VERSION%', version)));
   const hashes = new Map([...assets].map(([name, body]) => [name, createHash('sha256').update(body).digest('hex').slice(0, 16)]));
-  ASSET_HASHES = hashes;
-  STATICS = await staticTable(assets, ASSET_VERSION, hashes, dark);
+  const statics = await staticTable(assets, version, hashes, dark);
+  // Swapped together after the last await: SIGHUP's caller sets liveCommit in the same tick, so /api/health never pairs the new version with the old commit (#1628).
+  ASSETS = assets; ASSET_VERSION = version; ASSET_HASHES = hashes; STATICS = statics;
   throughFront?.statics(STATICS);
 }
 // The commit this server's code came from, so a deploy can tell whether the change it ships is

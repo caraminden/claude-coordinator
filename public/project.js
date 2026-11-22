@@ -18,7 +18,7 @@ import { preparePropFilter, renderSettingsCount } from './properties.js';
 import { renderCost } from './cost.js';
 import * as where from './where.js';
 import * as skills from './skills.js';
-import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox, takeItems } from './inbox.js';
+import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox, stripWaits, takeItems } from './inbox.js';
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { openSchedule, schedulesPage, schedulesPane } from './schedules.js';
 import { replaceHash } from './navstack.js';
@@ -174,33 +174,36 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   const last = main.kind === 'chat' ? schemeCache.get(projectId) : null;
   const stale = last && (main.number == null || last.tickets.some((t) => t.number === main.number)) ? last : null;
   // The chat's history starts with the scheme when its id is known already: a link's, or the Taskmaster's from the
-  // scheme list (#538), so a switch takes one round trip, not two. A wrong guess is dropped below.
-  const early = main.kind !== 'chat' ? null : main.id ?? (main.number == null ? view?.projects?.find((p) => p.id === projectId)?.coordinator_id : null);
-  const earlyCached = early ? cachedEvents(early) : null;
-  const earlyPage = early && !earlyCached ? loadEvents(early).catch(() => null) : null;
-  // The scheme list is redrawn behind on a switch (refreshSchemes below); only a first load waits for it, for the shelf.
+  // scheme list (#538), so a switch takes one round trip, not two. A link by number asks for that one minion beside the
+  // list, so its history doesn't wait for the list either (#1533). A wrong guess is dropped below.
+  const earlyId = main.kind !== 'chat' ? null : main.id ?? (main.number == null ? view?.projects?.find((p) => p.id === projectId)?.coordinator_id : null);
+  const numbered = !stale && !earlyId && main.kind === 'chat' && main.number != null
+    ? api(`api/projects/${projectId}?number=${main.number}`).then((r) => r.tickets?.[0] ?? null, () => null) : null;
+  const early = (async () => {
+    const id = earlyId ?? (await numbered)?.id;
+    if (!id) return null;
+    const cached = cachedEvents(id);
+    return { id, cached, page: cached ? null : loadEvents(id).catch(() => null) };
+  })();
+  // The list draws as soon as its own answer comes (#1533): requests sent with it queue on the server's one thread and hold
+  // it back, so a chat or Home asks for the files, machines and scheme list after its first paint. The Needs-you strip and
+  // the Filters button still come with that paint (#989), from what this tab saw of the scheme, or the shut strip's line
+  // holding its place; only a first sight of the filter or an opened strip waits, beside the list (both are small).
+  const later = main.kind === 'chat' || main.kind === 'home';
   const known = view?.projects?.length ? view.projects : null;
-  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, artifacts, shared, projects, machines, items] = stale
-    ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes, build_previews: stale.buildPreviews }, stale.artifacts, stale.shared, known, stale.machines]
-    : await Promise.all([
+  const filter = preparePropFilter(projectId);
+  const firstItems = !stale && stripWaits(projectId) ? fetchInbox(projectId) : null;
+  const files = stale || later ? null : shelfFiles(projectId);
+  const [{ project, coordinator, taskmasters, tickets: open, dismissed, seen, person_notes, pins, builds, build_previews }, items] = stale
+    ? [{ ...stale, dismissed: 0, person_notes: stale.personNotes, build_previews: stale.buildPreviews }, null]
     // The dismissed minions stay on the server until the Dismissed list is opened, searched or linked to: most of a big scheme's payload (#538), 8,000 elements.
-    api(`api/projects/${projectId}?tickets=open`),
-    // An empty shelf beats a broken page if the server is older than this front end.
-    api(`api/projects/${projectId}/artifacts`).catch(() => []),
-    api(`api/projects/${projectId}/shared`).catch(() => []),
-    // A failed fetch keeps the list already shown and tries again below, rather than blanking it (#491).
-    known ?? api('api/projects').catch(() => null),
-    // Each person's own machines; an admin's list has every machine (#306).
-    api('api/machines').catch(() => []),
-    // The Needs-you strip and the Filters button come with the first paint, not after it: they'd push the list down (#989).
-    fetchInbox(projectId),
-    preparePropFilter(projectId),
-  ]);
-  if (stale) preparePropFilter(projectId);
+    : await Promise.all([api(`api/projects/${projectId}?tickets=open`), firstItems, filter]);
+  const [artifacts, shared, machines] = stale ? [stale.artifacts, stale.shared, stale.machines] : files ? await files : [[], [], []];
   let tickets = open;
   // A link to a dismissed minion fetches that one minion; any other open draws without it.
   const findClosed = main.kind === 'chat' && main.number != null && dismissed && !open.some((t) => t.number === main.number);
-  if (findClosed) tickets = open.concat((await api(`api/projects/${projectId}?tickets=closed&number=${main.number}`)).tickets);
+  const found = numbered && await numbered;
+  if (findClosed) tickets = open.concat(found?.status === 'closed' ? [found] : (await api(`api/projects/${projectId}?tickets=closed&number=${main.number}`)).tickets);
   let chatId = null;
   if (main.kind === 'chat') {
     chatId = main.id ?? (main.number == null ? coordinator.id : tickets.find((t) => t.number === main.number)?.id);
@@ -215,9 +218,10 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   // Your Taskmaster in a scheme with several (#919) opens as Mine or Everyone, merged across them (#920).
   const merged = chatId === coordinator.id ? mergedView(projectId, chatId, taskmasters, tmViewMode()) : null;
   const src = merged?.src ?? chatId;
-  const guessed = chatId && chatId === early && !merged;
-  const cached = guessed ? earlyCached : chatId ? cachedEvents(src) : null;
-  const page = cached ?? (guessed ? await earlyPage : null) ?? (chatId ? await loadEvents(src) : null);
+  const head = await early;
+  const guessed = chatId && chatId === head?.id && !merged;
+  const cached = guessed ? head.cached : chatId ? cachedEvents(src) : null;
+  const page = cached ?? (guessed ? await head.page : null) ?? (chatId ? await loadEvents(src) : null);
   if (seq !== routeSeq) return; // overtaken by another click while loading
   forgetOtherSchemes();
   // Coming to Home from elsewhere is a new visit: its rows start afresh.
@@ -231,7 +235,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     pins: pins ?? [], // ticket ids you pinned, oldest pin first (#179)
     builds: builds ?? [], // build branches' headers: { build, merged, open, behind } (src/builds.ts)
     buildPreviews: !!build_previews, // this server runs the scheme's code, so each build branch has a preview (src/previews.ts)
-    artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects: projects ?? view?.projects ?? [],
+    artifacts, shared, artifactId: main.artifact?.id ?? null, machines, projects: known ?? view?.projects ?? [],
     file: main.file ?? null,
     ...chatView(chatId, ticket, merged),
   });
@@ -319,8 +323,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   renderSidebar();
   renderGithubStrip();
   renderSchemesShelf();
-  if (!projects || known) refreshSchemes();
+  refreshSchemes();
   if (stale) refreshScheme(projectId);
+  else if (later) fillShelf(projectId);
   renderHiddenNote();
   // A fresh open fetched the items with the list: draw those rather than ask again (#1528).
   if (items) takeItems(projectId, items);
@@ -333,6 +338,22 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
   if (!chatId) return window.scrollTo(0, 0);
   revealActiveRow();
   await mountChat(chatId, ticket, page, !!cached);
+}
+
+/** A scheme's artifacts and shared files, and your machines (an admin's: every one, #306). An empty shelf beats a broken page if the server is older than this front end. */
+const shelfFiles = (projectId) => Promise.all([
+  api(`api/projects/${projectId}/artifacts`).catch(() => []),
+  api(`api/projects/${projectId}/shared`).catch(() => []),
+  api('api/machines').catch(() => []),
+]);
+
+/** A chat's or Home's first paint left the files and machines till after (#1533): fill them in, unless the page has moved on. */
+async function fillShelf(projectId) {
+  const list = view.tickets;
+  const [artifacts, shared, machines] = await shelfFiles(projectId);
+  if (view?.kind !== 'project' || view.tickets !== list) return;
+  view.machines = machines; // only the Machines page draws them, and it isn't one of these
+  setArtifacts(artifacts, shared);
 }
 
 // The schemes you've left this session, each as you left it, most recent last (#538).

@@ -78,7 +78,13 @@ export function takeItems(projectId, items) {
   else renderInbox();
 }
 
-/** A scheme's items, kept for its next first paint; null when the fetch failed. Showing a scheme waits on this (project.js). */
+/**
+ * Whether a scheme's first paint waits for its items (#1533): a scheme seen before draws its last, and a shut strip is one line
+ * whatever the items are, so it holds its place while they come. Only an opened strip, whose rows push the list down, waits.
+ */
+export const stripWaits = (projectId) => !inboxSeen.has(projectId) && stripOpen();
+
+/** A scheme's items, kept for its next first paint; null when the fetch failed. */
 export async function fetchInbox(projectId) {
   const { items } = await api(`api/projects/${projectId}/inbox`).catch(() => ({ items: null }));
   if (items) inboxSeen.set(projectId, items);
@@ -220,7 +226,7 @@ export function renderInbox() {
   if (view?.kind !== 'project' || heldWhilePressed(renderInbox)) return;
   if (inbox.projectId !== view.projectId) {
     const seen = inboxSeen.get(view.projectId);
-    if (!seen) return;
+    if (!seen) return holdStrip();
     Object.assign(inbox, { projectId: view.projectId, items: seen });
   }
   mentions.clear();
@@ -256,8 +262,7 @@ export function renderInbox() {
     const empty = h('div', { class: 'inbox-toggle inbox-empty' }, `Nothing needs you${working ? ` · ${working} working` : ''}`);
     return strip.replaceChildren(empty);
   }
-  let open = false;
-  try { open = localStorage.getItem(OPEN_KEY) === '1'; } catch {}
+  const open = stripOpen();
   // A minion's items share its row, in the order of its most urgent one. A card addressed to you is a row like the rest,
   // linking to it in its chat (Cara, 2026-11-14: "It should just link to the chat that has the card like it used to").
   const rows = new Map();
@@ -284,6 +289,20 @@ export function renderInbox() {
   else strip.append(toggle);
   if (open && list.parentNode !== strip) strip.append(list);
   else if (!open) list.remove();
+}
+
+/** The strip as you last left it: opened (its rows showing) or shut. */
+function stripOpen() {
+  try { return localStorage.getItem(OPEN_KEY) === '1'; } catch { return false; }
+}
+
+/** A scheme whose items haven't come yet: the shut strip's one line, so nothing below moves when they do (#1533). */
+function holdStrip() {
+  const strip = inboxStrip();
+  strip.hidden = false;
+  strip.classList.remove('open');
+  list?.remove();
+  strip.replaceChildren(h('div', { class: 'inbox-toggle inbox-empty', 'aria-busy': 'true' }, 'Needs you…'));
 }
 
 /**

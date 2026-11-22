@@ -3,15 +3,18 @@
 // read-only connection with the real router, Auth and access checks; everything else is piped as it is (bodies,
 // live streams, websocket upgrades) to the main thread, which listens on a local socket. This file loads no app code
 // and reads no database, so nothing here can block. Design: the shared folder's specs/reader-threads.md.
-import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+import { Worker, isMainThread, parentPort, receiveMessageOnPort, workerData } from 'node:worker_threads';
 import { Agent, createServer, request, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect, Server as NetServer, type Socket } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-/** The paths readers answer, with or without the front end's /c prefix: a minion's history pages and single events, and memory search. */
-export const READER_PATHS = /^\/(?:c\/)?api\/(?:tickets\/\d+\/events(?:\/\d+)?|projects\/\d+\/memory)$/;
+/**
+ * The paths readers answer, with or without the front end's /c prefix: a minion's history pages and single events,
+ * memory search (#1563), and a scheme's minions list, a minion's own page and the Status page (#1590).
+ */
+export const READER_PATHS = /^\/(?:c\/)?api\/(?:tickets\/\d+(?:\/events(?:\/\d+)?)?|projects\/\d+(?:\/memory)?|status)$/;
 /** Headers the front thread sets on every request it passes to the main thread; a client's own copies are dropped. */
 export const PEER_HEADER = 'x-citadel-peer';
 export const LOCAL_HEADER = 'x-citadel-local';
@@ -39,6 +42,23 @@ export function appHost(req: IncomingMessage, domain: string | null): string | n
  */
 export const upgrades = (req: IncomingMessage, appsDomain: string | null) => (req.url ?? '').startsWith('/apps/') || appHost(req, appsDomain) !== null;
 
+/**
+ * What readers build pages from that lives in the main thread's memory, not the database (#1590): each minion's
+ * Runner.live(), the Status page's inputs (src/reader.ts statusPage), each scheme's build headers and Citadel's own
+ * scheme. Main posts what changed (publish); the front thread keeps the whole and passes each change on to the readers.
+ * `ready`: main has posted every minion once, so a minion missing from `live` is new and its page is main's to answer.
+ */
+export type Snapshot = { ready: boolean; live: Record<number, unknown>; status: Record<string, any> | null; builds: Record<number, unknown>; ownScheme: number | null };
+export type SnapDelta = { ready?: true; live?: Record<number, unknown>; status?: Record<string, unknown>; builds?: Record<number, unknown>; ownScheme?: number | null };
+export const emptySnapshot = (): Snapshot => ({ ready: false, live: {}, status: null, builds: {}, ownScheme: null });
+export function applySnap(s: Snapshot, d: SnapDelta) {
+  if (d.ready) s.ready = true;
+  if (d.live) Object.assign(s.live, d.live);
+  if (d.status) s.status = d.status;
+  if (d.builds) Object.assign(s.builds, d.builds);
+  if (d.ownScheme !== undefined) s.ownScheme = d.ownScheme;
+}
+
 type Answer = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
 export type FrontOptions = {
   /** systemd's socket, fd 3, or else this host and port (0: any free one). */
@@ -64,6 +84,7 @@ export function socketBase(env = process.env, tmp = tmpdir()) {
  * the real one. `onListening` gets the port the front thread bound. `onUsage`/`onSetting` take the counts and cache
  * writes readers post (the main thread and its writer do every write). The process exits if the front thread dies.
  * `stop()`, for a restart, resolves once the front thread has let go of the port and answered what it took.
+ * `publish()` posts a change to the readers' snapshot (Snapshot).
  */
 export function listenThroughFront(server: Server, opts: FrontOptions, on: { listening: (port: number) => void; usage: (args: unknown[]) => void; setting: (key: string, value: unknown) => void }) {
   // A private folder (0700) for the socket: only this account can reach it, so only the front thread sets the peer header.
@@ -74,10 +95,20 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
   let front: Worker | null = null;
   let stopped!: () => void;
   const drained = new Promise<void>((r) => (stopped = r));
+  // How many snapshot changes main has posted: the front thread reads what it hasn't applied yet before it asks a reader,
+  // so a reader never answers from older state than main had when the request came (a person's own click included).
+  const posted = new Int32Array(new SharedArrayBuffer(4));
+  let early: SnapDelta[] | null = [];
+  const post = (d: SnapDelta) => {
+    front!.postMessage({ snap: d });
+    Atomics.add(posted, 0, 1);
+  };
   // The front thread's pooled connections stay open until it closes them, so a reused one is never closed under a request.
   server.keepAliveTimeout = 0;
   server.listen(sock, () => {
-    front = new Worker(new URL(import.meta.url), { workerData: { front: { ...opts, sock } } });
+    front = new Worker(new URL(import.meta.url), { workerData: { front: { ...opts, sock, posted } } });
+    for (const d of early!) post(d);
+    early = null;
     front.on('message', (m: { listening?: number; usage?: unknown[][]; setting?: [string, unknown]; stopped?: true }) => {
       if (m.stopped) stopped();
       if (m.listening !== undefined) on.listening(m.listening);
@@ -104,15 +135,19 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
     release() {
       front?.postMessage('release');
     },
+    publish(d: SnapDelta) {
+      if (early) early.push(d);
+      else post(d);
+    },
   };
 }
 
-if (!isMainThread && workerData?.front) runFront(workerData.front as FrontOptions & { sock: string });
+if (!isMainThread && workerData?.front) runFront(workerData.front as FrontOptions & { sock: string; posted: Int32Array });
 
 /** Bodies up to this size are read whole before going to the main thread (pass, in runFront). */
 const SMALL_BODY = 1024 * 1024;
 
-function runFront(opts: FrontOptions & { sock: string }) {
+function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   const toMain = new Agent({ keepAlive: true });
   const answerMs = opts.answerMs ?? READER_ANSWER_MS, stuckMs = opts.stuckMs ?? READER_STUCK_MS;
 
@@ -162,6 +197,10 @@ function runFront(opts: FrontOptions & { sock: string }) {
     }
   };
 
+  // The readers' snapshot (Snapshot), whole for a reader that starts, and each change main posts passed on in order.
+  const snap = emptySnapshot();
+  let applied = 0;
+
   // Readers: started here, so their answers never wait on the main thread.
   // late: it missed an answer's deadline and gets no more requests until it posts something again.
   type Reader = { worker: Worker; ready: boolean; late: boolean; heard: number; open: Map<number, (a: Answer | null) => void> };
@@ -170,7 +209,7 @@ function runFront(opts: FrontOptions & { sock: string }) {
   let failures = 0;
   let stopping = false;
   const startReader = (again = false) => {
-    const r: Reader = { worker: new Worker(new URL('./reader.ts', import.meta.url), { workerData: { reader: opts.reader } }), ready: false, late: false, heard: Date.now(), open: new Map() };
+    const r: Reader = { worker: new Worker(new URL('./reader.ts', import.meta.url), { workerData: { reader: opts.reader, snap } }), ready: false, late: false, heard: Date.now(), open: new Map() };
     readers.add(r);
     const started = Date.now();
     r.worker.on('message', (m: { ready?: true; alive?: true; id?: number; answer?: Answer | null; usage?: unknown[][]; setting?: [string, unknown] }) => {
@@ -212,6 +251,9 @@ function runFront(opts: FrontOptions & { sock: string }) {
     && READER_PATHS.test((req.url ?? '').split('?')[0]);
 
   const ask = (req: IncomingMessage, res: ServerResponse) => {
+    // Every change main posted before this request is applied first, and so reaches the reader before the request does.
+    for (let m; Atomics.load(opts.posted, 0) !== applied && (m = receiveMessageOnPort(parentPort!));) fromMain(m.message);
+    if (Atomics.load(opts.posted, 0) !== applied) return pass(req, res);
     let best: Reader | null = null;
     for (const r of readers) if (r.ready && !r.late && r.heard !== Infinity && (!best || r.open.size < best.open.size)) best = r;
     if (!best) return pass(req, res);
@@ -257,14 +299,19 @@ function runFront(opts: FrontOptions & { sock: string }) {
   if (opts.fd !== undefined) front.listen({ fd: opts.fd }, listening);
   else front.listen(opts.port ?? 0, opts.host, listening);
 
-  parentPort!.on('message', (m) => {
+  function fromMain(m: 'stop' | 'release' | { snap: SnapDelta }) {
     if (m === 'release') {
       // net's close, not http's, which would also close an idle connection whose request isn't read yet (ECONNRESET).
       released = true;
       NetServer.prototype.close.call(front);
       return;
     }
-    if (m !== 'stop') return;
+    if (m !== 'stop') {
+      applySnap(snap, m.snap);
+      applied++;
+      for (const r of readers) r.worker.postMessage(m);
+      return;
+    }
     // New connections wait in systemd's socket for the next server; open ones finish what they asked, readers' and
     // the main thread's alike (it keeps listening until told this is done), then the main thread exits.
     stopping = true;
@@ -274,5 +321,6 @@ function runFront(opts: FrontOptions & { sock: string }) {
     });
     front.closeIdleConnections();
     setInterval(() => front.closeIdleConnections(), 50).unref();
-  });
+  }
+  parentPort!.on('message', fromMain);
 }

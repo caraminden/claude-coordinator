@@ -195,6 +195,9 @@ export interface StatusDeps {
   cache?: (now: number) => Promise<import('./cache-health.ts').CacheReading>;
   /** The database warmer's last pass (#1560, src/db-warmer.ts); null with no warmer. */
   warm?: () => { ms: number; mb: number; backoffs: number } | null;
+  /** A reader thread's (#1590, src/reader.ts): the units' rows and the periodic jobs as the main thread last read them. */
+  unitsNow?: () => UnitState[] | null;
+  jobs?: () => JobRow[];
 }
 
 /** One tile as a person saw it when they pressed Investigate (#1273): what the Taskmaster is sent. */
@@ -379,7 +382,8 @@ export class StatusPage {
   }
 
   /** The units' states; [] where they aren't read (a preview, a test), null when the read failed. */
-  private async unitRows(apps: ContraptionRow[]): Promise<UnitState[] | null> {
+  async unitRows(apps: ContraptionRow[]): Promise<UnitState[] | null> {
+    if (this.deps.unitsNow) return this.deps.unitsNow();
     const now = this.now();
     if (this.units && now - this.units.at < 60_000 && now >= this.units.at) return this.units.rows;
     const names = [...CITADEL_UNITS, ...apps.map((a) => `citadel-app-${a.name}.service`)];
@@ -552,7 +556,7 @@ export class StatusPage {
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
       ciVisible,
       // Every periodic job (#1311), for those who see Citadel's scheme.
-      jobs: ciVisible ? jobList(now) : [],
+      jobs: ciVisible ? jobList(now, this.deps.jobs?.()) : [],
       checks: standingStatus(this.deps.store, (id) => viewer.canSee(id), ciVisible),
       ships: { counts: days.map((d) => ships[d]), median: days.map((d) => median(shipTimes[d])), last: lastShip ? { at: lastShip.live_at!, version: lastShip.version.slice(0, 8), changes: ciVisible ? shipChanges(lastShip) : [] } : null },
       ci,

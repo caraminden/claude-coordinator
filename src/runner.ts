@@ -860,6 +860,11 @@ export class Runner {
     return this.turns.size;
   }
 
+  /** The minions whose turns are running now (src/reader-live.ts: what they last did changes with no broadcast). */
+  runningIds(): number[] {
+    return [...this.turns.keys()];
+  }
+
   isRunning(ticketId: number): boolean {
     return this.turns.has(ticketId);
   }
@@ -976,29 +981,23 @@ export class Runner {
     });
   }
 
-  /** A ticket as the API shows it: plus queued messages and its task-list steps. */
-  view(ticket: Ticket, list?: { once: <T>(key: string, read: () => T) => T; properties: Record<string, string | number | string[]> }) {
-    const once = list?.once ?? (<T>(_key: string, read: () => T) => read());
-    const project = once(`project:${ticket.project_id}`, () => this.store.getProject(ticket.project_id));
-    const limit = once(LIMIT_RESUMES, () => this.resumes.limit.all()).find((w) => w.ticket === ticket.id) ?? null;
+  /**
+   * What view() reads from this thread's memory and the server's hooks, not the database (#1590): the one list of
+   * them. The server posts each minion's copy to the reader threads (onLive, src/reader-live.ts), and a reader's
+   * view() runs on that copy, so a field added here reaches the readers by itself; one read from memory anywhere
+   * else in view() makes a reader's view throw, which sends the request to the main thread.
+   */
+  live(ticket: Ticket, ratio?: number) {
     const closed = ticket.status === 'closed';
+    ratio ??= closed ? 1 : this.stepRatio(ticket.project_id);
     // A dismissed minion's row shows no steps, so its task list isn't rebuilt from its whole history for a
     // scheme's list: after a restart that read every dismissed minion's events, 16 s for 500 of them (#527).
     const p = closed ? null : this.progressFor(ticket.id);
     const { total, done } = p ? stepInfo(p) : { total: 0, done: 0 };
-    // What steps took against their guesses (#571), which both bars scale the guesses by.
-    const ratio = closed ? 1 : once(`ratio:${ticket.project_id}`, () => this.stepRatio(ticket.project_id));
     // The running step's start and guessed seconds, so the list row's bar fills as the chat head's does (#573).
     const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
-    const cards = closed ? [] : this.store.openCardsOf(ticket.id);
-    // Who is still in the scheme and their names, read once per list (#1449).
-    const props = list?.properties ?? this.store.props.forTarget('minion', ticket.id);
-    const user = (id: number) => once(`user:${id}`, () => this.store.getUser(id));
-    const hears = (id: number, pid: number) => once(`hears:${id}:${pid}`, () => this.store.hearsScheme(id, pid, user(id)));
-    const nameOf = (id: number | null) => id == null ? null : user(id)?.name ?? null;
     return {
-      // A wait's held messages stay in the queue (src/minion-queue.ts): they go into its resume.
-      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id), held_ids: this.queue.heldMail(ticket.id).flatMap((m) => m.id ?? []), queued_ids: this.queue.msgs(ticket.id).flatMap((m) => m.id ?? []), steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
+      steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
       // The plan's segmented track for the list row (#630): each step's guess and whether it's done, underway or not started.
       step_track: total ? planTrack(p!) : null, closing: this.closing.has(ticket.id),
       // When the running turn started, so the page's timer needn't wait for the turn's first event.
@@ -1007,6 +1006,48 @@ export class Runner {
       activity: this.activityOf(ticket.id),
       // The running turn's unanswered spend alert (#723), for the list row's badge.
       spend_alert: this.spendAlert(ticket),
+      approvals: this.approvals.waiting(ticket.id),
+      // Its approval cards waiting on people, which open_cards lists among its stored cards.
+      asks: closed ? [] : this.approvals.pending().filter((a) => a.ticketId === ticket.id).map(({ at, card }) => ({ at, card })),
+      // Sealed on start_after: what it waits for, for Start now.
+      parked_for: this.heldFor(ticket.id),
+      held_brief: closed ? null : this.heldBrief(ticket.id),
+      // What wakes it by itself (start_after, wake_when_live, runners back): the list shows such a sealed minion as Waiting, not Sealed.
+      wakes_on: ticket.state === 'parked' ? this.wakesOn(ticket.id) : null,
+      // Everything it waits for, timed or on an event, for the list row's chip (ADR 0021 step 7).
+      outbox_waits: closed ? [] : this.outboxWaits(ticket),
+      ship: this.ship(ticket.id),
+      wait: closed ? null : this.wait(ticket.id),
+      // The server working for it while its own turn has ended (#727): the list and chat show it as working.
+      server_work: closed ? null : this.serverWork(ticket.id),
+      // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
+      context_live: this.turns.has(ticket.id) ? this.contextSizes.get(ticket.id) ?? null : null,
+    };
+  }
+
+  /** Each view's live() on the main thread, for the readers' copy (src/reader-live.ts). */
+  onLive: (ticketId: number, live: ReturnType<Runner['live']>) => void = () => {};
+
+  /** A ticket as the API shows it: plus queued messages and its task-list steps. */
+  view(ticket: Ticket, list?: { once: <T>(key: string, read: () => T) => T; properties: Record<string, string | number | string[]> }) {
+    const once = list?.once ?? (<T>(_key: string, read: () => T) => read());
+    const project = once(`project:${ticket.project_id}`, () => this.store.getProject(ticket.project_id));
+    const limit = once(LIMIT_RESUMES, () => this.resumes.limit.all()).find((w) => w.ticket === ticket.id) ?? null;
+    const closed = ticket.status === 'closed';
+    // What steps took against their guesses (#571), which both bars scale the guesses by.
+    const ratio = closed ? 1 : once(`ratio:${ticket.project_id}`, () => this.stepRatio(ticket.project_id));
+    const live = this.live(ticket, ratio);
+    this.onLive(ticket.id, live);
+    const { asks, ...shown } = live;
+    const cards = closed ? [] : this.store.openCardsOf(ticket.id);
+    // Who is still in the scheme and their names, read once per list (#1449).
+    const props = list?.properties ?? this.store.props.forTarget('minion', ticket.id);
+    const user = (id: number) => once(`user:${id}`, () => this.store.getUser(id));
+    const hears = (id: number, pid: number) => once(`hears:${id}:${pid}`, () => this.store.hearsScheme(id, pid, user(id)));
+    const nameOf = (id: number | null) => id == null ? null : user(id)?.name ?? null;
+    return {
+      // A wait's held messages stay in the queue (src/minion-queue.ts): they go into its resume.
+      ...ticket, replies: ticket.replies ? JSON.parse(ticket.replies) as string[] : [], queued: this.queued(ticket.id), held_ids: this.queue.heldMail(ticket.id).flatMap((m) => m.id ?? []), queued_ids: this.queue.msgs(ticket.id).flatMap((m) => m.id ?? []), ...shown,
       // Messages the loop guard holds for a person's Continue (#1067), for the row's badge and the chat's held-mail card.
       loop_hold: closed ? null : once('loop-holds', () => loopHolds(this.store)).get(ticket.id) ?? null,
       held_mail: this.heldMail(ticket),
@@ -1015,28 +1056,16 @@ export class Runner {
       limit_resume_at: limit?.at ?? null,
       // With several accounts all limited, each one's reset (#819), for the banner.
       limit_accounts: limit?.accounts ?? null,
-      approvals: this.approvals.waiting(ticket.id),
-      // Sealed on start_after: what it waits for, for Start now.
-      parked_for: this.heldFor(ticket.id),
-      held_brief: closed ? null : this.heldBrief(ticket.id),
-      // What wakes it by itself (start_after, wake_when_live, runners back): the list shows such a sealed minion as Waiting, not Sealed.
-      wakes_on: ticket.state === 'parked' ? this.wakesOn(ticket.id) : null,
-      // Everything it waits for, timed or on an event, for the list row's chip (ADR 0021 step 7).
-      outbox_waits: closed ? [] : this.outboxWaits(ticket),
       // When its oldest question or plan card still waiting on a person was posted.
       pending_card_at: cards[0]?.created_at ?? null,
       // Its cards waiting on people with the links that open them, for read_ticket and list_tickets (#400).
-      open_cards: this.cardLinks(ticket, false, cards),
+      open_cards: this.cardLinks(ticket, false, cards, asks),
       properties: props,
       // Who touched it and hasn't left (#919): their Taskmasters hear its updates; the page offers them Leave.
       touched: ticket.kind === 'ticket' && !closed ? this.store.touchedBy(ticket, props, hears) : [],
       // Whose its cards are (#1449: the owner's once its assignee left the scheme), as push and Needs you count it; null for anyone's.
       assignee: ticket.kind === 'ticket' ? nameOf(this.store.minionPerson(ticket, 'assigned', props, hears)) : null,
       preview: !!this.store.getSetting(previewKey(ticket.id)),
-      ship: this.ship(ticket.id),
-      wait: closed ? null : this.wait(ticket.id),
-      // The server working for it while its own turn has ended (#727): the list and chat show it as working.
-      server_work: closed ? null : this.serverWork(ticket.id),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
       // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
@@ -1046,8 +1075,6 @@ export class Runner {
       // Whose Claude plan its last turn ran on (the minion's chip), and what re-reading its context costs a new payer.
       payer: once(`payer:${ticket.person_id}`, () => this.payerView(ticket.person_id, user)),
       context_tokens: this.store.getSetting<number>(contextKey(ticket.id)),
-      // The chat's size meter (#1193): the context as of the turn's latest API call (so it moves mid-turn and drops after a compaction), against the model's window.
-      context_live: this.turns.has(ticket.id) ? this.contextSizes.get(ticket.id) ?? null : null,
       context_window: this.store.getSetting<number>(windowKey(ticket.id)) ?? guessWindow(ticket.model || ticket.last_model),
       // When its last turn ended, for the composer's cold-wake hint (#413).
       last_turn_end: this.store.lastTurnEnd(ticket.id),
@@ -4530,7 +4557,7 @@ export class Runner {
   }
 
   /** A minion's cards waiting on people, oldest first, each with the link that opens it (#400); `placed` adds where each sits (CardLink.below). */
-  cardLinks(ticket: Ticket, placed = false, open?: EventRow[]): CardLink[] {
+  cardLinks(ticket: Ticket, placed = false, open?: EventRow[], approvals?: { at: number; card: unknown }[]): CardLink[] {
     if (ticket.status === 'closed') return [];
     const minion = ticket.kind === 'coordinator' ? null : ticket.number;
     const link = (kind: CardLink['kind'], data: unknown, eventId: number): CardLink => ({
@@ -4539,7 +4566,7 @@ export class Runner {
       // Only question and plan cards are held under the turn's words (public/thread.js heldCards).
       ...(placed ? { below: kind !== 'approval' && this.store.heldBelow(ticket.id, eventId) } : {}),
     });
-    const asks = this.approvals.pending().filter((a) => a.ticketId === ticket.id).flatMap((a) => {
+    const asks = (approvals ?? this.approvals.pending().filter((a) => a.ticketId === ticket.id)).flatMap((a) => {
       const eventId = this.store.cardEventId(ticket.id, 'approval', (a.card as { id: string }).id);
       return eventId == null ? [] : [{ at: a.at, id: eventId, card: link('approval', a.card, eventId) }];
     });

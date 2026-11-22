@@ -1,6 +1,7 @@
 // A reader thread (#1563), started by the front thread (src/front.ts): it answers people's read-only page requests
 // on READER_PATHS from its own read-only connection, with the real router, Auth, access checks and route objects, so
-// who sees what has one copy. Anything it can't answer the same way the main thread would (a request it doesn't
+// who sees what has one copy. What those pages show from the main thread's memory (a turn's steps, its approval
+// cards, the ship line, the Status page's live numbers) comes from main's snapshot (#1590, src/reader-live.ts). Anything it can't answer the same way the main thread would (a request it doesn't
 // know, a failure, writes it can't wait out) it hands back, and the front thread asks the main thread instead.
 import { parentPort, workerData } from 'node:worker_threads';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -11,19 +12,57 @@ import { READ_WAIT_MS } from './db-writer.ts';
 import { llamaEmbed } from './memory.ts';
 import { ticketRoutes } from './routes/tickets.ts';
 import { projectRoutes } from './routes/projects.ts';
-import { READER_PATHS } from './front.ts';
+import { machineRoutes } from './routes/machines.ts';
+import { READER_PATHS, applySnap, type Snapshot, type SnapDelta } from './front.ts';
+import { Runner } from './runner.ts';
+import { MinionQueue } from './minion-queue.ts';
+import { LIMIT_RESUMES, WaitList } from './resumes.ts';
+import { StatusPage } from './status-page.ts';
+import { CiHealth } from './ci-health.ts';
+import type { Ticket } from './db.ts';
 
 export type ReaderData = {
   dbPath: string; password: string; secret: string;
   /** The write worker's counter (src/db-writer.ts): [0] the last write run, [1] its state, [2] the last write sent. */
   shared: BigInt64Array | null;
   embedUrl: string; embedModel: string; memorySchemes: number[] | null;
+  /** DATA_DIR, where the Status page reads backups from. */
+  dataDir: string;
   /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang` or `=slow` in a query ends, hangs or slows (500 ms) this thread mid-request. */
   testHooks?: boolean;
 };
 
 /** The routes readers answer: every GET whose path is one of READER_PATHS. */
-export const readerRoutes = () => [...ticketRoutes, ...projectRoutes].filter((r) => r.method === 'GET' && READER_PATHS.test(r.path.replace(/:\w+/g, '1')));
+export const readerRoutes = () => [...ticketRoutes, ...projectRoutes, ...machineRoutes].filter((r) => r.method === 'GET' && READER_PATHS.test(r.path.replace(/:\w+/g, '1')));
+
+/**
+ * The Runner a reader's views run on: the real view() and views(), their database reads on this thread's connection,
+ * and live() from main's snapshot. A minion main hasn't posted yet throws, and so does anything else read from memory
+ * (a field added outside Runner.live), which sends the request to the main thread.
+ */
+export function readerRunner(store: Store, snap: Snapshot): Runner {
+  return Object.assign(Object.create(Runner.prototype), {
+    store, queue: new MinionQueue(store), resumes: { limit: new WaitList(store, LIMIT_RESUMES) }, stepRatios: new Map(), onLive: () => {},
+    live: (t: Ticket) => {
+      const live = snap.ready ? snap.live[t.id] : undefined;
+      if (!live) throw new Error(`No live state for minion ${t.id} yet`);
+      return live;
+    },
+  });
+}
+
+/** The Status page on a reader: the database's parts read here, the memory's from main's snapshot; none before main posts one. */
+export function readerStatus(store: Store, snap: Snapshot, dataDir: string): () => StatusPage | null {
+  let page: StatusPage | null = null;
+  const s = () => snap.status!;
+  return () => snap.status && (page ??= new StatusPage({
+    store, dataDir, bootAt: s().bootAt, commit: s().commit, cores: s().cores, ownScheme: () => snap.ownScheme,
+    ciSnapshot: (canSee) => CiHealth.prototype.snapshot.call({ store } as unknown as CiHealth, canSee),
+    desktops: () => s().desktops, storms: () => s().storms, diskUse: (row) => s().disk[row.name] ?? null,
+    unitsNow: () => s().units, jobs: () => s().jobs,
+    answer: s().probing ? { probe: { get lastMs() { return s().lastMs; }, take: () => null }, turns: () => 0 } : undefined,
+  }));
+}
 
 /** Wait on this thread until every write sent so far has run, at most `ms`. False if they hadn't. */
 export function writesCaughtUp(shared: BigInt64Array | null, ms = READ_WAIT_MS): boolean {
@@ -114,13 +153,24 @@ if (workerData?.reader) {
     usage = [];
   }, 1000);
   const schemes = data.memorySchemes;
+  const snap = workerData.snap as Snapshot;
+  const status = readerStatus(store, snap, data.dataDir);
   const app = {
     store,
-    runner: { view: (t: unknown) => t }, // the slice's routes read only the row's id and scheme
+    runner: readerRunner(store, snap),
     memory: { embed: llamaEmbed(data.embedUrl), model: data.embedModel, indexed: (id: number) => !schemes || schemes.includes(id) },
+    builds: { get: (id: number) => snap.builds[id] ?? [] },
+    previews: { buildScheme: () => (snap.ownScheme == null ? null : { id: snap.ownScheme }) },
+    // None yet: main answers (its own would never be missing).
+    get status() {
+      const page = status();
+      if (!page) throw new Error('No Status snapshot yet');
+      return page;
+    },
   } as unknown as App;
   const routes = router(readerRoutes());
-  parentPort!.on('message', async (m: { id: number; method: string; url: string; headers: Record<string, string | string[] | undefined> }) => {
+  parentPort!.on('message', async (m: { snap?: SnapDelta; id: number; method: string; url: string; headers: Record<string, string | string[] | undefined> }) => {
+    if (m.snap) return applySnap(snap, m.snap);
     let a: Answer | null = null;
     if (data.testHooks && /[?&]citadel-test-reader=exit\b/.test(m.url)) process.exit(1);
     if (data.testHooks && /[?&]citadel-test-reader=hang\b/.test(m.url)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);

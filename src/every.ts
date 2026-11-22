@@ -73,8 +73,8 @@ export function every(name: string, ms: number, fn: () => unknown, first?: numbe
 export const SLOW_MS = 1000;
 
 /** Every job, with `overdue` (no run started for 3 periods past when one was due) and `slow` (the last run took over SLOW_MS). */
-export function jobList(now = Date.now()): (JobRow & { overdue: boolean; slow: boolean })[] {
-  return [...jobs.values()]
+export function jobList(now = Date.now(), rows = [...jobs.values()]): (JobRow & { overdue: boolean; slow: boolean })[] {
+  return rows
     .map((j) => ({ ...j, overdue: now > (j.last === null ? j.firstAt : j.last + j.ms) + 2 * j.ms, slow: (j.took ?? 0) > SLOW_MS }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

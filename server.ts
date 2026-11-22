@@ -73,6 +73,7 @@ import { every, stopAll, type Job } from './src/every.ts';
 import { handOver, standby } from './src/handover.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
+import { publishLive } from './src/reader-live.ts';
 import { listenThroughFront, upgrades } from './src/front.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { jobRoutes } from './src/routes/jobs.ts';
@@ -1992,11 +1993,17 @@ if (process.env.CITADEL_FRONT !== '0') {
     readers: 2,
     appsDomain: APPS_DOMAIN,
     ...(SETTLED_ROUTE ? { answerMs: Number(process.env.CITADEL_READER_ANSWER_MS) || undefined, stuckMs: Number(process.env.CITADEL_READER_STUCK_MS) || undefined } : {}),
-    reader: { testHooks: SETTLED_ROUTE, dbPath: store.path, ...signInKeys, shared: writer?.shared ?? null, embedUrl: EMBED_URL, embedModel: EMBED_MODEL, memorySchemes: MEMORY_SCHEMES ?? null },
+    reader: { testHooks: SETTLED_ROUTE, dbPath: store.path, ...signInKeys, shared: writer?.shared ?? null, embedUrl: EMBED_URL, embedModel: EMBED_MODEL, memorySchemes: MEMORY_SCHEMES ?? null, dataDir: DATA_DIR },
   }, {
     listening: listened,
     usage: (args) => (store.usage.used as (...a: unknown[]) => void)(...args),
     setting: (key, value) => { if (/^plan:\d+:page$/.test(key)) store.setSetting(key, value); },
+  });
+  // What the minions list, a minion's page and Status show from this thread's memory, for the readers (#1590).
+  publishLive({
+    publish: throughFront.publish, store, runner, builds: (id) => builds.get(id), ownScheme: () => ownScheme()?.id ?? null, status,
+    statusInputs: { bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', probing: !BOOT_CHECK && !PREVIEW, lastMs: () => answerProbe.lastMs, storms: () => memoryStorms.current(), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row) },
+    ...(SETTLED_ROUTE && Number(process.env.CITADEL_READER_SWEEP_MS) ? { sweepMs: Number(process.env.CITADEL_READER_SWEEP_MS) } : {}),
   });
 } else if (onSocket) {
   server.listen({ fd: 3 }, () => listened(PORT));

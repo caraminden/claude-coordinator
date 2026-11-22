@@ -286,13 +286,6 @@ export function planCard(ticketId, card, opts = {}) {
   const mine = { plan: card.plan ?? '', summary: card.summary ?? '', handle: null };
   if (!fixed && !ins) view.lastPlan = mine;
   const head = whoLine(m ? 'proposes machine notes' : k ? 'asks for a release key' : t ? 'asks for a host tool' : mem ? 'proposes a memory tidy' : ins ? (card.to ? 'held an instructions edit for' : 'held an instructions edit') : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
-  const el = h('div', { class: 'qcard pcard' },
-    head.el,
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : t ? 'Host tool' : mem ? 'Memory' : ins ? 'Instructions' : 'Plan'), card.summary),
-    h('div', { class: 'pbody' }, m ? notesBody(card) : mem ? memoryBody(card, ticketId) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
-    notes, why,
-    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), dismiss, drop, revise, approve, cancel, sendNotes));
-  let rank = 0;
   const dismiss = dismissButton(ticketId, card, () => {
     deciding = true;
     editing(false);
@@ -310,6 +303,13 @@ export function planCard(ticketId, card, opts = {}) {
     why.hidden = !hint;
     status.textContent = '';
   });
+  const el = h('div', { class: 'qcard pcard' },
+    head.el,
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : t ? 'Host tool' : mem ? 'Memory' : ins ? 'Instructions' : 'Plan'), card.summary),
+    h('div', { class: 'pbody' }, m ? notesBody(card) : mem ? memoryBody(card, ticketId) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
+    notes, why,
+    h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), dismiss, drop, revise, approve, cancel, sendNotes));
+  let rank = 0;
   const editing = (on) => {
     notes.hidden = cancel.hidden = sendNotes.hidden = !on;
     approve.hidden = revise.hidden = on;

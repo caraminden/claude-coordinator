@@ -2904,8 +2904,8 @@
  },
  "POST /api/tickets/:minion1/dismiss": {
   "anon": "401 Not logged in",
-  "person": "404 No such open card: it was answered, settled or dismissed already",
-  "member": "404 No such open card: it was answered, settled or dismissed already",
+  "person": "404 No such card",
+  "member": "404 No such card",
   "outsider": "404 No such minion",
   "tmA": "403 Only people dismiss cards",
   "tmB": "403 Only people dismiss cards",
@@ -3724,8 +3724,8 @@
  },
  "POST /api/tickets/:taskmasterA/dismiss": {
   "anon": "401 Not logged in",
-  "person": "404 No such open card: it was answered, settled or dismissed already",
-  "member": "404 No such open card: it was answered, settled or dismissed already",
+  "person": "404 No such card",
+  "member": "404 No such card",
   "outsider": "404 No such minion",
   "tmA": "403 Only people dismiss cards",
   "tmB": "403 Only people dismiss cards",

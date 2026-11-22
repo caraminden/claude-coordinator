@@ -963,7 +963,7 @@ export const ticketRoutes: Route[] = [
         runner.recordAnswer(id, session.name, `My answers to the question card:\n\n${text}`, { ...answer, ...(kept.length ? { images: kept.map((i) => i.name) } : {}) });
         deliverAnswer(app, asker.id, session.name, `My answers to your question card for everyone (in the Overlord's chat):\n\n${text}`, {}, await saveImages(app, asker, body.images), files);
       } else deliverAnswer(app, id, session.name, `My answers to your question card:\n\n${text}`, answer, await saveImages(app, ticket, body.images), files);
-      runner.echoOverlordAnswer(ticket, session.name, text, asker && asker.status !== 'closed' ? asker.id : id);
+      runner.echoOverlordAnswer(ticket, session.name, text, asker && asker.status !== 'closed' ? asker.id : id, session.uid);
       personWrote(ctx);
       return json(res, 202, ticketView(app, id));
     },
@@ -1127,7 +1127,7 @@ export const ticketRoutes: Route[] = [
         const result = { status: body.verdict === 'approve' ? 'approved' : fixed || body.verdict === 'reject' ? 'rejected' : 'revising', by: session.name, at: Date.now() };
         store.setEventData(event.id, { ...card, ...result });
         runner.emit(id, 'plan_result', { id: card.id, ...result });
-        runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? (ins ? 'Saved anyway' : 'Approved') : body.verdict === 'reject' ? `Cancelled${notes ? `: ${notes}` : ''}` : `Sent back${notes ? `: ${notes}` : ''}`}`);
+        runner.echoOverlordAnswer(ticket, session.name, `${card.summary}\n→ ${notes === null ? (ins ? 'Saved anyway' : 'Approved') : body.verdict === 'reject' ? `Cancelled${notes ? `: ${notes}` : ''}` : `Sent back${notes ? `: ${notes}` : ''}`}`, undefined, session.uid);
         deliverAnswer(app, id, session.name, ins
           ? notes === null
             ? 'Saved anyway: your instructions edit is saved as it was, beside what already said it.'

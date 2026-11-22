@@ -871,7 +871,7 @@ function replyShows(data) {
   return !!data.reply && !!view.part?.mine && data.asker !== view.coordinator?.id;
 }
 
-/** The reply an everyone card was asked in, above the card wherever it shows (#1581); a long one starts collapsed unless it holds a command (#1589). */
+/** The reply an everyone card was asked in, above the card wherever it shows (#1581); open from the first render (#1630). */
 function cardReply(text, ticketId) {
   const el = h('details', { class: 'card-reply' }, h('summary', {}, 'The reply this card belongs to'), markdown(text, ticketId));
   el.open = replyStartsOpen(text);

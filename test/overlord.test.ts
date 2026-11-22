@@ -100,7 +100,7 @@ test("the Overlord hears of every start, and gets a card when one reads like ano
   assert.ok(!mail(soloTm.id).some((t) => t.includes(`#${solo.number}`)));
 });
 
-test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't; an answer reaches every other Taskmaster as held mail", async () => {
+test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't; an answer reaches every other Taskmaster as held mail, not the answerer's own (#1630)", async () => {
   const ownCara = db.coordinatorFor(Shared.id, Cara.id)!;
   const ownJosh = db.coordinatorFor(Shared.id, Josh.id)!;
   const ask = async (ticketId: number) => {
@@ -121,10 +121,10 @@ test("the Overlord's cards are for everyone, a person's own Taskmaster's aren't;
     method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: lordCard, answers: [{ selected: ['Josh'] }] }),
   });
   assert.equal(res.status, 202);
-  for (const tm of [ownCara, ownJosh]) {
-    const got = await until(`the answer in mail for Taskmaster #${tm.id}`, () => { const m = mail(tm.id); return m.some((t) => t.includes('Who takes the pipeline lane next?')) && m; });
-    assert.ok(got.some((t) => /Cara answered the Overlord's card[\s\S]*→ Josh/.test(t)), got.join('\n'));
-  }
+  const got = await until(`the answer in mail for Taskmaster #${ownJosh.id}`, () => { const m = mail(ownJosh.id); return m.some((t) => t.includes('Who takes the pipeline lane next?')) && m; });
+  assert.ok(got.some((t) => /Cara answered the Overlord's card[\s\S]*→ Josh/.test(t)), got.join('\n'));
+  // Cara answered it herself, so her own Taskmaster's chat gets no "for your tracking" row (#1630; the echo runs before the 202 returns).
+  assert.ok(!mail(ownCara.id).some((t) => t.includes('answered the Overlord')), 'the answerer\'s own Taskmaster gets no tracking mail');
   assert.ok(!mail(overlord.id).some((t) => t.includes('for your tracking')), 'the Overlord, the card\'s own chat, gets no tracking mail');
 });
 
@@ -154,7 +154,7 @@ test("a person's Taskmaster asks for everyone: the card sits with the Overlord, 
   const lord = events(overlord.id).filter((e) => e.kind === 'user_message');
   assert.ok(lord.some((e) => e.data.answer?.questionId === id && !e.data.mail), "the answer is in the Overlord's chat, where the card is");
   assert.ok(!lord.some((e) => e.data.mail && String(e.data.text).includes('Freeze lands')), 'the Overlord, where the card is, gets no tracking mail about it');
-  assert.ok(mail(ownCara.id).some((t) => t.includes('Freeze lands')), "so does Cara's own");
+  assert.ok(!mail(ownCara.id).some((t) => t.includes('Freeze lands')), "nor does Cara's own: she answered it herself (#1630)");
   assert.ok(!mail(ownJosh.id).some((t) => t.includes('Freeze lands')), 'the asker gets it once, as its wake');
   const again = await fetch(`${srv.base}/api/tickets/${overlord.id}/answer`, {
     method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: id, answers: [{ selected: ['Yes'] }] }),

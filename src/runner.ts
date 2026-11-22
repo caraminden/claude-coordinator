@@ -2880,13 +2880,15 @@ export class Runner {
 
   /**
    * An answer to an Overlord's card wakes only the Taskmaster that acts on it (`actor`: the Overlord, or the person's
-   * Taskmaster that asked for everyone); every other Taskmaster in the scheme hears it as held mail (#921).
+   * Taskmaster that asked for everyone); every other Taskmaster in the scheme hears it as held mail (#921), but not the
+   * answerer's own: talking to the Overlord from their chat, they answered it themselves, and the answer is on the settled card (#1630).
    */
-  echoOverlordAnswer(overlord: Ticket, by: string, text: string, actor = overlord.id) {
+  echoOverlordAnswer(overlord: Ticket, by: string, text: string, actor = overlord.id, byUid?: number | null) {
     if (!this.isOverlord(overlord)) return;
+    const mine = byUid ?? this.personOf?.(by) ?? null;
     const line = text.length > 600 ? text.slice(0, 600) + '…' : text;
     for (const tm of this.store.listCoordinators(overlord.project_id)) {
-      if (tm.id !== actor && tm.id !== overlord.id) this.leaveMail(tm.id, by, `(for your tracking; nothing to do) ${by} answered the Overlord's card:\n${line}`);
+      if (tm.id !== actor && tm.id !== overlord.id && (mine == null || tm.coordinator_of !== mine)) this.leaveMail(tm.id, by, `(for your tracking; nothing to do) ${by} answered the Overlord's card:\n${line}`);
     }
   }
 

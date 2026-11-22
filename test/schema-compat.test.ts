@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
@@ -14,11 +14,14 @@ const repo = join(import.meta.dirname, '..');
 const root = mkdtempSync(join(tmpdir(), 'schema-compat-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-const resolves = (ref: string) => spawnSync('git', ['-C', repo, 'rev-parse', '-q', '--verify', `${ref}^{commit}`]).status === 0;
-const prev = ['last-good', 'origin/main'].find(resolves);
+// The live checkout's own tag first (deploy.sh moves it there): a worktree's clone can hold a last-good
+// left from long ago, which would test a rollback to a release no deploy goes back to (#1169).
+const live = process.env.DEPLOY_LIVE || join(homedir(), 'claude-coordinator');
+const resolves = (dir: string, ref: string) => spawnSync('git', ['-C', dir, 'rev-parse', '-q', '--verify', `${ref}^{commit}`]).status === 0;
+const [prevRepo, prev] = ([[live, 'last-good'], [repo, 'last-good'], [repo, 'origin/main']] as const).find(([dir, ref]) => resolves(dir, ref)) ?? [repo, undefined];
 const prevDir = join(root, 'prev');
 mkdirSync(prevDir);
-if (prev) execFileSync('sh', ['-c', 'git -C "$1" archive "$2" src public | tar -x -C "$3"', 'sh', repo, prev, prevDir]);
+if (prev) execFileSync('sh', ['-c', 'git -C "$1" archive "$2" src public | tar -x -C "$3"', 'sh', prevRepo, prev, prevDir]);
 const loadPrev = async () => {
   assert.ok(prev, 'no last-good tag or origin/main to find the last release by: fetch origin');
   return import(join(prevDir, 'src', 'db.ts'));

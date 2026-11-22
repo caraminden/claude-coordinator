@@ -7,6 +7,8 @@ export const TRACK = [['line', 'Ship line', 'Line'], ['rebase', 'Rebase'], ['tes
 const OWN = { slot: 'Heavy slot', run: 'Heavy run' };
 /** Running over the usual by more than this turns the bar amber. */
 export const LATE = 1.15;
+/** A counted bar on a capped track stops here, not at the time guess's cap, until the stage really ends. */
+export const COUNT_CAP = 97;
 
 /** Doing (blue) while its own landing or run is under way, waiting (violet) in a line, a CI queue or on the restart; a CI run that ended green or red, or grey with every job skipped (#558). */
 export const waitFam = (w) => (w.stage === 'passed' ? 'done' : w.stage === 'failed' || w.stage === 'cancelled' ? 'broken' : w.stage === 'skipped' ? 'idle'
@@ -16,6 +18,9 @@ const took = (w, now) => (w.ended ?? now) - w.since;
 export const waitLate = (w, now = Date.now()) => !!w.usual && !w.ended && took(w, now) > w.usual * 1000 * LATE;
 /** How full its bar is: by its counts (tests or CI jobs done, #551) when it has them, else elapsed against usual. */
 export const waitPct = (w, now) => (w.ended ? 100 : w.total ? (w.done / w.total) * 100 : w.usual ? Math.min(100, (took(w, now) / (w.usual * 1000)) * 100) : 0);
+
+/** The width a bar draws: waitPct up to `cap`, but a real count on a capped track goes to COUNT_CAP, not the guess's cap. */
+export const waitFill = (w, now, cap = 100) => Math.min(w.total && cap < 100 ? Math.max(cap, COUNT_CAP) : cap, waitPct(w, now));
 
 /** "1m 05s" style, for how long something has run. */
 export function elapsedText(ms) {
@@ -30,7 +35,8 @@ export function waitTime(w, now = Date.now()) {
 
 /**
  * A thin bar: tests or jobs done of all of them, or elapsed against usual, which the ticker below moves on; none with neither.
- * `cap`: the fill stops there (a release's stage track stops at 90% until the stage really ends, #626).
+ * `cap`: a time-based fill stops there (a release's stage track stops at 90% until the stage really ends, #626); a real
+ * count fills to its own done/total, with a small gap (COUNT_CAP) until the stage ends.
  */
 export function waitBar(w, cls = 'wait-bar', cap = 100) {
   if (!w.usual && !w.total) return '';
@@ -38,7 +44,7 @@ export function waitBar(w, cls = 'wait-bar', cap = 100) {
   // A counted bar moves when the wait is sent again with new counts, not on the ticker.
   const clock = w.total ? {} : { 'data-since': w.since, 'data-usual': w.usual, 'data-ended': w.ended ?? '', ...(cap < 100 ? { 'data-cap': cap } : {}) };
   const fill = h('i');
-  fill.style.width = `${Math.min(cap, waitPct(w, now))}%`; // the page's CSP drops style attributes, not the style property
+  fill.style.width = `${waitFill(w, now, cap)}%`; // the page's CSP drops style attributes, not the style property
   return h('span', { class: `${cls}${!w.total && waitLate(w, now) ? ' late' : ''}${fam === 'done' || fam === 'broken' ? ` f-${fam}` : ''}`, ...clock, 'aria-hidden': 'true' }, fill);
 }
 

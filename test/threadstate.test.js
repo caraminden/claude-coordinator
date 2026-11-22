@@ -183,6 +183,14 @@ test('a wait bar fills by its counts when it has them, by elapsed against usual 
   assert.equal(waitPct({ since: NOW - 80_000, usual: 160, done: 1, total: 3, ended: NOW - 1000 }, NOW), 100);
 });
 
+test('a capped track fills a real count to done/total, and a time-only guess still stops at the cap (#1613)', async () => {
+  const { waitFill } = await import('../public/wait.js');
+  assert.ok(waitFill({ since: NOW - 80_000, usual: 160, done: 571, total: 572 }, NOW, 90) > 95);
+  assert.equal(waitFill({ since: NOW - 80_000, usual: 160, done: 572, total: 572 }, NOW, 90), 97);
+  assert.equal(waitFill({ since: NOW - 999_000, usual: 160 }, NOW, 90), 90);
+  assert.equal(waitFill({ since: NOW - 80_000, usual: 160, done: 3, total: 6 }, NOW, 90), 50);
+});
+
 test('a wait reads elapsed against its usual, and runs late past 15% over', async () => {
   const { waitTime, waitLate } = await import('../public/wait.js');
   const w = { since: NOW - 59_000, usual: 160 };

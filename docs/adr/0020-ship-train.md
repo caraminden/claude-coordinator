@@ -243,3 +243,28 @@ run.
 - Each check logs `own check · <branch> · <verdict> · <s>` to the retro log: that is how its cost and catch get counted
   against the p90 handoff-to-live time and desktop CI-hours (the brief's bar: p90 down, CI-hours within about 1.7×).
 - Off: `LAND_OWN_CHECK=0`, `<state>/own-check-off`, or no runner carrying the label.
+
+## The light check, for a ship the busy check runner sends away (#1620)
+
+Cara, 2026-11-22, on #1620's card: "Fill #1567's gap". Replaying Nov 21-22's 229 ships through the own check's gates
+with its 775 s run: 91 were alone in line, 42 got a check, and 96 were sent to the line unchecked because the check
+runner was busy. Those 96 are the gap.
+
+- Where the own check would send a ship to the line unchecked (busy for longer than it waits, or still busy after
+  waiting), `light_check` (`tools/light-check.sh`, sourced by `tools/own-check.sh`) runs instead. Its branch, rebased
+  onto main in a scratch worktree, goes to CI's side runner (`citadel-ci-linux-side`) through `tools/heavy-ci.ts`, with
+  `CITADEL_HEAVY_SHIP=1` so it doesn't wait behind the ships' runs it is there to spare. There `tools/light-check-run.sh`
+  runs `citadel-test --affected` against main (240 s), then each failed file alone (at most 4, 90 s each) on the commit
+  and on main.
+- It pins on the runner, not on perigee. 13 of the 16 reds the brief counts (culprits #3 and #6 in the shared folder's
+  `reports/why-green-goes-red-2026-11-22.md`) are its "CI-only environment" ones: they pass on perigee and fail on the
+  runner (pwsh, git config, clock, CPU), so a pin on perigee would let them through.
+- Red, the ship's own (fails alone with the ship and passes alone on main, or is new with it): refused before the line,
+  like an own check's red. Anything else (flakes, main's own red, a run past 240 s, nothing back within 720 s, a run that
+  never started) joins the line, where CI decides as before.
+- Gated: only with the side runner online and idle (a heavy job or a proof on it means no light check), one at a time
+  (`<state>/light-check.lock`), not for a light lane, a taken-back commit or a branch that doesn't rebase cleanly.
+- What it can't catch: a file the affected map doesn't pick (#1169's second ship broke 12 files no rule maps to its
+  change), and a red that is a skip, not a failure (#1561's realtime test; `citadel-test` passes a skip, CI fails one).
+  Replayed against the 16 reds, the failing file was in the ship's own and affected set for 13.
+- Each logs `light check · <branch> · <verdict> · <s>`. Off: `LAND_LIGHT_CHECK=0` or `<state>/light-check-off`.

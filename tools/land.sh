@@ -13,6 +13,8 @@
 #    branch changes. A fail says "smoke: …", logs a smoke line to the retro log and no timing line. See smoke() below.
 #    Then, with others in line and the one check runner free, its own check (#1567, tools/own-check.sh): its CI on that
 #    runner before it joins the line, so a ship red on its own goes back to its minion without holding anyone up.
+#    With that runner busy, the light check instead (#1620, tools/light-check.sh): its own and affected test files on
+#    CI's side runner, pinned there on its commit and on main.
 # 1. Rebases the branch onto the local main. A conflict aborts the rebase and stops here. If the rebase
 #    changed land.sh itself, the rebased copy takes over from here, still holding the lock.
 #    Then refuses a branch that removes what a recent landing added without naming it (a stale squash: undo_guard).

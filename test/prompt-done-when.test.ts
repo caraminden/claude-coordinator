@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { systemPrompt } from '../src/prompts.ts';
+import { systemPrompt, turnContext } from '../src/prompts.ts';
 import { DONE_LINES } from '../src/done-lines.ts';
 
 const project = { id: 2, name: 'Citadel', instructions: '', approval_rules: '', onboarding: 'done', repo_dir: '/repo' } as any;
@@ -37,4 +37,10 @@ test('the done-lines rule (#1115) left every prompt for set_properties\' feature
   assert.ok(!build('coordinator').includes('Done lines (#1115)'));
   assert.match(DONE_LINES, /^Done lines \(#1115\): on a feature, before any code/);
   assert.match(DONE_LINES, /Bugs, chores and research write none\.$/);
+});
+
+test('a feature minion\'s first turn note opens with the done-lines rule; a later turn, a bug or no type does not (#1574)', () => {
+  const turn = (t: object) => turnContext(project, { ...ticket, ...t }, '/shared/929', '/shared/project', '/tickets', '/memory', [], true, '');
+  assert.ok(turn({ type: 'feature' }).includes(DONE_LINES));
+  for (const t of [{ type: 'feature', session_id: 's1' }, { type: 'bug' }, {}]) assert.ok(!turn(t).includes('Done lines'), JSON.stringify(t));
 });

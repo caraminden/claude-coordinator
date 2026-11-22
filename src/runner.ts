@@ -60,7 +60,6 @@ import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type Proc
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
-import { DONE_LINES } from './done-lines.ts';
 import { ASK, askText, type Budget, budgetFor, budgetKey, type BudgetState, chatNote, markOf, passed, turnLine, WAKE, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
@@ -3302,7 +3301,7 @@ export class Runner {
       // Two halves (#878): system-prompt.md, the same for every minion of the scheme, and the per-minion and volatile lines that open the turn message.
       // Machines a minion may queue jobs on (#857): lent to this scheme with a jobs block; the owner's go card is the gate.
       const jobMachines = ticket.kind === 'coordinator' ? [] : jobMachinesFor(this.store, project.id);
-      const parts = promptParts(project, ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null, jobMachines, ticket.kind === 'coordinator' && fableMeter(this.store).over);
+      const parts = promptParts(project, ticket.kind === 'ticket' ? { ...ticket, type: this.store.props.forTarget('minion', ticket.id).type } : ticket, filesDir, sharedDir, this.ticketsDir(project), memoryDir, machines, deploys, this.store.appInstructions().text, this.heldFor(ticket.id), ticket.kind === 'coordinator' && onboardingOpen(project) ? surveyReports(this.dataDir) : [], build, builds, everySchemeView, this.store.personalLayer(ticket), this.openPr(ticket.id), ticket.kind === 'coordinator' && this.store.isSplit(project.id) ? (ticket.coordinator_of == null ? 'overlord' : 'person') : null, jobMachines, ticket.kind === 'coordinator' && fableMeter(this.store).over);
       // A warm session keeps the prompt it last ran with (#1276): a changed byte would re-write its whole cached conversation.
       // Codex has no such cache to keep.
       const current = parts.system;
@@ -3321,8 +3320,6 @@ export class Runner {
       // Its budget (#1114) each turn: what its kind of work usually costs and what it has used.
       const budget = ticket.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
       if (budget) parts.turn.budget = [turnLine(budget, this.store.ticketCost(ticket.id))];
-      // Done lines (#1115) for a feature, once per session (#1574): moved out of every minion's system prompt.
-      if (ticket.kind === 'ticket' && !ticket.session_id && this.store.props.forTarget('minion', ticket.id).type === 'feature') parts.turn.doneLines = [DONE_LINES];
       // The seam trial's fresh group (#1129), while its context is past the mark: hand off at a seam it picks.
       const seamSize = this.store.getSetting<number>(contextKey(ticket.id));
       const seamFresh = ticket.kind === 'ticket' && armOf(this.store.getSetting<SeamTrial>(SEAM_TRIAL_KEY), ticket.id) === 'fresh';

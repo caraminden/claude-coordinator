@@ -188,7 +188,7 @@ function workspace(c: Case, side: Side, work: string): string {
 }
 
 function render(side: Side, role: Case['role'], ticket: Case['ticket'], dirs: object): { system: string; turn: string; tools: object[] } {
-  const spec = { role, number: ticket.number, title: ticket.title, appText: side.app, schemeText: side.scheme, dirs, drop: side.drop };
+  const spec = { role, number: ticket.number, title: ticket.title, type: ticket.type, appText: side.app, schemeText: side.scheme, dirs, drop: side.drop };
   return JSON.parse(execFileSync(process.execPath, [join(HERE, 'render.ts'), side.dir, JSON.stringify(spec)], { encoding: 'utf8', maxBuffer: 64 << 20 }));
 }
 

@@ -15,6 +15,7 @@ import { GLOBAL_OWNER } from './properties.ts';
 import { offSkills } from './skills.ts';
 import { CITADEL_REPLY_MS } from './access.ts';
 import { advisedModel, tableText } from '../public/model-table.js';
+import { DONE_LINES } from './done-lines.ts';
 import type { QueuedMessage } from './runner.ts';
 
 /** The live checkout: the code this server runs, which Citadel's own Taskmaster may read. */
@@ -269,7 +270,7 @@ export function shotLine(project: Partial<Pick<Project, 'shot_widths' | 'shot_th
   return `UI change shots: ${widths} px, ${themes} theme (\`tools/ui-shot.ts\` defaults to these). ${required ? 'Put them in your ready note.' : 'Ready-note shots optional.'}${project.shot_note ? ` ${project.shot_note.replace(/[.\s]*$/, '')}.` : ''}`;
 }
 
-export function promptParts(project: Project, ticket: Ticket, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null, openPr = false, split: TaskmasterRole | null = null, jobMachines: string[] = [], fableOver = false): { system: PromptSections; turn: PromptSections } {
+export function promptParts(project: Project, ticket: Ticket & { type?: unknown }, filesDir: string | null, sharedDir: string | null, ticketsDir: string, memoryDir: string | null, machines: TurnMachine[] = [], deploys = false, appText = '', held: string | null = null, surveys: string[] = [], build: BuildRole | null = null, builds = false, everyScheme: EverySchemeView | null = null, personal: PersonalLayer | null = null, openPr = false, split: TaskmasterRole | null = null, jobMachines: string[] = [], fableOver = false): { system: PromptSections; turn: PromptSections } {
   const layers = { app: appInstructions(appText), rules: minionRulesLines(project), scheme: projectInstructions(project, !!appText.trim()) };
   if (ticket.kind === 'coordinator') {
     return {
@@ -333,6 +334,9 @@ export function promptParts(project: Project, ticket: Ticket, filesDir: string |
         ? `Your working directory is a dedicated git worktree of the scheme repo on branch \`${ticket.branch}\`. Commit your work to this branch; do not push or touch other branches unless asked.`
         : 'Your working directory is a dedicated folder for this minion.'],
       build: buildLines(build),
+      // Done lines (#1115) open a feature minion's first session (#1574): moved out of every minion's system prompt. `type` is
+      // its type property, which the runner (and the prompt-eval rig) pass along on the ticket.
+      doneLines: ticket.type === 'feature' && !ticket.session_id ? [DONE_LINES] : [],
       // The advisor trial (#817, #954): only a `+…-advisor` model gets it, and it rides the turn message because it depends on the model.
       advisor: advisedModel(ticket.model).advisor
         ? [`You run with the ${advisedModel(ticket.model).advisor} advisor tool, and this is an advisor trial: call it once with your plan before your first code edit, once with your diff summary before you ship, and again whenever a fix did not hold. A trial minion that never consults it is a failed trial run.`]

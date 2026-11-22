@@ -228,6 +228,10 @@ Configuration comes from the environment:
 | `MACHINES_URL` | (unset: agents use the app's address) | Private address machines' agents connect to, e.g. `http://perigee.tail59477f.ts.net:8574`; the app listens there for agents only |
 | `PUSH_SUBJECT` | the app's address, from the first subscribe | VAPID contact (`https://…` or `mailto:…`) push services see |
 
+**A dev copy** (to try a change, curl the API or take screenshots): `tools/citadel-dev-copy start|seed|env|stop`
+(`--help`) runs one on its own port and a copy of the data. Never start `server.ts` by hand from a worktree:
+without `DATA_DIR` and `PORT` it opens the live database. `node tools/ui-shot.ts` drives a page on it.
+
 On perigee the secrets live in `~/.config/claude-coordinator/env` (mode 600,
 never committed) and the app runs as a user service:
 

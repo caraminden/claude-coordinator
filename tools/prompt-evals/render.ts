@@ -9,6 +9,7 @@ export type Spec = {
   role: 'minion' | 'taskmaster';
   number: number;
   title: string;
+  type?: string | null;   // the case's ticket type: a feature's first turn opens with the done-lines rule (#1574)
   appText: string;        // the Citadel-wide instructions
   schemeText: string;     // the scheme's own
   dirs: { files: string; shared: string; tickets: string; cwd: string };
@@ -73,7 +74,7 @@ function tools(dir: string, role: Spec['role']): Promise<object[]> {
 export async function render(dir: string, s: Spec): Promise<{ system: string; turn: string; tools: object[] }> {
   const m = await import(pathToFileURL(resolve(dir, 'src/prompts.ts')).href);
   const project = { ...PROJECT, instructions: s.schemeText };
-  const ticket = { id: 900_000 + s.number, project_id: 2, number: s.role === 'taskmaster' ? null : s.number, title: s.title,
+  const ticket = { id: 900_000 + s.number, project_id: 2, number: s.role === 'taskmaster' ? null : s.number, title: s.title, type: s.type ?? null,
     kind: s.role === 'taskmaster' ? 'coordinator' : 'ticket', status: 'idle', cwd: s.dirs.cwd, branch: `ticket/${s.number}-replay`,
     permission_mode: 'bypassPermissions', model: null, effort: null, workflow: 0, build: null, plugin_dirs: '', coordinator_of: null, created_by: 'replay' };
   const args = [project, ticket, s.dirs.files, s.dirs.shared, s.dirs.tickets, null, [], true, s.appText];

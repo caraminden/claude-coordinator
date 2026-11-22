@@ -1420,8 +1420,8 @@ export const projectRoutes: Route[] = [
       });
       // The last day's land runs, each red one under its cause (#1607); null when GitHub can't be read.
       const since = Date.now() - LAND_REDS_MS;
-      const runs = await app.ciHealth?.runsSince(project, since) ?? null;
-      const landRed = runs && landReds(runs, await readRetro(projectSharedDir(app.dataDir, project.id), since, Date.now()), since);
+      const read = await app.ciHealth?.runsSince(project, since) ?? null;
+      const landRed = read && { ...landReds(read.runs, await readRetro(projectSharedDir(app.dataDir, project.id), since, Date.now()), since), partial: read.partial };
       json(res, 200, { fast: project.land_mode === 'fast' ? app.fastMode?.view(project.id) ?? null : null, flakes, landReds: landRed, now: Date.now() });
     },
   },

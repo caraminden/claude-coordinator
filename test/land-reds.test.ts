@@ -73,3 +73,25 @@ test('runs before the window, and runs off land/ branches, are left out; a run s
   const out = landReds(runs, [], SINCE);
   assert.deepEqual({ runs: out.runs, red: out.red, other: out.other }, { runs: 1, red: 0, other: 1 });
 });
+
+test("a run's own verdict beats a later round's, a cut-off line names the run it cut off, and a red fresh run is the fresh run's own", () => {
+  const runs = [
+    run(50, 'ticket/50-a', '01:00', '01:10'), // its own suspects pin the lead
+    run(52, 'ticket/50-a', '01:12', '01:20'), // a later round, whose bisect pins another ship
+    run(60, 'ticket/60-c', '02:00', '02:05'), // cut off before any test failed
+    run(61, 'ticket/60-c', '02:06', '02:20'), // the fresh run fails for real
+    run(70, 'ticket/70-d', '03:00', '03:10'), // flakes only
+    run(71, 'ticket/70-d', '03:11', '03:20'), // the fresh run after flakes fails too
+  ];
+  const lines = day([
+    `- 01:11:00Z · ship train suspects · ticket/50-a · #50 (test/a.test.ts) · failed alone here: #50 · ${U}50`,
+    `- 01:25:00Z · ship train red · ticket/50-a · ticket/51-b · ${U}52`,
+    `- 02:06:00Z · cut-off rerun · ticket/60-c · ${U}60 · red`,
+    '- 02:21:00Z · timing · ticket/60-c · line 1 · rebase 1 · ci-queue 1 · ci-run 400 · fallback - · deploy - · live - · refused at ci',
+    '- 03:10:30Z · flake · test/q.test.ts · load 9.1 · ticket/70-d · in CI',
+    '- 03:21:00Z · flake rerun · ticket/70-d · test/q.test.ts · red',
+    '- 03:21:01Z · timing · ticket/70-d · line 1 · rebase 1 · ci-queue 1 · ci-run 400 · fallback - · deploy - · live - · refused at ci',
+  ].join('\n'));
+  const c = Object.fromEntries(landReds(runs, lines, SINCE).reds.map((r) => [r.id, `${r.cause}${r.rider ? ' rider' : ''}`]));
+  assert.deepEqual(c, { 50: 'change', 52: 'change rider', 60: 'flaky', 61: 'change', 70: 'flaky', 71: 'change' });
+});

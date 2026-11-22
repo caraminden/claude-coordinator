@@ -143,10 +143,11 @@ function landRedsBlock(s, lr) {
   });
   const [row] = settingsRow({ key, icon: 'chart', hue: lr.red ? hue : 'done', title,
     summary: done ? [toneChip(tone, unread ? `${lr.causes.unknown} reds unread` : `${own}% from a change`), `${raw}% red · ${lr.red} of ${done} runs`] : [toneChip('neutral', 'None'), 'no land runs finished'] },
-  done ? statTiles([String(lr.runs), 'land runs', 'running'], [`${raw}%`, 'red', lr.red ? 'waiting' : 'done'], [`${own}%`, "red from a ship's change", hue]) : null,
+  done ? statTiles([String(lr.runs), 'land runs', 'running'], [`${raw}%`, 'red', lr.red ? 'waiting' : 'done'], [unread ? '–' : `${own}%`, unread ? 'reds unread' : "red from a ship's change", hue]) : null,
   causes.length ? h('div', { class: 'hue-rows' }, ...causes) : null,
   reds.length ? showFirst({ key, items: reds, n: 5, noun: 'red runs' })
     : emptyCard(done ? 'No red land runs' : 'No land runs', done ? 'Every ship that finished its CI run went green.' : 'No ship ran its tests on GitHub in the last 24 hours.'),
+  lr.partial ? h('p', { class: 'look-prose' }, `Only the newest ${lr.runs} runs were read: GitHub had more in the day than the tab reads.`) : null,
   h('p', { class: 'look-prose' }, "Each red run counts under one cause, read from the lines the ship script writes to the retro log. The red rate from a change leaves out flaky runs and main's own reds."));
   return block('Land runs', lr.red ? hue : 'done', row);
 }

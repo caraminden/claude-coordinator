@@ -644,18 +644,19 @@ export class CiHealth {
    * The runs created since `since` (rounded down to the hour, so the read costs a 304 inside the hour), every workflow and
    * branch, oldest pages last: the Test health tab's land reds (#1607, src/land-reds.ts). At most `pages` pages of 100.
    */
-  async runsSince(p: Project, since: number, pages = 3, now = Date.now()): Promise<Run[] | null> {
+  async runsSince(p: Project, since: number, pages = 5, now = Date.now()): Promise<{ runs: Run[]; partial: boolean } | null> {
     const slug = repoSlug(p.repo_url);
     if (!slug || now < this.pausedUntil) return null;
     const from = new Date(Math.floor(since / 3_600_000) * 3_600_000).toISOString().replace('.000Z', 'Z');
     return this.guarded(now, async () => {
       const all: Run[] = [];
       for (let page = 1; page <= pages; page++) {
-        const got: Run[] = (await this.read(`repos/${slug}/actions/runs?created=%3E%3D${from}&per_page=100&page=${page}`, this.deps.as(p), true))?.workflow_runs ?? [];
+        // Not quiet: a 403 or 404 throws, so the tab reads "not read", never a short day as a whole one.
+        const got: Run[] = (await this.read(`repos/${slug}/actions/runs?created=%3E%3D${from}&per_page=100&page=${page}`, this.deps.as(p)))?.workflow_runs ?? [];
         all.push(...got);
-        if (got.length < 100) break;
+        if (got.length < 100) return { runs: all, partial: false };
       }
-      return all;
+      return { runs: all, partial: true };
     });
   }
 

@@ -21,7 +21,7 @@ export interface LandRun { id: number; head_branch: string; status: string; conc
 /** One retro-log line: when, its kind (`ship train red`), the rest split on ` · `, and the run its link names. */
 export interface RetroLine { at: number; kind: string; parts: string[]; run: number | null }
 export interface Red { id: number; branch: string; at: string; url: string | null; cause: Cause; rider: boolean; why: string }
-export interface LandReds { since: number; runs: number; green: number; red: number; other: number; causes: Record<Cause, number>; riders: number; reds: Red[] }
+export interface LandReds { partial?: boolean; since: number; runs: number; green: number; red: number; other: number; causes: Record<Cause, number>; riders: number; reds: Red[] }
 
 /** The window the Test health tab counts. */
 export const LAND_REDS_MS = 24 * 3_600_000;
@@ -49,8 +49,11 @@ const sameShip = (label: string, lead: string) => label === lead || (ticketOf(le
 /** A red run's cause, from the lines that name its link (`own`) and its branch's lines after it started (`after`, oldest first). */
 export function causeOf(lead: string, own: RetroLine[], after: RetroLine[]): { cause: Cause; rider: boolean; why: string } {
   // A train's first red run is often named by no line: its suspects and bisect lines link the later runs they made.
+  // A verdict that links this run beats one borrowed from a later round of the same train.
+  const TRAIN = ['ship train red', 'ship train suspects'];
+  const borrow = !own.some((l) => TRAIN.includes(l.kind));
   const train = (kind: string) => after.find((l) => l.kind === kind && l.run != null && sameShip(l.parts[0] ?? '', lead));
-  const of = (kind: string) => own.find((l) => l.kind === kind) ?? (kind === 'ship train red' || kind === 'ship train suspects' ? train(kind) : undefined);
+  const of = (kind: string) => own.find((l) => l.kind === kind) ?? (borrow && TRAIN.includes(kind) ? train(kind) : undefined);
   if (of("shipped through main's red")) return { cause: 'main', rider: false, why: `main was red on ${of("shipped through main's red")!.parts[1] ?? 'the same test'} too` };
   const bisect = of('ship train red');
   if (bisect) {
@@ -72,10 +75,13 @@ export function causeOf(lead: string, own: RetroLine[], after: RetroLine[]): { c
     const named = (sus.parts[1] ?? '').split(/, (?=#|ticket\/)/).map((s) => s.replace(/ \(.*$/, ''));
     if (named.length === 1 && named[0]) return { cause: 'change', rider: !sameShip(named[0], lead), why: `suspect ${named[0]} (not confirmed alone)` };
   }
-  // The lead's own lines: a fresh run after flakes only, a refusal at CI, the flakes its run saw.
+  // A cut-off rerun line links the run that was cut off.
+  if (own.some((l) => l.kind === 'cut-off rerun')) return { cause: 'flaky', rider: false, why: 'cut off before any test failed' };
+  // The lead's own lines: a refusal at CI, the flakes its run saw. A `flake rerun` line comes once the fresh run ends, so it is
+  // that fresh run's: a red one says nothing more (its refusal does), the rest mean the fresh run never got to its tests.
   const mine = after.filter((l) => l.run == null);
-  const rerun = mine.find((l) => l.kind === 'flake rerun' || l.kind === 'cut-off rerun');
-  if (rerun) return { cause: 'flaky', rider: false, why: `${rerun.kind === 'cut-off rerun' ? 'cut off before any test failed' : `passed alone: ${rerun.parts[1] ?? ''}`}`.trim() };
+  const rerun = mine.find((l) => l.kind === 'flake rerun' && l.parts.at(-1) !== 'red');
+  if (rerun) return { cause: 'flaky', rider: false, why: `passed alone: ${rerun.parts[1] ?? ''}; the fresh run: ${rerun.parts.at(-1)}` };
   if (mine.some((l) => l.kind === 'timing' && l.parts.at(-1) === 'refused at ci')) return { cause: 'change', rider: false, why: 'refused at CI with a real failure' };
   const flakes = mine.filter((l) => l.kind === 'flake' && l.parts.includes('in CI'));
   if (flakes.length) return { cause: 'flaky', rider: false, why: `passed alone: ${flakes.map((l) => l.parts[0]).join(', ')}` };

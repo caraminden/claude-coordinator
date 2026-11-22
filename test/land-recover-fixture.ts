@@ -13,7 +13,8 @@ export { git };
 
 // A bad commit can't stay on main (#553, the pipeline failure drill): the real land.sh and deploy.sh on a throwaway
 // pipeline, with a boot check and a service that fail on request, and a queued restart that really runs
-// `deploy.sh restart`. A checkout holding BOOT_BAD fails the boot check; one holding RUN_BAD never comes up.
+// `deploy.sh restart`. A checkout holding BOOT_BAD fails the boot check; one holding RUN_BAD never comes up, and with
+// RUN_BAD_GATE set it goes down only once that file is there, so a test decides when its roll back can start.
 export const tools = join(import.meta.dirname, '..', 'tools');
 const root = mkdtempSync(join(tmpdir(), 'land-recover-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -82,7 +83,7 @@ console.log('v1');
   mkdirSync(bin);
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh
 for a; do case $a in
-  restart) if [ -e "$DEPLOY_LIVE/RUN_BAD" ]; then : >"$PIPE/running"; else git -C "$DEPLOY_LIVE" rev-parse HEAD >"$PIPE/running"; fi; exit 0 ;;
+  restart) if [ -e "$DEPLOY_LIVE/RUN_BAD" ]; then until [ -z "\${RUN_BAD_GATE:-}" ] || [ -e "$RUN_BAD_GATE" ]; do sleep 0.05; done; : >"$PIPE/running"; else git -C "$DEPLOY_LIVE" rev-parse HEAD >"$PIPE/running"; fi; exit 0 ;;
   show) echo 100; exit 0 ;;
 esac; done
 exit 0

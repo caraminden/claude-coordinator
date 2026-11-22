@@ -78,8 +78,11 @@ test('when the restart ahead is rolled back, the landing behind rebases without 
     p.commit(p.wts[1], 'b.txt', 'innocent\n');
     const mark = join(p.dir, 'b-tests');
     const gate = join(p.dir, 'b-go');
-    const { a, b } = await pair(p, {}, { TEST_MARK: mark, TEST_GATE: gate });
+    // The bad restart goes down only once the second is in its test run, so the roll back can't beat its rebase (#1615).
+    const down = join(p.dir, 'bad-go');
+    const { a, b } = await pair(p, { RUN_BAD_GATE: down }, { TEST_MARK: mark, TEST_GATE: gate });
     await until("the second's test run to start", () => lines(mark) === 1);
+    writeFileSync(down, '');
     assert.equal(git(p.wts[1], 'merge-base', 'HEAD', bad), bad, `${lander}: the second sits on the first's commit`);
     if (lander === 'was killed outright') process.kill(a.pid, 'SIGKILL'); // its deploy.sh lives on, and nothing runs main_back
     else assert.match((await a.done).stderr, /main is back at/);
@@ -104,8 +107,10 @@ test('when the rolled-back commit stays on main, the landing that waited is refu
   p.commit(p.wts[1], 'b.txt', 'innocent\n');
   const mark = join(p.dir, 'b-tests');
   const gate = join(p.dir, 'b-go');
-  const { a, b } = await pair(p, {}, { TEST_MARK: mark, TEST_GATE: gate });
+  const down = join(p.dir, 'bad-go'); // as above: no roll back before the second is in its test run
+  const { a, b } = await pair(p, { RUN_BAD_GATE: down }, { TEST_MARK: mark, TEST_GATE: gate });
   await until("the second's test run to start", () => lines(mark) === 1);
+  writeFileSync(down, '');
   process.kill(a.pid, 'SIGKILL');
   assert.deepEqual(await p.restarts(1), ['1']);
   rmSync(join(p.state, 'moving'), { force: true }); // as after a lander that gave up waiting for a slow restart and left

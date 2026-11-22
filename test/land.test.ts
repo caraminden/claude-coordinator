@@ -543,7 +543,7 @@ test("when CI can't answer, the fallback says what gh or git said, at once", asy
 
 // M14: after a refusal, cancelling the CI run and deleting land/<branch> ran before the landing left the line, so a
 // hung gh or push held the deploy lock up to 60 s more.
-test('a refused landing lets go of the deploy lock before it cleans up on GitHub', { timeout: 60_000 }, async () => {
+test('a refused landing lets go of the deploy lock before it cleans up on GitHub', { timeout: 60_000 }, async (t) => {
   const r = setup();
   const c = ci(r);
   // Deleting the scratch branch hangs until the test opens the gate, once it has seen the lock free (a fixed 8 s, twice, before #1615).
@@ -554,6 +554,7 @@ test('a refused landing lets go of the deploy lock before it cleans up on GitHub
   let stderr = '';
   let ended = false;
   const landing = landAsync(r.wt, { DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', FAKE_CI: 'red' }, 50_000, (e) => (stderr = e)).finally(() => (ended = true));
+  t.after(async () => { writeFileSync(gate, ''); await landing; }); // a failed wait below still lets the hook, and the landing, end
   await until('the refusal', () => /tests failed on the rebased branch in CI/.test(stderr), 30_000, () => stderr);
   await until('the lock to be free', () => spawnSync('flock', ['-n', lock, 'true']).status === 0, 4_000, () => stderr);
   assert.ok(!ended, 'freed while the cleanup still runs');

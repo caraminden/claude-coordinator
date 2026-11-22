@@ -71,8 +71,8 @@ import { backfillRuns, importAllRubrics } from './src/review-set.ts';
 import { serverWorkWatch } from './src/server-work.ts';
 import { every, type Job } from './src/every.ts';
 import { keepServing, safely } from './src/safely.ts';
-import { acceptsGzip, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
-import { listenThroughFront } from './src/front.ts';
+import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
+import { listenThroughFront, upgrades } from './src/front.ts';
 import { agentRoutes, machineRoutes } from './src/routes/machines.ts';
 import { jobRoutes } from './src/routes/jobs.ts';
 import { ciStoreRoutes } from './src/routes/ci-store.ts';
@@ -1848,8 +1848,8 @@ busySource(() => [...inFlight].filter(([res]) => !res.headersSent).map(([, what]
 // A test server's "is everything you were doing finished?" (#1437, test/helpers.ts settled()): only with CITADEL_TEST_SETTLED=1.
 const SETTLED_ROUTE = process.env.CITADEL_TEST_SETTLED === '1';
 
-// Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets); anything else asking is served as usual.
-const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').startsWith('/apps/') || apps.onAppHost(req) }, (req, res) => writes.request.run({ seq: 0 }, async () => {
+// Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets), the same check as the front thread's; anything else asking is served as usual.
+const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS_DOMAIN) }, (req, res) => writes.request.run({ seq: 0 }, async () => {
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   inFlight.set(res, `${req.method} ${(req.url ?? '').split('?')[0]}`);
   res.once('close', () => inFlight.delete(res));
@@ -1865,6 +1865,8 @@ const server = createServer({ shouldUpgradeCallback: (req) => (req.url ?? '').st
       while (Date.now() < until);
       return json(res, 200, {});
     }
+    // test/front.test.ts: the client addresses this thread sees, which a client must not be able to set.
+    if (SETTLED_ROUTE && req.url?.startsWith('/api/test/peer')) return json(res, 200, connection(req));
     // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
     if (apps.onAppHost(req)) {
       const path = (req.url ?? '/').split('?')[0];
@@ -1971,9 +1973,10 @@ const listened = (port: number) => {
 };
 // People's read-only page requests answer on reader threads, behind a front thread that owns the port (#1563).
 // CITADEL_FRONT=0 is the off switch: the main thread listens itself, as before.
+let throughFront: ReturnType<typeof listenThroughFront> | null = null;
 if (process.env.CITADEL_FRONT !== '0') {
   front.on = true;
-  listenThroughFront(server, {
+  throughFront = listenThroughFront(server, {
     ...(SYSTEMD_SOCKET ? { fd: 3 } : { host: HOST, port: PORT }),
     readers: 2,
     appsDomain: APPS_DOMAIN,
@@ -2024,17 +2027,21 @@ process.on('SIGTERM', () => {
   store.usage.flush();
   memoryStorms.stop(); // records a storm still going, which the next server would otherwise only see from its middle
   process.once('exit', () => ciLoad.stop()); // at the exit itself, after the last request: writes the runner-load samples it still holds
-  server.close(() => process.exit(0));
   for (const c of clients.keys()) c.end();
   for (const s of upgraded) s.destroy();
   // Every other event stream too (an app's through /apps/, a machine session, a contraption route): none ends by itself, so
   // each held the whole grace (#1578). The exit cuts them anyway; their callers reconnect to the next server.
   for (const [res] of inFlight) if (isEventStream(res)) res.destroy();
   runner.approvals.wakeAll();
-  // A kept-alive connection (Caddy's) stays open after answering a request that was running at close(),
-  // until its keep-alive timeout: close each one as soon as it goes idle.
-  server.closeIdleConnections();
-  every('close idle connections', 50, () => server.closeIdleConnections());
+  // Through the front thread (#1563) this thread keeps listening until the front has let go of the port and answered
+  // what it took, readers' answers and requests piped here alike.
+  void (throughFront?.stop() ?? Promise.resolve()).then(() => {
+    server.close(() => process.exit(0));
+    // A kept-alive connection (Caddy's, or the front thread's) stays open after answering a request that was running
+    // at close(), until its keep-alive timeout: close each one as soon as it goes idle.
+    server.closeIdleConnections();
+    every('close idle connections', 50, () => server.closeIdleConnections());
+  });
   setTimeout(() => {
     server.getConnections((_err, n) => {
       const open = [...inFlight].map(([res, what]) => `${what}${res.headersSent ? ' (answering)' : ''}`).slice(0, 10).join(', ');

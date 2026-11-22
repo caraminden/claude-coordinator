@@ -29,6 +29,7 @@ import { place, type ChunkedUploads, type Meta } from './chunked-uploads.ts';
 import { capped } from './contraption-read.ts';
 import { safeFileName } from './uploads.ts';
 import { every } from './every.ts';
+import { appHost } from './front.ts';
 
 export const APPS_PATH = /^\/apps\/([^/]*)(\/.*)?$/;
 export const MAX_BODY = 20 * 1024 * 1024;
@@ -216,13 +217,8 @@ const handoff = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' 
 const notFound: Refusal = { status: 404, reason: 'Not Found', headers: html, body: page('Not found', 'There is no app here.') };
 const redirect = (to: string, headers: OutgoingHttpHeaders = { 'Cache-Control': 'no-store' }): Refusal => ({ status: 302, reason: 'Found', headers: { Location: to, ...headers }, body: '' });
 
-/** The contraption a request's host names (<name>.<domain>), or null on any other host: one of Citadel's own. */
-export function appHost(req: IncomingMessage, domain: string | null): string | null {
-  if (!domain) return null;
-  const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').toLowerCase();
-  const suffix = `.${domain.toLowerCase()}`;
-  return host.endsWith(suffix) ? host.slice(0, -suffix.length) : null;
-}
+/** The contraption a request's host names: one copy, with the front thread's upgrade check (src/front.ts). */
+export { appHost };
 
 /** Where a contraption's page goes after its sign-in handoff: one of its own paths, else its root. */
 export function enterNext(next: string | null, name: string): string {

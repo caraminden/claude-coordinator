@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 /** The paths readers answer, with or without the front end's /c prefix: a minion's history pages and single events, and memory search. */
 export const READER_PATHS = /^\/(?:c\/)?api\/(?:tickets\/\d+\/events(?:\/\d+)?|projects\/\d+\/memory)$/;
-/** Headers the front thread sets on every request it passes to the main thread; a client's own are dropped. */
+/** Headers the front thread sets on every request it passes to the main thread; a client's own copies are dropped. */
 export const PEER_HEADER = 'x-citadel-peer';
 export const LOCAL_HEADER = 'x-citadel-local';
 /** A request a reader hasn't answered in this long goes to the main thread instead (a GET is safe to ask twice). */
@@ -23,6 +23,21 @@ export const READER_STUCK_MS = 10_000;
 // Hop-by-hop headers belong to one connection, not the request.
 // Upgrade stays on a request that isn't one (no Connection: upgrade): the main thread answers it as it would have.
 const HOP = new Set(['connection', 'keep-alive', 'proxy-connection', 'te', 'trailer']);
+
+/** The contraption a request's host names (<name>.<domain>), or null on any other host: one of Citadel's own (src/apps.ts re-exports it). */
+export function appHost(req: IncomingMessage, domain: string | null): string | null {
+  if (!domain) return null;
+  const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').toLowerCase();
+  const suffix = `.${domain.toLowerCase()}`;
+  return host.endsWith(suffix) ? host.slice(0, -suffix.length) : null;
+}
+
+/**
+ * The requests the main thread upgrades (contraptions' websockets): an /apps/ path or a contraption's own host. One
+ * copy for both threads: the front thread pipes exactly these raw, so no request on a raw pipe reaches the main
+ * thread's HTTP parser carrying peer headers a client wrote.
+ */
+export const upgrades = (req: IncomingMessage, appsDomain: string | null) => (req.url ?? '').startsWith('/apps/') || appHost(req, appsDomain) !== null;
 
 type Answer = { status: number; headers: Record<string, string | string[]>; body: Uint8Array };
 export type FrontOptions = {
@@ -42,6 +57,7 @@ export type FrontOptions = {
  * Serve `server` (the main thread's) through a front thread: it listens on a local socket, and the front thread on
  * the real one. `onListening` gets the port the front thread bound. `onUsage`/`onSetting` take the counts and cache
  * writes readers post (the main thread and its writer do every write). The process exits if the front thread dies.
+ * `stop()`, for a restart, resolves once the front thread has let go of the port and answered what it took.
  */
 export function listenThroughFront(server: Server, opts: FrontOptions, on: { listening: (port: number) => void; usage: (args: unknown[]) => void; setting: (key: string, value: unknown) => void }) {
   // A private folder (0700) for the socket: only this account can reach it, so only the front thread sets the peer header.
@@ -49,11 +65,15 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
   const sock = join(dir, 'main.sock');
   process.once('exit', () => rmSync(dir, { recursive: true, force: true }));
   let stopping = false;
+  let front: Worker | null = null;
+  let stopped!: () => void;
+  const drained = new Promise<void>((r) => (stopped = r));
   // The front thread's pooled connections stay open until it closes them, so a reused one is never closed under a request.
   server.keepAliveTimeout = 0;
   server.listen(sock, () => {
-    const front = new Worker(new URL(import.meta.url), { workerData: { front: { ...opts, sock } } });
-    front.on('message', (m: { listening?: number; usage?: unknown[][]; setting?: [string, unknown] }) => {
+    front = new Worker(new URL(import.meta.url), { workerData: { front: { ...opts, sock } } });
+    front.on('message', (m: { listening?: number; usage?: unknown[][]; setting?: [string, unknown]; stopped?: true }) => {
+      if (m.stopped) stopped();
       if (m.listening !== undefined) on.listening(m.listening);
       for (const args of m.usage ?? []) on.usage(args);
       if (m.setting) on.setting(m.setting[0], m.setting[1]);
@@ -61,15 +81,20 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
     front.on('error', (err) => console.error(`Front thread failed: ${err?.stack ?? err}`));
     // It holds the port: without it nothing answers, so the server exits and systemd starts it again, the socket holding requests meanwhile.
     front.once('exit', (code) => {
+      stopped();
       if (stopping) return;
       console.error(`Front thread stopped (exit code ${code}): exiting so systemd starts the server again.`);
       process.exit(1);
     });
-    process.once('SIGTERM', () => {
-      stopping = true;
-      front.postMessage('stop');
-    });
   });
+  return {
+    stop() {
+      stopping = true;
+      if (!front) stopped();
+      else front.postMessage('stop');
+      return drained;
+    },
+  };
 }
 
 if (!isMainThread && workerData?.front) runFront(workerData.front as FrontOptions & { sock: string });
@@ -77,7 +102,6 @@ if (!isMainThread && workerData?.front) runFront(workerData.front as FrontOption
 function runFront(opts: FrontOptions & { sock: string }) {
   const toMain = new Agent({ keepAlive: true });
   const answerMs = opts.answerMs ?? READER_ANSWER_MS, stuckMs = opts.stuckMs ?? READER_STUCK_MS;
-  const suffix = opts.appsDomain ? `.${opts.appsDomain.toLowerCase()}` : null;
 
   /** The request's headers for the main thread: any client copy of its own two headers dropped, the connection's own addresses set. */
   const mainHeaders = (req: IncomingMessage, keepUpgrade = false) => {
@@ -160,7 +184,7 @@ function runFront(opts: FrontOptions & { sock: string }) {
   }, 1000).unref();
 
   const forReader = (req: IncomingMessage) => req.method === 'GET' && !req.headers.authorization && !req.headers.upgrade
-    && !(suffix && String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').toLowerCase().endsWith(suffix))
+    && appHost(req, opts.appsDomain) === null
     && READER_PATHS.test((req.url ?? '').split('?')[0]);
 
   const ask = (req: IncomingMessage, res: ServerResponse) => {
@@ -180,7 +204,7 @@ function runFront(opts: FrontOptions & { sock: string }) {
     r.worker.postMessage({ id, method: req.method, url: req.url, headers: req.headers });
   };
 
-  const front = createServer({ shouldUpgradeCallback: (req) => !!req.headers.upgrade }, (req, res) => {
+  const front = createServer({ shouldUpgradeCallback: (req) => upgrades(req, opts.appsDomain) }, (req, res) => {
     try {
       if (forReader(req)) ask(req, res);
       else pass(req, res);
@@ -210,11 +234,14 @@ function runFront(opts: FrontOptions & { sock: string }) {
 
   parentPort!.on('message', (m) => {
     if (m !== 'stop') return;
-    // New connections wait in systemd's socket for the next server; open ones finish what they asked.
+    // New connections wait in systemd's socket for the next server; open ones finish what they asked, readers' and
+    // the main thread's alike (it keeps listening until told this is done), then the main thread exits.
     stopping = true;
-    front.close();
+    front.close(() => {
+      for (const r of readers) void r.worker.terminate();
+      parentPort!.postMessage({ stopped: true });
+    });
     front.closeIdleConnections();
     setInterval(() => front.closeIdleConnections(), 50).unref();
-    for (const r of readers) void r.worker.terminate();
   });
 }

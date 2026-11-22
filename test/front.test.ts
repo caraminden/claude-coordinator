@@ -4,6 +4,7 @@
 // writer is still holding. Real servers on one data folder, with the front thread on and off (CITADEL_FRONT=0).
 import assert from 'node:assert/strict';
 import { mkdirSync, readFileSync } from 'node:fs';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
@@ -169,7 +170,44 @@ test('everything else passes through: a POST, a live stream, the password check'
   const first = await stream.body!.getReader().read();
   assert.ok(first.value && first.value.length > 0, 'the stream sent its first event through the front thread');
   ctl.abort();
-  await srv.stop();
+});
+
+test("a client can't set the peer headers, not even on a connection that asked for an upgrade the main thread refuses", { timeout: 60_000 }, async () => {
+  const sock = connect(Number(new URL(srv.base).port), '127.0.0.1');
+  // One request at a time on the one connection; each answer is a small JSON body, chunked or with a Content-Length.
+  const ask = (extra: string) => new Promise<string>((done, fail) => {
+    let got = '';
+    const on = (c: Buffer) => {
+      got += c;
+      const end = got.indexOf('\r\n\r\n'), len = Number(/content-length: (\d+)/i.exec(got)?.[1]);
+      if (end < 0 || !(got.endsWith('\r\n0\r\n\r\n') || Buffer.byteLength(got) - end - 4 >= len)) return;
+      sock.off('data', on);
+      done(got);
+    };
+    sock.on('data', on).once('error', fail);
+    sock.write(`GET /api/test/peer HTTP/1.1\r\nHost: 127.0.0.1\r\n${extra}X-Citadel-Peer: 10.9.9.9\r\nX-Citadel-Local: 10.9.9.9 4444\r\n\r\n`);
+  });
+  try {
+    for (const extra of ['Connection: Upgrade\r\nUpgrade: websocket\r\n', '']) {
+      const got = await ask(extra);
+      assert.match(got, /^HTTP\/1\.1 200/);
+      assert.doesNotMatch(got, /10\.9\.9\.9/, extra || 'the next request on that connection');
+      assert.match(got, /"remote":"(::ffff:)?127\.0\.0\.1"/);
+    }
+  } finally {
+    sock.destroy();
+  }
+});
+
+test('a restart answers what the front thread already took, a reader\'s answer included, then exits', { timeout: 60_000 }, async () => {
+  const slow = get(srv, `${PATHS[0]}?citadel-test-reader=slow`, srv.cookie);
+  await until('the reader has the request', () => logged().includes('Reader test hook: slow'));
+  srv.proc.kill('SIGTERM');
+  const got = await slow;
+  assert.equal(got.status, 200);
+  assert.ok(got.reader);
+  await until('the server exits', () => srv.proc.exitCode !== null || srv.proc.signalCode !== null);
+  assert.equal(srv.proc.exitCode, 0);
 });
 
 test('a write the writer is still holding is never missed: the read waits for it, or the main thread answers', { timeout: 120_000 }, async () => {

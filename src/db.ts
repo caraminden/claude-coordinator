@@ -1830,7 +1830,7 @@ export class Store {
   readonly path: string;
 
   /** `writer`: the write worker's own connection (src/db-writer.ts) to a database the server's Store already set up, so no setup or migrations.
-   *  `reader`: the same, opened read-only by SQLite, for a reader thread (src/readers.ts): any write throws. */
+   *  `reader`: the same, opened read-only by SQLite, for a reader thread (src/reader.ts): any write throws. */
   constructor(path: string, opts: { writer?: boolean; reader?: boolean } = {}) {
     this.path = path;
     // Wait out another connection's write (a test's second Store, a backup) instead of failing at once with SQLITE_BUSY.

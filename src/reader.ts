@@ -18,7 +18,7 @@ export type ReaderData = {
   /** The write worker's counter (src/db-writer.ts): [0] the last write run, [1] its state, [2] the last write sent. */
   shared: BigInt64Array | null;
   embedUrl: string; embedModel: string; memorySchemes: number[] | null;
-  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit` or `=hang` in a query ends or hangs this thread mid-request. */
+  /** A test server's (CITADEL_TEST_SETTLED): `citadel-test-reader=exit`, `=hang` or `=slow` in a query ends, hangs or slows (500 ms) this thread mid-request. */
   testHooks?: boolean;
 };
 
@@ -124,6 +124,10 @@ if (workerData?.reader) {
     let a: Answer | null = null;
     if (data.testHooks && /[?&]citadel-test-reader=exit\b/.test(m.url)) process.exit(1);
     if (data.testHooks && /[?&]citadel-test-reader=hang\b/.test(m.url)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+    if (data.testHooks && /[?&]citadel-test-reader=slow\b/.test(m.url)) {
+      console.log('Reader test hook: slow');
+      await new Promise((r) => setTimeout(r, 500));
+    }
     try {
       // Never older than the person's own last write: what the main thread sent the writer has run, or the main thread answers.
       if (writesCaughtUp(data.shared)) a = await answer(app, auth, routes, m);

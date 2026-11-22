@@ -22,6 +22,7 @@ const ACT = /\b(leaveMail|tellTaskmaster|tellHome|mandateAlert)\(|\brunner\.send
  */
 const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'server.ts': { why: "wiring: it hands each judge its acts (judged() wraps the registered ones' acts)", calls: 38 },
+  'src/exit-with-parent.ts': { why: 'kills only its own test server\'s processes when the parent test exits; judges nothing', calls: 2 },
   'src/ci-armed.ts': { why: "tellTaskmaster itself and the minion's own message tool", calls: 3 },
   'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes", calls: 10 },
   'src/routes/projects.ts': { why: "tells the Taskmaster a person started a minion; a new scheme's kickoff, a tune-up and a brief a person sent", calls: 4 },

@@ -30,10 +30,11 @@ if [ "$name" = mise ]; then
     case $(readlink -f "${d:-.}/mise") in */heavy-shim) continue ;; esac
     keep+=("$d")
   done
+  [[ $PATH == *: ]] && keep+=("") # read -a drops a trailing empty entry, the current folder
   PATH=$(IFS=:; echo "${keep[*]}")
   export PATH
 fi
-direct(){ exec "$real" "$@"; }
+direct() { exec "$real" "$@"; }
 case $(</proc/self/cgroup) in */"${CITADEL_HEAVY_SLICE:-citadel-heavy.slice}"/*) direct "$@" ;; esac
 mode=()
 case $name in

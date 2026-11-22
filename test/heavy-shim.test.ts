@@ -101,12 +101,12 @@ test('mise reshim or install in a turn links the shims to the real mise, never i
   symlinkSync(join(tools, 'heavy-shim'), join(outer, 'mise'));
   const shims = join(root, 'mise-shims');
   mkdirSync(shims);
-  const env = { CITADEL_HEAVY_UNIT: '0', MISE_SHIMS_DIR: shims, PATH: `${join(bin, 'heavy')}:${bin}:${outer}:${real}:${process.env.PATH}` };
+  const env = { CITADEL_HEAVY_UNIT: '0', MISE_SHIMS_DIR: shims, PATH: `${join(bin, 'heavy')}:${bin}:${outer}:${real}:${process.env.PATH}:` };
   for (const cmd of ['mise reshim', 'mise install node@24']) {
     rmSync(join(shims, 'node'), { force: true });
     assert.equal(run(cmd, env).status, 0, cmd);
     assert.equal(readlinkSync(join(shims, 'node')), join(real, 'mise'), cmd);
   }
   // What mise runs keeps the rest of the turn's PATH.
-  assert.match(run('mise exec -- sh -c \'echo "$PATH"\'', env).stdout, new RegExp(`^${miseDir}:${bin}:${real}:`));
+  assert.match(run('mise exec -- sh -c \'echo "$PATH"\'', env).stdout, new RegExp(`^${miseDir}:${bin}:${real}:.*:\n$`), 'a trailing empty entry, the current folder, stays');
 });

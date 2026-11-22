@@ -144,7 +144,7 @@ export function renderSchemesShelf() {
     h('a', { class: `nav-item${view.home ? ' active' : ''}`, href: '#/home', title: 'What waits on you in every scheme' },
       h('span', { class: 'home-mark', 'aria-hidden': 'true' }, '⌂'), h('span', { class: 'name' }, 'Home'))) : null;
   rememberHomeLine(!!home);
-  el.replaceChildren(h('h3', {}, gloss('scheme', 'Schemes'), h('span', { class: 'spacer' }), schemesChip, statusChipEl, releasesChipEl),
+  el.replaceChildren(h('h3', {}, gloss('scheme', 'Schemes'), h('span', { class: 'spacer' }), statusChipEl, schemesChip, releasesChipEl),
     home,
     // Each scheme's targets sit under its row (#626): what it ships and how far the next release is.
     ...shown.flatMap((p) => [row(p), releaseRows(p.id)]),

@@ -61,6 +61,8 @@ const turns = () => jsonLines(join(root, 'turns.jsonl'));
 const live = () => turns().filter((t) => t.token.startsWith(`${ticket.id}.`)).at(-1).token;
 // Nothing queued too: a message that came in during a turn waits out its save with the minion not running, and the
 // next turn's token would log out the one live() last saw.
+// The status is the runner's live turns (#1618), not the row's, which on a loaded box still said idle for a minion
+// whose turn -- and whose only working token -- had started.
 const idle = () => until('the turn to end', async () => {
   const { ticket: t } = await call('Cara', `/api/tickets/${ticket.id}`);
   return t.status !== 'running' && t.queued === 0;

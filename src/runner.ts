@@ -997,6 +997,10 @@ export class Runner {
     // The running step's start and guessed seconds, so the list row's bar fills as the chat head's does (#573).
     const est = p && ticket.status === 'running' ? planEstimate(p, true, Date.now(), ratio) : null;
     return {
+      // `status` from the live turns, not the row alone: the row's write waits in the queue (src/db-writer.ts), so under
+      // load this called a minion idle whose turn had already started -- and a turn's token, minted at that start, is the
+      // only one that still works, so anything acting on "idle, nothing queued" got 401s from it (#1618).
+      status: !closed && this.turns.has(ticket.id) ? 'running' : ticket.status,
       // What steps took against their guesses (#571), which both bars scale the guesses by: the one ratio steps.usual used.
       step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,

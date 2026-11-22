@@ -181,7 +181,8 @@ export function socketBase(env = process.env, tmp = tmpdir()) {
  * Serve `server` (the main thread's) through a front thread: it listens on a local socket, and the front thread on
  * the real one. `onListening` gets the port the front thread bound. `onUsage`/`onSetting` take the counts and cache
  * writes readers post (the main thread and its writer do every write). The process exits if the front thread dies.
- * `stop()`, for a restart, resolves once the front thread has let go of the port and answered what it took.
+ * `stop()`, for a restart, resolves once the front thread has let go of the port and answered what it took; `quiet`
+ * once its reader threads have gone, which the exit waits for (#1625).
  * `publish()` posts a change to the readers' snapshot (Snapshot); `statics()` the front end's files, which it serves (Statics).
  */
 export function listenThroughFront(server: Server, opts: FrontOptions, on: { listening: (port: number) => void; usage: (args: unknown[]) => void; setting: (key: string, value: unknown) => void }) {
@@ -193,6 +194,8 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
   let front: Worker | null = null;
   let stopped!: () => void;
   const drained = new Promise<void>((r) => (stopped = r));
+  let quieted!: () => void;
+  const quiet = new Promise<void>((r) => (quieted = r));
   // How many snapshot changes main has posted: the front thread reads what it hasn't applied yet before it asks a reader,
   // so a reader never answers from older state than main had when the request came (a person's own click included).
   const posted = new Int32Array(new SharedArrayBuffer(4));
@@ -209,8 +212,9 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
     const held = early!;
     early = null;
     for (const m of held) post(m);
-    front.on('message', (m: { listening?: number; usage?: unknown[][]; setting?: [string, unknown]; stopped?: true }) => {
+    front.on('message', (m: { listening?: number; usage?: unknown[][]; setting?: [string, unknown]; stopped?: true; quiet?: true }) => {
       if (m.stopped) stopped();
+      if (m.quiet) quieted();
       if (m.listening !== undefined) on.listening(m.listening);
       for (const args of m.usage ?? []) on.usage(args);
       if (m.setting) on.setting(m.setting[0], m.setting[1]);
@@ -219,6 +223,7 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
     // It holds the port: without it nothing answers, so the server exits and systemd starts it again, the socket holding requests meanwhile.
     front.once('exit', (code) => {
       stopped();
+      quieted();
       if (stopping) return;
       console.error(`Front thread stopped (exit code ${code}): exiting so systemd starts the server again.`);
       process.exit(1);
@@ -227,10 +232,14 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
   return {
     stop() {
       stopping = true;
-      if (!front) stopped();
-      else front.postMessage('stop');
+      if (!front) {
+        stopped();
+        quieted();
+      } else front.postMessage('stop');
       return drained;
     },
+    /** Resolves once no reader thread is still starting: the process must not exit while one is (src/reader.ts, #1625). */
+    quiet,
     /** A warm handover (#1170): stop accepting, keep open connections, and send all their requests to the main thread. */
     release() {
       front?.postMessage('release');
@@ -312,13 +321,17 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
 
   // Readers: started here, so their answers never wait on the main thread.
   // late: it missed an answer's deadline and gets no more requests until it posts something again.
-  type Reader = { worker: Worker; ready: boolean; late: boolean; heard: number; open: Map<number, (a: Answer | null) => void> };
+  // starting: resolves when the thread has said it is ready, or has died. A thread that hasn't is still evaluating its
+  // module (it opens the database and hashes the sign-in keys there), and killing one then aborts the whole process:
+  // V8's "Check failed: !is_null()", SIGTRAP, so the server dies on a signal instead of exiting 0 (#1625).
+  type Reader = { worker: Worker; ready: boolean; late: boolean; heard: number; open: Map<number, (a: Answer | null) => void>; starting: Promise<void> };
   const readers = new Set<Reader>();
   let nextId = 1;
   let failures = 0;
   let stopping = false;
   const startReader = (again = false) => {
-    const r: Reader = { worker: new Worker(new URL('./reader.ts', import.meta.url), { workerData: { reader: opts.reader, snap } }), ready: false, late: false, heard: Date.now(), open: new Map() };
+    let started_up!: () => void;
+    const r: Reader = { worker: new Worker(new URL('./reader.ts', import.meta.url), { workerData: { reader: opts.reader, snap } }), ready: false, late: false, heard: Date.now(), open: new Map(), starting: new Promise<void>((done) => (started_up = done)) };
     readers.add(r);
     const started = Date.now();
     r.worker.on('message', (m: { ready?: true; alive?: true; id?: number; answer?: Answer | null; usage?: unknown[][]; setting?: [string, unknown] }) => {
@@ -326,6 +339,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
       r.late = false;
       if (m.ready) {
         r.ready = true;
+        started_up();
         failures = 0;
         if (again) console.log('Reader thread started again: ready.');
       }
@@ -335,6 +349,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     r.worker.on('error', (err) => console.error(`Reader thread failed: ${err?.stack ?? err}`));
     r.worker.once('exit', (code) => {
       readers.delete(r);
+      started_up();
       for (const done of r.open.values()) done(null); // to the main thread
       r.open.clear();
       if (stopping) return;
@@ -349,6 +364,14 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   // A reader whose thread stopped answering (a read that never ends) is replaced; its requests already went to the main thread.
   setInterval(() => {
     for (const r of readers) if (Date.now() - r.heard > stuckMs) {
+      // One that has never said it is ready is still starting, and terminating it then aborts the process (see Reader
+      // above), so it is left to finish; it answers nothing meanwhile, and the message that says it is ready sets
+      // `heard` again, which puts it back under this watch.
+      if (!r.ready) {
+        console.error(`Reader thread hasn't started in ${Math.round((Date.now() - r.heard) / 1000)} s: leaving it to finish.`);
+        r.heard = Infinity; // said once
+        continue;
+      }
       console.error(`Reader thread silent for ${Math.round((Date.now() - r.heard) / 1000)} s: replacing it.`);
       r.heard = Infinity; // terminated once
       void r.worker.terminate();
@@ -442,8 +465,17 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
     // the main thread's alike (it keeps listening until told this is done), then the main thread exits.
     stopping = true;
     front.close(() => {
-      for (const r of readers) void r.worker.terminate();
+      // At once: the main thread closes its own connections when it hears this, and holding it back for the readers
+      // below would hold every open connection open with it.
       parentPort!.postMessage({ stopped: true });
+      void (async () => {
+        // Each reader finishes starting first: one killed mid-start takes the whole process down with it (see Reader
+        // above). The main thread waits for `quiet` before it exits, with a cap, so a reader that never starts only
+        // slows the restart down.
+        await Promise.all([...readers].map((r) => r.starting));
+        for (const r of readers) void r.worker.terminate();
+        parentPort!.postMessage({ quiet: true });
+      })();
     });
     front.closeIdleConnections();
     setInterval(() => front.closeIdleConnections(), 50).unref();

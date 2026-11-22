@@ -68,6 +68,7 @@
  "src/prompts.ts": 1,
  "src/push.ts": 7,
  "src/quiet.ts": 4,
+ "src/reader.ts": 1,
  "src/reaper.ts": 1,
  "src/release-key.ts": 2,
  "src/release-readers.ts": 1,

@@ -2012,7 +2012,7 @@ if (process.env.CITADEL_FRONT !== '0') {
     readers: 2,
     appsDomain: APPS_DOMAIN,
     ...(SETTLED_ROUTE ? { answerMs: Number(process.env.CITADEL_READER_ANSWER_MS) || undefined, stuckMs: Number(process.env.CITADEL_READER_STUCK_MS) || undefined } : {}),
-    reader: { testHooks: SETTLED_ROUTE, dbPath: store.path, ...signInKeys, shared: writer?.shared ?? null, embedUrl: EMBED_URL, embedModel: EMBED_MODEL, memorySchemes: MEMORY_SCHEMES ?? null, dataDir: DATA_DIR },
+    reader: { testHooks: SETTLED_ROUTE, bootWait: SETTLED_ROUTE ? process.env.CITADEL_READER_BOOT_WAIT : undefined, dbPath: store.path, ...signInKeys, shared: writer?.shared ?? null, embedUrl: EMBED_URL, embedModel: EMBED_MODEL, memorySchemes: MEMORY_SCHEMES ?? null, dataDir: DATA_DIR },
   }, {
     listening: listened,
     usage: (args) => (store.usage.used as (...a: unknown[]) => void)(...args),
@@ -2078,10 +2078,16 @@ function closeDown(why: string) {
   // each held the whole grace (#1578). The exit cuts them anyway; their callers reconnect to the next server.
   for (const [res] of inFlight) if (isEventStream(res)) res.destroy();
   runner.approvals.wakeAll();
+  // Nothing exits while a reader thread is still starting: killing one then takes the process down on a signal
+  // instead of exiting 0 (src/front.ts, #1625). Capped, so a reader that never starts only slows the restart down.
+  const exit = async () => {
+    await Promise.race([throughFront?.quiet ?? Promise.resolve(), new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS).unref())]);
+    process.exit(0);
+  };
   // Through the front thread (#1563) this thread keeps listening until the front has let go of the port and answered
   // what it took, readers' answers and requests piped here alike.
   void (throughFront?.stop() ?? Promise.resolve()).then(() => {
-    server.close(() => process.exit(0));
+    server.close(() => void exit());
     // A kept-alive connection (Caddy's, or the front thread's) stays open after answering a request that was running
     // at close(), until its keep-alive timeout: close each one as soon as it goes idle.
     server.closeIdleConnections();
@@ -2091,7 +2097,7 @@ function closeDown(why: string) {
     server.getConnections((_err, n) => {
       const open = [...inFlight].map(([res, what]) => `${what}${res.headersSent ? ' (answering)' : ''}`).slice(0, 10).join(', ');
       console.log(`${why}: exiting with ${n} connection(s) still open after ${SHUTDOWN_GRACE_MS / 1000} s${open ? `: ${open}` : ''}`);
-      process.exit(0);
+      void exit();
     });
   }, SHUTDOWN_GRACE_MS).unref();
 }

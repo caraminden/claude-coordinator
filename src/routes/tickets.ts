@@ -57,6 +57,7 @@ import { saveInstructions, type HeldEdit } from '../instructions-save.ts';
 
 export { postPlan };
 import { machineNotes, patchMachine } from './machines.ts';
+import { lendAfter, lendLines, lendPatch, parseLendChange } from '../machine-lend.ts';
 import { installCommand, LIVE_MANIFEST, listed, parseHostTool, readManifest, sourceName, toolLabel } from '../host-tools.ts';
 import { approveHostTool } from '../host-tool-ship.ts';
 import { ensureCoordinator, ensureCoordinatorFor, LINE_FIELDS, schemeTarget } from './projects.ts';
@@ -1037,6 +1038,54 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    method: 'POST', path: '/api/tickets/:ticket/machine-lend', who: ['self'], refuse: 'Only the minion or Taskmaster itself can propose machine lending in its chat',
+    async handler(ctx) {
+      const { req, res, app, ticket } = ctx;
+      const { store } = app;
+      // propose_machine_lend (#1638): a card whose Approve saves the change through the Machines page's PATCH (src/machine-lend.ts).
+      const body = await readJson(req);
+      const name = str(body.machine, 'Machine', 30).toLowerCase();
+      let change;
+      try {
+        change = parseLendChange(body);
+      } catch (err: any) {
+        throw new HttpError(400, err.message);
+      }
+      const why = body.why === undefined ? '' : str(body.why, 'Why', 500);
+      const project = store.getProject(ticket.project_id)!;
+      // Any machine by name, lent here or not: asking for one not lent yet is the point. Approving is who can save it on the page.
+      const machine = store.listMachines().find((m) => m.name === name);
+      const view = machine && app.machines.view(machine);
+      if (!machine || !view || view.runners) {
+        const names = store.listMachines().filter((m) => !app.machines.view(m).runners).map((m) => m.name);
+        throw new HttpError(404, machine ? `${name} is a CI runner host: it lends no tools` : `No machine called ${name}; there are ${names.join(', ') || 'none'}`);
+      }
+      // An online agent says what it has, so a typo is caught here, not after a person approves it. Offline, nobody knows.
+      if (view.managed === false && (change.tick || change.untick || change.server !== undefined)) {
+        throw new HttpError(400, `${name}'s agent is from before ticks: it lends what its own command line says. Propose workspace_tools instead, or ask its owner to reinstall it from the Machines page`);
+      }
+      if (view.managed) {
+        const missing = (change.tick ?? []).filter((w) => !view.workspaces.some((f) => f.name === w));
+        if (missing.length) throw new HttpError(400, `${name} has no workspace called ${missing.join(', ')}; it has ${view.workspaces.map((w) => w.name).join(', ') || 'none'}`);
+        if (change.server && !view.found.some((f) => f.name === change.server)) throw new HttpError(400, `${name} has no MCP server called ${change.server}; it found ${view.found.map((f) => f.name).join(', ') || 'none'}`);
+      }
+      const now = { projects: view.projects, lend: view.lend, workspace_tools: view.workspace_tools, always_on: view.always_on };
+      const scheme = { id: project.id, name: project.name };
+      const lines = lendLines(change, now, scheme, name);
+      if (!lines.length) throw new HttpError(400, `Nothing to change: ${name} already ${Object.keys(change).length ? 'has all of that' : 'is as it is; name what should change'}`);
+      const after = lendAfter(change, now, project.id);
+      const was = view.projects.includes(project.id);
+      const owner = machine.owner_id === null ? null : store.getUser(machine.owner_id)?.name ?? null;
+      const page = `#/p/${project.id}/machines/${name}`;
+      const event = postPlan(app, ticket.id, {
+        summary: change.here === false && was ? `Take ${name} from ${project.name}` : change.here && !was ? `Lend ${name} to ${project.name}` : `Change what ${name} lends`,
+        plan: [...lines, '', `After this it lends: ${after.server ? `the ${after.server} MCP server; ` : ''}${after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'}.`, ...(why ? ['', why] : []), '', `[${name} on the Machines page](${page})`].join('\n'),
+        machineLend: { id: machine.id, name, owner, scheme, change, lines, after, why, page },
+      });
+      return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id), owner, page });
+    },
+  },
+  {
     method: 'POST', path: '/api/tickets/:ticket/host-tool', who: ['minion'], refuse: 'Only the minion itself can propose a host tool in its chat',
     async handler(ctx) {
       const { req, res, app, ticket } = ctx;
@@ -1093,13 +1142,15 @@ export const ticketRoutes: Route[] = [
       if (body.verdict === 'reject' && !ins) throw new HttpError(400, 'verdict must be approve or revise');
       // A machine's notes card (#617) or a release key card (#837): a reason to reject is optional, and a reject is final.
       // A host tool card (#1147) too.
-      const fixed = card.machine || card.releaseKey || card.hostTool;
+      // A machine lending card (#1638) too.
+      const fixed = card.machine || card.releaseKey || card.hostTool || card.machineLend;
+      const ml = card.machineLend;
       const notes = body.verdict === 'approve' ? null : (fixed || ins) && !String(body.notes ?? '').trim() ? '' : str(body.notes, 'Notes', 10_000);
       if (card.status === 'withdrawn') throw new HttpError(409, 'Its minion withdrew this card: nothing to answer');
       if (card.status === 'dismissed') throw new HttpError(409, `${card.by} dismissed this card`);
-      if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : card.hostTool ? `A newer proposal for ${card.hostTool.package} replaced this one` : 'A newer plan replaced this one');
+      if (card.status === 'superseded') throw new HttpError(409, card.machine ? `A newer proposal for ${card.machine.name}'s notes replaced this one` : ml ? `A newer proposal for ${ml.name}'s lending replaced this one` : card.releaseKey ? 'A newer card for this key replaced this one' : card.hostTool ? `A newer proposal for ${card.hostTool.package} replaced this one` : 'A newer plan replaced this one');
       if (ins && card.status !== 'pending') throw new HttpError(409, `${card.by} already ${card.status === 'approved' ? 'saved' : card.status === 'rejected' ? 'cancelled' : 'sent back'} this edit`);
-      if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : card.hostTool ? 'this tool' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
+      if (card.status !== 'pending') throw new HttpError(409, fixed ? `${card.by} already ${card.status === 'approved' ? 'approved' : 'rejected'} ${card.machine ? 'these notes' : ml ? 'this change' : card.hostTool ? 'this tool' : 'this key'}` : `${card.by} already ${card.status === 'approved' ? 'approved this plan' : 'asked for changes'}`);
       // One answer per card: the key, the notes and the install each take time (keytool, a write) before the card says "approved",
       // so a second click in that gap would run them again after the first one's answer. Held until the card's new status is readable.
       if (deciding.has(event.id)) throw new HttpError(409, `${card.by}'s card is being answered right now`);
@@ -1112,6 +1163,19 @@ export const ticketRoutes: Route[] = [
           // Approve writes what the card showed, or nothing: notes changed since (on the Machines page) aren't overwritten unseen.
           if (machine.name !== card.machine.name || machine.notes !== card.old) throw new HttpError(409, `${card.machine.name}'s notes changed since this was proposed; ask the minion to propose them again`);
           await patchMachine(app, session, machine, { notes: card.plan });
+        }
+        let lendResult = '';
+        if (ml && notes === null) {
+          const machine = store.getMachine(ml.id);
+          if (!machine || machine.name !== ml.name) throw new HttpError(409, `${ml.name} was removed or renamed; ask for it again`);
+          // Who can save it on the Machines page (Cara, 2026-11-22, "Who can save the page"): an admin, or its owner for their own.
+          if (!managesMachine(session, machine)) throw new HttpError(403, `Only ${ml.owner ? `${ml.owner}, who owns ${ml.name},` : 'an admin'}${ml.owner ? ' or an admin' : ''} can change what it lends`);
+          const v = app.machines.view(machine);
+          const patch = lendPatch(ml.change, { projects: v.projects, lend: v.lend, workspace_tools: v.workspace_tools, always_on: v.always_on }, ml.scheme.id);
+          if (patch.projects?.includes(ml.scheme.id) && !store.canSee(session, ml.scheme.id)) throw new HttpError(403, `You aren't in ${ml.scheme.name}, so you can't lend ${ml.name} to it`);
+          // The same save as the page's: the agent is told the ticks, and sessions on what is no longer lent end.
+          if (Object.keys(patch).length) await patchMachine(app, session, machine, patch);
+          lendResult = Object.keys(patch).length ? '' : ' (it already had all of that: someone saved it on the Machines page meanwhile)';
         }
         // A host tool installs software on the server every scheme's turns share: a member of the Citadel scheme approves it (Josh, 2026-11-19).
         if (card.hostTool && notes === null && !session.admin) throw new HttpError(403, `Only a member of the ${APP_NAME} scheme can approve installing software on the server`);
@@ -1144,6 +1208,10 @@ export const ticketRoutes: Route[] = [
           ? notes === null
             ? `Approved: ${card.releaseKey.title}'s release key is made on the server, and its APK is building now. The key and its password stay out of chats and repos.`
             : `Rejected the release key card for ${card.releaseKey.title}; no key was made.${notes ? `\n\n${notes}` : ''}`
+          : ml
+          ? notes === null
+            ? `Approved: ${ml.name}'s lending is saved as the card showed${lendResult}. Its agent has it now, and minion turns that start from now get it: a minion that needs it ends its turn and carries on in the next.`
+            : `Rejected your proposed lending for ${ml.name}; nothing changed.${notes ? `\n\n${notes}` : ''}`
           : card.machine
           ? notes === null
             ? `Approved: ${card.machine.name}'s new notes are saved, and turns read them from their next start.`

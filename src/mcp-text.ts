@@ -158,7 +158,7 @@ export function machineText(m: any): string {
     ...(m.managed ? [
       // Its agent reports what it found and a person ticks what to lend on the Machines page (#439).
       `  found on that computer: ${[m.found.length ? `MCP servers ${m.found.map((f: any) => f.name).join(', ')}` : '', ws ? `workspaces ${ws}` : ''].filter(Boolean).join('; ') || 'nothing'}`,
-      `  ticked to lend: ${[m.lend?.server ? `MCP server ${m.lend.server}` : '', m.lend?.workspaces.length ? `workspaces ${m.lend.workspaces.join(', ')}` : ''].filter(Boolean).join('; ') || 'nothing (a person ticks it on the Machines page)'}`,
+      `  ticked to lend: ${[m.lend?.server ? `MCP server ${m.lend.server}` : '', m.lend?.workspaces.length ? `workspaces ${m.lend.workspaces.join(', ')}` : ''].filter(Boolean).join('; ') || 'nothing'}`,
     ] : [
       m.online && !m.runners ? `  agent runs: ${m.command || '?'} (set on that computer); offers ${m.servers.length ? m.servers.map((s: string) => (s === 'ws' ? 'workspace tools' : 'its MCP server')).join(' and ') : 'nothing'}` : '',
       m.runners ? '' : `  workspace tools: ${m.workspace_tools ? 'on' : 'off'}${m.online && ws ? `; workspaces: ${ws}` : ''}`,
@@ -167,5 +167,7 @@ export function machineText(m: any): string {
     m.checked?.results.length ? [`  last check ${ago(m.checked.at)}:`, ...checkLines(m.checked.results).map((l) => `  ${l}`)].join('\n') : m.online && !m.runners ? '  tools: not checked yet (Citadel checks it shortly after it connects; check_machine checks now)' : '',
     m.problems.length ? `  agent reports problems: ${m.problems.join('; ')}` : '',
     m.notes ? `  notes: ${m.notes.replace(/\n+/g, ' ')}` : '',
+    // #1638: a change goes through propose_machine_lend, and its page entry is a link.
+    m.page ? `  change it: propose_machine_lend; on the page: [${m.name} on the Machines page](${m.page})` : '',
   ].filter(Boolean).join('\n');
 }

@@ -1059,6 +1059,8 @@ async function route() {
     // Settings and Orders open on their list of pages on a phone (#1018); on a desktop Settings opens on Members beside
     // its menu, and Orders on Instructions with the panel's Orders tab showing (#1071).
     else if ((m = hash.match(/^#\/p\/(\d+)\/(settings|orders)$/))) await showProject(Number(m[1]), matchMedia('(max-width: 800px)').matches ? { kind: m[2] } : m[2] === 'settings' ? { kind: 'members' } : { kind: 'instructions', orders: true });
+    // The Machines page at one machine (#1638): lending cards and list_machines link here; its row opens and scrolls into view.
+    else if ((m = hash.match(/^#\/p\/(\d+)\/machines\/([a-z0-9-]{1,30})$/))) await showProject(Number(m[1]), { kind: 'machines', machine: m[2] });
     else if ((m = hash.match(PAGE_ROUTE))) await showProject(Number(m[1]), { kind: m[2] }); // every Settings and Orders page in the table (settings-pages.js)
     else if ((m = hash.match(/^#\/p\/(\d+)\/schedules(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'schedules', schedule: Number(m[2]) || null });
     // Releases, CI and Status are one page's tabs (#1423): their old addresses open it on their tab. CI's All (Home's) opens the

@@ -223,6 +223,8 @@ function taskmasterMachines({ app, caller, project }: Ctx) {
       project_names: view.projects.map((id) => app.store.getProject(id)?.name ?? `scheme ${id}`),
       // Whether a minion turn its asker starts here gets it (src/runner.ts): an admin sees more than that.
       minions_get_it: lendsMachine(app.store, m, project, asker === null ? [] : [asker]),
+      // The machine on the Machines page (#1638), for tool replies and cards to link.
+      page: `#/p/${project.id}/machines/${m.name}`,
     };
   });
 }
@@ -456,7 +458,13 @@ export const machineRoutes: Route[] = [
   // The Taskmaster's look at the machines (#307): list them with their live state, and test one.
   {
     method: 'GET', path: '/api/projects/:project/machines', ...taskmaster,
-    handler: (ctx) => json(ctx.res, 200, { machines: taskmasterMachines(ctx) }),
+    handler: (ctx) => {
+      const machines = taskmasterMachines(ctx);
+      // The names of the rest (#1638): one not lent here yet is what propose_machine_lend asks for.
+      const others = ctx.app.store.listMachines().filter((m) => !machines.some((x) => x.id === m.id) && !ctx.app.machines.view(m).runners)
+        .map((m) => ({ name: m.name, owner_name: m.owner_id === null ? null : ctx.app.store.getUser(m.owner_id)?.name ?? null }));
+      return json(ctx.res, 200, { machines, others });
+    },
   },
   {
     method: 'POST', path: '/api/projects/:project/machines/:name/check', ...taskmaster,

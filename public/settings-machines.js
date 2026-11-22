@@ -80,7 +80,7 @@ function machineAddForm(runners, label) {
 }
 
 /** Settings' Machines tab: add machines, show the line that connects one, tick what each lends, and remove them or replace their token. */
-export function machinesPage() {
+export function machinesPage(main = {}) {
   view.machineToken = null; // { id, name, token } just made, shown until you leave the page
   shownTokens.clear();
   const add = machineAddForm(false, 'Add machine');
@@ -119,8 +119,12 @@ export function machinesPage() {
     else el.textContent = `Android emulator (citadel-android): leased by ${l.who}${l.what ? ` for "${l.what}"` : ''}, until ${new Date(l.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
   }).catch(() => document.getElementById('emulator-lease')?.remove());
   setTimeout(() => {
+    // A link to one machine (#1638) opens its row, so its scheme list and ticks show at once.
+    const focus = main.machine && view.machines?.find((m) => m.name === main.machine);
+    if (focus) (view.machineOpen ??= new Set()).add(focus.id);
     renderMachineSetup();
     renderMachineList();
+    if (focus) document.querySelector(`#machine-list .machine-row[data-name="${focus.name}"]`)?.scrollIntoView({ block: 'start' });
     if (!view.machines?.length) add.show(true);
   });
   return section;
@@ -394,6 +398,7 @@ function machineLine(m) {
   // The fix stays on the closed line (#437, take A); a button inside a summary doesn't toggle the row.
   if (fix) sum.after(h('span', { class: 'machine-fix' }, fix));
   row.classList.add('machine-row', 'machine-line', m.status);
+  row.dataset.name = m.name;
   row.addEventListener('toggle', () => {
     if (row.open === view.machineOpen.has(m.id)) return;
     view.machineOpen[row.open ? 'add' : 'delete'](m.id);

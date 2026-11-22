@@ -41,8 +41,8 @@ export function mcpFromAgent(describe: string): Pick<Machine, 'mcp_kind' | 'mcp_
 }
 
 /** An MCP server's name as an agent reports it (machine-agent.mjs SERVER_NAME), and a workspace's. */
-const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}$/;
-const WORKSPACE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
+export const SERVER_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,59}$/;
+export const WORKSPACE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/;
 /** What the setup lines ran for a machine added as a Claude Code server with no name typed (#308). */
 const DEFAULT_CLAUDE_MCP = 'godot-ai';
 

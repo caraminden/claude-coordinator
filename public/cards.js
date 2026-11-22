@@ -218,6 +218,19 @@ function planOutcome(r, machine) {
   return machine ? 'Superseded by a newer proposal' : 'Superseded by a newer plan';
 }
 
+/** A machine lending card (#1638): each change as a + or − line, what it lends after, why, and the machine on the Machines page. */
+function lendBody(card) {
+  const ml = card.machineLend;
+  const after = ml.after ?? { server: null, workspaces: [] };
+  return [
+    h('pre', { class: 'instructions-diff' }, ...ml.lines.map((l) => h('div', { class: l.startsWith('+') ? 'add' : 'del' }, l))),
+    h('div', { class: 'small' }, h('span', { class: 'muted' }, 'After this it lends: '),
+      [after.server ? `the ${after.server} MCP server` : '', after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'].filter(Boolean).join('; ')),
+    ml.why ? h('div', { class: 'small' }, ml.why) : '',
+    h('div', { class: 'small' }, h('a', { href: ml.page }, `${ml.name} on the Machines page`)),
+  ];
+}
+
 /** A machine's notes card (#617): what changes, with the whole new text behind a toggle. */
 function notesBody(card) {
   const diff = card.diff ?? [];
@@ -268,10 +281,13 @@ export function planCard(ticketId, card, opts = {}) {
   const mem = card.memory;
   // A held instructions edit (#1162): Save anyway, Work it in (notes optional) or Cancel edit.
   const ins = card.instructions;
-  const fixed = m || k || t || mem;
-  const mayApprove = t ? !!account?.admin : ins ? ins.scope !== 'citadel' || !!account?.admin : !m || !!account?.admin || (m.owner != null && m.owner === me);
+  // A machine lending card (#1638): approved by who can save that machine on the Machines page, as a notes card.
+  const ml = card.machineLend;
+  const fixed = m || k || t || mem || ml;
+  const owned = m ?? ml;
+  const mayApprove = t ? !!account?.admin : ins ? ins.scope !== 'citadel' || !!account?.admin : !owned || !!account?.admin || (owned.owner != null && owned.owner === me);
   // Said beside the greyed-out Approve, not only in its tooltip, so a phone or keyboard shows why.
-  const hint = mayApprove ? '' : t ? 'Only a member of the Citadel scheme can approve' : ins ? 'Only an admin or a Citadel scheme member can save the Citadel-wide text' : `Only ${m.owner ? `${m.owner} (its owner)` : 'an admin'}${m.owner ? ' or an admin' : ''} can approve`;
+  const hint = mayApprove ? '' : t ? 'Only a member of the Citadel scheme can approve' : ins ? 'Only an admin or a Citadel scheme member can save the Citadel-wide text' : `Only ${owned.owner ? `${owned.owner} (its owner)` : 'an admin'}${owned.owner ? ' or an admin' : ''} can approve`;
   const status = h('span', { class: 'muted', role: 'status' });
   const why = h('div', { class: 'muted small', hidden: !hint }, hint);
   const approve = h('button', { type: 'button', class: 'small', disabled: !mayApprove, title: hint || null }, ins ? 'Save anyway' : 'Approve');
@@ -285,7 +301,7 @@ export function planCard(ticketId, card, opts = {}) {
   const prev = fixed || ins || view.lastPlan?.handle.status === 'approved' ? null : view.lastPlan;
   const mine = { plan: card.plan ?? '', summary: card.summary ?? '', handle: null };
   if (!fixed && !ins) view.lastPlan = mine;
-  const head = whoLine(m ? 'proposes machine notes' : k ? 'asks for a release key' : t ? 'asks for a host tool' : mem ? 'proposes a memory tidy' : ins ? (card.to ? 'held an instructions edit for' : 'held an instructions edit') : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
+  const head = whoLine(m ? 'proposes machine notes' : ml ? 'asks to change machine lending' : k ? 'asks for a release key' : t ? 'asks for a host tool' : mem ? 'proposes a memory tidy' : ins ? (card.to ? 'held an instructions edit for' : 'held an instructions edit') : card.to ? 'proposes a plan to' : 'proposes a plan', card, opts);
   const dismiss = dismissButton(ticketId, card, () => {
     deciding = true;
     editing(false);
@@ -305,8 +321,8 @@ export function planCard(ticketId, card, opts = {}) {
   });
   const el = h('div', { class: 'qcard pcard' },
     head.el,
-    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : k ? 'Release key' : t ? 'Host tool' : mem ? 'Memory' : ins ? 'Instructions' : 'Plan'), card.summary),
-    h('div', { class: 'pbody' }, m ? notesBody(card) : mem ? memoryBody(card, ticketId) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
+    h('div', { class: 'qtitle' }, h('span', { class: 'chip' }, m ? 'Machine notes' : ml ? 'Machine lending' : k ? 'Release key' : t ? 'Host tool' : mem ? 'Memory' : ins ? 'Instructions' : 'Plan'), card.summary),
+    h('div', { class: 'pbody' }, m ? notesBody(card) : ml ? lendBody(card) : mem ? memoryBody(card, ticketId) : prev ? revisionBody(card, prev, ticketId) : markdown(card.plan, ticketId)),
     notes, why,
     h('div', { class: 'row' }, status, h('span', { class: 'spacer' }), dismiss, drop, revise, approve, cancel, sendNotes));
   let rank = 0;
@@ -349,7 +365,7 @@ export function planCard(ticketId, card, opts = {}) {
         status.textContent = '';
         if (verdict === 'revise') editing(true);
       },
-      label: ins ? (verdict === 'approve' ? 'save the instructions edit' : verdict === 'reject' ? 'cancel the instructions edit' : 'send the edit back') : m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : t ? `${verdict === 'approve' ? 'approve' : 'reject'} installing ${t.package}` : k ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
+      label: ins ? (verdict === 'approve' ? 'save the instructions edit' : verdict === 'reject' ? 'cancel the instructions edit' : 'send the edit back') : m ? `${verdict === 'approve' ? 'approve' : 'reject'} the notes for ${m.name}` : ml ? `${verdict === 'approve' ? 'approve' : 'reject'} the lending change for ${ml.name}` : t ? `${verdict === 'approve' ? 'approve' : 'reject'} installing ${t.package}` : k ? `${verdict === 'approve' ? 'make' : 'reject'} ${k.title}'s release key` : verdict === 'approve' ? `approve the plan "${card.summary}"` : `send the revision notes`,
     }).then((ticket) => adoptTicket(ticketId, ticket), () => {}); // a failure already said so in its toast
   };
   approve.addEventListener('click', () => decide('approve'));

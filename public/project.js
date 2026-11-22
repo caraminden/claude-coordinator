@@ -306,7 +306,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : main.kind === 'files' ? filesView(main.folder)
     : main.kind === 'settings' ? settingsHome()
     : main.kind === 'orders' ? settingsHome(true)
-    : pageRow(main.kind) && !pageRow(main.kind).own ? pageFn(main.kind)()
+    : pageRow(main.kind) && !pageRow(main.kind).own ? pageFn(main.kind)(main)
     : main.kind === 'releases' ? releasesShell()
     : main.kind === 'schedules' ? schedulesPage(projectId, main.schedule)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)

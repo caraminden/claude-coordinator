@@ -332,6 +332,27 @@ const PROPOSE_PLAN = {
   },
 };
 
+// propose_machine_lend (#1638; Cara, 2026-11-22): Taskmasters and minions both, as a card a person approves.
+const PROPOSE_MACHINE_LEND = {
+  name: 'propose_machine_lend',
+  description:
+    "Ask for a connected machine's lending to change, as a card in this chat: put this scheme on its list or take it off (here), tick or untick its workspaces (folders) and its MCP server, and set its switches. Use it instead of describing the Machines page to a person. Only who can save that machine on the Machines page approves (an admin, or its owner for someone's own); approving saves it exactly as the page does (its agent is told, and sessions on what is no longer lent end), rejecting changes nothing, and either comes as a message. A scheme's minions use a workspace only if it is ticked AND the scheme is on the machine's list, so ask for both in one card. Ticks are the machine's, shared by every scheme it is lent to. Names come from list_machines; a newer proposal for the same machine replaces an open one. Minion turns get the change from their next start. Link every mention of the card, as with propose_plan.",
+  inputSchema: {
+    type: 'object',
+    properties: {
+      machine: { type: 'string', description: 'The machine, as list_machines names it, e.g. citadel-test-box' },
+      here: { type: 'boolean', description: "true: put this scheme on the machine's list; false: take it off. Leave out to keep it as it is" },
+      tick: { type: 'array', items: { type: 'string' }, maxItems: 50, description: 'Workspaces (folders) to tick, by the names list_machines shows' },
+      untick: { type: 'array', items: { type: 'string' }, maxItems: 50, description: 'Workspaces to untick: every scheme it is lent to loses them' },
+      server: { type: ['string', 'null'], description: 'The MCP server to lend (it lends one at a time), or null to untick it. Leave out to keep it' },
+      workspace_tools: { type: 'boolean', description: "Only for an agent from before ticks: all its folders on or off" },
+      always_on: { type: 'boolean', description: 'true: offline over 5 minutes shows as Down (a desktop); false: shows as Asleep (a laptop)' },
+      why: { type: 'string', maxLength: 500, description: 'What it is for, for the person approving: at most 500 characters' },
+    },
+    required: ['machine'],
+  },
+};
+
 const PROPOSE_HOST_TOOL = () => ({
   name: 'propose_host_tool',
   description:
@@ -789,7 +810,7 @@ const TOOLS = () => ([
   {
     name: 'list_machines',
     description:
-      "List the connected machines (people's computers lending an MCP server, like a Godot editor, and workspace tools) this scheme can see: an admin's ask sees all of them, anyone else's those a minion turn of theirs here would get. For each: its status as the Machines tab shows it (Ready, Needs a fix, Down, Asleep) with the reason, online or offline from the server's live connection, connected since (this connection, which a Citadel restart also resets) and last seen, host, the MCP server its agent runs, the tools at its last check (Citadel checks each machine on connect and hourly), workspace tools on or off and its workspaces, and whom it is lent to. Read-only.",
+      "List the connected machines (people's computers lending an MCP server, like a Godot editor, and workspace tools) this scheme can see: an admin's ask sees all of them, anyone else's those a minion turn of theirs here would get. For each: its status as the Machines tab shows it (Ready, Needs a fix, Down, Asleep) with the reason, online or offline from the server's live connection, connected since (this connection, which a Citadel restart also resets) and last seen, host, the MCP server its agent runs, the tools at its last check (Citadel checks each machine on connect and hourly), workspace tools on or off and its workspaces, and whom it is lent to, with a link to it on the Machines page. Read-only: propose_machine_lend asks a person to change what it lends. Machines not lent here are named at the end.",
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -798,6 +819,7 @@ const TOOLS = () => ([
       "Test one machine through the path a minion turn uses: for its MCP server (and its workspace tools, when on) open a session, send MCP initialize and tools/list, and close it. Reports pass or fail per server with the error, and the tools listed. It starts a copy of the machine's MCP server, as any turn does, but calls no tool, so nothing on the machine changes. Takes up to 30 seconds a server.",
     inputSchema: { type: 'object', properties: { name: { type: 'string', description: 'The machine name, as list_machines shows it, e.g. josh-laptop' } }, required: ['name'] },
   },
+  PROPOSE_MACHINE_LEND,
   STRIKE_TEXT,
   LIST_PROPERTIES,
   {
@@ -2250,8 +2272,9 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${head}: ${job.ok ? 'done' : 'FAILED'}.\n${job.text}`;
     }
     case 'list_machines': {
-      const { machines } = await call('GET', `/api/projects/${C().PROJECT}/machines`);
-      return (machines.length ? machines.map(machineText) : ['No machines this scheme can see.']).join('\n\n');
+      const { machines, others } = await call('GET', `/api/projects/${C().PROJECT}/machines`);
+      return [...(machines.length ? machines.map(machineText) : ['No machines this scheme can see.']),
+        ...(others?.length ? [`Not lent here (propose_machine_lend asks for one): ${others.map((o: any) => (o.owner_name ? `${o.name} (${o.owner_name}'s own)` : o.name)).join(', ')}`] : [])].join('\n\n');
     }
     case 'check_machine': {
       if (typeof args.name !== 'string' || !/^[a-z0-9-]{1,30}$/i.test(args.name)) throw new Error('name is required: the machine name, as list_machines shows it');
@@ -2296,6 +2319,10 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!C().MACHINES.includes(String(args.machine ?? '').toLowerCase())) throw new Error(C().MACHINES.length ? `No machine called ${args.machine} that this turn got: it has ${C().MACHINES.join(', ')}` : 'This turn got no connected machines, so there are no notes to propose');
       const { href, owner } = await call('POST', `/api/tickets/${C().TICKET}/machine-notes`, { machine: args.machine, notes: args.notes });
       return `The notes card is in the chat; its link is ${href}. Link every mention of it, e.g. [the notes card below](${href}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
+    }
+    case 'propose_machine_lend': {
+      const { href, owner, page } = await call('POST', `/api/tickets/${C().TICKET}/machine-lend`, args);
+      return `The lending card is in the chat; its link is ${href}. Link every mention of it, e.g. [the lending card below](${href}), and the machine itself as [${String(args.machine).toLowerCase()} on the Machines page](${page}). Only ${owner ? `${owner} (its owner) or an admin` : 'an admin'} can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
     case 'propose_host_tool': {
       const { href } = await call('POST', `/api/tickets/${C().TICKET}/host-tool`, { source: args.source, package: args.package, version: args.version, why: args.why });
@@ -2545,7 +2572,7 @@ function toolListAll() {
   const memory = [...(C().MEMORY ? [SEARCH_MEMORY] : []), SEARCH_DECISIONS, SEARCH_MINIONS, IDEAS];
   const audit = C().HOME_CONTRAPTIONS.length && (C().ROLE !== 'thread' || C().APP_TURNS_RUN) ? [CONTRAPTION_TURNS()] : [];
   if (C().ROLE !== 'thread') return C().APP_INSTRUCTIONS ? [...TOOLS().map(withScheme), SHIP_LESSONS, WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_INSTRUCTION_TOOLS, ...CONTRAPTION_TOOLS, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host] : [...TOOLS(), WAKE_AT, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ORDER_SHIP_LINE, ...APP_TOOLS, ...deploy, MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...host];
-  return [...THREAD_TOOLS(), ...(C().SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, PREP_ULTRA_REVIEWS, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION(), PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : []), PROPOSE_MACHINE_NOTES, PROPOSE_HOST_TOOL(), PROPOSE_MEMORY(), EDIT_INSTRUCTIONS, ...(C().JOB_MACHINES.length ? [QUEUE_JOB(), JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(C().APPROVALS ? [APPROVE] : [])];
+  return [...THREAD_TOOLS(), ...(C().SEAM_TRIAL ? [SEAM_FRESH] : []), SHIP_LESSONS, WAKE_AT, PREP_ULTRA_REVIEWS, CI_RUNNERS, CI_FILES, PUBLISH_DESKTOP, ...(C().HOME_CONTRAPTIONS.length ? [DEPLOY_CONTRAPTION(), PUBLISH_RELEASE(), MAKE_RELEASE_KEY()] : []), PROPOSE_MACHINE_NOTES, PROPOSE_MACHINE_LEND, PROPOSE_HOST_TOOL(), PROPOSE_MEMORY(), EDIT_INSTRUCTIONS, ...(C().JOB_MACHINES.length ? [QUEUE_JOB(), JOB_STATUS, STOP_JOB] : []), MANDATE_ITEM, REVIEW_SET, RECORD_VERDICT, CONTRAPTION_READ, ...audit, ...memory, ...MEDIA_TOOL_LIST, CODEX_IMAGE_TOOL, ...host, ...(C().APPROVALS ? [APPROVE] : [])];
 }
 
 /** One JSON-RPC request's answer, or null for a notification: a turn's own helper writes it to stdout, the shared tool server (src/mcp-pool.ts) sends it over HTTP. */

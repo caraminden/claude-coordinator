@@ -47,3 +47,11 @@ test('an answer older than a day, a different question, another person\'s card, 
   assert.equal(cardTwin(other.store, other.b, { ...ask, to: 'Cara' }), null, 'Josh\'s open card is not one Cara can answer');
   assert.equal(cardTwin(store, b, { questions: [] }), null, 'a choices-page or secret card has no questions');
 });
+
+test('questions that differ only by a number or a letter are not twins, and an everyone card is not a twin of one for Cara', () => {
+  const { store, a, b } = setup();
+  store.addEvent(a.id, 'question', { id: 'q1', to: 'Cara', questions: [Q('Merge #12 now?', 'Yes', 'No')] });
+  assert.equal(cardTwin(store, b, { questions: [Q('Merge #13 now?', 'Yes', 'No')], to: 'Cara' }), null);
+  assert.equal(cardTwin(store, b, { questions: [Q('Merge #12 now?', 'Yes', 'No')] }), null, 'no to: everyone, not the same people');
+  assert.match(cardTwin(store, b, { questions: [Q('Merge #12 now?', 'Yes', 'No')], to: 'Cara' }) ?? '', /still open/);
+});

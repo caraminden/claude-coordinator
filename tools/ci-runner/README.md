@@ -445,17 +445,21 @@ For Linux jobs, `runs-on: [self-hosted, <scheme-slug>-ci-linux]`; they need no `
 Citadel's suite runs on its Linux runners (`citadel-ci-linux`; two of them, but the workflow lets one land's suite
 run at a time: two at once on that PC failed in a different file every run, 2026-11-11). Only the lands' runs may take
 the first runner: flake proofs (`flake-proof.yml`), heavy jobs (`citadel-heavy.yml`, #1347), the desktop build (`desktop.yml`), the nightly and runs started by hand ask for the side label
-`citadel-ci-linux-side`, which only `-linux-2` carries (#1240: on 2026-11-20 proofs held both runners for three hours and
+`citadel-ci-linux-side`, which `-linux-2` and the long runner `-linux-3` carry (#1240: on 2026-11-20 proofs held both runners for three hours and
 every land fell back to perigee). Runners added before #1240 got the side label by hand, as the repo's admin:
 `gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-side'`.
 Without a runner carrying it, those wait in GitHub's queue (up to a day) while lands go on; `test/ci-runner-choice.test.ts` fails on a workflow job that could take the first runner.
-Long jobs (`citadel-heavy --long`, `src/long-jobs.ts`) have a third runner of their own, `-linux-3`, which carries
-`citadel-ci-linux-long` and not the side label (#1592: on 2026-11-22 a long job held the side runner from 02:04 to 07:30
-and five flake proofs queued behind it). `citadel-heavy.yml` takes a `long` input, and the pump sends it when the
+Long jobs (`citadel-heavy --long`, `src/long-jobs.ts`) have a third runner, `-linux-3`, the only one carrying
+`citadel-ci-linux-long` (#1592: on 2026-11-22 a long job held the side runner from 02:04 to 07:30 and five flake proofs
+queued behind it). It carries the side label too, so it takes side work while no long job runs (#1646, Cara, 2026-11-22,
+"Long runner helps out": with `-linux-2` alone, proofs and heavy jobs queued about 45 minutes an hour while `-linux-3`
+sat idle: `shared/project/reports/side-runner-queue-2026-11-22.md`). A long job can
+wait behind one side job there; `-linux-2` never takes a long job. `citadel-heavy.yml` takes a `long` input, and the pump sends it when the
 workflow declares one, so a scheme whose workflow lacks it keeps its long jobs on the side runner. `add-runner.sh` gives
 every runner after the first the side label, so a long runner is relabelled by hand, as the repo's admin:
-`gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-long'`, then
-`gh api -X DELETE repos/caraminden/claude-coordinator/actions/runners/<id>/labels/citadel-ci-linux-side`. Without a runner
+`gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-long'`
+(it keeps the side label `add-runner.sh` gave it; to stop it taking side work, as before #1646:
+`gh api -X DELETE repos/caraminden/claude-coordinator/actions/runners/<id>/labels/citadel-ci-linux-side`). Without a runner
 carrying the long label, a long job waits in GitHub's queue for a day and is then lost.
 A ship's own check (#1567, `tools/own-check.sh`) has a runner of its own too, which carries only
 `citadel-ci-linux-check`: `tests.yml` sends every `check/**` run there, one at a time (group `citadel-check`), niced, so

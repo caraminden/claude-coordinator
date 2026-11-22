@@ -157,7 +157,7 @@ export class LongJobs {
     const wf = JSON.parse(await this.d.gh(projectId, [`repos/${j.slug}/contents/.github/workflows/${WORKFLOW}?ref=${encodeURIComponent(branch)}`]));
     const text = Buffer.from(wf.content ?? '', 'base64').toString('utf8');
     const minutes = /^\s+minutes:\s*$/m.test(text) ? ['-f', `inputs[minutes]=${LONG_MINUTES}`] : [];
-    // A `long` input sends it to a runner only long jobs use, so flake proofs and heavy runs never queue behind it (#1592).
+    // A `long` input sends it to the runner with the long label, so flake proofs and heavy runs never queue behind it on the side runner (#1592; that runner takes side work too between long jobs, #1646).
     if (/^\s+long:\s*$/m.test(text)) minutes.push('-f', 'inputs[long]=true');
     // Saved first and never put back on an error: a dispatch GitHub took but didn't answer is found by watch(), and one it
     // never took goes back in line there once it shows no run, so the command can't run twice.

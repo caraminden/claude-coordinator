@@ -3,6 +3,7 @@ import { lines } from './approvals.ts';
 import type { Project } from './db.ts';
 import { pacific } from './pacific.ts';
 import type { Job, Run, Runner } from './ci-health.ts';
+import { LONG_MINUTES, type LongJob } from './long-jobs.ts';
 
 /** A job waiting this long on labels only offline runners serve rings. */
 export const WAIT_MS = 10 * 60_000;
@@ -127,14 +128,33 @@ export function stuckProblems(runners: Runner[], jobs: Job[], offline: Record<st
   });
 }
 
-/** Runners on one job HUNG_MS or more: no job here runs that long, so it is probably hung. */
-export function hungProblems(jobs: Job[], now: number): Problem[] {
-  return jobs.filter((j) => j.status === 'in_progress' && j.runner_name && j.started_at && now - at(j.started_at) >= HUNG_MS).map((j) => ({
-    key: `hung:${j.runner_name}`,
-    title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}) since ${clock(at(j.started_at!))}`,
-    why: 'over 2 h on one job is far past a normal run, so it is probably hung (a test waiting forever, or its PC asleep mid-job), and jobs queued for it wait',
-    fix: `cancel run ${j.run_id} on GitHub, then restart the runner if it stays busy`,
-  }));
+/** The minutes a long job may run: its command's DEADLINE_MIN=<n> when it sets one, else LONG_MINUTES (the run's own time limit, 6 h). */
+export function longDeadlineMs(l: Pick<LongJob, 'command'>): number {
+  const m = /\bDEADLINE_MIN=(\d+)/.exec(l.command);
+  return (m && Number(m[1]) > 0 ? Number(m[1]) : LONG_MINUTES) * 60_000;
+}
+
+/**
+ * Runners on one job HUNG_MS or more: no job here runs that long, so it is probably hung. A planned long job (citadel-heavy
+ * --long, `longs`) that is running keeps to its own deadline instead: quiet inside it, a hung problem naming it past it.
+ */
+export function hungProblems(jobs: Job[], now: number, longs: Pick<LongJob, 'run_id' | 'state' | 'command' | 'started_at'>[] = []): Problem[] {
+  const out: Problem[] = [];
+  for (const j of jobs) {
+    if (j.status !== 'in_progress' || !j.runner_name || !j.started_at || now - at(j.started_at) < HUNG_MS) continue;
+    const long = j.run_id != null ? longs.find((l) => l.state === 'running' && l.run_id === j.run_id) : undefined;
+    const base = { key: `hung:${j.runner_name}`, fix: `cancel run ${j.run_id} on GitHub, then restart the runner if it stays busy` };
+    if (!long) {
+      out.push({ ...base, title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}) since ${clock(at(j.started_at))}`,
+        why: 'over 2 h on one job is far past a normal run, so it is probably hung (a test waiting forever, or its PC asleep mid-job), and jobs queued for it wait' });
+      continue;
+    }
+    const limit = longDeadlineMs(long);
+    if (now - (long.started_at ?? at(j.started_at)) < limit) continue;
+    out.push({ ...base, title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}), a long job, since ${clock(at(j.started_at))}, past its ${Math.round(limit / 60_000)} min deadline`,
+      why: `a long job (citadel-heavy --long) is allowed ${Math.round(limit / 60_000)} min, and this one is still running, so it is probably hung, and jobs queued for it wait` });
+  }
+  return out;
 }
 
 /** A job that ended without starting: no steps ran and no runner took it (a billing block, or a runner that never came). */

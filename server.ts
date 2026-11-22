@@ -43,7 +43,7 @@ import { moveEventsOffThread } from './src/events-db.ts';
 import { MachineRelay } from './src/machines.ts';
 import { ShipWatch } from './src/ci-ships.ts';
 import { DEFAULT_SETTINGS, MachineJobs, storedSettings } from './src/machine-jobs.ts';
-import { LongJobs } from './src/long-jobs.ts';
+import { LongJobs, readLongJobs } from './src/long-jobs.ts';
 import { Pusher, loadVapidKeys, type PushTrigger } from './src/push.ts';
 import { Runner, slimEvent } from './src/runner.ts';
 import { describesIn } from './src/review-describe.ts';
@@ -1354,6 +1354,7 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
 // its scheme); no turn runs.
 const ciHealth = new CiHealth(store, {
   outbox,
+  longs: () => readLongJobs(join(DATA_DIR, 'projects', '.heavy')),
   as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined),
   // shortcut: compares against the clone's local branch, so a scheme whose clone lags GitHub's main gets its last green late; read origin's ref too if one does.
   green: (p, runs, branch) => {

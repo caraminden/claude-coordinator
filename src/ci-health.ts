@@ -53,6 +53,7 @@ import type { GithubEnv } from './scheme-repo.ts';
 import { pacific } from './pacific.ts';
 import { failuresIn, ghText } from './flake-evidence.ts';
 
+import type { LongJob } from './long-jobs.ts';
 import { VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, startedRed, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
 export { WAIT_MS, HUNG_MS, RED_FIX_MS, ORPHAN_MS, type Problem, type ProblemLink, type WakeAt, problemLink, itemText, clock, trackOffline, servers, stuckProblems, hungProblems, neverStarted, deadGroups, deadProblem, orphanRuns, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, computerOf, sharedHost, bundleTitle, ciPage, CI_SENDER, itemKey } from './ci-problems.ts';
 import { LAND_RING_STREAK, LAND_RING_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
@@ -310,6 +311,8 @@ export interface CiHealthDeps {
   outbox?: Outbox;
   /** Each poll's runs of a scheme (all branches, newest first) with its default branch, for its last green (src/last-green.ts, #1016). */
   green?: (project: Project, runs: GreenRun[], branch: string) => void;
+  /** The long jobs (citadel-heavy --long) on record: one running inside its deadline is not a hung runner. */
+  longs?: () => LongJob[];
 }
 
 export class CiHealth {
@@ -563,7 +566,7 @@ export class CiHealth {
     for (const g of deadGroups(all)) out.push(deadProblem(g, await this.reason(slug, g.dead.at(-1)!, as)));
     // A runner list it can't read keeps the stuck items as they were: it can't tell, so it neither clears nor rings anew.
     out.push(...(runners ? stuckProblems(runners, all, saved.offline, now) : (saved.problems ?? []).filter((x) => x.key.startsWith('stuck:'))));
-    out.push(...hungProblems(all, now));
+    out.push(...hungProblems(all, now, this.deps.longs?.() ?? []));
 
     const branch = (await this.read(`repos/${slug}`, as))?.default_branch ?? 'main';
     this.deps.green?.(p, runs.filter((r) => !quietWorkflow(p, r)).map((r) => ({ head_sha: r.head_sha, workflow_id: r.workflow_id, status: r.status, conclusion: r.conclusion, created_at: r.created_at, file: workflowFile(r) })), branch);

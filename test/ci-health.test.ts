@@ -83,6 +83,20 @@ test('a runner on one job over 2 h rings as probably hung; under that is the pag
   assert.match(p.fix!, /^cancel run 44370680700 on GitHub/);
 });
 
+test('a long job running inside its deadline is not hung; past it, it rings as a long job; any other job over 2 h still rings (#1601)', () => {
+  const run = 45038989266;
+  const hrs = (n: number) => n * HOUR;
+  const running = (msAgo: number, run_id = run) => job({ status: 'in_progress', conclusion: null, run_id, name: 'heavy', runner_name: 'DESKTOP-G248IJ8-linux-3', started_at: iso(msAgo) });
+  const long = (command: string, state: 'running' | 'done' = 'running') => [{ run_id: run, state, command, started_at: NOW - hrs(3) } as any];
+  assert.deepEqual(hungProblems([running(hrs(3))], NOW, long('DEADLINE_MIN=330 ./x')), [], 'inside its own deadline');
+  assert.deepEqual(hungProblems([running(hrs(5))], NOW, long('make')), [], 'no DEADLINE_MIN: the 6 h cap');
+  const [p] = hungProblems([running(hrs(6))], NOW, [{ ...long('DEADLINE_MIN=330 ./x')[0], started_at: NOW - hrs(6) }]);
+  assert.match(p.title, /a long job.*past its 330 min deadline/);
+  assert.equal(hungProblems([running(hrs(3))], NOW).length, 1, 'not a long job: rings');
+  assert.equal(hungProblems([running(hrs(3), 999)], NOW, long('make')).length, 1, 'another run: rings');
+  assert.equal(hungProblems([running(hrs(3))], NOW, long('make', 'done')).length, 1, 'an ended record: rings');
+});
+
 test('jobs that never started group by labels, apart from red tests, until a job with those labels starts', () => {
   assert.equal(neverStarted(dead(HOUR)), true);
   assert.equal(neverStarted(job({ conclusion: 'failure' })), false, 'a red test ran steps on a runner');

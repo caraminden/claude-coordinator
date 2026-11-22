@@ -132,7 +132,8 @@ lets go of the lock and holds with the phase "held: main is broken (N min)", a w
 ticket's `yield`) and never a train rider. Every `LAND_HOLD_POLL` (30 s) it looks: the deploy's note cleared or changed,
 main moved, or main's check passing on a recheck (a fixed box) sends it back to its place in line, and it starts over
 from its rebase. A fix for main still passes its own check and ships as usual, and the held ships follow it. Only past
-`LAND_HOLD_MAX` (8 h) is a held ship refused. Merges into a build, `--full` and `--build` runs are refused as before.
+`LAND_HOLD_MAX` (8 h) is a held ship refused. A `--build` run is refused as before; merges into a build and `--full`
+runs never run this check.
 
 A ship refused by the pipeline rather than by its own change (#1360, Cara 2026-11-20, "Refused ships keep their place":
 CI and perigee both busy, perigee's heavy slot taken, or a perigee red of flakes only) keeps its ticket once per

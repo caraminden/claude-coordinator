@@ -132,6 +132,13 @@ export function landNews(output: string, name: (branch: string) => string): News
 let cache: { path: string; size: number; mtime: number; output: string } | null = null;
 
 /** A landing log's end, read again only when it changed (Releases reads it at every poll). */
+/** Whether CI's run on this landing's train was started early, during the train ahead's deploy, and counted for it (land.sh's early_gate, #1366). It's the latest try's: a line before its last rebase belongs to an earlier one. */
+export function earlyCi(output: string): boolean {
+  const all = output.split('\n');
+  const start = all.findLastIndex((l) => /^land: rebasing \S+ onto /.test(l));
+  return all.slice(start + 1).some((l) => /^land: early next train: CI started on this train at /.test(l));
+}
+
 export function readTail(path: string): string {
   let st;
   try {

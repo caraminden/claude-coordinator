@@ -15,6 +15,8 @@ export interface Wait {
   kind: string;
   /** Where it is: a landing's stage (line, rebase, test, deploy, restart) or a lone wait's own (slot, run; CI's queued, jobs, passed, failed, cancelled). */
   stage: string;
+  /** The stage's name as the page says it when it is finer than the track's: "Boot check", "CI · started early". */
+  label?: string;
   /** The row's badge, as short as it gets: "line · 2nd". */
   chip: string;
   /** The readout's detail: "2nd in line, behind #513 (testing)". */
@@ -174,20 +176,35 @@ export function moveIn(line: number[], seqs: number[], moved: number): number[] 
   return [...rest.slice(0, i), moved, ...rest.slice(i)];
 }
 
-/** A landing's phase (queue_phase's words in land.sh and deploy.sh) as its stage, badge word and detail. */
-export function landPhase(phase: string): { stage: string; word: string; key: string; text: string } {
+/**
+ * A landing's phase (queue_phase's words in land.sh and deploy.sh) as its stage, badge word, detail and `label`: the
+ * name the Releases page shows for it. `key` still groups the usual times, so a start or boot check counts in the
+ * rebase's span as before. Only a rebase reads "Rebase" (#1566): every other phase land.sh writes has its own words.
+ */
+export function landPhase(phase: string): { stage: string; word: string; key: string; text: string; label: string } {
   const p = phase.replace(/ since \d\d:\d\d$/, '');
   // CI gave no answer and perigee is too busy for the suite (#1254): it asks CI again until one of them is free.
-  if (/^waiting for CI or a quiet perigee/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: p };
-  if (/^waiting for CI/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI on the rebased commit' };
+  if (/^waiting for CI or a quiet perigee/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: p, label: 'CI' };
+  if (/^waiting for CI's reruns alone/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: "CI's full run ended red: waiting for its reruns of the failed files alone", label: 'CI' };
+  if (/^waiting for CI/.test(p)) return { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI on the rebased commit', label: 'CI' };
   // land.sh runs the suite itself only when CI couldn't answer (its CI FALLBACK, #523).
-  if (/^running the tests/.test(p)) return { stage: 'test', word: 'tests', key: 'tests', text: 'CI fell back: running the full suite on perigee' };
+  if (/^running the tests/.test(p)) return { stage: 'test', word: 'tests', key: 'tests', text: 'CI fell back: running the full suite on perigee', label: 'Tests on perigee' };
   // tools/run-tests.sh's reruns of the failed files, each alone (#553), on perigee: land.sh's run or deploy.sh's.
-  if (/^rerunning \d+ failed test files?$/.test(p)) return { stage: 'test', word: 'reruns', key: 'reruns', text: 'rerunning the failed test files alone on perigee' };
-  if (/^finding the ship that turned the train red/.test(p)) return { stage: 'test', word: 'bisect', key: 'bisect', text: 'the train went red in CI: finding the ship that turned it red' };
-  if (/^deploying/.test(p)) return { stage: 'deploy', word: 'deploy', key: 'deploy', text: p.replace(/^deploying(: )?/, '') || 'deploying' };
-  return { stage: 'rebase', word: 'rebase', key: 'rebase', text: p === 'starting' ? 'starting' : 'rebasing onto main' };
+  if (/^rerunning \d+ failed test files?$/.test(p)) return { stage: 'test', word: 'reruns', key: 'reruns', text: 'rerunning the failed test files alone on perigee', label: 'Reruns' };
+  // The red train's bisect: its trial runs (#1366) and its search.
+  if (/^(finding the ship that turned the train red|testing the train again without its likely causes)/.test(p)) return { stage: 'test', word: 'bisect', key: 'bisect', text: p === 'finding the ship that turned the train red' ? 'the train went red in CI: finding the ship that turned it red' : 'the train went red in CI: testing it again without its likely causes', label: 'Bisect' };
+  if (/^deploying/.test(p)) return { stage: 'deploy', word: 'deploy', key: 'deploy', text: p.replace(/^deploying(: )?/, '') || 'deploying', label: 'Deploy' };
+  // Before the rebase: the boot check main's refusing deploys earn before a CI run is spent (#1012), and the moment after the lock.
+  if (/^boot check before CI/.test(p)) return { stage: 'rebase', word: 'boot check', key: 'rebase', text: "boot check before CI: deploy has been refusing, so main's own check runs first", label: 'Boot check' };
+  if (/^(rebasing|merging main)/.test(p)) return { stage: 'rebase', word: 'rebase', key: 'rebase', text: 'rebasing onto main', label: 'Rebase' };
+  return { stage: 'rebase', word: 'starting', key: 'rebase', text: 'starting', label: 'Starting' };
 }
+
+/** A waiter's phase while main fails its boot check (#1564): it holds, up to 8 h, and never rides a train. "held: main is broken (12 min)". */
+export const heldOf = (phase: string): string | null => (/^held: main is broken/.test(phase) ? phase.replace(/ since \d\d:\d\d$/, '') : null);
+
+/** The Releases page's words for a holder's CI after an early run counted for it (land.sh's early_gate). */
+export const EARLY_CI = { word: 'CI · early', label: 'CI · started early', text: "CI started early, during the train ahead's deploy: waiting for that run's result" };
 
 // The one-line readout's words for a landing's test phases (#630): the stage and its count say the rest, and the
 // suite's file counts fill its piece of the track.
@@ -204,7 +221,7 @@ export const TRAIN_SHIPS = 7;
 export const trainLabel = (g: number) => (g === 0 ? 'Releasing next' : `Train ${g + 2}, after ${g + 1} ahead`);
 
 /** Each land-line ticket's wait, by its label (a branch, or "tools/deploy.sh"). `name` turns a label into "#513". */
-export function landWaits(line: LandTicket[], took: number[], now: number, usual: (key: string) => number | null, name: (label: string) => string): Map<string, Wait> {
+export function landWaits(line: LandTicket[], took: number[], now: number, usual: (key: string) => number | null, name: (label: string) => string, early: (label: string) => boolean = () => false): Map<string, Wait> {
   const out = new Map<string, Wait>();
   const typical = median(took) ?? TYPICAL_LANDING;
   const holder = line.find((t) => t.got > 0);
@@ -215,12 +232,12 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
   let forming = 0; // waiters past the train, in line order: they fill the next trains
   line.forEach((t, i) => {
     if (t.got > 0) {
-      const ph = landPhase(t.phase), c = t.tests;
+      const ph = landPhase(t.phase), c = t.tests, e = ph.key === 'ci' && early(t.label);
       const size = riders.length ? `Train of ${members.length} (${members.join(', ')}) · ` : '';
       const brief = BRIEF[ph.key] ?? (riders.length ? ph.text : undefined);
       out.set(t.label, {
-        kind: 'land', stage: ph.stage, since: t.mtime, usual: usual(`land:${ph.key}`),
-        chip: `ship · ${c ? `${c.done}/${c.total}` : ph.word}`, text: `${size}${c ? `${ph.text}: ${countsText(c)}` : ph.text}`,
+        kind: 'land', stage: ph.stage, since: t.mtime, usual: usual(`land:${ph.key}`), label: e ? EARLY_CI.label : ph.label,
+        chip: `ship · ${c ? `${c.done}/${c.total}` : e ? EARLY_CI.word : ph.word}`, text: `${size}${c ? `${ph.text}: ${countsText(c)}` : e ? EARLY_CI.text : ph.text}`,
         ...(brief && { brief: riders.length ? `train of ${members.length} · ${brief}` : brief }), ...(c && { done: c.done, total: c.total }), ...(c?.failed && { failed: c.failed }),
         ...(riders.length && { train: train('front') }),
       });
@@ -229,13 +246,19 @@ export function landWaits(line: LandTicket[], took: number[], now: number, usual
     if (holder && riders.includes(t)) {
       const hp = landPhase(holder.phase);
       out.set(t.label, {
-        kind: 'land', stage: hp.stage, since: holder.mtime, usual: usual(`land:${hp.key}`), chip: 'ship · riding',
+        kind: 'land', stage: hp.stage, label: hp.label, since: holder.mtime, usual: usual(`land:${hp.key}`), chip: 'ship · riding',
         text: `riding in ${name(holder.label)}'s train (${members.join(', ')}): ${hp.text}`, brief: `riding in ${name(holder.label)}'s train`,
         train: train('rider'),
       });
       return;
     }
-    const ahead = line.slice(0, i).filter((a) => !riders.includes(a));
+    // A ship held while main fails its boot check (#1564): not next in line, in no train, so it fills no train's count.
+    const held = heldOf(t.phase);
+    if (held) {
+      out.set(t.label, { kind: 'land', stage: 'line', label: 'Held', chip: 'line · held', text: `${held}: it waits until main passes its boot check again, and rides no train`, brief: held, since: t.mtime, usual: null, train: { role: 'waiting', label: 'Held' } });
+      return;
+    }
+    const ahead = line.slice(0, i).filter((a) => !riders.includes(a) && !heldOf(a.phase));
     const place = ordinal(ahead.length + 1);
     const label = trainLabel(Math.floor(forming++ / TRAIN_SHIPS));
     let text: string, usualS: number | null = null;
@@ -378,6 +401,8 @@ export interface WaitDeps {
   ciSlug?: () => string | null;
   /** Every poll: the land line with each landing's phase and its gate run, for the land alarm (#561, CiHealth.land). */
   landLine?: (seen: LandSeen[], now: number) => void;
+  /** Whether a minion's ship counted a CI run started early on its train (#1566, land-news's earlyCi). */
+  early?: (ticketId: number) => boolean;
 }
 
 /** The waits of every minion, polled from disk; a change re-sends that minion's row. */
@@ -498,7 +523,7 @@ export class Waits {
         const id = this.ticketFor(t.label);
         return { seq: t.seq, name: t.label === 'tools/deploy.sh' ? t.label : this.name(t.label), phase: t.got > 0 ? landPhase(t.phase).key : 'line', ci: id != null ? this.d.ci?.view(id)?.stage ?? null : null, run: id != null ? this.d.ci?.runOf(id) ?? null : null };
       }), now);
-      for (const [label, w] of landWaits(line, took, now, this.usual, this.name)) {
+      for (const [label, w] of landWaits(line, took, now, this.usual, this.name, (l) => { const i = this.ticketFor(l); return i != null && !!this.d.early?.(i); })) {
         const id = this.ticketFor(label);
         const holder = line.find((t) => t.label === label && t.got > 0);
         if (id != null) next.set(id, { ...w, key: holder ? `land:${landPhase(holder.phase).key}` : undefined });

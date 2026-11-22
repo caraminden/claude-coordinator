@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import type { Ship } from '../src/branch.ts';
+import { earlyCi } from '../src/land-news.ts';
 import { flockedInodes, landPhase, median, moveIn, procAlive, ridingOf, slotHeld, trainLabel, Waits } from '../src/waits.ts';
 import { tempRoot } from './helpers.ts';
 
@@ -61,7 +62,7 @@ test('the land line: the holder by its phase, each waiter by its place and who i
   dead.add(ticket(4, d.branch, 0, 'waiting', 5)); // its process is gone
   waits.poll();
 
-  assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', chip: 'ship · tests', text: 'CI fell back: running the full suite on perigee', brief: 'full suite on perigee', since: now - 30_000, usual: null });
+  assert.deepEqual(waits.wait(a.id), { kind: 'land', stage: 'test', label: 'Tests on perigee', chip: 'ship · tests', text: 'CI fell back: running the full suite on perigee', brief: 'full suite on perigee', since: now - 30_000, usual: null });
   const wb = waits.wait(b.id)!;
   assert.equal(wb.chip, 'line · next train');
   assert.equal(wb.text, `Releasing next: 2nd in line, behind #${a.number} (testing)`);
@@ -95,7 +96,7 @@ test('a stage that moves on counts toward its usual; a landing that leaves the l
   waits.poll();
   assert.equal(waits.usual('land:rebase'), 12);
   assert.equal(waits.usual('land:ci'), null);
-  assert.deepEqual({ ...waits.wait(a.id)!, since: 0 }, { kind: 'land', stage: 'deploy', chip: 'ship · deploy', text: 'boot check', since: 0, usual: null });
+  assert.deepEqual({ ...waits.wait(a.id)!, since: 0 }, { kind: 'land', stage: 'deploy', label: 'Deploy', chip: 'ship · deploy', text: 'boot check', since: 0, usual: null });
   now += 30_000;
   rmSync(join(state, 'queue', '0000000001'));
   waits.poll();
@@ -202,7 +203,7 @@ test("a test run's counts (#545): the landing's run and a heavy Node suite show 
   progress(join(state, 'land-test.progress'), '96\n212\ntest/runner.test.ts\n', 1);
   waits.poll();
   assert.deepEqual(waits.wait(a.id), {
-    kind: 'land', stage: 'test', chip: 'ship · 96/212', text: 'CI fell back: running the full suite on perigee: 96 of 212 files · test/runner.test.ts', brief: 'full suite on perigee',
+    kind: 'land', stage: 'test', label: 'Tests on perigee', chip: 'ship · 96/212', text: 'CI fell back: running the full suite on perigee: 96 of 212 files · test/runner.test.ts', brief: 'full suite on perigee',
     since: now - 30_000, usual: null, done: 96, total: 212,
   });
   // #1368: the full run's failed files so far go on to Releases; the reruns' counts (run-tests.sh's rerun_counts) say what they are.
@@ -316,7 +317,7 @@ test('a move on a target that shows part of the line moves only that landing (#1
 });
 
 test("a ship waiting for CI or a quiet perigee shows that wait, how long so far included, not a plain CI wait (#1254)", () => {
-  assert.deepEqual(landPhase('waiting for CI or a quiet perigee, 5 min so far'), { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI or a quiet perigee, 5 min so far' });
+  assert.deepEqual(landPhase('waiting for CI or a quiet perigee, 5 min so far'), { stage: 'test', word: 'CI', key: 'ci', text: 'waiting for CI or a quiet perigee, 5 min so far', label: 'CI' });
   assert.equal(landPhase('waiting for CI since 14:02').text, 'waiting for CI on the rebased commit');
 });
 
@@ -349,4 +350,64 @@ test('a red train under bisect reads as the front bisecting; later trains say ho
   assert.equal(trainLabel(1), 'Train 3, after 2 ahead');
   assert.equal(ridingOf("riding in ticket/1-x's ship train since 14:05"), 'ticket/1-x');
   assert.equal(ridingOf('waiting'), null);
+});
+
+// Every phase tools/land.sh, deploy.sh and run-tests.sh write (queue_phase), by the name the Releases page shows (#1566):
+// only a rebase reads "Rebase".
+test('landPhase names each phase land.sh writes: starting, boot check, rebase, CI, the suite on perigee, reruns, bisect and deploy', () => {
+  const rows: [string, string, string, string][] = [ // phase, stage, key, label
+    ['starting', 'rebase', 'rebase', 'Starting'],
+    ['', 'rebase', 'rebase', 'Starting'],
+    ['boot check before CI since 14:01', 'rebase', 'rebase', 'Boot check'],
+    ['rebasing onto main', 'rebase', 'rebase', 'Rebase'],
+    ['merging main into build/7', 'rebase', 'rebase', 'Rebase'],
+    ['waiting for CI since 14:02', 'test', 'ci', 'CI'],
+    ['waiting for CI: running since 14:03', 'test', 'ci', 'CI'],
+    ["waiting for CI's reruns alone since 14:09", 'test', 'ci', 'CI'],
+    ['waiting for CI: a busy runner, 5 min so far', 'test', 'ci', 'CI'],
+    ['waiting for CI or a quiet perigee, 31 min so far', 'test', 'ci', 'CI'],
+    ['testing the train again without its likely causes', 'test', 'bisect', 'Bisect'],
+    ['finding the ship that turned the train red', 'test', 'bisect', 'Bisect'],
+    ['running the tests since 14:20', 'test', 'tests', 'Tests on perigee'],
+    ['rerunning 2 failed test files since 14:25', 'test', 'reruns', 'Reruns'],
+    ['deploying', 'deploy', 'deploy', 'Deploy'],
+    ['deploying: running the tests since 14:30', 'deploy', 'deploy', 'Deploy'],
+    ['deploying: boot check since 14:31', 'deploy', 'deploy', 'Deploy'],
+    ['deploying: going live', 'deploy', 'deploy', 'Deploy'],
+    ['deploying: waiting for the restart ahead: x', 'deploy', 'deploy', 'Deploy'],
+  ];
+  for (const [phase, stage, key, label] of rows) {
+    const p = landPhase(phase);
+    assert.deepEqual([p.stage, p.key, p.label], [stage, key, label], phase);
+  }
+  assert.notEqual(landPhase('boot check before CI since 14:01').text, landPhase('rebasing onto main').text);
+});
+
+test('a ship whose CI started early on the train ahead reads "CI · started early"; a held ship (main broken) is in no train and not counted ahead (#1566, #1564)', () => {
+  const { waits, ticket } = setup();
+  const f = minion(), h = minion(), w = minion();
+  const early = new Set<number>([f.id]);
+  (waits as any).d.early = (id: number) => early.has(id);
+  ticket(1, f.branch, now / 1000 - 40, 'waiting for CI since 14:02', 30);
+  ticket(2, h.branch, 0, 'held: main is broken (12 min)', 20);
+  ticket(3, w.branch, 0, 'waiting', 19);
+  waits.poll();
+  const front = waits.wait(f.id)!;
+  assert.equal(front.label, 'CI · started early');
+  assert.equal(front.chip, 'ship · CI · early');
+  const held = waits.wait(h.id)!;
+  assert.deepEqual([held.stage, held.label, held.chip], ['line', 'Held', 'line · held']);
+  assert.match(held.text, /^held: main is broken \(12 min\)/);
+  assert.equal(waits.wait(w.id)!.train?.label, 'Releasing next', 'the held ship fills no train');
+  assert.doesNotMatch(waits.wait(w.id)!.text, /behind .*\(waiting\).*and 1 more/);
+  early.clear();
+  waits.poll();
+  assert.equal(waits.wait(f.id)!.label, 'CI');
+});
+
+test("land-news's earlyCi reads the latest try's early_gate line only", () => {
+  const line = "land: early next train: CI started on this train at 14:02 while ticket/9-x's deployed, and it came out the same, so that run is its CI (120 s head start)";
+  assert.equal(earlyCi(`land: rebasing a onto main\n${line}\n`), true);
+  assert.equal(earlyCi(`${line}\nland: rebasing a onto main\nland: waiting for CI on abc\n`), false);
+  assert.equal(earlyCi('land: waiting for CI on abc\n'), false);
 });

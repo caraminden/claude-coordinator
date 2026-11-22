@@ -131,7 +131,7 @@ import { Builds } from './src/builds.ts';
 import { Waits, readHeavy } from './src/waits.ts';
 import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
-import { landNews, readTail } from './src/land-news.ts';
+import { earlyCi, landNews, readTail } from './src/land-news.ts';
 import { AUTO_BY, AutoDeploy } from './src/auto-deploy.ts';
 import { gitContains, LastGreen } from './src/last-green.ts';
 import { Rollback } from './src/rollback.ts';
@@ -933,6 +933,7 @@ void originRepo(import.meta.dirname).then((slug) => (liveSlug = slug));
 const waits = new Waits({ store, deployState, heavyDir: join(DATA_DIR, 'projects', '.heavy'), ship: ships.ship, interruptible: () => runner.interruptible(), changed: (id) => runner.broadcastTicket(id), ci: ciRuns, ciSlug: () => liveSlug,
   // The land gate's alarm (#561), under the scheme whose repo the live checkout is.
   // Not before the live repo is known: a guess of no scheme would clear the alarm, and a restart would ring it again.
+  early: (id) => earlyCi(readTail(landings.log(id))),
   landLine: (seen, now) => {
     const live = liveSlug && store.listProjects().find((p) => repoSlug(p.repo_url) === liveSlug);
     if (live) ciHealth.land(live.id, seen, now).catch((err) => console.error(`Land alarm: ${err?.message ?? err}`));

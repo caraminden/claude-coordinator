@@ -215,7 +215,7 @@ function stageTrack(stages, p, { mini = false, labels = false } = {}) {
 const nowWords = (p, eta, full = false) => {
   const stuck = stuckFor(p);
   if (stuck) return `stuck ${shortSpan(stuck)}: ${p.waitingOn}`;
-  return p.brief ?? p.waitingOn ?? (eta ? etaText(eta, { suffix: ' left', since: p.since, full }) : p.text);
+  return p.brief ?? p.waitingOn ?? (eta ? etaText(eta, { suffix: ' to live', since: p.since, full }) : p.text);
 };
 
 /** A row's "now" words with its ship train: the front says how many ride, a rider whose train it is in, a waiter which train it will be in. */
@@ -230,7 +230,7 @@ function trainNow(next, c, waits) {
 
 /** A change's stage and its short words: "Deploy ~50s left", "Line 2nd". */
 function changeNow(next, c) {
-  return [h('b', { class: c.waitingOn ? 'waits' : 'work' }, stageName(c.stage)), ' ', h('span', { class: 'muted' }, nowWords(c, changeEta(next, c)))];
+  return [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage)), ' ', h('span', { class: 'muted' }, nowWords(c, changeEta(next, c)))];
 }
 
 // ---------- the page ----------
@@ -326,7 +326,7 @@ function targetCard(projectId, tv, alone) {
     h('h4', {}, n?.number != null ? ['Next: ', n.link ? h('a', { class: 'rel-ver', href: n.link, target: '_blank', rel: 'noopener' }, releaseName(n), ' (try it)') : releaseName(n)] : n?.name ?? 'Next release'),
     n ? [
       stageTrack(n.stages, n, { labels: true }),
-      h('p', { class: 'rel-now' }, h('b', {}, stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta, true))),
+      h('p', { class: 'rel-now' }, h('b', {}, n.label ?? stageName(n.stage)), ' · ', h('span', { class: n.waitingOn ? 'waits' : '' }, nowWords(n, n.eta, true))),
       newsList(n),
     ] : h('p', { class: 'muted' }, 'Nothing on its way.'),
     changeList(projectId, tv),
@@ -605,7 +605,7 @@ function changeList(projectId, tv) {
     return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
       h('span', { class: 'what' }, e.ticketId != null ? h('a', { href: `#/t/${e.ticketId}` }, e.name) : e.name),
       h('span', { class: 'where' }, n ? stageTrack(n.stages, { stage: e.stage, since: e.since, usual: null, waitingOn: e.holds ? null : e.place }, { mini: true }) : '',
-        e.holds ? [h('b', { class: 'work' }, stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')]
+        e.holds ? [h('b', { class: 'work' }, e.label ?? stageName(e.stage)), ' ', h('span', { class: 'muted' }, 'holds the lock')]
           : i > 0 ? waiting() : [h('b', { class: 'waits' }, 'Line'), ' ', h('span', { class: 'muted' }, e.place)]),
       lastTryLine(e), landNext(wait), stuck(why), placedNote(placed)));
   }

@@ -66,6 +66,8 @@ export interface Progress {
   /** The short words for a list that already shows the order (Josh, 2026-11-13: "the line should be apparent from the list
    *  you are looking at"): a line place ("2nd"), or a landing's short detail ("CI: the full suite", waits.ts, #630). */
   brief?: string;
+  /** The stage's name when finer than the track's: "Boot check", "CI · started early" (waits.ts landPhase, #1566). */
+  label?: string;
   done?: number;
   total?: number;
   /** Its ship train (Citadel's land line): the front with its riders, a rider, or a waiter's train ("Releasing next"). */
@@ -116,6 +118,8 @@ export interface LineEntry {
   ticketId: number | null;
   /** Holding the lock (true) or waiting for it. */
   holds: boolean;
+  /** Its stage's own name while it holds the lock ("Boot check", #1566). */
+  label?: string;
   /** Its place as the line's waits say it: "next", "2nd". */
   place: string;
   /** Its ticket in the line (tools/deploy-queue.sh): what the Releases page sends to reorder the waiters (#1002). */
@@ -394,7 +398,7 @@ export class CitadelServer implements Reader {
     const w = this.d.wait(id);
     if (w?.kind === 'land') {
       const waits = w.stage === 'line' || (w.stage === 'test' && !!this.d.ciQueued?.(id));
-      const p: Progress = { stage: w.stage, since: w.since, usual: waits ? null : w.usual, waitingOn: waits ? w.text : null, text: w.text, ...(w.brief && { brief: w.brief }), ...(w.train && { train: w.train }) };
+      const p: Progress = { stage: w.stage, since: w.since, usual: waits ? null : w.usual, waitingOn: waits ? w.text : null, text: w.text, ...(w.brief && { brief: w.brief }), ...(w.label && { label: w.label }), ...(w.train && { train: w.train }) };
       if (w.total) Object.assign(p, { done: w.done, total: w.total });
       return p;
     }
@@ -411,7 +415,7 @@ export class CitadelServer implements Reader {
     // On main and not live: a deploy run alone (tools/deploy.sh) may be carrying it; else nothing is yet.
     if (loneDeploy) {
       const ph = landPhase(loneDeploy.phase);
-      return { stage: ph.stage, since: loneDeploy.mtime, usual: this.stageUsual(ph.stage), waitingOn: null, text: ph.text };
+      return { stage: ph.stage, since: loneDeploy.mtime, usual: this.stageUsual(ph.stage), waitingOn: null, text: ph.text, label: ph.label };
     }
     const text = 'on main, not deployed yet: the next change to ship takes it live, or the Taskmaster can run a deploy';
     return { stage: 'deploy', since: since('deploy'), usual: null, waitingOn: text, text: ship.text, brief: 'on main, waits for the next ship' };
@@ -460,7 +464,7 @@ export class CitadelServer implements Reader {
       const ticket = id != null ? store.getTicket(id) : undefined;
       return {
         name: ticket ? `#${ticket.number ?? ticket.id}` : t.label.replace(/ \(.*\)$/, ''), ticketId: ticket?.id ?? null,
-        holds: t.got > 0, place: ordinal(i + 1), seq: t.seq, movable: t.got === 0 && !ridingOf(t.phase) && !!t.orders && !behindOld(lineTickets, t), stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime,
+        holds: t.got > 0, place: ordinal(i + 1), seq: t.seq, movable: t.got === 0 && !ridingOf(t.phase) && !!t.orders && !behindOld(lineTickets, t), stage: t.got > 0 ? landPhase(t.phase).stage : 'line', since: t.mtime, ...(t.got > 0 && { label: (id != null ? this.d.wait(id)?.label : undefined) ?? landPhase(t.phase).label }),
         ...(t.got === 0 && !t.orders ? { why: OLD_LAND } : t.got === 0 && behindOld(lineTickets, t) ? { why: BEHIND_OLD } : {}),
       };
     });

@@ -469,8 +469,9 @@ export function landPhase(output: string): string {
   return 'landing: starting';
 }
 
-/** land.sh's conflict-prep lines (#1366): a ship waiting in line that will conflict once the train ahead ships. */
-const PREP = /^land: prep: (\S+) will conflict with (.+) once (\S+)'s ship train ships; conflicted files: (.*); record the fix against ([0-9a-f]{7,64}) from ([0-9a-f]{7,64}) to ([0-9a-f]{7,64})$/;
+/** land.sh's conflict-prep lines (#1366): a ship waiting in line that will conflict once the train ahead ships. The kit's
+ *  template (CONFLICT_PREP, #1571) says "once <the ship ahead> ships", with no train. */
+const PREP = /^land: prep: (\S+) will conflict with (.+) once (\S+?)(?:'s ship train)? ships; conflicted files: (.*); record the fix against ([0-9a-f]{7,64}) from ([0-9a-f]{7,64}) to ([0-9a-f]{7,64})$/;
 
 export interface PrepConflict { branch: string; cause: string; front: string; files: string; top: string; base: string; head: string }
 

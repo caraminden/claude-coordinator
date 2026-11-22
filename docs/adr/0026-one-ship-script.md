@@ -32,6 +32,13 @@ the top, ship up to the deepest green commit, bisect the prefixes when the top i
   `append` (both add to one list), `sum` (both raise a number: main's plus the branch's raise, never more), `main`
   (a file `land_rebased` makes again), `hook` (`land_merge`). Anything a rule isn't sure of conflicts as before.
   Ruled out: one budget file per bump.
+- **Step 3b (#1571) gives Citadel's last extras a core home** (Cara, 2026-11-22, on #1322's ship card: "A step 3b
+  first"), each off by default: `FLAKE_RUNS` (several fresh runs for a flaky CI red), `PARK_RETRIES` (ask CI again in
+  place before parking), `CONFLICT_PREP` (rerere on, the `prep:` line, a recorded fix retries the build),
+  `land_ci_more` (more time past `CI_LIMIT`, once per reason), `land_main_red` (waive failures red on main's tip
+  too), `land_recover` (put right what a half-done deploy left) and `land_under` (rebase from a rolled-back commit).
+  A `MERGES` `hook` line may now sit beside `append` / `sum` lines for the same file (Citadel's `src/db.ts`): the
+  hook leaves its clashes as the core's diff3 markers and the rules take them.
 - **Batching is on by default** (Cara, 2026-11-20: "On, up to 4"). A scheme that sets nothing batches up to 4;
   Citadel sets 6; a scheme can set it lower, or 1 for none.
 

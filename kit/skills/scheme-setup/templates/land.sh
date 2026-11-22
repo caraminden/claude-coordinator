@@ -229,10 +229,25 @@ park() { say "$*"; exit 75; }
 #                                 its deploys are refusing).
 #   land_flaky                    reads a red check's or CI's output on stdin; exit 0 says the red was flakes only
 #                                 (what it prints says which). A red check then runs once more and passes only if
-#                                 that run is green; a red CI run gets one fresh run (ADR 0006). None: red is red.
+#                                 that run is green; a red CI run gets FLAKE_RUNS fresh runs (ADR 0006). None: red is red.
 #   land_fallback <commit>        CI gave no answer about <commit> (no runner, no verdict, past CI_LIMIT): it decides
 #                                 in CI's place, in this worktree, which sits on <commit>: exit 0 green, 75 no verdict
-#                                 either (it parks), else red. None: it parks, as always.
+#                                 either (it parks, or asks CI again: PARK_RETRIES), else red; LAND_PARK_RETRIED says
+#                                 how many times this landing asked again already. None: it parks, as always.
+#   land_ci_more <commit> <keys>  CI on <commit> ran past CI_LIMIT: prints "<seconds> <key> <why>" to give it more time
+#                                 (a run that is only queued behind a busy runner), else nothing. <keys> are the keys
+#                                 it already gave this run, space-separated: each counts once, so a reason can't add
+#                                 time twice. None, or nothing printed: CI_LIMIT holds.
+#   land_main_red <main> <commit> reads failure ids (land_failures') that aren't known reds on stdin, and prints those it
+#                                 finds red on <main> too ($BRANCH's tip): the check, the smoke check or CI on <commit>
+#                                 then waives them as known reds. Asked once per pair of commits and ids, kept a day.
+#                                 None: only LAND_KNOWN_RED waives.
+#   land_recover <main's commit>  each pass of the line before this landing's work, in the main checkout: puts right
+#                                 what a deploy that died half way left behind (Citadel's restart bookkeeping).
+#                                 A failure refuses the landing; a person needs to look.
+#   land_under <commit> <branch>  once a plain landing: prints a commit under <commit> (the branch) whose own commits
+#                                 left $BRANCH since (a deploy rolled them back), so the rebase replays only the
+#                                 branch's commits above it. Nothing printed: the usual fork point (header at under_of).
 #   land_merge <side> <base> <ours> <theirs> <path>  the "hook" rule of MERGES: merges the file, leaving the result in
 #                                 <ours>; <side> names which of ours and theirs is $BRANCH's. Exit 0 clean, else
 #                                 it stops the rebase as a clash does. With LAND_MERGE_DIFF3=1 (the path has append or

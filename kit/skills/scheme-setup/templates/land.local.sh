@@ -42,6 +42,18 @@
 # How many landings share one CI run (batches), with a CI gate. A batch takes whoever is waiting and never waits to
 # fill. 1: off, every landing runs its own. A high share of red ship runs (over about 15%): 2.
 # CI_BATCH=${LAND_BATCH:-4}
+
+# How many fresh CI runs a red that land_flaky calls flakes only gets, keeping its place in line. Flakes that strike
+# twice in a row: 3.
+# FLAKE_RUNS=${LAND_FLAKE_RUNS:-1}
+
+# Where CI gives no answer (no runner, no verdict, past its limit), ask it again in place this many times before
+# parking. A runner that drops runs now and then: 2.
+# PARK_RETRIES=${LAND_PARK_RETRIES:-0}
+
+# Conflict prep: a landing stacked on the one ahead whose rebase onto it stops prints a "prep:" line, and its author
+# records the fix ahead of time with git rerere (Citadel's server wakes the minion with the steps). Needs CI_STACK 2+.
+# CONFLICT_PREP=${LAND_PREP:-0}
 # More of the pipeline's own files, besides tools/land.sh, this file, .github/ and the lanes map: a list in the repo,
 # one path a line, # comments, a trailing / for a folder. A landing that changes one ships alone, in no batch, and
 # keeps fast mode on the full gate.
@@ -135,20 +147,47 @@
 # }
 
 # Reads a red check's or CI's output on stdin; exit 0 says the red was flakes only, and what it prints says which. A
-# red check then runs once more and passes only if that run is green; a red CI run gets one fresh run. None: red is
-# red.
+# red check then runs once more and passes only if that run is green; a red CI run gets FLAKE_RUNS fresh runs. None:
+# red is red.
 # land_flaky() {
 #   ids=$(land_failures) && [ -n "$ids" ] && ! grep -vxFf tools/known-flakes.txt <<<"$ids" >/dev/null && echo "$ids"
 # }
 
 # CI gave no answer about <commit> (no runner started, no verdict, past its limit): decide in CI's place, in the
-# worktree, which sits on <commit>. Exit 0 green, 75 no verdict either (it parks, as with none), anything else red.
+# worktree, which sits on <commit>. Exit 0 green, 75 no verdict either (it parks, as with none, or asks CI again with
+# PARK_RETRIES; LAND_PARK_RETRIED counts the asks so far), anything else red.
 # land_fallback() { # <commit>
 #   timeout 1800 npm test >&2
 # }
 
+# CI on <commit> ran past CI_LIMIT: print "<seconds> <key> <why>" to give it more time, else nothing. <keys> are the
+# keys given this run already; each counts once.
+# land_ci_more() { # <commit> <keys>
+#   case " $2 " in *' queued '*) ;; *) [ -n "$(gh run list --commit "$1" --status queued --json databaseId -q '.[]')" ] && echo "900 queued its run is still waiting for a runner" ;; esac
+# }
+
+# Failure ids on stdin (none of them known reds): print those that fail on <main> too. The check, the smoke check or
+# CI then waives them, saying so.
+# land_main_red() { # <main> <commit>
+#   grep -xFf /dev/stdin .main-reds.txt || true # ids a nightly run of main found red
+# }
+
+# Each pass of the line, in the main checkout before this landing's work: put right what a deploy that died half way
+# left. A failure refuses the landing.
+# land_recover() { # <main's commit>
+#   [ ! -e .deploy-half-done ] || tools/deploy-finish.sh "$1"
+# }
+
+# Print a commit under the branch's whose own commits left main since (a deploy rolled them back), so the rebase
+# replays only the branch's commits above it. Nothing: the usual fork point.
+# land_under() { # <the branch's commit> <branch>
+#   cat .rolled-back-to 2>/dev/null || true # the deploy's roll back writes main's commit before the rolled-back ones
+# }
+
 # MERGES's hook rule: merge <path>, leaving the result in <ours>. <side> says which of ours and theirs is main's
-# (ours in a rebase). Exit 0 clean; anything else stops the rebase as a clash does.
+# (ours in a rebase). Exit 0 clean; anything else stops the rebase as a clash does. With append or sum lines for the
+# same path, it runs with LAND_MERGE_DIFF3=1 and leaves its clashes as diff3 markers (size 31, main/base/branch) for
+# those rules; tools/ship-numbers.ts does.
 # land_merge() { # <side> <base> <ours> <theirs> <path>
 #   node tools/ship-numbers.ts merge "$1" "$2" "$3" "$4" # it takes no path
 # }

@@ -294,9 +294,9 @@ let shell = null; // the open page
 let pending = null; // where the next page built opens
 
 /** Point the page at `scope` (a scheme's id or 'all') on `tab`: the open one when it's this scheme's (true), else the next one built. */
-export function goReleases(projectId, { scope, tab = 'releases', hl = null }) {
-  pending = { projectId, scope, tab, hl };
-  setReleasesPage(scope, hl);
+export function goReleases(projectId, { scope, tab = 'releases', hl = null, target = null }) {
+  pending = { projectId, scope, tab, hl, target };
+  setReleasesPage(scope, hl, target);
   if (!shell?.el.isConnected || shell.projectId !== projectId) return false;
   shell.go(pending);
   return true;

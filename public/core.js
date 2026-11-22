@@ -1068,9 +1068,10 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/status(?:\/(all))?$/))) await showReleases(Number(m[1]), { scope: m[2] ? 'all' : Number(m[1]), tab: 'status' });
     else if ((m = hash.match(/^#\/p\/(\d+)\/ci(?:\/(overview|history|runs|runners|health|numbers|all))?$/))) await showReleases(Number(m[1]), { scope: Number(m[1]), tab: tabOf(!m[2] || m[2] === 'all' ? 'overview' : m[2]) });
     else if ((m = hash.match(/^#\/p\/(\d+)\/shared$/))) await showProject(Number(m[1]), { kind: 'files' });
-    else if ((m = hash.match(/^#\/p\/(\d+)\/releases(?:\/(all|\d+)(?:\/(\d+|overview|history|health|numbers|status))?)?$/))) {
+    else if ((m = hash.match(/^#\/p\/(\d+)\/releases(?:\/(all|\d+)(?:\/(\d+|overview|history|health|numbers|status|target\/[^/]+))?)?$/))) {
       const hl = /^\d+$/.test(m[3] ?? '') ? Number(m[3]) : null; // a change to highlight, else a tab's name
-      await showReleases(Number(m[1]), { scope: m[2] === 'all' ? 'all' : Number(m[2] ?? m[1]), tab: hl == null && m[3] ? m[3] : 'releases', hl });
+      const target = m[3]?.startsWith('target/') ? decodeURIComponent(m[3].slice(7)) : null; // a release target to scroll to (#1647)
+      await showReleases(Number(m[1]), { scope: m[2] === 'all' ? 'all' : Number(m[2] ?? m[1]), tab: hl == null && target == null && m[3] ? m[3] : 'releases', hl, target });
     }
     else if ((m = hash.match(/^#\/a\/(\d+)$/))) await showArtifact(Number(m[1]));
     else if ((m = hash.match(/^#\/s\/(\d+)\/(.+)$/))) await showSharedFile(Number(m[1]), decodeURIComponent(m[2]));

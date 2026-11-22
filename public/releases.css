@@ -199,3 +199,5 @@ b.waits { color: var(--held); }
   .claim-mvs:empty { display: none; }
   .claim-mv { width: var(--citadel-control-h, 2.5rem); height: var(--citadel-control-h, 2.5rem); border-color: var(--line); }
 }
+/* A link that names a release target scrolls its card to the top, clear of the sticky head (#1647). */
+.rel-card[data-target] { scroll-margin-top: calc(var(--topbar-h, 0px) + var(--rel-head-h, 3.5rem) + var(--space-3)); }

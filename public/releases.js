@@ -117,7 +117,8 @@ const isSha = (v) => /^[0-9a-f]{7,40}$/.test(v);
 const minionHref = (projectId, c) => (c.number != null ? `#/p/${projectId}/t/${c.number}` : `#/t/${c.ticketId}`);
 /** Where Releases opens from scheme `id` with no scope named (Josh, 2026-11-19): that scheme's own, and every scheme's only from Citadel (project 2). */
 
-const pageHref = (scope, hl) => `#/p/${view?.projectId ?? ''}/releases/${scope}${hl ? `/${hl}` : ''}`;
+/** The page's address on `scope`, with change `hl` highlighted, or a release target's card scrolled to (#1647: `target` is a target's id, which has colons). */
+const pageHref = (scope, hl, target = null) => `#/p/${view?.projectId ?? ''}/releases/${scope}${hl ? `/${hl}` : target ? `/target/${encodeURIComponent(target)}` : ''}`;
 /** "50s", "3m", "1h 5m": an estimate's size, rounded. */
 const tookText = (r) => {
   if (!(r.started && r.live)) return null;
@@ -182,7 +183,7 @@ export function opening() {
 export function releaseRows(projectId) {
   const s = schemes.get(projectId);
   return h('div', { class: 'rel-rows', 'data-rel-scheme': projectId }, (s?.targets ?? []).filter((tv) => tv.next).map((tv) => {
-    const href = pageHref(projectId);
+    const href = pageHref(projectId, null, tv.target.id);
     return h('div', {
       class: 'rel-row',
       // The whole row opens the scheme's page (Josh: "clicking any of the releases would take you to that schemes detail page"); its release link opens the release.
@@ -238,9 +239,9 @@ function changeNow(next, c) {
 let pageEl = null;
 
 /** Open the Releases tab on `scope` ('all' or a scheme's id), with change `hl` (a ticket id) highlighted; redraws an open one. */
-export function setReleasesPage(scope, hl = null) {
-  if (page?.scope === scope && page?.hl === hl) return;
-  page = { scope, hl };
+export function setReleasesPage(scope, hl = null, target = null) {
+  if (page?.scope === scope && page?.hl === hl && page?.target === target) return;
+  page = { scope, hl, target };
   if (pageEl?.isConnected) fillPage();
 }
 
@@ -268,9 +269,22 @@ export function allSchemes() {
 function fillPage() {
   const scope = page?.scope ?? 'all';
   pageEl.replaceChildren(...(!loaded ? [loadingLine('Loading releases…')] : scope === 'all' ? allView(allSchemes()) : schemeCards(scope, true)));
-  // Brings the highlighted change into view once, so a later update doesn't pull back someone who scrolled away.
-  const hl = page?.hl != null && !page.shown && pageEl.querySelector('.rel-card.hl, .rel-change.hl');
-  if (hl) { page.shown = true; hl.scrollIntoView({ block: 'nearest' }); }
+  bringIntoView(page);
+}
+
+/**
+ * Brings the highlighted change, or the release target's card a link named (#1647), into view once, so a later update doesn't pull
+ * back someone who scrolled away. A page just built isn't in the document yet, and its opening scrolls to the top after it is, so
+ * that one waits a frame; one that isn't there yet (the releases still loading) tries again when it draws.
+ */
+function bringIntoView(want) {
+  if (want?.shown || (want?.hl == null && want?.target == null)) return;
+  if (!pageEl?.isConnected) { requestAnimationFrame(() => page === want && pageEl?.isConnected && bringIntoView(want)); return; }
+  const cards = pageEl.querySelectorAll('.rel-card.hl, .rel-change.hl');
+  const el = want.hl != null ? cards[0] : pageEl.querySelector(`[data-target="${CSS.escape(`${want.scope}/${want.target}`)}"]`);
+  if (!el) return;
+  want.shown = true;
+  el.scrollIntoView({ block: want.hl != null ? 'nearest' : 'start' });
 }
 
 /**
@@ -316,7 +330,7 @@ function schemeCards(projectId, alone) {
 function targetCard(projectId, tv, alone) {
   const n = tv.next, cur = tv.current, hl = page?.hl;
   const curTook = cur && tookText(cur);
-  return h('article', { class: `rel-card${hl && n?.changes.some((c) => c.ticketId === hl) ? ' hl' : ''}` },
+  return h('article', { class: `rel-card${hl && n?.changes.some((c) => c.ticketId === hl) ? ' hl' : ''}`, 'data-target': `${projectId}/${tv.target.id}` },
     h('header', {}, h('h3', {}, iconOf(projectId), alone ? tv.target.name : `${schemeName(projectId)} ${tv.target.name}`)),
     h('p', { class: 'rel-current' }, 'Current: ', cur ? versionLink(cur) : 'none yet', cur?.live ? ` · live ${ago(cur.live)}` : '', curTook ? ` · took ${curTook}` : '',
       cur && releaseDetail(cur) ? h('span', { class: 'muted rel-detail' }, ` · ${releaseDetail(cur)}`) : ''),
@@ -755,8 +769,8 @@ function allView(ids) {
       for (const c of tv.next?.changes ?? []) cells[columnOf(tv.next.stages, c)].push(card(id, tv.next, c));
       if (tv.current) cells[3].push(lastCard(id, tv.current));
       return tint(h('div', { class: 'rel-grid-row', role: 'row', 'data-scheme': id },
-        h('div', { class: 'rel-target', role: 'rowheader', onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = pageHref(id); } } },
-          h('a', { href: pageHref(id), onclick: opening }, iconOf(id), h('b', {}, `${schemeName(id)} ${tv.target.name}`))),
+        h('div', { class: 'rel-target', role: 'rowheader', onclick: (e) => { if (!e.target.closest('a')) { opening(); location.hash = pageHref(id, null, tv.target.id); } } },
+          h('a', { href: pageHref(id, null, tv.target.id), onclick: opening }, iconOf(id), h('b', {}, `${schemeName(id)} ${tv.target.name}`))),
         cells.map((list) => h('div', { class: 'cell', role: 'cell' }, list))), id);
     }));
   const copies = ids.flatMap((id) => {

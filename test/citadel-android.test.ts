@@ -123,8 +123,10 @@ function serve(locks: string) {
 }
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 async function emulatorPid() {
-  await until('emu.pid', async () => existsSync(join(sdk, 'emu.pid')), 5000);
-  return Number(readFileSync(join(sdk, 'emu.pid'), 'utf8'));
+  // The pid, not the file: the stub's `>` makes it empty a moment before it writes, and Number('') is 0, the whole group (#1586).
+  const read = () => (existsSync(join(sdk, 'emu.pid')) ? Number(readFileSync(join(sdk, 'emu.pid'), 'utf8')) : 0);
+  await until('emu.pid', async () => read() > 0);
+  return read();
 }
 
 test('serve stops the emulator once nobody has used it for the idle time, and ends with it', async () => {
@@ -430,7 +432,8 @@ test('adb-serve keeps the adb server here and answers console steps with the tok
   const s = tmp.spawn(helper, ['adb-serve'], { env: { ...env, HOME: home, CITADEL_HEAVY_DIR: locks, CITADEL_ANDROID_CONSOLE_PORT: port }, stdio: 'ignore' });
   const done = new Promise((r) => s.on('close', r));
   try {
-    await until('the calls file', async () => existsSync(calls), 5000);
+    // The line, not the file: the stub's `>>` makes the file a moment before it writes to it (#1586).
+    await until('adb-serve to start the server', async () => existsSync(calls) && /^start-server/m.test(readFileSync(calls, 'utf8')));
     // The server's own scan is off: through the tunnel it would knock on a stopped emulator every second.
     assert.match(readFileSync(calls, 'utf8'), /^start-server scan<=5553$/m);
     const r = await runAsync(['sms', '5551234', 'hello'], { CITADEL_HEAVY_DIR: locks });

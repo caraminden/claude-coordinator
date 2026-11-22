@@ -20,8 +20,6 @@ import { LOOK } from './threadstate.js';
 /** Resting there: a running, stuck or approval-waiting thread shows where it would otherwise, as does one the server is landing (#727). */
 const resting = (t) => !t.approvals && !['running', 'error'].includes(t.status) && !t.server_work;
 const isParked = (t) => t.state === 'parked' && resting(t) && (t.status !== 'new' || !!t.parked_for);
-/** Asleep (#1636): out of its type like a sealed one, and like one it stays in its build. */
-const isAsleep = (t) => !!t.asleep && t.status !== 'closed' && resting(t) && !isParked(t);
 /** Deploying: pending-deploy, or dismissed with its change still on its way in a release (#764, `release` from releases.js). */
 const isDeploying = (t) => (t.state === 'pending-deploy' || (t.status === 'closed' && !!t.release)) && resting(t) || onMainDeploying(t);
 /** The server is landing its change (server_work: line, rebase, tests, deploy, restart), nothing of its own is stuck: a failed land, a running turn or a waiting approval keeps it in its type (#1003). */
@@ -40,9 +38,8 @@ export function threadSections(all, types, groups = [], deployOrder = () => unde
   // `deployOrder(t)` is its place there; rows it doesn't list go after, in the list's own order (the sort is stable).
   const deploying = all.filter(isDeploying).sort((a, b) => (deployOrder(a) ?? Infinity) - (deployOrder(b) ?? Infinity));
   const parked = all.filter((t) => isParked(t) && !buildOf(t));
-  const parkedInBuild = all.filter((t) => (isParked(t) || isAsleep(t)) && buildOf(t));
-  const asleep = all.filter((t) => isAsleep(t) && !buildOf(t) && !isDeploying(t));
-  const open = all.filter((t) => !isParked(t) && !isAsleep(t) && !isDeploying(t));
+  const parkedInBuild = all.filter((t) => isParked(t) && buildOf(t));
+  const open = all.filter((t) => !isParked(t) && !isDeploying(t));
   const builds = [...new Set([...open, ...parkedInBuild].map(buildOf).filter(Boolean))].sort((a, b) => a - b);
   // Parked rows follow the active ones in their build.
   const buildSection = (build, i) => ({ key: `build-${build}`, build, current: i === 0,
@@ -57,7 +54,7 @@ export function threadSections(all, types, groups = [], deployOrder = () => unde
   const typeOf = (t) => (types.includes(t.properties?.type) ? t.properties.type : 'other');
   const kinds = types.map((type) => ({ key: type, type, rows: loose.filter((t) => !promotedTo.get(t) && typeOf(t) === type) }));
   return [{ key: 'deploying', rows: deploying }, ...builds.slice(0, 1).map(buildSection), ...promoted, ...kinds, ...builds.slice(1).map((b, i) => buildSection(b, i + 1)),
-    { key: 'asleep', rows: asleep }, { key: 'waiting', rows: parked.filter(wakesItself) }, { key: 'parked', rows: parked.filter((t) => !wakesItself(t)) }]
+    { key: 'waiting', rows: parked.filter(wakesItself) }, { key: 'parked', rows: parked.filter((t) => !wakesItself(t)) }]
     .filter((s) => s.rows.length);
 }
 

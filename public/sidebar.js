@@ -168,7 +168,7 @@ function buildHeading(s) {
 }
 
 /** The resting sections' headings (threadgroups.js threadSections). */
-const REST = { deploying: 'Deploying', asleep: 'Asleep', waiting: 'Waiting', parked: 'Sealed' };
+const REST = { deploying: 'Deploying', waiting: 'Waiting', parked: 'Sealed' };
 
 let sidebarFrame = 0;
 /**
@@ -517,13 +517,13 @@ export function threadRow(t, href = threadHref(t)) {
   const active = view.id === t.id;
   // Rows waiting on you get a tint of their colour, stronger until you've opened them since they changed.
   // Unread (a dot and a bold title) marks a row with something for a person that changed since you last opened it.
-  // Asleep (#1636): no tint and grey chips, so its "answer now" stops shouting until someone wakes it.
+  // Asleep (#1636; Cara picked "Stay put, dimmed", 2026-11-22): it keeps its place, dimmed with a moon, no tint and grey chips; Wake is in its chat header.
   const asleep = !coord && t.status !== 'closed' && !!t.asleep;
   const yours = !coord && !asleep && st.rank === 0 ? ' yours' : '';
   const unread = !coord && rowUnread(t, st, isSeen(t)) ? ' unread' : '';
   // No one-tap replies on list rows (#130): a stray tap on "Merge it" would ship work nobody opened.
   return h('a', { class: `thread-row s-${t.status} f-${asleep ? 'idle' : st.fam || 'none'}${coord ? ' coordinator' : ''}${yours}${unread}${spend ? ' spend' : ''}${active ? ' active' : ''}${asleep ? ' asleep' : ''}`, href, title: details, 'data-id': t.id },
-    h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), asleep ? wakeMark(t) : '', h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
+    h('span', { class: 'name' }, coord ? taskmasterLabel(t.project_id) : [h('i', { class: 'unread-dot' }), asleep ? sleepMark(t) : '', h('span', { class: 'num' }, t.number ?? t.id), ' ', t.title]),
     t.queued ? h('span', { class: 'queued' }, `✉ ${t.queued}`) : '',
     // Messages the loop guard holds for a person (#1067; Josh, 2026-11-19: "a minion badge for the loop guard"): Continue is in its chat.
     t.loop_hold ? h('span', { class: 'loop-badge', title: `The loop guard holds ${t.loop_hold.n === 1 ? 'a message' : `${t.loop_hold.n} messages`} here: open the chat to continue` }, `⏸ ${t.loop_hold.n}`) : '',
@@ -540,11 +540,8 @@ export function threadRow(t, href = threadHref(t)) {
     bar);
 }
 
-/** An asleep row's moon (#1636): a tap wakes it there, without opening the chat. */
-function wakeMark(t) {
-  const wake = (e) => { e.preventDefault(); e.stopPropagation(); import('./thread-head.js').then((m) => m.setAsleep(t, false)); };
-  return h('button', { type: 'button', class: 'wake-mark', title: `Asleep since ${ago(t.asleep.at)}${t.asleep.by ? `, put to sleep by ${t.asleep.by}` : ''}. Tap to wake it`, 'aria-label': `Wake #${t.number ?? t.id}`, onclick: wake }, '🌙');
-}
+/** An asleep row's moon (#1636): says since when and who; Wake is in the chat header. */
+const sleepMark = (t) => h('span', { class: 'sleep-mark', role: 'img', 'aria-label': 'Asleep', title: `Asleep since ${ago(t.asleep.at)}${t.asleep.by ? `, put to sleep by ${t.asleep.by}` : ''}. Wake it from its chat header` }, '🌙 ');
 
 /** The rows drawn last, by id, for their chips' popovers; a check's answer per minion while its popover shows it. */
 const drawn = new Map(), checks = new Map();

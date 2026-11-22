@@ -449,7 +449,7 @@ mock.boards('#takes', { boards: [
     },
   },
   asleep: {
-    about: 'two minions put to sleep (#1636): one waiting on a question card, one on a plan; plus an awake one with a card, for Needs you',
+    about: 'two minions put to sleep (#1636): one waiting on a question card, one ready; plus an awake one with a card, for Needs you',
     seed(c) {
       const t = minion(c, 'Badge colours, asleep', { note: 'needs a pick: badge colours' });
       const w = chat(c, t, 2);

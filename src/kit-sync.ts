@@ -264,7 +264,22 @@ export const NOT_NOW = 'Not now';
  */
 export const CHECK_SCRIPT = `set -u
 bash -n tools/land.sh || exit
-if [ "\${KIT_SYNC_GUARD:-}" = 1 ]; then tools/guard.sh --self-test || exit; fi
+if [ "\${KIT_SYNC_GUARD:-}" = 1 ]; then
+  if ! out="$(tools/guard.sh --self-test 2>&1)"; then
+    printf '%s\\n' "$out"
+    # The scheme's own section may be the cause: run the same self-test on main's guard (the commit before the sync's).
+    if git show HEAD~1:tools/guard.sh > tools/.guard-main.sh 2>/dev/null; then
+      chmod +x tools/.guard-main.sh
+      mainout="$(bash tools/.guard-main.sh --self-test 2>&1)"; mainrc=$?
+      rm -f tools/.guard-main.sh
+      if [ "$mainrc" != 0 ]; then
+        echo "kit sync: main fails it too, so look at this scheme's own guard section, not the kit. Failing cases on main:"
+        printf '%s\\n' "$mainout" | grep '^FAIL' || true
+      fi
+    fi
+    exit 1
+  fi
+fi
 CHECK=true SMOKE_CMD=
 eval "$(grep -m1 '^CHECK=' tools/land.sh)"
 set +u

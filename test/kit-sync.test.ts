@@ -6,7 +6,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { until } from './wait.ts';
-import { git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
+import { spawnSync } from 'node:child_process';
+import { CHECK_SCRIPT, git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
 
 const ID = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const LAND = KIT_FILES[0];
@@ -260,4 +261,34 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// The pre-card check's guard step: when the self-test fails, it also runs main's guard, so a failure that main has too
+// points at the scheme's own guard section, not the kit (#1547: Mandate's `..` through a slot link).
+const FAILING = '#!/bin/bash\necho "FAIL: wanted 2, got 0: ls ~/apps/x/../mandate"\nexit 1\n';
+const PASSING = '#!/bin/bash\nexit 0\n';
+function checkGuard(mainGuard: string, syncGuard: string) {
+  const root = mkdtempSync(join(tmpdir(), 'kit-sync-check-'));
+  try {
+    const dir = repo(root, 'scheme');
+    commit(dir, { 'tools/land.sh': '#!/bin/bash\nCHECK=true\n', 'tools/guard.sh': mainGuard }, 'main');
+    commit(dir, { 'tools/guard.sh': syncGuard + '# sync\n' }, 'sync');
+    git(dir, ['update-index', '--chmod=+x', 'tools/guard.sh']);
+    spawnSync('chmod', ['+x', join(dir, 'tools/guard.sh')]);
+    const r = spawnSync('bash', ['-c', CHECK_SCRIPT], { cwd: dir, env: { ...process.env, KIT_SYNC_GUARD: '1' }, encoding: 'utf8' });
+    return { code: r.status, out: r.stdout + r.stderr };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+test('a guard self-test that fails on main too says so and names the failing case', () => {
+  const r = checkGuard(FAILING, FAILING);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /main fails it too/);
+  assert.match(r.out, /FAIL: wanted 2, got 0: ls ~\/apps\/x\/\.\.\/mandate/);
+});
+test('a guard self-test that fails only on the sync does not say main fails it', () => {
+  const r = checkGuard(PASSING, FAILING);
+  assert.notEqual(r.code, 0);
+  assert.doesNotMatch(r.out, /main fails it too/);
 });

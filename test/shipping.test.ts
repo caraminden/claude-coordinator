@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { shippingLine } from '../src/prompts.ts';
-import { MERGE_RULES, needsGo, shippingGate } from '../public/shipping.js';
+import { MERGE_RULES, needsGo, SHIP_PATHS, shippingGate, values } from '../public/shipping.js';
 
 // A scheme's Shipping settings (#1043): the one gate between them and the merge approval, the go threshold, the
 // prompt line, and the one-off move of the schemes whose merges already waited for a person.
@@ -26,6 +26,9 @@ test('shippingGate: on a PR path the merge approval is on exactly when every cha
   assert.deepEqual(off, { go_from: 'high', approval_rules: 'Bash(tools/deploy.sh:*)' });
   // pr-person means a person merges every change.
   assert.deepEqual(shippingGate({ ship_path: 'pr-person', go_from: 'medium', approval_rules: '' }), { go_from: 'all', approval_rules: merge });
+  // pr-minion runs the merge itself, so on every change its Approve is the go; by label, the card is.
+  assert.deepEqual(shippingGate({ ship_path: 'pr-minion', go_from: 'all', approval_rules: '' }), { go_from: 'all', approval_rules: merge });
+  assert.deepEqual(shippingGate({ ship_path: 'pr-minion', go_from: 'medium', approval_rules: merge }), { go_from: 'medium', approval_rules: '' });
   // Citadel's own path merges no PR, so the box is left as people ticked it.
   assert.deepEqual(shippingGate({ ship_path: 'citadel', go_from: 'high', approval_rules: merge }), { go_from: 'high', approval_rules: merge });
   // Rules that already agree come back as they were, spacing and all, so a save doesn't rewrite them.
@@ -81,4 +84,16 @@ test('a scheme whose merges already waited for a person starts on pr-person once
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('pr-minion (#1569): an allowed value, and its line merges after green CI and never mentions turning on auto-merge', () => {
+  assert.deepEqual(values(SHIP_PATHS), ['citadel', 'pr-auto', 'pr-minion', 'pr-person'], 'the values the PATCH route and Minion rules accept');
+  const line = shippingLine({ ship_path: 'pr-minion', go_from: 'medium', try_first: 'never' }, false);
+  assert.match(line, /log_learned/);
+  assert.match(line, /push your branch and open a pull request/);
+  assert.match(line, /set state outside and end the turn, and once the \[GitHub\] message says CI is green on your head commit \(and any go below is in\), run `gh pr merge --squash`/);
+  assert.match(line, /Never merge while CI is red or still running/);
+  assert.doesNotMatch(line, /--auto|turn on auto-merge|hand_off_land/);
+  assert.match(line, /A medium or high-risk change waits for a member's go: .*kind ship/);
+  assert.match(shippingLine({ ship_path: 'pr-minion', go_from: 'all', try_first: 'never' }, false), /the merge's own Approve is that go/);
 });

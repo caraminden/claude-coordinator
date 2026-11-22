@@ -282,13 +282,14 @@ export function pickers({ settingsRow, settingsHelp, saveProject }) {
   const SHIP_HELP = {
     citadel: 'The server runs the scheme\'s land script, rebases onto main and the change goes live.',
     'pr-auto': 'The minion opens a pull request and turns on auto-merge, so it ships once CI is green.',
+    'pr-minion': 'For a repo GitHub won\'t auto-merge (a private repo on a free plan): the minion opens a pull request and merges it itself with gh pr merge --squash once CI is green and any go is in.',
     'pr-person': 'The minion opens a pull request and waits: merging it needs a person\'s Approve, so every change needs a go and "Merge a pull request" is ticked under Approvals.',
   };
   const ship = () => live({ part: 'how-changes-ship', icon: 'branch', hue: 'accent', title: 'How a change ships' },
     settingsHelp('What a minion does with a finished, self-reviewed change.', 'Minions get the steps for the path picked in their prompt; these settings win over any shipping paragraph in the scheme instructions.'),
     (mount) => {
       const cur = stored().ship_path ?? 'citadel';
-      mount.replaceChildren(seg([['citadel', 'Citadel ships it'], ['pr-auto', 'PR, auto-merge'], ['pr-person', 'PR, a person merges']], cur, (v) => saveShipping({ ship_path: v }, 'set how a change ships'), false, 'How a change ships'),
+      mount.replaceChildren(seg([['citadel', 'Citadel ships it'], ['pr-auto', 'PR, auto-merge'], ['pr-minion', 'PR, minion merges'], ['pr-person', 'PR, a person merges']], cur, (v) => saveShipping({ ship_path: v }, 'set how a change ships'), false, 'How a change ships'),
         h('p', { class: 'muted small settings-help' }, SHIP_HELP[cur]));
       return label(SHIP_PATHS, cur);
     });

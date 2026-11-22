@@ -143,7 +143,7 @@ export interface Project {
   shots_required: number;
   /** Free text added to the screenshot line of the prompt, e.g. "1x in her window" (#1044). */
   shot_note: string;
-  /** How a change ships (#1043, public/shipping.js): citadel (hand_off_land runs tools/land.sh), pr-auto or pr-person. */
+  /** How a change ships (#1043, public/shipping.js): citadel (hand_off_land runs tools/land.sh), pr-auto, pr-minion (the minion merges once CI is green: repos GitHub won't auto-merge, #1569) or pr-person. */
   ship_path: ShipPath;
   /** From which risk label a change waits for a person's go: never, high, medium or all; pr-person is always all. */
   go_from: GoFrom;
@@ -301,7 +301,7 @@ export type GrillMode = (typeof GRILL_MODES)[number];
 export const GH_RUNNERS_MODES = ['ask', 'ok', 'never'] as const;
 export type GhRunnersMode = (typeof GH_RUNNERS_MODES)[number];
 /** A scheme's Shipping settings (#1043): their values and labels are public/shipping.js's, shared with the page. */
-export type ShipPath = 'citadel' | 'pr-auto' | 'pr-person';
+export type ShipPath = 'citadel' | 'pr-auto' | 'pr-minion' | 'pr-person';
 export type GoFrom = 'never' | 'high' | 'medium' | 'all';
 export type TryFirst = 'never' | 'ui' | 'features';
 

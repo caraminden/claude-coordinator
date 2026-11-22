@@ -31,7 +31,7 @@ CLAUDE.md and glossary for the scrub. The tripwire refuses some of these; the re
 
 | Part | Used in |
 |---|---|
-| Shipping answer: the scheme's Shipping settings (Minion rules; `get_project_settings` shows them): Citadel ships it (`citadel`), pull request with auto-merge (`pr-auto`) or pull request a person merges (`pr-person`), and from which risk label a person's go is needed; and the pusher of main (`tools/land.sh`, or "main stays local") | steps 3, 4, 8 |
+| Shipping answer: the scheme's Shipping settings (Minion rules; `get_project_settings` shows them): Citadel ships it (`citadel`), pull request with auto-merge (`pr-auto`), pull request the minion merges when green (`pr-minion`) or pull request a person merges (`pr-person`), and from which risk label a person's go is needed; and the pusher of main (`tools/land.sh`, or "main stays local") | steps 3, 4, 8 |
 | Project facts draft, or the interview answers behind it (stack, tests, high-risk areas) | step 3 |
 | Adapt list: name, kind (skill, agent, rule), source scheme and path, new name, why | step 5 |
 | Write-new list: name, kind, one-line job | step 6 |
@@ -358,8 +358,15 @@ shipping answer:
 
 - **Pull request, a person merges** (`pr-person`): push your branch, `gh pr create`, and ship it
   with `gh pr merge` (the merge approval turns that into a card for a person). Wait for it to ship.
-- **Pull request, auto-merge when green** (`pr-auto`): push your branch, `gh pr create`, and
+- **Pull request, auto-merge when green** (`pr-auto`): first check the repo can auto-merge:
+  `gh api repos/<owner>/<repo> --jq .allow_auto_merge`. Anything but `true` (a private repo on a
+  free plan refuses auto-merge with a 403) means the plan's path can't work: ask the Taskmaster to
+  switch the scheme's ship path to `pr-minion` (`message_coordinator`, `need: ask`), say so in
+  your done note, and ship as below. Otherwise push your branch, `gh pr create`, and
   `gh pr merge --auto --squash`. Wait for CI and the merge.
+- **Pull request, the minion merges when green** (`pr-minion`): push your branch, `gh pr create`,
+  wait for CI to go green on your head commit, then `gh pr merge --squash`. Never merge a red or
+  still-running PR.
 - **Citadel ships it** (`citadel`), pusher `tools/land.sh`: commit it
   with the rest, then run `tools/land.sh` from your worktree. It ships and pushes your own
   setup, and every minion after you ships through it.

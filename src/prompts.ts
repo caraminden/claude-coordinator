@@ -365,6 +365,8 @@ export function shippingLine(p: Pick<Project, 'ship_path' | 'go_from' | 'try_fir
   const path = {
     citadel: 'once tested and self-reviewed, hand it off with `hand_off_land` (the server runs tools/land.sh), with up to 3 lines in `learned`: what the brief missed, what fought you ("nothing" is fine)',
     'pr-auto': 'once tested and self-reviewed, log up to 3 lines with `log_learned`: what the brief missed, what fought you ("nothing" is fine), push your branch, open a pull request and turn on auto-merge (`gh pr merge --auto --squash`), so it ships once CI is green',
+    // #1569: for repos GitHub won't auto-merge (a private repo on a free plan refuses it with a 403).
+    'pr-minion': 'once tested and self-reviewed, log up to 3 lines with `log_learned`: what the brief missed, what fought you ("nothing" is fine), push your branch and open a pull request. GitHub can\'t auto-merge this repo, so you merge it yourself: set state outside and end the turn, and once the [GitHub] message says CI is green on your head commit (and any go below is in), run `gh pr merge --squash`. Never merge while CI is red or still running',
     'pr-person': 'once tested and self-reviewed, log up to 3 lines with `log_learned`: what the brief missed, what fought you ("nothing" is fine), push your branch and open a pull request; merging it waits for a person\'s Approve',
   }[p.ship_path ?? 'citadel'] ?? p.ship_path;
   const go = (p.go_from ?? 'high') === 'never'
@@ -543,7 +545,7 @@ export function onboardingPrompt(project: Project, sharedDir: string | null, sur
     '- Stack: 2 or 3 likely ones, plus "not sure yet". Drives check commands and rules.',
     '- Who works on it: just the person who created it · them and named people. Drives the requestedBy and assigned values.',
     '- Whose GitHub account owns the repo: the creator · another member · none yet. Skip it when the kickoff\'s code source already says. Ships push with the GitHub link of the person whose turn runs them, so unless you can confirm that link already reaches the repo, the plan\'s By hand part gets a first step for the owner: install the GitHub App on the repo, or authorise their link (the right scopes, workflow included for CI files).',
-    '- How changes ship: Citadel ships it (a scheme-local tools/land.sh) · pull request, auto-merge when green · pull request a person merges. Sets ship_path.',
+    '- How changes ship: Citadel ships it (a scheme-local tools/land.sh) · pull request, auto-merge when green · pull request, the minion merges when green · pull request a person merges. Sets ship_path. Before offering auto-merge, check the repo with `gh api repos/<owner>/<repo> --jq .allow_auto_merge`: anything but `true` (a private repo on a free plan can\'t auto-merge) means offer "the minion merges when green" (pr-minion) in its place.',
     '- From which risk label a change waits for a person\'s go: never · high · medium and up · every change (a person merging means every change). Sets go_from.',
     '- What waits for someone to try it before it ships: nothing · UI changes · every feature. Sets try_first.',
     `- Where does it run: in ${APP_NAME}\'s sidebar (a contraption: recommended for a web app; setup\'s contraption step registers it through you and deploys it) · on perigee as a service · its own CI/CD · someone\'s own machines · nothing to run · not sure yet. For a contraption the plan needs a slug, title, repo owner/name and branch. For perigee, a first minion writes a deploy script and a unit in \`deploy/\` for a person to install by hand.`,

@@ -1349,7 +1349,6 @@ function addTracked(group, bubble) {
   return group;
 }
 
-/** The time a message or card was posted, after its who-line; the full date shows on hover. */
 /**
  * Whether an everyone card carries its reply here (#1581): only where the chat that holds the reply isn't drawn whole, which is
  * the Overlord's filtered part of Mine, and not when the asker is the viewer's own Taskmaster (drawn whole in Mine).
@@ -1366,6 +1365,7 @@ function cardReply(text, ticketId) {
   return el;
 }
 
+/** The time a message or card was posted, after its who-line; the full date shows on hover. */
 function stamped(el, event) {
   if (!event.created_at) return el;
   const d = new Date(event.created_at);

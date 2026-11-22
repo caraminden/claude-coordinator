@@ -272,7 +272,7 @@ export class StatusPage {
     if (step === 'ok') store.addHealthEvent('answer-ok', now, null, 'answer time is back inside the line');
     if (step !== 'slow') return;
     const w = windows.at(-1)!;
-    const text = `The server's answer time missed its line three samples in a row (p95 over ${line.p95} ms or p99 over ${line.p99} ms, at a load up to ${TARGET.load} and ${TARGET.turns} running turns). Latest window: ${describe(w)}. The Status page's Answer time tile has the day. This is the one alert until it clears.`;
+    const text = `The server's answer time missed its line three samples in a row (alert line: p95 over ${line.p95} ms or p99 over ${line.p99} ms; the target at a load up to ${TARGET.load} and ${TARGET.turns} running turns is p95 within ${TARGET.p95} ms, p99 within ${TARGET.p99} ms, none over ${TARGET.max} ms). Latest window: ${describe(w)}. The Status page's Answer time tile has the day. This is the one alert until it clears.`;
     store.addHealthEvent('answer-slow', now, null, describe(w));
     const own = ownScheme();
     if (own != null) tell?.(own, text);

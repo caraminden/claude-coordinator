@@ -74,10 +74,6 @@ export function parseWindow(text: string | null | undefined): AnswerWindow | nul
   } catch { return null; }
 }
 
-/** Whether a window counts against the line: only at a load and a turn count the target covers (above them the box is out of its design). */
-export function judged(w: AnswerWindow): boolean {
-  return w.load <= TARGET.load && w.turns <= TARGET.turns;
-}
 export function outside(w: AnswerWindow, line: { p95: number; p99: number }): boolean {
   return w.p95 > line.p95 || w.p99 > line.p99;
 }
@@ -85,10 +81,10 @@ export function outside(w: AnswerWindow, line: { p95: number; p99: number }): bo
 /**
  * The alert's next step from the stored windows, oldest first: 'slow' when the newest ALERT_RUN judged windows are all
  * outside the line and it isn't already raised; 'ok' when raised and the newest ALERT_RUN are all inside; else null.
- * Windows outside the target's load aren't judged: they neither raise nor clear.
  */
 export function alertStep(windows: AnswerWindow[], line: { p95: number; p99: number }, raised: boolean): 'slow' | 'ok' | null {
-  const last = windows.filter(judged).slice(-ALERT_RUN);
+  // Every window counts, busy ones too: the target says where it must hold, and a slow server at load 129 is the very thing to hear about.
+  const last = windows.slice(-ALERT_RUN);
   if (last.length < ALERT_RUN) return null;
   if (!raised && last.every((w) => outside(w, line))) return 'slow';
   if (raised && last.every((w) => !outside(w, line))) return 'ok';
@@ -116,7 +112,7 @@ const WORKER = `
 const { workerData, parentPort } = require('node:worker_threads');
 const fs = require('node:fs/promises');
 const http = require('node:http');
-const { port, pid, everyMs, lookMs } = workerData;
+const { port, host, pid, everyMs, lookMs } = workerData;
 let samples = 0, blocked = 0, lastSched = null, lastAt = performance.now(), looking = false;
 const sched = async () => {
   try { const p = (await fs.readFile('/proc/' + pid + '/task/' + pid + '/schedstat', 'utf8')).split(' ').map(Number); return { run: p[0] || 0, wait: p[1] || 0 }; } catch { return null; }
@@ -142,7 +138,7 @@ const probe = () => {
   const t0 = performance.now();
   let done = false;
   const end = (ms) => { if (!done) { done = true; void post(ms); } };
-  const req = http.get({ host: '127.0.0.1', port, path: '/api/health', agent: false, timeout: 60000 }, (res) => {
+  const req = http.get({ host, port, path: '/api/health', agent: false, timeout: 60000 }, (res) => {
     res.resume();
     res.on('end', () => end(Math.round((performance.now() - t0) * 10) / 10));
     res.on('error', () => end(null));
@@ -163,9 +159,9 @@ export class AnswerProbe {
   constructor(opts: { everyMs?: number; lookMs?: number } = {}) { this.opts = opts; }
 
   /** `port` is the one the server is bound to (the socket systemd hands over included). */
-  start(port: number) {
+  start(port: number, host = '127.0.0.1') {
     if (this.worker) return;
-    const worker = new Worker(WORKER, { eval: true, workerData: { port, pid: process.pid, everyMs: this.opts.everyMs ?? 1000, lookMs: this.opts.lookMs ?? 20 } });
+    const worker = new Worker(WORKER, { eval: true, workerData: { port, host, pid: process.pid, everyMs: this.opts.everyMs ?? 1000, lookMs: this.opts.lookMs ?? 20 } });
     worker.on('message', (m: ProbeMessage) => {
       this.lastMs = m.ms;
       this.msgs.push(m);

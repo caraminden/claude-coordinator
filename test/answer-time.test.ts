@@ -22,13 +22,12 @@ test('the thread split sums CPU, waiting, blocked and idle to the window', () =>
 const win = (p95: number, p99 = 0, load = 10, turns = 5): AnswerWindow => ({ v: 1, n: 300, fail: 0, p50: 1, p95, p99, max: p99, over: 0, split: null, load, turns });
 const line = { p95: 250, p99: 1000 };
 
-test('three windows outside the line raise once; three inside clear; ones past the target load are not judged', () => {
+test('three windows outside the line raise once; three inside clear, busy windows included', () => {
   assert.equal(alertStep([win(300), win(300)], line, false), null);
   assert.equal(alertStep([win(10), win(300), win(10, 2000), win(300)], line, false), 'slow');
   assert.equal(alertStep([win(300), win(300), win(300)], line, true), null);
   assert.equal(alertStep([win(300), win(10), win(10), win(10)], line, true), 'ok');
-  assert.equal(alertStep([win(10), win(10), win(10), win(9000, 9000, 150)], line, true), 'ok');
-  assert.equal(alertStep([win(9000, 0, 150), win(9000, 0, 150), win(9000, 0, 150)], line, false), null);
+  assert.equal(alertStep([win(9000, 0, 150), win(9000, 0, 150), win(9000, 0, 150)], line, false), 'slow');
   assert.equal(parseWindow('{"v":1,"p95":3}')?.p95, 3);
   assert.equal(parseWindow('nope'), null);
 });

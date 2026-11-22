@@ -1950,7 +1950,7 @@ server.requestTimeout = 30 * 60_000;
 // Once up, a stray error is logged rather than fatal. Not before: a failed start (a port in use, a
 // database that won't open) must still exit non-zero so systemd restarts it.
 server.on('listening', keepServing);
-server.on('listening', () => { boundPort = (server.address() as AddressInfo).port; if (!BOOT_CHECK) answerProbe.start(boundPort); });
+server.on('listening', () => { boundPort = (server.address() as AddressInfo).port; if (!BOOT_CHECK) answerProbe.start(boundPort, LOCAL_HOST); });
 
 // Under socket activation (deploy/claude-coordinator.socket) systemd holds the listening socket, fd 3,
 // across restarts: requests made while the server restarts wait for the next one instead of failing.

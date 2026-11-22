@@ -599,7 +599,10 @@ function changeList(projectId, tv) {
     if (c) {
       return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },
         h('span', { class: 'what' }, h('a', { href: minionHref(projectId, c) }, `#${c.number ?? c.ticketId}`), ' ', c.title, fixTag(c)),
-        h('span', { class: 'where' }, stageTrack(n.stages, c, { mini: true }), ...trainNow(n, c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)),
+        // The one the release's top readout is about shows its stage only: the track, counts and time live up there (#1613).
+        h('span', { class: 'where' }, ...(i === 0 && (!c.train || c.train.role === 'front')
+          ? [h('b', { class: c.waitingOn ? 'waits' : 'work' }, c.label ?? stageName(c.stage))]
+          : [stageTrack(n.stages, c, { mini: true }), ...trainNow(n, c, i > 0 && (c.stage === 'line' || (c.stage === 'land' && c.waitingOn)) ? waiting() : null)])),
         lastTryLine(c), landNext(wait), stuck(why), placedNote(placed), tryIt(projectId, tv, c)));
     }
     return h('li', { class: cls, ...seq }, pos, h('div', { class: 'body' },

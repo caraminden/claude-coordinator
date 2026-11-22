@@ -14,6 +14,10 @@ ExecStart=@/usr/bin/node citadel-server %h/claude-coordinator/server.ts
 EnvironmentFile=%h/.config/claude-coordinator/env
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=HOST=127.0.0.1 PORT=8573
+# Node's compile cache: boot to listening drops from about 1.4 s to 0.6 s, and every request waits that long in the
+# socket on each restart (#1578). Node makes the folder (about 7 MB), checks each entry against its file, and skips the
+# cache if it can't write there. Turns don't inherit it (turnEnv's allowlist).
+Environment=NODE_COMPILE_CACHE=%h/.cache/citadel-server-compile-cache
 # always, not on-failure: a stray SIGTERM (a turn's pkill) makes a clean exit, which on-failure leaves down.
 Restart=always
 RestartSec=3

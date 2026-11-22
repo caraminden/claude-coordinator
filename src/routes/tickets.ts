@@ -1082,7 +1082,7 @@ export const ticketRoutes: Route[] = [
       const owner = machine.owner_id === null ? null : store.getUser(machine.owner_id)?.name ?? null;
       const event = postPlan(app, ticket.id, {
         summary: change.here === false && was ? `Take ${name} from ${project.name}` : change.here && !was ? `Lend ${name} to ${project.name}` : `Change what ${name} lends`,
-        plan: [...lines, '', view.managed === false ? 'It goes on lending what its own command line says.' : `After this it lends: ${after.server ? `the ${after.server} MCP server; ` : ''}${after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'}.`, ...(why ? ['', why] : []), '', `[${name} on the Machines page](${page})`].join('\n'),
+        plan: [...lines, '', view.managed === false ? 'It goes on lending what its own command line says.' : `After this it lends: ${after.server ? `the ${after.server} MCP server; ` : ''}${after.workspaces.length ? `workspaces ${after.workspaces.join(', ')}` : 'no workspaces'}.`, ...(why ? ['', `Why: ${why}`] : []), '', `[${name} on the Machines page](${page})`].join('\n'),
         machineLend: { id: machine.id, name, owner, scheme, change, lines, after, why, page },
       });
       return json(res, 201, { id: JSON.parse(event.data).id, href: cardHref(ticket, event.id), owner, page });

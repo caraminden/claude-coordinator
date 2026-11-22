@@ -135,31 +135,37 @@ export type DropOld = { rows: number; ms: number; beforeMb: number; afterMb: num
 /**
  * Drop the main file's copy of the chat log from before the move (events_old, #1169 ship 3), then VACUUM the main file
  * to give its space back (2,165 MB to 271 MB on a copy). Only once every events_old id is in events.db: with any missing
- * it changes nothing and says how many, since a release still writing the main file's copy would mean events.db isn't
- * the whole log. It deletes in batches of DROP_OLD_BATCH, each its own commit, so no write holds the lock for long and
- * the WAL checkpoints as it goes, and drops the empty table last; a stop part way leaves fewer rows for the next start.
- * Null when there is nothing to drop (no events_old, or the database isn't moved).
+ * it changes nothing and says how many, since then events.db isn't the whole log (one put back from an older
+ * events-<day>.db, or the boot check's copy, which holds only open chats). It deletes in batches of `batch`, each its
+ * own commit, so no write holds the lock for long and the WAL checkpoints as it goes, and drops the empty table last; a
+ * stop part way leaves fewer rows for the next start, and one between the drop and the VACUUM leaves the space free,
+ * which the next start vacuums (over half the file and `minFreeMb` free). Null when there is nothing to do.
  */
-export function dropEventsOld(db: DatabaseSync, batch = DROP_OLD_BATCH): DropOld | null {
-  if (!hasTable(db, 'main', 'events_old') || !eventsMoved(db) || eventsHome(db) !== CHAT) return null;
+export function dropEventsOld(db: DatabaseSync, { batch = DROP_OLD_BATCH, minFreeMb = 100 } = {}): DropOld | null {
   const started = Date.now();
-  const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
-  const mb = () => Math.round(((db.prepare('PRAGMA main.page_count').get() as any).page_count * (db.prepare('PRAGMA main.page_size').get() as any).page_size) / 1e6);
-  const missing = n(`SELECT count(*) AS n FROM main.events_old o WHERE NOT EXISTS (SELECT 1 FROM ${CHAT}.events c WHERE c.id = o.id)`);
-  if (missing) return { missing };
-  const beforeMb = mb();
-  const del = db.prepare(`DELETE FROM main.events_old WHERE id IN (SELECT id FROM main.events_old ORDER BY id LIMIT ${batch})`);
+  const pragma = (k: 'page_count' | 'page_size' | 'freelist_count') => (db.prepare(`PRAGMA main.${k}`).get() as Record<string, number>)[k];
+  const mb = (pages: number) => Math.round((pages * pragma('page_size')) / 1e6);
+  const old = hasTable(db, 'main', 'events_old');
+  if (old ? !eventsMoved(db) || eventsHome(db) !== CHAT : pragma('freelist_count') * 2 < pragma('page_count') || mb(pragma('freelist_count')) < minFreeMb) return null;
+  const beforeMb = mb(pragma('page_count'));
   let rows = 0;
-  for (let changed; (changed = Number(del.run().changes)); ) rows += changed;
-  db.exec('DROP TABLE main.events_old; VACUUM main; PRAGMA main.wal_checkpoint(TRUNCATE);');
-  return { rows, ms: Date.now() - started, beforeMb, afterMb: mb() };
+  if (old) {
+    const { missing } = db.prepare(`SELECT count(*) AS missing FROM main.events_old o WHERE NOT EXISTS (SELECT 1 FROM ${CHAT}.events c WHERE c.id = o.id)`).get() as { missing: number };
+    if (missing) return { missing };
+    const del = db.prepare(`DELETE FROM main.events_old WHERE id IN (SELECT id FROM main.events_old ORDER BY id LIMIT ${batch})`);
+    for (let changed; (changed = Number(del.run().changes)); ) rows += changed;
+    db.exec('DROP TABLE main.events_old');
+  }
+  db.exec('VACUUM main; PRAGMA main.wal_checkpoint(TRUNCATE);');
+  return { rows, ms: Date.now() - started, beforeMb, afterMb: mb(pragma('page_count')) };
 }
 
 /** What dropEventsOld did, for the server's log. */
 function saidDrop(d: DropOld | null): string | null {
   if (!d) return null;
   if ('missing' in d) return `Kept the main file's old copy of the chat log (events_old): ${d.missing} of its events aren't in events.db, so events.db may not hold the whole log. Find out why before dropping it by hand.`;
-  return `Dropped the main file's old copy of the chat log (events_old, ${d.rows} events) and vacuumed it: ${d.beforeMb} MB to ${d.afterMb} MB in ${d.ms} ms.`;
+  const what = d.rows ? `Dropped the main file's old copy of the chat log (events_old, ${d.rows} events) and vacuumed it` : 'Vacuumed the main file, whose space dropping events_old freed';
+  return `${what}: ${d.beforeMb} MB to ${d.afterMb} MB in ${d.ms} ms.`;
 }
 
 /**

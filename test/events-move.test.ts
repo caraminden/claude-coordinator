@@ -120,17 +120,27 @@ test('events_old goes in batches only when events.db holds every one of its ids,
   let db = open();
   const first = (db.prepare('SELECT min(id) AS id FROM main.events_old').get() as any).id;
   db.prepare(`DELETE FROM ${CHAT}.events WHERE id = ?`).run(first);
-  assert.deepEqual(dropEventsOld(db, 7), { missing: 1 });
+  assert.deepEqual(dropEventsOld(db, { batch: 7 }), { missing: 1 });
   assert.equal((db.prepare('SELECT count(*) AS n FROM main.events_old').get() as any).n, 300);
   db.prepare(`INSERT INTO ${CHAT}.events SELECT * FROM main.events_old WHERE id = ?`).run(first);
   const size = () => (db.prepare('PRAGMA main.page_count').get() as any).page_count;
   const pages = size();
 
-  // Whole: it goes in batches of 7 (300 rows, so the last one is short), and the file gives back the space.
-  const done = dropEventsOld(db, 7) as { rows: number; beforeMb: number; afterMb: number };
-  assert.equal(done.rows, 300);
+  // Whole: it goes in batches of 7, each its own run (300 rows: 42 full, a short one, then one that finds none), and the file gives back the space.
+  let runs = 0;
+  const spy = new Proxy(db, {
+    get(target, key) {
+      if (key !== 'prepare') return Reflect.get(target, key).bind?.(target) ?? Reflect.get(target, key);
+      return (sql: string) => {
+        const st = target.prepare(sql);
+        return /^DELETE FROM main\.events_old/.test(sql) ? { run: () => (runs++, st.run()) } : st;
+      };
+    },
+  });
+  const done = dropEventsOld(spy, { batch: 7 }) as { rows: number; beforeMb: number; afterMb: number };
+  assert.deepEqual([done.rows, runs], [300, 44]);
   assert.ok(size() < pages - 290, `${size()} pages after, ${pages} before`); // 300 rows of 4 kB, a page each
-  assert.equal(dropEventsOld(db), null);
+  assert.equal(dropEventsOld(db, { minFreeMb: 0 }), null);
   db.close();
   assert.deepEqual(look(path).tables, []);
   s = new Store(path);
@@ -165,6 +175,27 @@ test('a copy left by a move that stopped halfway is made again, and a main file 
   const ev2 = new DatabaseSync(join(dir, 'events.db'), { readOnly: true });
   assert.deepEqual(ev2.prepare('SELECT data FROM events').all().map((r: any) => r.data), [JSON.stringify({ text: 'kept' })]);
   ev2.close();
+});
+
+test('a start stopped after the drop but before the VACUUM leaves the space free, and the next one vacuums it', () => {
+  const dir = mkdtempSync(join(root, 'vac-'));
+  const path = join(dir, 'coordinator.db');
+  let s = new Store(path);
+  const t = s.createTicket({ project_id: s.createProject('p', null).id, title: 't', permission_mode: 'default', created_by: 'Cara' });
+  for (let i = 0; i < 300; i++) s.addEvent(t.id, 'note', { text: 'x'.repeat(4000) });
+  s.db.close();
+  unsplitEvents(path);
+  new Store(path).db.close(); // moves, keeping events_old
+  const db = new DatabaseSync(path);
+  db.prepare(`ATTACH DATABASE ? AS ${CHAT}`).run(eventsPath(path));
+  db.exec('DROP TABLE main.events_old');
+  const free = () => (db.prepare('PRAGMA main.freelist_count').get() as any).freelist_count;
+  assert.ok(free() > 290);
+  assert.equal(dropEventsOld(db), null, 'under 100 MB free: not worth a VACUUM at start');
+  const done = dropEventsOld(db, { minFreeMb: 0 }) as { rows: number };
+  assert.deepEqual([done.rows, free() === 0], [0, true]);
+  assert.equal(dropEventsOld(db, { minFreeMb: 0 }), null);
+  db.close();
 });
 
 test('the rollback tool refuses a database whose events are already in the main file', () => {

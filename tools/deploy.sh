@@ -8,7 +8,7 @@
 # 2. A change to public/ only: SIGHUP, and the server reloads its front end. No restart, no killed turns.
 # 3. Anything else: queues the fixed-name restart unit, which restarts straight away (running turns
 #    carry on in their own units and the new server re-attaches; it only waits while turns a restart
-#    would cut off are running, see interruptible, or for 60 s on a server that is up but doesn't answer), waits up to 120 s for a healthy server, checks it is still
+#    would cut off are running, see interruptible, or for 60 s on a server that is up but doesn't answer), waits up to 45 s for a healthy server, checks it is still
 #    healthy 30 s later, and tags it last-good. If the new code doesn't come up or stay up, it rolls the checkout back to last-good and restarts
 #    again. It reports how it went in the deploying minion's chat (failures as errors, which push) and
 #    in the journal. Before restarting it copies the database to backups/pre-deploy-<commit>.db (newest

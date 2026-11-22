@@ -347,6 +347,25 @@ const size = (n) => (n < 1024 * 1024 ? `${Math.ceil(n / 1024)} KB` : `${(n / 102
 const ARGS_MAX = 64;
 const ARG_LENGTH_MAX = 4000;
 const SHOT_DELAY_MAX = 30;
+/**
+ * A reply to the app, tried again on a dropped line or a 5xx (MA6): otherwise the minion's tool call waits out Claude
+ * Code's 30 minutes for an answer already made. About a minute in all; a 4xx is the app's answer and is not retried.
+ */
+export async function sendRetrying(post, onRetry = () => {}, waits = [1000, 2000, 4000, 8000, 16000, 30000]) {
+  for (let i = 0; ; i++) {
+    let res;
+    try {
+      res = await post();
+      if (res.status < 500 || i >= waits.length) return res;
+      onRetry(new Error(`the app answered ${res.status}`));
+    } catch (err) {
+      if (i >= waits.length) throw err;
+      onRetry(err);
+    }
+    await new Promise((r) => setTimeout(r, waits[i]));
+  }
+}
+
 const LOCK_STALE_MS = 2 * 60 * 60_000; // past any job's 30 minutes or a desktop CI job's timeout
 
 function pidAlive(pid) {
@@ -1335,8 +1354,8 @@ export class JobRunner {
     job.since = null;
   }
 
-  /** Tells the app where a job stands. True once the app has heard it, refusal included; false if it couldn't be reached. */
-  async report(job) {
+  /** Tells the app where a job stands. True once the app has heard it, refusal included; false if it couldn't be reached or took none of it. */
+  async report(job, extra = {}) {
     const g = job._gpu;
     const body = {
       id: Number(job.id), state: job.state, run_s: this.runS(job), gpu_busy_s: Math.round(job.gpu_busy_s),
@@ -1344,10 +1363,17 @@ export class JobRunner {
       ...(job.state === 'paused' && job.paused === 'frozen' && g ? { held_vram_mb: g.vram } : {}),
       ...(job.outputs.length ? { outputs: job.outputs.map(({ path, size, uploaded, why }) => ({ path, size, uploaded, ...(why && !uploaded ? { why } : {}) })) } : {}),
       ...(JOB_ENDED.includes(job.state) ? { exit_code: job.final.exit_code, ...(job.final.error ? { error: job.final.error } : {}) } : {}),
+      ...extra,
     };
     let res;
     try {
-      res = await this.call('POST', '/api/machines/job-state', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const post = (b) => this.call('POST', '/api/machines/job-state', { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+      res = await post(body);
+      // Too big for the route (MA7): the state matters, the log tail and a long output list don't.
+      if (res.statusCode === 413) {
+        res.resume();
+        res = await post({ ...body, log_tail: '', ...(body.outputs ? { outputs: body.outputs.slice(0, 100).map((o) => ({ ...o, path: o.path.slice(0, 200), why: o.why?.slice(0, 100) })) } : {}) });
+      }
     } catch (err) {
       this.log(`Job ${job.id}: could not report ${job.state}: ${err.message}`);
       return false;
@@ -1355,7 +1381,8 @@ export class JobRunner {
     res.resume();
     // The app ended it, never started it, or doesn't know it: it must not keep running here.
     if ((res.statusCode === 409 || res.statusCode === 404) && !job.final) this.stop(job, 'stopped', 'the app ended it');
-    return res.statusCode < 500;
+    if (res.statusCode === 413) this.log(`Job ${job.id}: the app refused its ${job.state} report as too big`);
+    return res.statusCode < 500 && res.statusCode !== 413;
   }
 
   /** A job.start this agent won't run: the app hears why, and nothing is made on disk. */
@@ -1471,6 +1498,8 @@ export class JobRunner {
     this.watch(job);
     if (job.stopping) return void this.exec(this.podman, ['rm', '-f', this.name(job)]);
     await this.report(job);
+    // A pause asked while it was starting (MA2) happens now it runs.
+    if (job.want === 'paused') await this.pause(job);
   }
 
   /** Waits on the job's container in the background; its end finishes the job, or completes a pause. */
@@ -1497,9 +1526,13 @@ export class JobRunner {
     job.paused = 'stopped';
     this.save(job);
     await this.report(job);
+    // A resume asked during the pause's grace (MA9) happens now the pause is done.
+    if (job.want === 'running') await this.resume(job);
   }
 
   async pause(job) {
+    // What the person asked for last wins, even while it starts or a pause is still under way (MA2, MA9).
+    job.want = 'paused';
     if (job.state !== 'running' || job.pausing || job.stopping) return;
     this.closeSegment(job);
     if (job.kind.resumable) {
@@ -1511,15 +1544,19 @@ export class JobRunner {
         if (r.code === 0 || !job.pausing) return;
         // Still running: the limit counts again and a later pause can try again.
         job.pausing = false;
+        job.want = null;
         job.since = Date.now();
         this.save(job);
         this.log(`Job ${job.id}: podman stop failed, still running: ${r.out.slice(-300)}`);
+        return this.report(job, { pause_failed: `podman stop failed: ${r.out.slice(-300)}` });
       });
     }
     const r = await this.exec(this.podman, ['pause', this.name(job)]);
     if (r.code !== 0) {
       job.since = Date.now();
-      return this.log(`Job ${job.id}: podman pause failed: ${r.out.slice(-300)}`);
+      job.want = null;
+      this.log(`Job ${job.id}: podman pause failed: ${r.out.slice(-300)}`);
+      return this.report(job, { pause_failed: `podman pause failed: ${r.out.slice(-300)}` });
     }
     job.state = 'paused';
     job.paused = 'frozen';
@@ -1529,7 +1566,9 @@ export class JobRunner {
   }
 
   async resume(job) {
+    job.want = 'running';
     if (job.state !== 'paused' || job.stopping) return;
+    job.want = null;
     if (job.paused === 'stopped') {
       job.state = 'starting';
       this.save(job);
@@ -1537,7 +1576,10 @@ export class JobRunner {
       return this.launch(job, true);
     }
     const r = await this.exec(this.podman, ['unpause', this.name(job)]);
-    if (r.code !== 0) return this.log(`Job ${job.id}: podman unpause failed: ${r.out.slice(-300)}`);
+    if (r.code !== 0) {
+      this.log(`Job ${job.id}: podman unpause failed: ${r.out.slice(-300)}`);
+      return this.report(job);
+    }
     job.state = 'running';
     job.paused = null;
     job.since = Date.now();
@@ -1671,9 +1713,9 @@ export class JobRunner {
     return Number.isFinite(pct) && Number.isFinite(vram) ? { pct, vram } : null;
   }
 
-  /** Every tick: GPU use, the time limit, the disk cap now and then, and a report for each live job. */
+  /** Every tick: GPU use, the time limit, the disk cap now and then, and a report for each live job (a starting one too, so the app knows it isn't lost: MA8). */
   async tick() {
-    const live = [...this.jobs.values()].filter((j) => (j.state === 'running' || j.state === 'paused') && !j.final);
+    const live = [...this.jobs.values()].filter((j) => ['starting', 'running', 'paused'].includes(j.state) && !j.final);
     const now = Date.now();
     const dt = Math.min(now - this.lastSample, 2 * this.tickMs) / 1000;
     this.lastSample = now;
@@ -2172,11 +2214,11 @@ async function main() {
 
   function send(s, id, body) {
     s.chain = s.chain.then(async () => {
-      const res = await fetch(new URL('/api/machines/send', appUrl), {
+      const res = await sendRetrying(() => fetch(new URL('/api/machines/send', appUrl), {
         method: 'POST',
         headers: { ...auth, 'Content-Type': 'application/json' },
         body: JSON.stringify({ session: id, ...body }),
-      });
+      }), (err) => log(`Send to the app failed, trying again: ${err.message}`));
       // The thread's turn ended: nobody is listening to this server any more.
       if (res.status === 410) stopServer(id);
     }).catch((err) => log(`Could not send to the app: ${err.message}`));

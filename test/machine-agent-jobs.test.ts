@@ -10,7 +10,7 @@ import { after, before, test } from 'node:test';
 import { jsonLines } from './helpers.ts';
 import { holds } from './holds.ts';
 // @ts-ignore: a plain .mjs the agent's computers download
-import { JobRunner, loadConfig, outFiles, podmanRunArgs } from '../public/machine-agent.mjs';
+import { JobRunner, loadConfig, outFiles, podmanRunArgs, sendRetrying } from '../public/machine-agent.mjs';
 
 // The machine agent's GPU job runner (#858) against a fake podman, a fake nvidia-smi and a stand-in for the app's
 // three job routes. The fake podman keeps each container as a file; a test ends one by writing that file.
@@ -47,7 +47,7 @@ if (cmd === 'run') {
   const s = read(name);
   if (!s || s.status === 'removed') { console.error('no such object'); process.exit(125); }
   console.log(args.join(' ').includes('ExitCode') ? s.status + ' ' + (s.code ?? 0) : s.status);
-} else if ((cmd === 'rm' || cmd === 'stop') && read(name)?.stuck) {
+} else if ((cmd === 'rm' || cmd === 'stop' || cmd === 'pause') && read(name)?.stuck) {
   console.error('Error: container state improper'); process.exit(125);
 } else if (cmd === 'rm') {
   const s = read(name);
@@ -608,4 +608,73 @@ test('podman wait failing while the container still runs does not end the job', 
   assert.equal(lastState(msg.id)!.state, 'running');
   exitContainer(msg.id, 0);
   await until('done', () => lastState(msg.id)?.state === 'done', 6000, statesTail);
+});
+
+test('a pause asked while the job starts pauses it once it runs (MA2)', async () => {
+  const r = runner();
+  const msg = start();
+  const started = r.handle(msg);
+  await r.handle({ type: 'job.pause', id: msg.id });
+  await started;
+  await until('paused', () => lastState(msg.id)?.state === 'paused', 6000, statesTail);
+  assert.equal(container(msg.id).status, 'paused');
+  await r.handle({ type: 'job.stop', id: msg.id });
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+});
+
+test('a resume during a pause\'s grace runs the job again once the pause ends (MA9)', async () => {
+  const r = runner();
+  const msg = start({}, { resumable: true });
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  await r.handle({ type: 'job.pause', id: msg.id });
+  await r.handle({ type: 'job.resume', id: msg.id });
+  await until('paused, then running again', () => statesOf(msg.id).some((s) => s.state === 'paused') && lastState(msg.id)?.state === 'running', 6000, statesTail);
+  assert.equal(container(msg.id).status, 'running');
+  await r.handle({ type: 'job.stop', id: msg.id });
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+});
+
+test('a failed podman pause is reported to the app, not only logged (MA2)', async () => {
+  const r = runner();
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  stickContainer(msg.id, true);
+  await r.handle({ type: 'job.pause', id: msg.id });
+  const said = lastState(msg.id) as any;
+  assert.equal(said.state, 'running');
+  assert.match(said.pause_failed ?? '', /podman pause failed/);
+  stickContainer(msg.id, false);
+  await r.handle({ type: 'job.stop', id: msg.id });
+  await until('stopped', () => lastState(msg.id)?.state === 'stopped', 6000, statesTail);
+});
+
+test('a final report the app refuses as too big is not marked sent (MA7)', async () => {
+  const r = runner();
+  const msg = start();
+  await r.handle(msg);
+  await until('running', () => lastState(msg.id)?.state === 'running', 6000, statesTail);
+  app.stateStatus = 413;
+  try {
+    exitContainer(msg.id, 0);
+    await until('the runner tried its final report', () => statesOf(msg.id).filter((s) => s.state === 'done').length >= 2, 6000, statesTail);
+    const tries = statesOf(msg.id).filter((s) => s.state === 'done');
+    assert.equal((tries.at(-1) as any).log_tail, '', 'the second try leaves the log tail out');
+    assert.equal(r.jobs.get(String(msg.id))?.final_sent, false);
+    assert.ok(r.known().some((k: any) => k.id === msg.id), 'it still holds the job, to report again');
+  } finally {
+    app.stateStatus = 202;
+  }
+});
+
+test('a reply the agent cannot POST is tried again; a 4xx is the answer (MA6)', async () => {
+  let n = 0;
+  const flaky = async () => { if (++n === 1) throw new Error('fetch failed'); return { status: n === 2 ? 502 : 200 }; };
+  const res = await sendRetrying(flaky, () => {}, [0, 0, 0]);
+  assert.deepEqual([res.status, n], [200, 3]);
+  n = 0;
+  assert.equal((await sendRetrying(async () => (++n, { status: 410 }), () => {}, [0, 0])).status, 410);
+  assert.equal(n, 1);
+  await assert.rejects(sendRetrying(async () => { throw new Error('down'); }, () => {}, [0, 0]), /down/);
 });

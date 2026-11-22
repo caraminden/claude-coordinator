@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
-import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, notTaken, pacificClock, type JobKind } from '../src/machine-jobs.ts';
+import { DEFAULT_SETTINGS, hoursOpen, kindHash, MachineJobs, notTaken, pacificClock, STARTING_TIMEOUT_S, type JobKind } from '../src/machine-jobs.ts';
 import { writeOffThread } from '../src/db-writer.ts';
 import { projectSharedDir } from '../src/workspace.ts';
 import { bootServer, jsonLines, SECRET, stopProcs, stopTurns, until, holds, ok, zoneLabel, type Booted } from './helpers.ts';
@@ -566,4 +566,52 @@ test('the wake names results the server did not take, with where they are on the
   assert.match(line, /gpu-box, in job folder 7\/out\//);
   assert.doesNotMatch(line, /a\.json/);
   assert.equal(notTaken({ id: 8, outputs: JSON.stringify([{ path: 'a', size: 1, uploaded: true }]) } as any, 'gpu-box'), '');
+});
+
+test('a failed pause on the machine shows as running with why; a job silent in "starting" fails and frees the queue (MA2, MA8)', () => {
+  const dir = join(root, 'ma8');
+  mkdirSync(dir);
+  const store = new Store(join(dir, 'coordinator.db'));
+  const owner = store.createUser({ name: 'Owner', login: 'owner' });
+  const who = { uid: owner.id, name: 'Owner', admin: false };
+  const p = store.createProject('U', null, owner.id);
+  const id0 = store.createMachine('gpu-box', 'x', 'Owner', owner.id).id;
+  store.updateMachine(id0, { jobs: JSON.stringify({ folders: [], max_limit_h: 12, max_disk_gb: null, gpu: true }) });
+  let t = Date.now();
+  const sent: any[] = [];
+  const woke: string[] = [];
+  const jobs = new MachineJobs({
+    store, send: (_m, msg) => (sent.push(msg), true), online: () => true, broadcast() {}, postCard: () => null, settleCard() {}, wake: (_t, text) => woke.push(text), note() {},
+    resultsDir: (j) => join(dir, 'jobs', String(j.id)), now: () => t,
+  });
+  const m = () => store.getMachine(id0)!;
+  const kind: JobKind = { name: 'k', image: `docker.io/x/y@sha256:${'a'.repeat(64)}`, command: ['run'], reads: [], gpu: true, network: false, resumable: false, max_limit_s: 3600 };
+  const ticket = store.createTicket({ project_id: p.id, title: 'asker', permission_mode: 'default', created_by: 'owner' } as any).id;
+  const queue = () => jobs.queue({ machine: m(), projectId: p.id, ticketId: ticket, contraptionId: null, askedBy: 'test', kind, inputs: [], limitS: 600, when: 'now', reason: 'test' });
+  const a = queue();
+  jobs.decide(a.id, 'now', who);
+  jobs.report(m(), { id: a.id, state: 'running', run_s: 0 });
+  jobs.pause(a.id, who);
+  jobs.report(m(), { id: a.id, state: 'running', run_s: 5, pause_failed: 'podman pause failed: state improper' });
+  assert.equal(store.getMachineJob(a.id)!.state, 'running');
+  assert.match(store.getMachineJob(a.id)!.error ?? '', /Pause didn't take.*state improper/);
+  jobs.report(m(), { id: a.id, state: 'done', run_s: 9 });
+  assert.equal(store.getMachineJob(a.id)!.error, null, 'a finished job keeps no stale pause error');
+
+  const b = queue();
+  jobs.decide(b.id, 'now', who);
+  assert.equal(store.getMachineJob(b.id)!.state, 'starting');
+  const c = queue();
+  jobs.decide(c.id, 'now', who);
+  assert.equal(store.getMachineJob(c.id)!.state, 'queued');
+  t += STARTING_TIMEOUT_S * 1000 - 1000;
+  jobs.tickAll();
+  assert.equal(store.getMachineJob(b.id)!.state, 'starting', 'inside the timeout it waits');
+  t += 2000;
+  jobs.tickAll();
+  assert.equal(store.getMachineJob(b.id)!.state, 'failed');
+  assert.ok(sent.some((x) => x.type === 'job.stop' && x.id === b.id));
+  assert.ok(woke.some((w) => w.includes(`Job #${b.id}`) && /starting/.test(w)), 'the minion that asked is told');
+  assert.equal(store.getMachineJob(c.id)!.state, 'starting', 'the next job starts');
+  store.db.close();
 });

@@ -227,6 +227,10 @@ export function jobView(j: MachineJob, extra: { machine?: string; waits?: string
 }
 export type JobView = ReturnType<typeof jobView>;
 
+/** How long a job may sit in "starting" with no word from its machine: inputs and an image pull fit well inside. */
+export const STARTING_TIMEOUT_S = 2 * 3600;
+const PAUSE_FAILED = "Pause didn't take, still running: ";
+
 /** The results a job's machine kept because the server didn't take them, named with where they are there (MA3). */
 export function notTaken(job: MachineJob, machine: string): string {
   let all: unknown = [];
@@ -629,6 +633,7 @@ export class MachineJobs {
       const s = storedSettings(m);
       if (s.until !== null && s.until <= this.now()) this.store.updateMachine(m.id, { job_settings: JSON.stringify({ ...s, until: null }) });
       this.enforceLimit(m.id);
+      this.timeOutStart(m.id);
       this.pump(m.id);
       // "outside job hours" and "behind job #N" change with the clock: keep viewers' lines true.
       for (const j of this.store.machineJobs({ machine: m.id, states: ['queued'] }, 200)) this.changed(j.id);
@@ -642,6 +647,16 @@ export class MachineJobs {
     this.d.send(machineId, { type: 'job.stop', id: j.id });
     this.store.updateMachineJob(j.id, { error: `over its ${Math.round(j.limit_s / 60)} min limit; Citadel stopped it` });
     this.changed(j.id);
+  }
+
+  /** A job the machine never moved past "starting" (MA8: an agent that lost it, or a refusal it couldn't report) fails, so the queue moves. */
+  private timeOutStart(machineId: number) {
+    const j = this.store.machineJobs({ machine: machineId, states: ['starting'] }, 1)[0];
+    if (!j || this.now() - (j.live_at ?? j.started_at ?? this.now()) < STARTING_TIMEOUT_S * 1000) return;
+    this.d.send(machineId, { type: 'job.stop', id: j.id });
+    const error = `the machine said nothing for ${STARTING_TIMEOUT_S / 3600} h while starting it; Citadel gave up on it`;
+    this.store.updateMachineJob(j.id, { state: 'failed', ended_at: this.now(), input_token_hash: null, error });
+    this.ended(j.id, `Job #${j.id} (${j.kind_name}) on ${this.machineOf(j).name} failed: ${error}.`);
   }
 
   /** The agent's job-state report (every 10 s while a job runs, and on every change). */
@@ -675,14 +690,17 @@ export class MachineJobs {
     const ended = (ENDED as readonly string[]).includes(state);
     // A pause stays the server's: a "running" report sent before the agent got job.pause (a resumable kind's grace)
     // leaves it paused, and the agent saying "paused" keeps who paused it, so job hours can resume it.
-    const held = job.state === 'paused' && state === 'running';
+    // ...unless the agent says its pause failed (MA2): then it runs, and the owner sees why.
+    const pauseFailed = typeof body.pause_failed === 'string' ? body.pause_failed.slice(0, 500) : null;
+    const held = job.state === 'paused' && (state === 'running' || state === 'starting') && !pauseFailed;
     this.store.updateMachineJob(id, {
       state: held ? 'paused' : state, live: JSON.stringify(live), live_at: now,
       run_s: Math.round(num(body.run_s) ?? job.run_s), server_run_s: Math.round(job.server_run_s + gap), gpu_busy_s: Math.round(num(body.gpu_busy_s) ?? job.gpu_busy_s),
       ...(state === 'paused' && !job.paused_by ? { paused_by: 'owner' } : {}),
       ...(state !== 'paused' && !held ? { paused_by: null } : {}),
       ...(outputs ? { outputs: JSON.stringify(outputs) } : {}),
-      ...(ended ? { ended_at: now, input_token_hash: null, exit_code: Number.isInteger(body.exit_code) ? body.exit_code : null, error: typeof body.error === 'string' ? body.error.slice(0, 2000) : job.error } : {}),
+      ...(pauseFailed && !ended ? { error: `${PAUSE_FAILED}${pauseFailed}` } : {}),
+      ...(ended ? { ended_at: now, input_token_hash: null, exit_code: Number.isInteger(body.exit_code) ? body.exit_code : null, error: typeof body.error === 'string' ? body.error.slice(0, 2000) : job.error?.startsWith(PAUSE_FAILED) ? null : job.error } : {}),
     });
     if (ended) {
       const m2 = this.machineOf(job);

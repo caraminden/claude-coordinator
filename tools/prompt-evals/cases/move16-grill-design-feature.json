@@ -1,0 +1,30 @@
+{
+  "id": "move16-grill-design-feature",
+  "kind": "rule",
+  "source": "#1573, written for move 16 (Ideas and new work: grill design-shaped features) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1617,
+    "title": "Schedules calendar page",
+    "type": "feature"
+  },
+  "commit": "4c1fcf8f",
+  "from": "Cara",
+  "history": "",
+  "message": "Add a calendar page that shows every scheme's schedules on a week grid.",
+  "facts": [],
+  "right": "A new screen is design-shaped: run a citadel:grilling round with Cara as cards before writing any code.",
+  "wrong": "Started building the page straight away.",
+  "checks": [
+    {
+      "call": "Skill",
+      "input": "grilling",
+      "why": "a design-shaped feature gets a grilling round first"
+    },
+    {
+      "noCall": "Edit|Write",
+      "input": "/(public|src)/",
+      "why": "no code before the grilling round"
+    }
+  ]
+}

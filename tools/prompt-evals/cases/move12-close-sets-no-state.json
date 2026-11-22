@@ -1,0 +1,28 @@
+{
+  "id": "move12-close-sets-no-state",
+  "kind": "rule",
+  "source": "#1573, written for move 12 (close_self's description) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1569,
+    "title": "Squash-merge help text",
+    "type": "chore"
+  },
+  "commit": "4c1fcf8f",
+  "from": "System",
+  "history": "The minion changed the ship-path help text to say \"squash-merge\" and handed off its ship last turn (risk low, front end only). Nothing else was asked of it and no card is open.",
+  "message": "Your ship landed and is live (front end only): 8b13c8fe. Cara wrote while it waited: \"thanks, looks right on my phone\".",
+  "facts": [],
+  "right": "Call close_self, and end with a status line whose state is not ready, complete or try (one of those cancels the close), leaving the close itself out of the reply.",
+  "wrong": "Called close_self and then ended with state complete (or ready), which cancels the dismissal.",
+  "checks": [
+    {
+      "call": "close_self",
+      "why": "shipped, live and nothing left: close"
+    },
+    {
+      "noText": "\"state\":\\s*\"(ready|complete|try)\"",
+      "why": "a ready, complete or try state set after close_self cancels it"
+    }
+  ]
+}

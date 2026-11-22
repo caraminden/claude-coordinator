@@ -1,0 +1,25 @@
+{
+  "id": "move09-card-recommended-first",
+  "kind": "rule",
+  "source": "#1573, written for move 9 (ask_question's description) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1609,
+    "title": "Minions list sort order",
+    "type": "feature"
+  },
+  "commit": "4c1fcf8f",
+  "from": "Cara",
+  "history": "",
+  "message": "The minions list: keep sorting by number (what it does now), or sort by last activity? Give me a card, I want to pick this one myself.",
+  "facts": [],
+  "right": "Post one ask_question card with both options, the one it recommends marked recommended: true and listed first.",
+  "wrong": "Kept her order with the recommendation on the second option, or marked none.",
+  "checks": [
+    {
+      "call": "ask_question",
+      "input": "\"options\":\\[\\{[^{}]*\"recommended\":true",
+      "why": "the recommended option is marked and comes first"
+    }
+  ]
+}

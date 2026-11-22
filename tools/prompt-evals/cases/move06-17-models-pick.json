@@ -1,0 +1,32 @@
+{
+  "id": "move06-17-models-pick",
+  "kind": "rule",
+  "source": "#1573, written for move 6 (the models line) and 17 (Usage bullets 2 and 3) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1606,
+    "title": "Sidebar cleanup follow-ups",
+    "type": "chore"
+  },
+  "commit": "4c1fcf8f",
+  "from": "Cara",
+  "history": "",
+  "message": "Two minions to start from this. One renames the .chip-old CSS class to .chip across public/ (pure find-and-replace, the tests already cover it). The other redesigns how the land queue hands its lock from one ship to the next, which has bitten us twice. Which model and effort should each get? Just tell me, I'll start them.",
+  "facts": [],
+  "right": "Name the model table's tiers: Sonnet 5.5 medium for the known-shape rename, Opus 5.5 high for the risky land-queue redesign (Fable 5.2 medium only for the really complex), and nothing above high effort.",
+  "wrong": "Picked by feel: Haiku or low effort for the rename, or max/xhigh effort for the redesign.",
+  "checks": [
+    {
+      "said": "sonnet[^\\n]{0,40}\\bmedium\\b",
+      "why": "known-shape work: Sonnet 5.5 medium"
+    },
+    {
+      "said": "opus[^\\n]{0,40}\\bhigh\\b|fable[^\\n]{0,40}\\bmedium\\b",
+      "why": "design and risky work: Opus 5.5 high (Fable 5.2 medium for the really complex)"
+    },
+    {
+      "noText": "\\b(max|xhigh|extra[- ]high)\\b",
+      "why": "nothing above high effort unless a person asks"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "id": "strike-relayed-stale-blocker",
   "kind": "strike",
-  "source": "Citadel Taskmaster, strike 453185 on event 453160, 2026-11-11 01:36 PST",
+  "source": "Citadel Taskmaster, strike 453185 on event 453160, 2026-11-11 01:36 PST; #1573 inlined the handoff's new part (the replay's shared folder is empty, so runs went hunting for it) and answered list_tickets",
   "role": "taskmaster",
   "ticket": {
     "number": 0,
@@ -11,13 +11,18 @@
   "commit": "fc11c111",
   "from": "Cara",
   "history": "The Taskmaster had been working from handoffs/handoff-jam-wrapup-2026-11-11.md (a wrap-up of a land jam). Cara updated it with takeaway 8: #506 made minion test runs normal priority, so full-suite runs fill perigee. Its fix list: (a) minions run only the tests their change touches; (b) give tools/run-tests.sh a default concurrency cap; (c) \"once #510's WSL Linux runner works, give Citadel a CI workflow, and let the land gate accept a green CI run for the exact commit, as Peek Auras now does.\" Takeaway 9: the server stalls for 7-12 s now and then. #510 (a WSL Linux CI runner on Cara's desktop) was a minion started earlier that week.",
-  "message": "There are some updates to the last handoff",
+  "message": "There are some updates to the last handoff (handoffs/handoff-jam-wrapup-2026-11-11.md). The new part:\n\n8. **#506 removed a hidden brake on Citadel's own tests (01:29).** Before it, minion test runs were\n   `SCHED_IDLE`, so they yielded to everything. Now they're normal priority, and each\n   `--test-concurrency=0` run takes the whole box. At 01:29, #519's and #520's full-suite runs took ~10\n   cores together, and load hit ~115. Citadel has no CI, so every change runs the full suite **twice**\n   on perigee: the minion's own \"Running the full test suite\" step, then `land.sh`'s gate run.\n   Cara asked \"why isn't it running on my CI setup?\" In order:\n   (a) minions run only the tests their change touches, and leave the full suite to `land.sh`'s single\n   gate run (a guidance change);\n   (b) give `tools/run-tests.sh` a default concurrency cap (e.g. half of nproc) so one run can't fill\n   the box;\n   (c) once #510's WSL Linux runner works, give Citadel a CI workflow, and let the land gate accept a\n   green CI run for the exact commit, as Peek Auras now does. The ~5 s boot check stays on perigee.\n9. **The server stalls for 7–12 s now and then, and it isn't CPU.** At 01:30 the server's cgroup had\n   cpu.weight 1000 and cpu.pressure ~0.5%, with no swap, yet `/api/health` took 7.5–11.8 s between\n   12 ms answers. The stalls lined up with \"restored the Claude session from the database\" and\n   \"cleared 35 MiB of build output on dismissal\". Likely synchronous file work on the event loop.\n   This belongs with #520 (Slow minute after a restart), but it's lasting well past the first minute.",
   "facts": [
     {
-      "tool": "read_ticket|read_minion|list_tickets",
+      "tool": "read_ticket|read_minion|live_facts|list_tickets|search_minions",
       "match": "510",
       "result": "#510 WSL Linux CI runner on Cara's desktop | stage: done | status: closed | latest: The citadel-ci distro and its keep-up task are set up; the agent is online as cara-desktop-linux, so Citadel's CI can start.",
       "why": "#510 was closed and working"
+    },
+    {
+      "tool": "list_tickets",
+      "result": "#520 Slow minute after a restart | stage: build | open\n#519 Minions run only affected tests | stage: review | open\n#510 WSL Linux CI runner on Cara's desktop | stage: done | closed\n#508 Contraption turns and app deploys | stage: plan | open (card waiting on Cara)\n#506 Minion tests at normal priority | stage: done | closed",
+      "why": "the list showed #510 done and closed"
     },
     {
       "tool": "ci_runners",
@@ -30,8 +35,8 @@
   "wrong": "Relayed the handoff's condition as current and parked the CI move, saying it waits until #510's WSL Linux runner works.",
   "checks": [
     {
-      "call": "read_ticket|read_minion|list_tickets|ci_runners|host_check",
-      "input": "510|runner|\\{\\}",
+      "call": "read_ticket|read_minion|live_facts|list_tickets|search_minions|ci_runners|host_check",
+      "input": "510|runner|include_closed|\\{\\}",
       "before": "wait(s|ing)? (until|on|for) #?510|once #?510",
       "why": "look at #510 before relaying that the work waits on it"
     },

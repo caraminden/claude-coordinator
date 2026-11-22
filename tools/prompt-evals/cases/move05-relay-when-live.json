@@ -1,0 +1,31 @@
+{
+  "id": "move05-relay-when-live",
+  "kind": "rule",
+  "source": "#1573, written for move 5 (the relay_when_live line) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1569,
+    "title": "Squash-merge help text",
+    "type": "chore"
+  },
+  "commit": "796c27af",
+  "work": "8b13c8fe",
+  "from": "Cara",
+  "history": "The minion changed the ship-path help text in public/minion-rules.js to say \"squash-merge\" instead of spelling out the gh command, which wrapped mid-flag on phones. It is committed on the minion's branch, the tests it touches are green, and self-review labelled it low risk (front end only).",
+  "message": "Looks good, ship it. Once it's live, Mandate's Taskmaster needs to know: their onboarding doc quotes the old help text word for word.",
+  "facts": [],
+  "right": "Queue the note for Mandate with relay_when_live (to: Mandate) before hand_off_land, so it goes out once the change is live, instead of messaging now or asking the Taskmaster to pass it on later.",
+  "wrong": "Asked the Taskmaster to relay it to Mandate (now, before the change was live), or promised to tell them later.",
+  "checks": [
+    {
+      "call": "relay_when_live",
+      "input": "Mandate",
+      "why": "queue the note for once it's live"
+    },
+    {
+      "noCall": "message_coordinator|message_taskmaster",
+      "input": "Mandate",
+      "why": "not relaying through the Taskmaster now"
+    }
+  ]
+}

@@ -11,10 +11,10 @@ import { nameMatches, type Fact } from './stub.ts';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 
-export type Check = { call?: string; noCall?: string; input?: string; before?: string; reply?: string; noText?: string; why: string };
+export type Check = { call?: string; noCall?: string; input?: string; before?: string; reply?: string; noText?: string; said?: string; why: string };
 export type Case = {
   id: string; kind: 'strike' | 'correction' | 'rule'; source: string; role: 'minion' | 'taskmaster';
-  ticket: { number: number; title: string; type: string | null }; commit: string; from: string; history: string; message: string;
+  ticket: { number: number; title: string; type: string | null }; commit: string; work?: string; from: string; history: string; message: string;
   facts: Fact[]; right: string; wrong: string; checks: Check[];
 };
 export type Brief = { id: string; source: string; ticket: { number: number; title: string; type: string | null }; from: string; message: string;
@@ -56,7 +56,9 @@ export function holds(c: Check, ev: Event[]): boolean {
     return !!last && re(c.reply).test(last.text!);
   }
   if (c.noText !== undefined) return !ev.some((e) => e.text !== undefined && re(c.noText!).test(e.text));
-  throw new Error('a check needs call, noCall, reply or noText');
+  // Anywhere in the turn: its text or any call's input (a rule met in a plan, a card or a file as well as in a reply).
+  if (c.said !== undefined) return ev.some((e) => re(c.said!).test(e.text ?? e.input ?? ''));
+  throw new Error('a check needs call, noCall, reply, noText or said');
 }
 
 /** The whys of the checks a rerun failed; empty means it passed. */
@@ -77,6 +79,7 @@ export function problems(c: any, file?: string): string[] {
   if (!['minion', 'taskmaster'].includes(c?.role)) out.push('role is minion or taskmaster');
   if (!Number.isInteger(c?.ticket?.number) || typeof c?.ticket?.title !== 'string') out.push('ticket needs number and title');
   if (!/^[0-9a-f]{7,40}$/.test(c?.commit ?? '')) out.push('commit is a sha');
+  if (c?.work !== undefined && !/^[0-9a-f]{7,40}$/.test(c.work)) out.push('work is a sha (a child of commit)');
   const compiles = (what: string, s: unknown) => {
     if (s === undefined) return;
     try { if (typeof s !== 'string') throw new Error('not a string'); new RegExp(s, 'i'); } catch (e: any) { out.push(`${what}: ${e.message}`); }
@@ -88,11 +91,11 @@ export function problems(c: any, file?: string): string[] {
   }
   if (!Array.isArray(c?.checks) || !c.checks.length) out.push('checks needs at least one check');
   for (const [i, k] of (c?.checks ?? []).entries()) {
-    const kinds = ['call', 'noCall', 'reply', 'noText'].filter((x) => k?.[x] !== undefined);
-    if (kinds.length !== 1) out.push(`checks[${i}] needs exactly one of call, noCall, reply, noText`);
+    const kinds = ['call', 'noCall', 'reply', 'noText', 'said'].filter((x) => k?.[x] !== undefined);
+    if (kinds.length !== 1) out.push(`checks[${i}] needs exactly one of call, noCall, reply, noText, said`);
     if (typeof k?.why !== 'string' || !k.why) out.push(`checks[${i}] needs a why`);
     if ((k?.before !== undefined) && k?.call === undefined) out.push(`checks[${i}]: before goes with call`);
-    for (const x of ['call', 'noCall', 'reply', 'noText', 'input', 'before']) compiles(`checks[${i}].${x}`, k?.[x]);
+    for (const x of ['call', 'noCall', 'reply', 'noText', 'said', 'input', 'before']) compiles(`checks[${i}].${x}`, k?.[x]);
   }
   return out;
 }
@@ -176,7 +179,11 @@ function workspace(c: Case, side: Side, work: string): string {
   git('-C', dir, '-c', 'user.name=replay', '-c', 'user.email=replay@localhost', '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '--allow-empty', '--no-verify', '-m', 'Prompt files under test');
   git('-C', dir, 'branch', '-q', '-f', 'main', 'HEAD');
   if (c.role === 'taskmaster') git('-C', dir, 'checkout', '-q', 'main'); // the Taskmaster works in the repo on main
-  else onTicketBranch(dir, c.ticket.number);
+  else {
+    onTicketBranch(dir, c.ticket.number);
+    // The minion's own finished work, for a moment that hinges on it (a ship): a child of `commit`, on the ticket branch.
+    if (c.work) git('-C', dir, '-c', 'user.name=replay', '-c', 'user.email=replay@localhost', '-c', 'core.hooksPath=/dev/null', 'cherry-pick', c.work);
+  }
   return dir;
 }
 

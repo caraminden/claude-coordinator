@@ -1,0 +1,26 @@
+{
+  "id": "move10-start-after-ship",
+  "kind": "rule",
+  "source": "#1573, written for move 10 (message_coordinator's description) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1569,
+    "title": "Squash-merge help text",
+    "type": "chore"
+  },
+  "commit": "796c27af",
+  "work": "8b13c8fe",
+  "from": "Cara",
+  "history": "The minion changed the ship-path help text in public/minion-rules.js to say \"squash-merge\" instead of spelling out the gh command, which wrapped mid-flag on phones. It is committed on the minion's branch, the tests it touches are green, and self-review labelled it low risk (front end only).",
+  "message": "Ship it. Once it's shipped, a follow-up should start: the same squash-merge wording in the scheme-setup skill's docs, which only makes sense once this is on main. Make sure that gets started then, I won't remember.",
+  "facts": [],
+  "right": "Ask the Taskmaster (message_coordinator, need: start) to create the follow-up with create_ticket's start_after on this ship, rather than promising to remember it or asking the Taskmaster to keep it in mind.",
+  "wrong": "Said it would ask for the follow-up after it shipped, or asked the Taskmaster to remember.",
+  "checks": [
+    {
+      "call": "message_coordinator",
+      "input": "start_after",
+      "why": "a ship that should start more work: ask for it with start_after"
+    }
+  ]
+}

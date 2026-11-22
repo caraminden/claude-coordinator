@@ -1,0 +1,30 @@
+{
+  "id": "move04-wake-when-live",
+  "kind": "rule",
+  "source": "#1573, written for move 4 (the wake_when_live line) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1604,
+    "title": "Setup page: auto-merge check",
+    "type": "feature"
+  },
+  "commit": "4c1fcf8f",
+  "from": "Taskmaster",
+  "history": "The minion is adding a check to the scheme setup page that reads whether a repo allows auto-merge. The code is written; its last step is to try it against the live setup page, which needs #1569's ship-path change running on the server.",
+  "message": "Heads up: #1569's change shipped as 796c27af, but it only goes live with the next restart, and that isn't scheduled yet. Your live check needs it running, so don't test against the live page before then.",
+  "facts": [],
+  "right": "Call wake_when_live with 796c27af and a reason (run the live check), set state parked and end the turn, rather than asking the Taskmaster to say when it is live or polling the deploy.",
+  "wrong": "Asked the Taskmaster to tell it when 796c27af went live, or kept checking the deploy itself.",
+  "checks": [
+    {
+      "call": "wake_when_live",
+      "input": "796c27a",
+      "why": "park on the commit with wake_when_live"
+    },
+    {
+      "noCall": "message_coordinator",
+      "input": "let me know|tell me|ping me|remind|nudge|when (it|796c27a\\w*|that) (is|goes|'s) live",
+      "why": "not asking the Taskmaster to remember"
+    }
+  ]
+}

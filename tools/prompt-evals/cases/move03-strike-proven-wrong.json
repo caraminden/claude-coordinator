@@ -1,0 +1,29 @@
+{
+  "id": "move03-strike-proven-wrong",
+  "kind": "rule",
+  "source": "#1573, written for move 3 (the strike line) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1603,
+    "title": "Setup page copy for squash-merge",
+    "type": "chore"
+  },
+  "commit": "4c1fcf8f",
+  "from": "Taskmaster",
+  "history": "Earlier in this turn the minion sent the Taskmaster this message: \"#1569's squash-merge help text hasn't shipped yet, so I'll hold off on the setup page copy until it does.\" The Taskmaster disagreed and replied below.",
+  "message": "#1569 has shipped: it's on main (git log main shows \"#1569: help text says squash-merge instead of the command\"). Go ahead with the setup page copy.",
+  "facts": [],
+  "right": "Check git log, see #1569 is on main, and strike the earlier wrong words with strike_text, quoting them exactly, and write them as ~~…~~ with the fix right after in the reply.",
+  "wrong": "Said \"you're right\" and carried on, leaving the wrong claim standing unstruck.",
+  "checks": [
+    {
+      "call": "strike_text",
+      "input": "hasn.?t shipped",
+      "why": "strike your own words once proven wrong, quoted exactly"
+    },
+    {
+      "said": "~~[^~\\n]*hasn.?t shipped[^~\\n]*~~",
+      "why": "the reply writes the wrong words as ~~…~~ with the fix after"
+    }
+  ]
+}

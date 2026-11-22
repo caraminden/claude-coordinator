@@ -1,0 +1,25 @@
+{
+  "id": "move18-shared-folder-by-kind",
+  "kind": "rule",
+  "source": "#1573, written for move 18 (Shared folder) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1619,
+    "title": "Prompt-eval spend",
+    "type": "research"
+  },
+  "commit": "4c1fcf8f",
+  "from": "Cara",
+  "history": "The minion looked into prompt-eval spend: an opening move on Opus high costs about $0.50, mostly writing the ~50k-token prompt to the cache, so a 30-case × 3-run pass is about $45 a side and a --base comparison about $90. It has those numbers in hand and nothing is written down yet.",
+  "message": "Write up what you found about the eval spend as a short report in the shared folder, so the other minions can find it.",
+  "facts": [],
+  "right": "Put the report under the shared folder's reports/ (it is sorted by kind), after reading its README.",
+  "wrong": "Wrote the report at the shared folder's top level.",
+  "checks": [
+    {
+      "call": "Write|Bash",
+      "input": "/reports/",
+      "why": "the shared folder is sorted by kind: a report goes in reports/"
+    }
+  ]
+}

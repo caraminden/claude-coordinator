@@ -59,7 +59,8 @@ and scheme instructions are one entry each), and cuts each tool's description to
 matches or cuts nothing stops the run, so pick cases whose role has the part (`--case` with the minion cases: a
 Taskmaster's prompt has no `close`). A Citadel-wide section goes the `--app` way: a copy of the instructions without it.
 `--base` keeps `fixture/`, so compare against a second run of the same `--ref` and `--app` with no drop, not `--base`.
-`reports/prompt-ablation-2026-11.md` in the shared folder is the first per-section run.
+`reports/prompt-ablation-2026-11.md` in the shared folder is the first per-section run. The `move*` cases (#1573) each
+aim at one rule #1277 moved out of the always-loaded prompt; the move number is in the id.
 
 ## A case (`cases/<id>.json`)
 
@@ -74,6 +75,8 @@ a rerun made the right move.
   "role": "minion",                         // minion | taskmaster
   "ticket": { "number": 999, "title": "Why #993's test job hung", "type": "bug" },  // the minion it was
   "commit": "a1b2c3d",                      // main as it was then: the rerun works in a copy of the repo at it
+  // "work": "e4f5a6b",                     // optional: the minion's own finished work, a child of commit, cherry-picked onto
+                                            // its ticket branch (for a moment that hinges on it, like a ship); keep it off CLAUDE.md and .claude/
   "from": "Cara",                           // who sent the message
   "history": "What the minion knew from earlier in its chat, in its own terms, at most ~1,500 characters. Empty for a first turn.",
   "message": "The message the minion answers, as sent (trimmed only of anything private).",
@@ -102,6 +105,7 @@ are JavaScript regexes, matched case-insensitively. Tool names match without the
 | `{ "noCall": "<tools>", "input": "<re>" }` | no call to a matching tool with a matching input |
 | `{ "reply": "<re>" }` | the last text of the turn matches |
 | `{ "noText": "<re>" }` | no text anywhere in the turn matches |
+| `{ "said": "<re>" }` | any text, or any call's JSON input, matches: a rule met in a plan, a card or a file counts as well as in the reply |
 
 Each check has a `why`: the report prints it for a failed check. Write checks that test the move, not the
 wording: "called ask_question" and "read before claiming" survive a reworded prompt; a phrase match on the

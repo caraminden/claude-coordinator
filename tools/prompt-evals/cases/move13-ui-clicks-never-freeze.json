@@ -1,0 +1,28 @@
+{
+  "id": "move13-ui-clicks-never-freeze",
+  "kind": "rule",
+  "source": "#1573, written for move 13 (UI checks) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1613,
+    "title": "Pin toggle on minion rows",
+    "type": "feature"
+  },
+  "commit": "4c1fcf8f",
+  "from": "Cara",
+  "history": "",
+  "message": "Add a pin toggle to each minion row in the sidebar; it saves through POST /api/tickets/:id/pin. Run the plan back to me before any code.",
+  "facts": [],
+  "right": "Plan it so the click shows the pinned state at once while the request runs behind it, and a failure rolls back that one row with a toast and a retry.",
+  "wrong": "Planned a click that waits on the server before showing anything, with no rollback on failure.",
+  "checks": [
+    {
+      "said": "optimistic|(at once|immediately|instantly|right away|before the (request|server|response))",
+      "why": "a click shows its result at once"
+    },
+    {
+      "said": "roll(s|ed|ing)?[ -]?back|revert",
+      "why": "a failed request rolls back that one item"
+    }
+  ]
+}

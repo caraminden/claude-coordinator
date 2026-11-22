@@ -56,6 +56,17 @@ test('checks: call, before, noCall, reply and noText', () => {
   assert.deepEqual(failures(c, ev), ['said it']);
 });
 
+test('checks: said matches any text or any call input', () => {
+  const ev = events(stream(said('Let me look.'), called('mcp__thread__plan', { steps: [{ n: 1, step: 'when X, then Y' }] }), said('Done.')));
+  assert.ok(holds({ said: 'let me', why: '' }, ev), 'an early text');
+  assert.ok(holds({ said: 'when x, then y', why: '' }, ev), 'a call input');
+  assert.ok(!holds({ said: 'nowhere', why: '' }, ev));
+  const ok = { id: 'x', kind: 'rule', source: 's', role: 'minion', ticket: { number: 1, title: 't', type: null }, commit: 'abc1234', from: 'Cara',
+    history: '', message: 'm', facts: [], right: 'r', wrong: 'w', checks: [{ said: 'a', why: 'y' }] };
+  assert.deepEqual(problems(ok), []);
+  assert.match(problems({ ...ok, work: 'not a sha' }).join(), /work is a sha/);
+});
+
 test('scoring: most runs pass; a case fell only on a drop of 2 or more', () => {
   assert.ok(passes(2, 3) && !passes(1, 3) && !passes(1, 2));
   assert.ok(fell(1, 3) && fell(0, 2) && !fell(2, 3) && !fell(1, 2) && !fell(3, 1));

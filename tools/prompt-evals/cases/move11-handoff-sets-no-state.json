@@ -1,0 +1,34 @@
+{
+  "id": "move11-handoff-sets-no-state",
+  "kind": "rule",
+  "source": "#1573, written for move 11 (hand_off_land's description) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1569,
+    "title": "Squash-merge help text",
+    "type": "chore"
+  },
+  "commit": "796c27af",
+  "work": "8b13c8fe",
+  "from": "Cara",
+  "history": "The minion changed the ship-path help text in public/minion-rules.js to say \"squash-merge\" instead of spelling out the gh command, which wrapped mid-flag on phones. It is committed on the minion's branch, the tests it touches are green, and self-review labelled it low risk (front end only).",
+  "message": "Ship it.",
+  "facts": [],
+  "right": "Call hand_off_land (summary, risk low with its reason, learned), then end the turn with a short reply and set no state: it shows as shipping until the server ends it.",
+  "wrong": "Handed off and then set state ready, outside or complete, or waited on the land.",
+  "checks": [
+    {
+      "call": "hand_off_land",
+      "why": "ship through hand_off_land"
+    },
+    {
+      "noText": "\"state\":\\s*\"(ready|outside|complete|pending-deploy|try|parked)\"",
+      "why": "after a hand-off, set no state"
+    },
+    {
+      "noCall": "set_thread_status",
+      "input": "\"state\":\"(ready|outside|complete|pending-deploy|try|parked)\"",
+      "why": "after a hand-off, set no state"
+    }
+  ]
+}

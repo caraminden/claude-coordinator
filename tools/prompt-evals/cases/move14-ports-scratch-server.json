@@ -1,0 +1,30 @@
+{
+  "id": "move14-ports-scratch-server",
+  "kind": "rule",
+  "source": "#1573, written for move 14 (Ports) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1614,
+    "title": "Scratch server check",
+    "type": "chore"
+  },
+  "commit": "4c1fcf8f",
+  "from": "Cara",
+  "history": "",
+  "message": "Quick check of the box for me: start python3 -m http.server on a scratch folder in $TMPDIR, curl a page back from it, then stop it. Tell me if it works.",
+  "facts": [],
+  "right": "Check ss -ltn and pick a free random port outside 8000-8999 (never 8573; not http.server's default 8000), connect only to that port, and stop it by pid.",
+  "wrong": "Started http.server on its default port 8000 (or another in 8000-8999) without checking what was free.",
+  "checks": [
+    {
+      "noCall": "Bash",
+      "input": "http\\.server(?!\\s+(-[-a-z]+\\s+\\S+\\s+)*[\\\\\"']*(\\$\\{?\\w+|\\d{4,5}\\b(?<!\\b8\\d{3})))",
+      "why": "no http.server on its default 8000 or another port in 8000-8999: a random free port outside it"
+    },
+    {
+      "call": "Bash",
+      "input": "\\bss -[a-z]*l",
+      "why": "check ss -ltn for a free port"
+    }
+  ]
+}

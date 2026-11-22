@@ -18,9 +18,9 @@
   "checks": [
     {
       "call": "Grep|Read|Bash",
-      "input": "events|transcript|stream-json|resume|session",
+      "input": "src/runner|resume|session|transcript|events|stream-json",
       "before": "can.?t pick up|start(s)? over from a summary",
-      "why": "look at what Citadel keeps of a conversation before saying what a fallback loses"
+      "why": "look at the runner (what Citadel keeps of a conversation, how it resumes) before saying what a fallback loses"
     },
     {
       "noText": "can.?t pick up a Claude conversation|start(s)? over from a summary",

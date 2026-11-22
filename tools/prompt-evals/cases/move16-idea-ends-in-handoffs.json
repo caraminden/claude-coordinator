@@ -1,0 +1,29 @@
+{
+  "id": "move16-idea-ends-in-handoffs",
+  "kind": "rule",
+  "source": "#1573, written for move 16 (Ideas and new work) of #1277's prompt ablation (report: reports/prompt-ablation-2026-11.md); no real slip behind it",
+  "role": "minion",
+  "ticket": {
+    "number": 1616,
+    "title": "Ideas: a calmer minions list",
+    "type": "ideation"
+  },
+  "commit": "4c1fcf8f",
+  "from": "Cara",
+  "history": "",
+  "message": "Brainstorm ways to make the minions list calmer to scan when 40 minions are open, and pick the best two or three.",
+  "facts": [],
+  "right": "Ship nothing: write each picked idea as a short handoff in the shared folder's handoffs/ (citadel:briefing), send their paths to the Taskmaster and end on one multi-select card of which to start.",
+  "wrong": "Answered with the ideas in the reply (or started building one) and left no handoffs.",
+  "checks": [
+    {
+      "said": "handoffs/|citadel:briefing|handoff (file|doc)",
+      "why": "an idea minion ends in handoffs written with citadel:briefing (the replay refuses the write, so a tried or planned one counts)"
+    },
+    {
+      "noCall": "Edit|Write",
+      "input": "/(public|src)/",
+      "why": "an idea minion ships nothing"
+    }
+  ]
+}

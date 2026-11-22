@@ -169,6 +169,7 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/check/') }}
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache # each source file compiled once per job, not once per process (#1565)
+          BURN_IN_NICE: ${{ startsWith(github.ref, 'refs/heads/check/') && 'nice -n 10' || '' }} # a check yields to a land's run (#1567)
         run: |
           base=origin/${GITHUB_REF_NAME%%/*}-base/${GITHUB_REF_NAME#*/}
           if ! git rev-parse -q --verify "$base^{commit}" >/dev/null; then

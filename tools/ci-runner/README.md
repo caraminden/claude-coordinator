@@ -457,8 +457,16 @@ every runner after the first the side label, so a long runner is relabelled by h
 `gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-long'`, then
 `gh api -X DELETE repos/caraminden/claude-coordinator/actions/runners/<id>/labels/citadel-ci-linux-side`. Without a runner
 carrying the long label, a long job waits in GitHub's queue for a day and is then lost.
-`.github/workflows/tests.yml` runs on every push to a `land/**` branch, and `tools/land.sh` is the only
-thing that pushes there: it sends the rebased commit to `land/<branch>`, waits for the run on that exact commit
+A ship's own check (#1567, `tools/own-check.sh`) has a runner of its own too, which carries only
+`citadel-ci-linux-check`: `tests.yml` sends every `check/**` run there, one at a time (group `citadel-check`), niced, so
+Cara's desktop runs at most one check beside a land's run. `add-runner.sh` gives it `citadel-ci-linux` and the side
+label, so it is relabelled by hand, as the repo's admin:
+`gh api -X POST repos/caraminden/claude-coordinator/actions/runners/<id>/labels -f 'labels[]=citadel-ci-linux-check'`, then
+`gh api -X DELETE repos/caraminden/claude-coordinator/actions/runners/<id>/labels/citadel-ci-linux-side` and
+`gh api -X DELETE repos/caraminden/claude-coordinator/actions/runners/<id>/labels/citadel-ci-linux`. With no runner
+online carrying the check label, `land.sh` runs no check and ships go to the line as before.
+`.github/workflows/tests.yml` runs on every push to a `land/**` or `check/**` branch, and `tools/land.sh` is the only
+thing that pushes there (`check/**` through `tools/own-check.sh`, above): it sends the rebased commit to `land/<branch>`, waits for the run on that exact commit
 while it holds the deploy lock, and deletes the branch again. A land that touches no pipeline file leaves out the
 pipeline's own test files (#581, `tools/pipeline-files.txt`), so the whole suite also runs on main every night at
 13:30 UTC. That run and any started by hand are in a concurrency group of their own (a run waiting in the lands' group

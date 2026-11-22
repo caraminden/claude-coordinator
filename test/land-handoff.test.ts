@@ -836,6 +836,7 @@ test('landPhase reads the phase from land.sh\'s newest phase line', () => {
   assert.equal(landPhase('land: waiting for CI on abc\nland: main is now at abc1234 "#9"\ndeploy: restart queued as citadel-restart\n'), 'landing: deploying');
   assert.equal(landPhase('land: smoke: checking ticket/1-x before it queues\nland: smoke: running 5 test files\n'), 'landing: smoke check');
   assert.equal(landPhase('land: smoke: passed in 19 s\nqueue: 2nd in line (ahead: #12)\n'), 'landing: in line');
+  assert.equal(landPhase('land: smoke: passed in 19 s\nland: own check: its CI runs now on the check runner, on abc1234\n'), 'landing: own check', '#1567');
   // A rider (#1166) says which train it rides in (#1366, for #1303), and is in line again once it goes back.
   assert.equal(landPhase("queue: 2nd in line (ahead: #12)\nland: riding in ticket/12-usage-bar's ship train: waiting for CI on the train\n"), "landing: riding in #12's train");
   assert.equal(landPhase("queue: 3rd in line\nland: riding in build/3's ship train: waiting for CI on the train\n"), "landing: riding in build/3's train");

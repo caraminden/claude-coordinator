@@ -107,7 +107,7 @@ export async function liveFacts(app: App, ticketId: number, get: GhGet = ghGet):
   let ci: Facts['ci'] = null;
   if (t.branch && slug && project?.repo_dir) {
     try {
-      ci = await newestRun(get, slug, schemeGithub(store, app.github, project.repo_dir, app.dataDir), [t.branch, `land/${t.branch}`], status?.tip.slice(0, 8) ?? null);
+      ci = await newestRun(get, slug, schemeGithub(store, app.github, project.repo_dir, app.dataDir), [t.branch, `land/${t.branch}`, `check/${t.branch}`], status?.tip.slice(0, 8) ?? null);
     } catch (err: any) {
       ci = { error: String(err?.message ?? err).split('\n')[0].slice(0, 120) };
     }

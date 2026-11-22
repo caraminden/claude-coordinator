@@ -74,7 +74,7 @@ own_check() {
 # <slug> <remote>: the check itself, holding its lock. 1 with the refusal in $own_refusal; 0 to join the line.
 own_refusal=''
 own_check_run() {
-  local slug=$1 remote=$2 m c wt lane_c t0=$SECONDS taken='' run id='' st='' res='' link='' why='' step failed real f n=0 a b bad=()
+  local slug=$1 remote=$2 m c wt lane_c t0=$SECONDS taken='' run id='' st='' res='' link='' why='' step failed real f n=0 a b bad=() floor
   local limit=${LAND_OWN_CHECK_LIMIT:-900} start_limit=${LAND_OWN_CHECK_START:-180} poll=${LAND_OWN_CHECK_POLL:-10}
   m=$(git rev-parse main)
   [ -z "$(under_of)" ] || { say "own check: $branch sits on a commit that came off main, so it joins the line unchecked"; return 0; }
@@ -90,6 +90,7 @@ own_check_run() {
     rmdir "$wt" 2>/dev/null || true
     [ -z "$id" ] || [ "$st" = completed ] || own_hub gh api -X POST "repos/$slug/actions/runs/$id/cancel" >/dev/null 2>&1 || true
     own_hub git push -q "$remote" ":refs/heads/check/$branch" ":refs/heads/check-base/$branch" >/dev/null 2>&1 || true
+    trap - TERM INT HUP
   }
   if [ -z "$c" ]; then
     git worktree remove --force "$wt" >/dev/null 2>&1 || true
@@ -105,6 +106,12 @@ own_check_run() {
   fi
   # The same rebase for the line (stacked_of), the last 50 kept.
   { tail -n 49 "$state/own-checked" 2>/dev/null || true; echo "$m $(git rev-parse HEAD) $c"; } >"$state/own-checked.tmp$$" && mv -f "$state/own-checked.tmp$$" "$state/own-checked"
+  # Runs GitHub already has on this commit (an earlier check or land of the same commit) are older than this one's: the
+  # poll takes only a check/ run past the newest of them.
+  floor=$(own_hub gh api "repos/$slug/actions/runs?head_sha=$c&per_page=20" --jq '[.workflow_runs[].id] | max // 0' 2>/dev/null) || floor=0
+  [[ $floor =~ ^[0-9]+$ ]] || floor=0
+  # A stop (a person's, or systemd's) mid-check still cancels its run and takes its worktree and branches away.
+  trap 'own_check_done; rm -f "$state/own-check-run"; exit 143' TERM INT HUP
   # With its base, atomic, as ci_gate pushes a land's: the burn-in compares with it.
   if ! own_hub git push -q --atomic "$remote" "+$c:refs/heads/check/$branch" "+$m:refs/heads/check-base/$branch" >/dev/null 2>&1; then
     own_check_done
@@ -114,7 +121,7 @@ own_check_run() {
   fi
   say "own check: its CI runs now on the check runner, on $(git rev-parse --short "$c") (rebased onto main $(git rev-parse --short "$m")), before it joins the line: up to $((start_limit / 60)) min to start and $((limit / 60)) min to run"
   while :; do
-    run=$(own_hub gh api "repos/$slug/actions/runs?head_sha=$c&per_page=20" --jq "[.workflow_runs[] | select(.path | startswith(\"$OWN_CHECK_WORKFLOW\"))][0] // empty | [.id, .status, .conclusion // \"-\", .html_url] | @tsv" 2>/dev/null) || run=''
+    run=$(own_hub gh api "repos/$slug/actions/runs?head_sha=$c&per_page=20" --jq "[.workflow_runs[] | select((.path | startswith(\"$OWN_CHECK_WORKFLOW\")) and .head_branch == \"check/$branch\" and .id > $floor)][0] // empty | [.id, .status, .conclusion // \"-\", .html_url] | @tsv" 2>/dev/null) || run=''
     [[ $run =~ ^[0-9]+$'\t' ]] && read -r id st res link <<<"$run" || true
     [ "$st" != completed ] || break
     [ -n "$taken" ] || [ "$st" != in_progress ] || taken=$SECONDS
@@ -149,7 +156,7 @@ own_check_run() {
     tail -n 40 <<<"$failed" >&2
     a=$(sed -n 's/.*burn-in: \([^ ]*: failed in [0-9]* of [0-9]* copies at once\).*/\1/p' <<<"$failed" | sort -u | sed ':a;N;$!ba;s/\n/; /g')
     retro_log "own check · $label · red: burn-in · $((SECONDS - t0))s"
-    own_refusal="own check: the burn-in of its new and changed tests failed on its commit rebased onto main ($link)${a:+: $a}. A burn-in red is the ship's own, so it didn't join the line and nobody waited on it. Fix the race (its output is above), re-test (citadel-test), commit, then run this again"
+    own_refusal="own check: a new or changed test failed its burn-in in CI on its own check, on its commit rebased onto main ($link)${a:+: $a}. A burn-in red is the ship's own, so it didn't join the line and nobody waited on it. Fix the race (its output is above), re-test (citadel-test), commit, then run this again"
     return 1
   fi
   if [ "${step:-$OWN_CHECK_SUITE_STEP}" != "$OWN_CHECK_SUITE_STEP" ]; then

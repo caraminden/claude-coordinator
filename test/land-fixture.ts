@@ -131,6 +131,16 @@ echo "$*" >>"${calls}"
 case "$*" in
   *"/actions/runs?head_sha="*)
     sha=\${2#*head_sha=} sha=\${sha%%&*}
+    # FAKE_CHECK_OLD="<branch> <polls>": GitHub as JSON through the caller's --jq: an earlier red check run of <branch> on
+    # every commit, and the run of a land/ or check/ branch at the commit only after <polls> head_sha questions (#1567).
+    if [ -n "\${FAKE_CHECK_OLD:-}" ]; then
+      q=\$4; read -r ob ol <<<"\$FAKE_CHECK_OLD"
+      b=$(git -C "${hub}" for-each-ref --points-at "$sha" --format='%(refname:lstrip=2)' refs/heads/land/ refs/heads/check/ | head -n 1)
+      new=''
+      [ -z "$b" ] || [ "$(grep -c head_sha "${calls}")" -le "$ol" ] || new='{"id":99,"status":"completed","conclusion":"success","html_url":"https://ci/99","path":".github/workflows/tests.yml","head_branch":"'"$b"'"},'
+      echo '{"workflow_runs":['"$new"'{"id":3,"status":"completed","conclusion":"failure","html_url":"https://ci/3","path":".github/workflows/tests.yml","head_branch":"check/'"$ob"'"}]}' | jq -r "$q"
+      exit 0
+    fi
     [ -z "\${FAKE_CI_FILE:-}" ] || FAKE_CI=$(cat "\$FAKE_CI_FILE")
     [ "\${FAKE_CI:-}" != down ] || exit 1
     [ "\${FAKE_CI:-}" != rate ] || { echo 'gh: API rate limit exceeded for installation ID 1. (HTTP 403)' >&2; exit 1; }

@@ -1162,10 +1162,21 @@ test("own check: green on the check runner, it joins the line and that run is it
   l.done();
 });
 
+// An earlier red check run of the same commit (handed off again unchanged) is no verdict on this one: the check waits
+// for the run its own push starts, which GitHub lists a poll or two later.
+test("own check: an earlier check run of the same commit is not taken for this one's (#1567)", async () => {
+  const l = await line([{}, {}], (d) => ({ ...own(d), FAKE_CHECK_OLD: 'ticket/2-x 4' }));
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.match(done[1].stderr, /land: own check: green in \d+ s \(https:\/\/ci\/99\), so it joins the line/);
+  assert.doesNotMatch(done[1].stderr, /ci\/3\b/);
+  l.done();
+});
+
 test('own check: a burn-in red is refused before the line, with nobody waiting on it (#1567)', async () => {
   const { l, d } = await refusedBehind(bad(2).change as [string, string], { FAKE_REAL: realOf(2), FAKE_STEP: 'burn in new and changed tests', FAKE_LOG: 'burn' });
   assert.equal(d.status, 1, d.stderr);
-  assert.match(d.stderr, /own check: the burn-in of its new and changed tests failed on its commit rebased onto main \(https:\/\/ci\/\d+\): test\/p2\.test\.ts: failed in 3 of 10 copies at once\. A burn-in red is the ship's own, so it didn't join the line/);
+  assert.match(d.stderr, /own check: a new or changed test failed its burn-in in CI on its own check, on its commit rebased onto main \(https:\/\/ci\/\d+\): test\/p2\.test\.ts: failed in 3 of 10 copies at once\. A burn-in red is the ship's own, so it didn't join the line/);
   assert.doesNotMatch(d.stderr, /in line for the deploy lock/);
   assert.ok(!pushes(l.r.dir).some((x) => x.endsWith(' refs/heads/land/ticket/2-x')), 'it never got a run in line');
   assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1']);

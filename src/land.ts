@@ -450,6 +450,7 @@ const PHASES: [RegExp, string][] = [
   [/^land: (running |CI FALLBACK)/, 'running tests'],
   [/^land: (rebasing|merging main)/, 'rebasing'],
   [/^land: smoke: /, 'smoke check'],
+  [/^land: own check: /, 'own check'], // a ship's own CI before the line (#1567)
   [/^queue: got the deploy lock/, 'starting'],
   [/^queue: /, 'in line'],
   // A rider waits outside the line for its train's verdict (#1166); "back in line" puts it in line again.

@@ -468,7 +468,8 @@ test('the waiters take the lock in the order .order sets, a later one goes to th
 
 // Waiters two or more back look every DEPLOY_QUEUE_NAP s, not every DEPLOY_QUEUE_POLL (#1545): twelve of them looking
 // every second, with a few processes per ticket each look, cost most of a core.
-const napper = (state: string, label: string, pre = '', extra: Record<string, string> = {}) => waiter(state, label, '', { DEPLOY_QUEUE_NAP: '4', ...extra }, false, pre);
+// A 1 s nap: the test counts naps, never seconds, so a longer one proves nothing more (it was 4 s before #1615).
+const napper = (state: string, label: string, pre = '', extra: Record<string, string> = {}) => waiter(state, label, '', { DEPLOY_QUEUE_NAP: '1', ...extra }, false, pre);
 test('a waiter further back naps between looks and runs no subshell in a look, yet still acts on a reorder, a dead ticket and its wait check within a nap, and the next in line takes its turn at once (#1545)', { timeout: 60_000 }, async () => {
   const state = queueState();
   const a = waiter(state, 'a', `until [ -e '${state}/go' ]; do sleep 0.05; done`);
@@ -478,19 +479,19 @@ test('a waiter further back naps between looks and runs no subshell in a look, y
     const join1 = (label: string, pre = '') => { ws.push(napper(state, label, pre)); return until(`${label}'s ticket`, () => issued(state) === ws.length + 1); };
     await join1('b');
     // c, d and e trace every command with its subshell depth: a $( ) or a pipe in a look shows as depth 1, and each nap
-    // as "+0 sleep 4". Counting naps, not seconds, keeps a loaded box from failing it: a change made at any moment is
+    // as "+0 sleep 1". Counting naps, not seconds, keeps a loaded box from failing it: a change made at any moment is
     // seen at the end of the nap under way, so before the second nap that starts after it.
     const trace = `PS4='+$BASH_SUBSHELL '; set -x; `;
     await join1('c', trace);
     await join1('d', `${trace}queue_wait_check() { [ ! -e '${state}/moved' ] || { echo "queue: main moved under d" >&2; return 1; }; }; `);
     await join1('e', trace);
     const [b, c, d, e] = ws;
-    const naps = (s: string) => (s.match(/^\+0 sleep 4$/gm) ?? []).length;
+    const naps = (s: string) => (s.match(/^\+0 sleep 1$/gm) ?? []).length;
     // What a waiter traced from `from` up to where it first said `what`.
     const upTo = (s: string, from: number, what: RegExp) => { const t = s.slice(from); const m = what.exec(t); return m ? t.slice(0, m.index) : t; };
     await until('e to say its place', () => /5th in line/.test(e.stderr()));
     await until('c to nap twice', () => naps(c.stderr()) >= 2);
-    const look = c.stderr().split(/^\+0 sleep 4$/m)[1];
+    const look = c.stderr().split(/^\+0 sleep 1$/m)[1];
     assert.doesNotMatch(look, /^\++[1-9]/m, `a look back in line started a subshell:\n${look}`);
     assert.doesNotMatch(c.stderr().split('3rd in line')[1], /^\+0 sleep 0\.05$/m, 'c, two back, never looked at the poll beat');
 

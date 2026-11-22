@@ -298,7 +298,7 @@ function stripOpen() {
 
 /** A scheme whose items haven't come yet: the shut strip's one line, so nothing below moves when they do (#1533). */
 function holdStrip() {
-  const strip = inboxStrip();
+  if (!strip) return; // not placed yet: showProject draws it before the first renderInbox
   strip.hidden = false;
   strip.classList.remove('open');
   list?.remove();

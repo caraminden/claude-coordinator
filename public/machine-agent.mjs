@@ -788,6 +788,8 @@ export class WorkspaceHost {
           : `git checkout failed; nothing was changed.\n${out.out}`);
       }
       const after = await this.checkout(w);
+      // Whose sync left which commit: run_task refuses a caller whose own sync another one has since moved (MA5).
+      (w.syncs ??= new Map()).set(who, { sha: target.out, at: Date.now() });
       return { text: `Checked out ${ref} in ${w.name}: ${after.at}.\nBefore: ${before.at}.\nLocal changes now:\n${after.changes}` };
     } finally {
       this.release(w, lock);
@@ -808,6 +810,15 @@ export class WorkspaceHost {
     mkdirSync(this.jobsDir, { recursive: true });
     this.prune();
     const lock = this.take(w, `task ${name}`, who);
+    // The commit it runs, and a refusal when the caller synced and the workspace has moved since (MA5).
+    const head = await this.git(w, ['rev-parse', 'HEAD']).catch(() => ({ code: 1, out: '' }));
+    const commit = head.code ? null : head.out;
+    const mine = w.syncs?.get(who);
+    if (mine && commit && commit !== mine.sha) {
+      this.release(w, lock);
+      const by = [...w.syncs].filter(([k, v]) => k !== who && v.sha === commit && v.at > mine.at).map(([k]) => k).at(-1);
+      throw new ToolError(`Not run: ${w.name} has moved since your git_sync. You checked out ${mine.sha.slice(0, 10)}; it is now at ${commit.slice(0, 10)}${by ? `, synced since by ${by}` : ', changed on that computer'}. Run git_sync again, then run_task.`);
+    }
     let ticket = null;
     try {
       // Every screen task joins the line, even with the screen free: it is the line that keeps arrival order.
@@ -817,11 +828,11 @@ export class WorkspaceHost {
       throw new ToolError(`Could not join the screen's line: ${err.message}`);
     }
     const id = randomBytes(4).toString('hex');
-    const job = { id, workspace: w.name, task, name, who, started: Date.now(), ended: null, code: null, error: null, tail: [], partial: '', log: join(this.jobsDir, `${id}.log`), line: null, seen: Date.now(), watching: 0 };
+    const job = { id, workspace: w.name, task, name, who, commit, started: Date.now(), ended: null, code: null, error: null, tail: [], partial: '', log: join(this.jobsDir, `${id}.log`), line: null, seen: Date.now(), watching: 0 };
     lock.job = job;
     this.jobs.set(id, job);
     const file = createWriteStream(job.log).on('error', () => {});
-    file.write(`${argv.join(' ')}\n(in ${w.path}, for ${who})\n\n`);
+    file.write(`${argv.join(' ')}\n(in ${w.path}${commit ? ` at ${commit}` : ''}, for ${who})\n\n`);
     job.done = new Promise((resolveDone) => {
       let child;
       let screen = null;
@@ -929,7 +940,7 @@ export class WorkspaceHost {
     const ok = job.code === 0;
     const all = job.tail.join('\n');
     const hints = job.task.hints.filter((h) => (h.exit !== undefined ? h.exit === job.code : false) || (h.match && !ok && h.match.test(all))).map((h) => h.say);
-    const head = `${job.name} in ${job.workspace} ${ok ? 'succeeded' : 'FAILED'} (${job.error ?? `exit ${job.code}`}) after ${Math.round((job.ended - job.started) / 1000)} s. Job ${job.id}; full log on that computer: ${job.log}`;
+    const head = `${job.name} in ${job.workspace} ${ok ? 'succeeded' : 'FAILED'} (${job.error ?? `exit ${job.code}`}) after ${Math.round((job.ended - job.started) / 1000)} s${job.commit ? ` at commit ${job.commit.slice(0, 10)}` : ''}. Job ${job.id}; full log on that computer: ${job.log}`;
     return { text: [head, ...hints, `--- last ${Math.min(lines, job.tail.length)} lines ---`, tail].join('\n'), isError: !ok };
   }
 

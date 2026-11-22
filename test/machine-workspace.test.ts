@@ -156,6 +156,19 @@ test('only configured tasks run, with hints, one at a time, and long ones become
   assert.match((await call('job', { id })).text, /./);
 });
 
+test('run_task names the commit it ran, and refuses a caller whose own git_sync another minion has since moved (MA5)', async () => {
+  const as = (who: string) => (tool: string, args: object) => host.call(tool, args, who, async () => '');
+  const sha = (ref: string) => git(clone, 'rev-parse', ref);
+  await as('#90 in Citadel')('git_sync', { workspace: 'delve', ref: 'build-7' });
+  assert.match((await as('#90 in Citadel')('run_task', { workspace: 'delve', task: 'ok' })).text, new RegExp(`succeeded \\(exit 0\\) after \\d+ s at commit ${sha('HEAD').slice(0, 10)}\\.`));
+  await as('#91 in Delve')('git_sync', { workspace: 'delve', ref: 'main' });
+  await refused(as('#90 in Citadel')('run_task', { workspace: 'delve', task: 'ok' }), new RegExp(`Not run: delve has moved since your git_sync\\. You checked out ${sha('origin/build-7').slice(0, 10)}; it is now at ${sha('origin/main').slice(0, 10)}, synced since by #91 in Delve\\. Run git_sync again`));
+  assert.match((await as('#91 in Delve')('run_task', { workspace: 'delve', task: 'ok' })).text, /succeeded/, 'the one who synced last runs, and the workspace is free again');
+  assert.match((await as('#92 in Peek')('run_task', { workspace: 'delve', task: 'ok' })).text, /succeeded/, 'one that never synced runs what is there');
+  await as('#90 in Citadel')('git_sync', { workspace: 'delve', ref: 'build-7' });
+  assert.match((await as('#90 in Citadel')('run_task', { workspace: 'delve', task: 'ok' })).text, /succeeded/, 'its own sync again lets it run');
+});
+
 test('the MCP side lists the tools and answers calls and unknown methods', async () => {
   const list = await workspaceReply(host, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, 'x');
   assert.deepEqual(list.result.tools.map((t: any) => t.name), ['workspaces', 'git_sync', 'run_task', 'job', 'stop_job', 'read_file', 'list_files', 'fetch_file']);

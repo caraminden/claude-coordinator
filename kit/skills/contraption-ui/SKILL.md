@@ -69,6 +69,10 @@ break would ship as a new file (`ui/chat2.js`) beside the old one. Types: point 
 served `.d.ts` (copy it into your repo's types folder, or `declare module` it) rather than writing
 your own.
 
+### Ports for dev servers and browsers
+
+Many minions run at once: for every dev copy, scratch server and browser `--remote-debugging-port`, pick a free random port (check `ss -ltn`; never 8573, and outside 8000-8999 unless a person needs Tailscale), connect only to the port your process reported, and stop it when done.
+
 ## Tokens (`theme.css`)
 
 Follow the device's light or dark mode, as Citadel does. Names are stable; values change when
@@ -275,7 +279,7 @@ above until it passes. The critic's `ui-screenshots` rubric fails both (`citadel
     [references/api.md](references/api.md#requests-from-browsers-the-appsname-proxy).
 
 A self-review counts a break of these rules, and anything hand-rolled that the library serves, as a
-finding (`citadel:self-review`, "UI findings").
+finding (`citadel:self-review`, "UI findings"). Its "UI checks for every front end" hold here too.
 
 ## Read on demand
 

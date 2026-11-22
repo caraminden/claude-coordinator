@@ -35,7 +35,7 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    on why. Paths, never pasted text: the minion reads the file itself.
 8. **Model and effort**, with one line of why from the Taskmaster's model table: `Opus 5.5 high:
    design-shaped, a new flow`. create_ticket takes the pick in `model` and `effort`; the
-   line in the brief is the why.
+   line in the brief is the why. Nothing above high unless a person asks (`citadel:subagents`).
    The tiers, read from the table when this skill loaded (a scheme with Fable off gets them without
    Fable):
 
@@ -60,6 +60,14 @@ A handoff is a brief kept in a file so a fresh minion can begin from it.
 - Under about 60 lines; link the long material rather than copy it.
 - An idea or research minion ends in one handoff per piece of work it proposes, then the card that
   asks which to start (past four handoffs, a choices page: the Citadel-wide card rule (Asking and picking)).
+
+## Idea minions and process-only changes
+
+An idea minion ships nothing: it ends in short handoffs in the shared folder, written with this skill. A process-only change (prompts, skills, tooling, docs) never waits for a feature build: it ships once green and self-reviewed, and its risk label decides whether it needs a go.
+
+## The shared folder
+
+It is sorted by kind (`handoffs/`, `reports/`, `specs/`, `mockups/`, plus what the scheme's README adds). Read the README before adding files. No caches, build output, raw runs or secrets there.
 
 ## Example
 

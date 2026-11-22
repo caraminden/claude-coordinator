@@ -16,9 +16,9 @@ calibrated: "2026-11-08, sonnet: 6/6 hits, 1/4 false alarms (images only; blocke
 # UI screenshots
 
 **Starter.** A scheme's own `ui-screenshots` entry in its review set `extends:` this, sets its `when:` globs
-to its front end and the URL of its dev copy, and gathers its people's notes. The rules come from the
-Citadel-wide "UI checks", `citadel:contraption-ui`'s "The rules" and `citadel:self-review`'s "UI
-findings"; the seen examples from #390's survey of five schemes, where 27 of Citadel's last 400
+to its front end and the URL of its dev copy, and gathers its people's notes. The rules come from
+`citadel:self-review`'s "UI findings" (its "UI checks for every front end" included) and
+`citadel:contraption-ui`'s "The rules"; the seen examples from #390's survey of five schemes, where 27 of Citadel's last 400
 commits fixed a clip, an overflow, padding or a phone layout.
 
 **The script measures; the critic looks.** A model's eye misses a 2 px slip, so the numbers come from

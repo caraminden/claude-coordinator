@@ -3,6 +3,12 @@ name: grilling
 description: Grill the user relentlessly about a plan, design, decision or idea, until its open forks are settled. Use before designing or building something design-shaped (a new screen, data model or flow) whose brief leaves forks open, when the user wants to stress-test their thinking, or on any 'grill' trigger phrase.
 ---
 
+## Which features get grilled
+
+Grill design-shaped features first (Cara, 2026-11-17, picked "Yes, design-shaped only"). A feature minion whose work needs design (a new screen, a new data model, a new flow people use) runs one or more rounds of this skill with its requester, as cards, before it writes code. A brief or handoff that already settles those decisions, a picked idea's handoff included, needs only a round on what it leaves open. Bugs, chores and known-shape work (a small feature or UI tweak with a clear spec) skip it. A scheme can change this in its Minion rules (every feature, or none); its minions' prompts then say so.
+
+## How to grill
+
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
 
 Work the tree in **rounds**. The **frontier** is every decision whose prerequisites are already settled: the questions you can ask _now_ without guessing at answers you haven't heard yet. Ask the whole frontier in one round, one card per question where cards exist (Cara, 2026-10-27: "grilling should use cards I like cards"), then wait for the user's answers before the next round.

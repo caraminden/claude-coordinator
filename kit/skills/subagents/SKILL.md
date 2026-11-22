@@ -73,6 +73,12 @@ scheme with Fable off gets them without Fable):
   the same commit (a test in Citadel's repo checks they match), and the hook quotes the table as
   written.
 
+### Minions, Taskmasters and schedules too
+
+Moved here from the Citadel-wide Settings (#1576):
+- Nothing above high effort unless a person asks, for a Grunt, a minion, a schedule or an app's turn.
+- Models by kind of work: the Taskmaster's model table (`public/model-table.js`) is their one home; this skill and `citadel:briefing` part 8 render its tiers (Josh, 2026-11-13: "only for really complex or high risk things").
+
 ## How the cost works
 
 Every model call re-reads the session's whole context, so a session's cost is roughly its calls

@@ -16,7 +16,7 @@ export function settingsText(s: Settings): string {
   return [s.gate !== undefined ? `gate: ${s.gate ?? 'none'}` : '', s.panel !== undefined ? `panel: ${s.panel ?? 'none'}` : '', s.on_fail !== undefined ? `on_fail: ${s.on_fail?.length ? onFailText(s.on_fail) : 'the default'}` : '', s.position !== undefined ? `run order: ${s.position}` : ''].filter(Boolean).join('\n');
 }
 
-/** The cheap tier for a known-shape edit (Citadel-wide "Usage, effort and models"): Sonnet at medium. */
+/** The cheap tier for a known-shape edit (the model table, public/model-table.js): Sonnet at medium. */
 const ARGS = ['-p', '--output-format', 'json', '--model', 'sonnet', '--effort', 'medium', '--tools', '', '--setting-sources', '', '--strict-mcp-config', '--no-session-persistence'];
 const TIMEOUT_MS = 4 * 60_000;
 

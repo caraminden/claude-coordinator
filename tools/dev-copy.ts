@@ -29,6 +29,13 @@ const STOP_TIMEOUT_MS = 8000;
 // It stops itself after an hour nothing asked it anything, as an unused preview does (#1365); a test sets it shorter.
 const IDLE_EXIT_MS = Number(process.env.DEV_COPY_IDLE_MS) || 60 * 60_000;
 const USAGE = 'usage: citadel-dev-copy start [--data copy|empty|<file.db>] [--apps-hosts] | status [--json] | env | seed <scenario>... | seed --list | stop';
+// The Citadel-wide ports rule, moved out of Settings (#1576); its home is citadel:contraption-ui ("Ports for dev servers and browsers").
+const HELP = `${USAGE}
+
+start picks a free random port below 32768 itself and prints it: connect only to that one, and stop the copy when done.
+Ports for any other dev server, scratch server or browser --remote-debugging-port: citadel:contraption-ui,
+"Ports for dev servers and browsers" (a free random port checked with ss -ltn; never 8573; outside 8000-8999
+unless a person needs Tailscale).`;
 
 interface State { pid: number; started: string; holder: number; port: number; url: string; login: string; password: string; cookie: string; data: string; worktree: string }
 
@@ -222,7 +229,8 @@ async function seed(names: string[]) {
 }
 
 const [cmd, ...rest] = process.argv.slice(2);
-if (cmd === 'start') await start(rest);
+if (cmd === '--help' || cmd === '-h' || cmd === 'help') say(HELP);
+else if (cmd === 'start') await start(rest);
 else if (cmd === 'stop' && !rest.length) await stop();
 else if (cmd === 'env' && !rest.length) env();
 else if (cmd === 'seed') await seed(rest);

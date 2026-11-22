@@ -17,6 +17,5 @@ on the dev copy it starts and keeps, then `citadel-dev-copy stop`. It is also th
 `freePort()` (`src/ports.ts`), and a page that isn't Citadel's gets `test/browser.ts` (headless Chromium over a pipe,
 no port, no dependency).
 
-Dev copies, scratch servers and browser `--remote-debugging-port`s take a random free port (1024-32767, outside 8000-8999
-unless a person needs Tailscale, never 8573), checked with `ss -ltn`; connect only to the port your process reported and
-stop it when done. The one-line rule is in the Citadel-wide instructions; `freePort()` does it for a script.
+Every other dev server and browser debugging port follows the ports rule in `citadel:contraption-ui` ("Ports for dev
+servers and browsers"); `freePort()` does it for a script.

@@ -20,7 +20,9 @@ export const IMAGE_PROPS = {
 /**
  * Every generative media tool opens with this (Cara, 2026-11-14: "image via code should ABSOLUTELY be the default
  * unless using a system (like I described for making spell alerts) or explicitly asking for a generative model").
- * test/media-tools.test.ts pins it.
+ * test/media-tools.test.ts pins it. Since #1576 it is the one home of the rule that was the Citadel-wide "Images by code"
+ * section: make images and sounds with code; a generative tool (generate_image_codex too) only when a person asks for
+ * one or a scheme system uses one (src/rule-homes.ts, id images-by-code).
  */
 export const NOT_DEFAULT = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise draw with code.';
 export const NOT_DEFAULT_AUDIO = 'Only on a person\'s explicit ask or a scheme system\'s call; otherwise make sound with code.';

@@ -97,5 +97,48 @@ export const RULE_HOMES: RuleHome[] = [
     home: { kind: 'repo', file: 'src/mcp.ts', anchor: 'const EDIT_INSTRUCTIONS' },
     pointer: 'the edit_instructions description',
     phrases: ['is an agent instruction change', 'label it at least medium', 'keep its dated quotes'],
+  // Six Citadel-wide Settings sections moved to where their job starts (#1576, moves 13 to 18 of #1277's ablation;
+  // Cara, 2026-11-22: "Moving" on all 18 moves).
+  {
+    id: 'ui-checks',
+    title: 'UI checks for every front end',
+    home: { kind: 'repo', file: 'kit/skills/self-review/SKILL.md', section: 'UI checks for every front end' },
+    pointer: 'the UI checks (citadel:self-review, "UI findings")',
+    phrases: ['proportional checks', 'no reflow without input', 'sit for a minute', 'automated layout shift check', 'big pieces of the ui', 'scrollbar coming and going', 'never in backticks or a bare domain'],
+  },
+  {
+    id: 'ports',
+    title: 'Ports for dev servers and browsers',
+    home: { kind: 'repo', file: 'kit/skills/contraption-ui/SKILL.md', section: 'Ports for dev servers and browsers' },
+    pointer: 'the ports rule (citadel:contraption-ui, "Ports for dev servers and browsers")',
+    phrases: ['free random port', 'never 8573', 'outside 8000 8999', 'unless a person needs tailscale', 'connect only to the port your process reported'],
+  },
+  {
+    id: 'images-by-code',
+    title: 'Images and sounds by code',
+    home: { kind: 'repo', file: 'src/mcp-media.ts', anchor: 'export const NOT_DEFAULT =' },
+    pointer: 'images by code (the media tools say when a generative one is allowed)',
+    phrases: ['otherwise draw with code', 'otherwise make sound with code', 'a scheme systems call', 'explicit ask or a scheme system'],
+  },
+  {
+    id: 'idea-minions',
+    title: 'Idea minions and process-only changes',
+    home: { kind: 'repo', file: 'kit/skills/briefing/SKILL.md', section: 'Idea minions and process-only changes' },
+    pointer: 'idea minions end in handoffs (citadel:briefing)',
+    phrases: ['an idea minion ships nothing', 'never waits for a feature build', 'process only change'],
+  },
+  {
+    id: 'grill-first',
+    title: 'Which features get grilled',
+    home: { kind: 'repo', file: 'kit/skills/grilling/SKILL.md', section: 'Which features get grilled' },
+    pointer: 'grill design-shaped features first (citadel:grilling)',
+    phrases: ['a new flow people use', 'needs only a round on what it leaves open', 'known shape work a small feature or ui tweak'],
+  },
+  {
+    id: 'shared-folder',
+    title: 'How the shared folder is sorted',
+    home: { kind: 'repo', file: 'kit/skills/briefing/SKILL.md', section: 'The shared folder' },
+    pointer: "the shared folder's layout (citadel:briefing, \"The shared folder\")",
+    phrases: ['sorted by kind', 'what the schemes readme adds', 'read the readme before adding files', 'raw runs or secrets'],
   },
 ];

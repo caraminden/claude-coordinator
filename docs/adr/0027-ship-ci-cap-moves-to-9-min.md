@@ -45,5 +45,6 @@ on perigee, and hit about 1 green ship in 11.
 
 - Burn-in skipping files whose last full-run time won't fit what's left of its 150 s: it would shorten the line, not
   the cap's clock, and those files gave no verdict anyway.
-- Bigger levers, each a choice for a person: more of the desktop's threads for the WSL VM (16 of 32 today), speeding
-  up the slow land-* test files, or GitHub's own runners (Actions minutes).
+- Bigger levers. Cara picked two on #1606's card (2026-11-22): the WSL VM went from 16 to 24 of the desktop's 32
+  threads (done by hand the same day), and a minion speeds up the slow land-* test files. Not picked: GitHub's own
+  runners (Actions minutes).

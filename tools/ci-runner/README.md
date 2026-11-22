@@ -315,7 +315,7 @@ counts stay; jobs just run slower when it's busy. The PC has 16 cores, 32 thread
 | Part | What holds it | Its share |
 |---|---|---|
 | Windows runners, every one on the PC (Delve's, Peek's, Mandate's, ToC's, the session runners) | `keep-runners.ps1`, which the Windows agent keeps running: one job object, `Global\CitadelCiRunners` | below-normal priority, all together at most 75% (`CI_CPU_PERCENT` in `public/runner-agent.mjs`) |
-| The WSL VM (Citadel's and ToC's Linux runners, and the Android emulator, #533) | `processors=16` in Cara's `%UserProfile%\.wslconfig`; inside it, the runners niced (`citadel-runner-.service.d/yield.conf`, written by `install-runner-agent.sh`) | at most 16 of the 32 threads; the emulator's 4 cores come first |
+| The WSL VM (Citadel's and ToC's Linux runners, and the Android emulator, #533) | `processors=24` (16 until Cara raised it on 2026-11-22, #1606) in Cara's `%UserProfile%\.wslconfig`; inside it, the runners niced (`citadel-runner-.service.d/yield.conf`, written by `install-runner-agent.sh`) | at most 24 of the 32 threads; the emulator's 4 cores come first |
 | The test box VM (Peek's desktop tests) | `Set-VMProcessor -Count 6 -Maximum 75 -RelativeWeight 50`, set by `tools/win-test-box/new-test-box.ps1` | about 4.5 of 32 threads, already; left as it is |
 
 **Windows.** Every 15 seconds `keep-runners.ps1` finds each `RunnerService.exe` and `Runner.Listener.exe` and
@@ -348,7 +348,7 @@ PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\ProgramData\
 
 ```powershell
 $f = "$env:UserProfile\.wslconfig"; $t = if (Test-Path $f) { Get-Content -Raw $f } else { '' }
-if ($t -match '(?m)^[^\S\r\n]*processors\s*=') { $t = $t -replace '(?m)^[^\S\r\n]*processors[^\S\r\n]*=[^\r\n]*', 'processors=16' } elseif ($t -match '(?m)^\[wsl2\]') { $t = $t -replace '(?m)^\[wsl2\][^\S\r\n]*(?=\r?$)', "[wsl2]`r`nprocessors=16" } else { $t = "[wsl2]`r`nprocessors=16`r`n`r`n" + $t }
+if ($t -match '(?m)^[^\S\r\n]*processors\s*=') { $t = $t -replace '(?m)^[^\S\r\n]*processors[^\S\r\n]*=[^\r\n]*', 'processors=24' } elseif ($t -match '(?m)^\[wsl2\]') { $t = $t -replace '(?m)^\[wsl2\][^\S\r\n]*(?=\r?$)', "[wsl2]`r`nprocessors=24" } else { $t = "[wsl2]`r`nprocessors=24`r`n`r`n" + $t }
 Set-Content -Path $f -Value $t -Encoding ASCII; Get-Content $f
 ```
 
@@ -388,7 +388,7 @@ keeper log, `shared/project/reports/ships-first-windows-squeeze-2026-11-21.md`).
   share of the PC on its own job.
 - **WSL.** The Linux agent finds each `citadel-runner-*` service's folder, names it the same way, and sets
   `systemctl set-property --runtime <unit> CPUQuota=` on every runner not on a ship: 30% of the VM's cores split among
-  the ones running a job (with `processors=16`, 480% for one, 240% for two). An empty `CPUQuota=` lifts it.
+  the ones running a job (with `processors=24`, 720% for one, 360% for two). An empty `CPUQuota=` lifts it.
 - **Lifting.** An empty list lifts the squeeze at once (both agents get one every 15 seconds); if Citadel goes quiet
   (restart, GitHub hiccup, the agent's link down), it lifts after 2 minutes on its own. A repo whose reads keep failing
   keeps its last ships for 2 minutes, then drops them. A rate limit from GitHub lifts the squeeze at once and pauses the

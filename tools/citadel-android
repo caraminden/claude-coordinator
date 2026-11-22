@@ -384,14 +384,19 @@ case "$cmd" in
   mic)
     [ $# -ge 1 ] && [ $# -le 2 ] && [ -f "$1" ] || { say "usage: citadel-android mic <file.wav> [seconds]   (plays once an app records; loops to fill seconds)"; exit 2; }
     # The screen stays ours for the lease, but not locked: the same turn's open, install and shot run while it plays.
-    take_screen; up; keep_screen; exec 9>&-
+    take_screen
+    # An interrupted caller lets go of the screen at once rather than holding it to the lease's end (#1522). Set as
+    # soon as the screen is ours, before up and before anything is forked: a signal in that window used to kill the
+    # step with the screen still held (#1586). Unquoted, so the not-yet-started ones drop out.
+    play='' renew=''
+    trap 'kill $play $renew 2>/dev/null; wait 2>/dev/null; [ "$(cut -f2 "$holder" 2>/dev/null)" = "$who" ] && : >"$holder"; exit 130' INT TERM HUP
+    up; keep_screen; exec 9>&-
     # Renewed while it plays, so a long play keeps the screen from other turns' steps; it ends with this caller, even a
-    # killed one (#1522), and an interrupted caller lets go of the screen at once rather than holding it to the lease's end.
+    # killed one (#1522).
     me=$$
     ( trap 'kill $n 2>/dev/null; exit 0' TERM; while :; do sleep "${CITADEL_ANDROID_RENEW:-60}" & n=$!; wait $n; kill -0 "$me" 2>/dev/null || exit 0; keep_screen; done ) & renew=$!
     # In the background, so a trapped signal ends the wait at once instead of after the play.
     node "$mic" play "$@" & play=$!
-    trap 'kill "$play" "$renew" 2>/dev/null; wait 2>/dev/null; [ "$(cut -f2 "$holder" 2>/dev/null)" = "$who" ] && : >"$holder"; exit 130' INT TERM HUP
     wait "$play"; s=$?; trap - INT TERM HUP; kill "$renew"; wait "$renew" 2>/dev/null; keep_screen; exit $s ;;
   mic-check) exec node "$mic" check "$@" ;;
   *)

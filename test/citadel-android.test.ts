@@ -508,11 +508,39 @@ test('an interrupted mic step ends its lease renewer and its play, and lets go o
   const m = tmp.spawn(helper, ['mic', wav], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'M', CITADEL_ANDROID_RENEW: '1' }, stdio: ['ignore', 'ignore', 'pipe'] });
   const done = new Promise<number | null>((r) => m.on('exit', r));
   const left = () => spawnSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' }).stdout.split('\n').filter((l) => l.includes(wav) && !l.includes(' ps '));
-  await until('the play and its renewer to run', async () => left().length >= 3, 10_000);
+  // The play itself, not just three processes naming the wav: bash's own subshells in take_screen and up name it too,
+  // and a signal there never reached the play (#1586). The renewer is forked before the play, so it runs by then.
+  await until('the play and its renewer to run', async () => { const l = left(); return l.length >= 3 && l.some((x) => x.includes('citadel-android-mic.ts play')); });
   m.kill('SIGTERM');
   await done;
-  await until('the renewer and the play to end', async () => left().length === 0, 5000).catch(() => { throw new Error(`still running:\n${left().join('\n')}`); });
+  await until('the renewer and the play to end', async () => left().length === 0).catch(() => { throw new Error(`still running:\n${left().join('\n')}`); });
   assert.equal(readFileSync(join(locks, 'android.who'), 'utf8'), '', 'the screen is free at once');
   // The renewer (a fork naming the wav) is gone, so nothing takes it back: another caller's step goes straight through.
   assert.equal(runIn(locks, 'N', 'shot', join(root, 'mic-1.png')).status, 0);
+});
+
+test('a mic step interrupted while it brings the emulator up lets go of the screen too (#1586)', async () => {
+  const locks = join(root, 'mic-2');
+  const wav = join(root, 'mic-2.wav');
+  assert.equal(runIn(locks, 'M', 'tone', '440', '1', wav).status, 0);
+  // A starter that never answers holds the step inside up(), the window where SIGTERM used to find no trap and
+  // leave the screen held for the lease's two minutes (the CI flake: bash's own subshells there named the wav).
+  const open: import('node:net').Socket[] = [];
+  let asked = false;
+  const starter = createServer((s) => { asked = true; open.push(s); });
+  await tmp.serve(starter);
+  try {
+    const m = tmp.spawn(helper, ['mic', wav], { env: { ...env, CITADEL_HEAVY_DIR: locks, CITADEL_HEAVY_WHO: 'M', CITADEL_ANDROID_STARTER: String((starter.address() as AddressInfo).port) }, stdio: 'ignore' });
+    const done = new Promise<number | null>((r) => m.on('exit', r));
+    await until('up to ask the starter', async () => asked);
+    assert.match(readFileSync(join(locks, 'android.who'), 'utf8'), /^\d+\tM\n$/, 'the step has the screen');
+    m.kill('SIGTERM');
+    // The trap runs once the ask in flight ends; ending it here keeps the test from waiting out poke's 5 s.
+    for (const s of open) s.destroy();
+    await done;
+    assert.equal(readFileSync(join(locks, 'android.who'), 'utf8'), '', 'the screen is free at once');
+  } finally {
+    for (const s of open) s.destroy();
+    starter.close();
+  }
 });

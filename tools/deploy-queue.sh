@@ -113,6 +113,13 @@ queue_phase() {
   local t=${DEPLOY_QUEUE_TICKET:-} l
   [ -n "$t" ] && [ -e "$t" ] || return 0
   mapfile -t l 2>/dev/null <"$t" || return 0
+  # The kit's core land.sh's ticket (eight lines, "order" last: tools/land.local.sh's land_deploy hands it to
+  # deploy.sh, #1323): only its phase changes, so the core's commit and verdict lines stay.
+  if [ "${l[7]:-}" = order ]; then
+    l[3]=$1
+    { printf '%s\n' "${l[@]}" >"$t.tmp$$" && mv -f "$t.tmp$$" "$t"; } 2>/dev/null || true
+    return 0
+  fi
   queue_write "$t" "${l[0]:-}" "${l[1]:-0}" "${l[2]:-}" "$1" 2>/dev/null || true
 }
 
@@ -138,7 +145,7 @@ queue_order() {
   QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY=""
   for t in "$1"/[0-9]*; do
     [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
-    [ "${l[1]:-0}" != 0 ] || [ "${l[4]:-}" = order ] || QUEUE_OLD+=("${t##*/}")
+    [ "${l[1]:-0}" != 0 ] || [ "${l[4]:-}" = order ] || [ "${l[7]:-}" = order ] || QUEUE_OLD+=("${t##*/}") # the core's "order" is line 8
   done
   [ -f "$1/.order" ] || return 0
   while read -r t; do

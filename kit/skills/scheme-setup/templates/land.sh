@@ -764,7 +764,9 @@ queue_look() {
     # lands only if what is ahead of it fails, so the ones behind build on the one ahead of it meanwhile.
     # Q_LINE: the ones ahead that aren't skipped, for batches: label, commit, verdict ("old" from a land.sh older than
     # batches), base, pid.
-    [ "${l[4]:-}" = skip ] || { Q_PRED=${l[4]:-} Q_PREDNAME=${l[2]:-?}; Q_LINE+=("${l[2]:-?} ${l[4]:--} ${l[5]:-old} ${l[6]:--} ${l[0]}"); }
+    # A verdict line it doesn't know (another script's ticket sharing the line, as Citadel's deploy.sh) reads as old.
+    [[ ${l[5]:-} =~ ^(-|running|green|red)$ ]] || l[5]=old
+    [ "${l[4]:-}" = skip ] || { Q_PRED=${l[4]:-} Q_PREDNAME=${l[2]:-?}; Q_LINE+=("${l[2]:-?} ${l[4]:--} ${l[5]} ${l[6]:--} ${l[0]}"); }
   done
   Q_AHEAD=$ahead
   [[ $Q_PRED =~ ^[0-9a-f]{40,}$ ]] || Q_PRED='' # "-": it has built nothing yet; no line: older than the stack
@@ -1923,7 +1925,7 @@ batch_look() {
     mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue
     [ -n "${l[0]:-}" ] && queue_proc "${l[0]%% *}" p && [ "$p" = "${l[0]}" ] && [ "${l[4]:-}" != skip ] || continue
     if [ "${l[1]:-0}" = 0 ] && { queue_state "${l[0]%% *}" st; [[ $st == [Tt] ]]; }; then continue; fi
-    [ -n "${l[5]:-}" ] && [ "${l[5]}" != old ] || break # older than batches, or fast mode's: the next batch
+    [[ ${l[5]:-} =~ ^(-|running|green|red)$ ]] || break # older than batches, fast mode's or another script's: the next batch
     batch_add "${l[2]:-?}" "${l[4]:--}" "${l[5]}" "${l[6]:--}" "${l[0]}"
   done
   SHIP_M=$B_N

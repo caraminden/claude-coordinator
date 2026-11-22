@@ -6,6 +6,8 @@
 # A test file goes here only if it imports nothing from outside test/, directly or through its fixtures, and every
 # tools/ file it reads is listed: test/pipeline-files.test.ts (on every land) checks both.
 tools/land.sh
+tools/land-core.sh
+tools/land.local.sh
 tools/ship-numbers.ts
 tools/ship-numbers.attributes
 tools/known-flakes.ts

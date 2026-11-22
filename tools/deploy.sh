@@ -518,8 +518,13 @@ deploy() {
   # DEPLOY_LOCKED: run by tools/land.sh, which already holds the lock on fd 9 and its place in the line. Trusted
   # (DEPLOY_TESTED with it) only when fd 9 really is this lock file: a leaked env (a test run under a deploy, a
   # nested run) must still wait in line and lock (#514).
-  local inherited=
-  if [ -n "${DEPLOY_LOCKED:-}" ]; then
+  # DEPLOY_LOCKED=core: run by the kit's core land.sh (tools/land.local.sh's land_deploy, #1323), which holds the lock
+  # in a process above this one but hands its hooks no fd 9. Trusted only with the restart lock taken on fd 7, which
+  # land_deploy takes first, and the deploy lock held by someone: a leaked env has neither.
+  local inherited= core=
+  if [ "${DEPLOY_LOCKED:-}" = core ]; then
+    if [ /dev/fd/7 -ef "$STATE/restart.lock" ] && ! flock -n "$STATE/lock" true 2>/dev/null; then inherited=1 core=1 TIMES=${DEPLOY_TIMES:-}; else say "DEPLOY_LOCKED is core but fd 7 isn't the restart lock or nobody holds the deploy lock; taking the lock"; fi
+  elif [ -n "${DEPLOY_LOCKED:-}" ]; then
     if [ /dev/fd/9 -ef "$STATE/lock" ]; then inherited=1 TIMES=${DEPLOY_TIMES:-}; else say "DEPLOY_LOCKED is set but fd 9 isn't the deploy lock; taking the lock"; fi
   fi
   if [ -z "$inherited" ]; then
@@ -732,8 +737,9 @@ deploy() {
   fi
   # The queued restart takes the restart lock before it restarts: let go, or it waits out the wait below. The deploy
   # lock goes with it, so the next in line rebases and passes its gate while that restart is judged (#566).
-  queue_done ok
-  flock -u 9
+  [ -n "$core" ] || queue_done ok # the core's ticket is the core's to end
+  # Under the core, the lock is the core's: it holds it until this returns, and the restart lock goes all the same.
+  [ -n "$core" ] || flock -u 9
   flock -u 7
   # Usually it is live within seconds and checked again SETTLE s later (last-good moves); say how that went here, as
   # this turn carries on through the restart. A rollback fails this deploy (#553), so land.sh takes the commit off main.

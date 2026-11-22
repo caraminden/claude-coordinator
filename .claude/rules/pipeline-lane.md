@@ -2,6 +2,8 @@
 paths:
   - "tools/pipeline-files.txt"
   - "tools/land.sh"
+  - "tools/land-core.sh"
+  - "tools/land.local.sh"
   - "tools/deploy.sh"
   - "tools/deploy-queue.sh"
   - "tools/kit-land-drift.sh"

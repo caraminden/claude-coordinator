@@ -64,6 +64,30 @@
 # CI_SKIPS_ANDROID='desktop-tests'
 # CI_STATUS gets the lane as its second argument.
 
+# Guards: a quick command run on each rebased commit, after land_rebased and before the check (a schema, budget or
+# contract test). Exit 0 goes on; 2, a timeout or a kill doesn't decide (it says so, and the check decides); anything
+# else refuses as a red check does. Every batch member runs it; the light lane doesn't.
+# GUARD_CMD='node --test test/schema-compat.test.ts'
+# GUARD_TIMEOUT=${LAND_GUARD_TIMEOUT:-120}
+
+# Ship-time merges: files two branches often change in the same place, which the rebase merges by rule rather than
+# stopping on, a line "<path> <rule> [<regex>]" each. Rules: append <regex> (lines both add to a list whose opening
+# line matches), sum <regex> (lines matching <regex> both changed: numbers both raised become main's plus this
+# branch's raise, notes both added keep both), main (main's copy: a file land_rebased makes again), hook (land_merge
+# below). Anything a rule isn't sure of stops the rebase, as a clash in any other file does. The header of
+# tools/land.sh says the rest.
+# MERGES='
+# test/prompt-budget.test.ts sum ^const\ (BUDGET|KIT_BUDGET)\ =
+# src/db.ts append ^const\ MIGRATIONS
+# test/prompt-baseline.json main
+# '
+
+# The land lock and the line's folder ('' is <.git>/land.lock and <.git>/land-queue in the main checkout). Set both to
+# share one line with another script that takes the same lock with flock (a deploy queue). Relative: from the main
+# checkout.
+# LOCK_FILE=''
+# QUEUE_DIR=''
+
 # 0: main stays in the main checkout and is never pushed (a scheme whose origin isn't its own).
 # PUSH_MAIN=1
 
@@ -102,4 +126,29 @@
 # in CI's (ci:<file>). A scheme whose CI_STATUS prints its own: replace it.
 # land_failures() {
 #   sed -nE 's/^FAILED: (\S+)$/\1/p'
+# }
+
+# Runs on each rebased commit just before GUARD_CMD, in the worktree, not on the light lane: non-zero refuses the
+# landing as a red check does (a boot check while deploys are refusing).
+# land_preflight() { # <commit> <lane>
+#   tools/boot-check.sh "$1"
+# }
+
+# Reads a red check's or CI's output on stdin; exit 0 says the red was flakes only, and what it prints says which. A
+# red check then runs once more and passes only if that run is green; a red CI run gets one fresh run. None: red is
+# red.
+# land_flaky() {
+#   ids=$(land_failures) && [ -n "$ids" ] && ! grep -vxFf tools/known-flakes.txt <<<"$ids" >/dev/null && echo "$ids"
+# }
+
+# CI gave no answer about <commit> (no runner started, no verdict, past its limit): decide in CI's place, in the
+# worktree, which sits on <commit>. Exit 0 green, 75 no verdict either (it parks, as with none), anything else red.
+# land_fallback() { # <commit>
+#   timeout 1800 npm test >&2
+# }
+
+# MERGES's hook rule: merge <path>, leaving the result in <ours>. <side> says which of ours and theirs is main's
+# (ours in a rebase). Exit 0 clean; anything else stops the rebase as a clash does.
+# land_merge() { # <side> <base> <ours> <theirs> <path>
+#   node tools/ship-numbers.ts merge "$1" "$2" "$3" "$4" # it takes no path
 # }

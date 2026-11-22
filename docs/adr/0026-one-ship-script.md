@@ -1,6 +1,6 @@
 # One ship script and one way of batching ships, for every scheme
 
-Status: accepted, 2026-11-21. Decided on #1304's cards; step 2 of its five (#1321) turns batching on in the kit's template and adds the `land_deploy` and `land_rebased` hooks; the later steps move Citadel onto the template. Supersedes ADR 0020's "Where it lives". Design: the shared folder's `specs/one-ship-batching.md`.
+Status: accepted, 2026-11-21. Decided on #1304's cards; step 2 of its five (#1321) turns batching on in the kit's template and adds the `land_deploy` and `land_rebased` hooks; step 3 (#1322) adds Citadel's other extras as hooks and ship-time merges; the later steps move Citadel onto the template. Supersedes ADR 0020's "Where it lives". Design: the shared folder's `specs/one-ship-batching.md`.
 
 Citadel's own `tools/land.sh` batched ships with a train (ADR 0020) and every other scheme's copy of the kit's
 template batched them with `CI_BATCH`. The two are one idea: stack the waiting ships on each other, run CI once on
@@ -23,7 +23,15 @@ the top, ship up to the deepest green commit, bisect the prefixes when the top i
   "Later"); once on the core it can turn it on from Settings.
 - **Build branches** don't batch: `--into` and `--full` stay out of the line, `--build` ships alone.
 - **Citadel runs the kit's script** with a `tools/land.local.sh` (Cara, 2026-11-20: "One script for all"). Its extras
-  (flake rerun, CI fallback, preflight, guards) become hooks any scheme can use.
+  (flake rerun, CI fallback, preflight, guards) become hooks any scheme can use. Step 3 (#1322) adds them, each off
+  by default: `GUARD_CMD`, `land_preflight`, `land_flaky` (a check's red runs once more, a CI red gets one fresh run;
+  ADR 0006), `land_fallback` (decides when CI gives no answer), and `LOCK_FILE` / `QUEUE_DIR` (a lock and line
+  another script shares, as Citadel's deploy queue does). The smoke check is the core's `SMOKE_CMD`.
+- **Ship-time merges are a core setting**, `MERGES` (Cara, 2026-11-20, "Build it into step 3"): files two ships
+  often change in the same place merge by rule during the rebase, as a git merge driver, alone and inside a batch:
+  `append` (both add to one list), `sum` (both raise a number: main's plus the branch's raise, never more), `main`
+  (a file `land_rebased` makes again), `hook` (`land_merge`). Anything a rule isn't sure of conflicts as before.
+  Ruled out: one budget file per bump.
 - **Batching is on by default** (Cara, 2026-11-20: "On, up to 4"). A scheme that sets nothing batches up to 4;
   Citadel sets 6; a scheme can set it lower, or 1 for none.
 

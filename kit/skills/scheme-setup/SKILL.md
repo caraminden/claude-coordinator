@@ -196,7 +196,10 @@ that many share one run on the last one's commit, with `CI_STACK` set to the run
 takes whoever is waiting and never waits to fill, and the header says how a red batch is bisected. A ship that
 changes the pipeline (land.sh, land.local.sh, `.github/`, the lanes map, and `PIPELINE_FILES`' list) ships alone.
 Leave it at the default. A high share of red ship runs (over about 15%) argues for 2. A scheme that deploys what
-ships gives land.local.sh a `land_deploy`: the batch deploys once, and a failed deploy takes main back. When much of what ships needs less than the whole check and CI
+ships gives land.local.sh a `land_deploy`: the batch deploys once, and a failed deploy takes main back. Files two
+ships often change in the same place (a budget both raise, a list both append to, a generated baseline) get a
+`MERGES` line each, so the rebase merges them by rule rather than stopping. The rest of land.local.sh's hooks (guards,
+preflight, a flaky-red rerun, a fallback when CI gives no answer, a shared lock) stay off unless the plan asks. When much of what ships needs less than the whole check and CI
 (docs, one app of several), give it lanes: `LANES=tools/lanes` and a map of `<lane> <pattern>...` lines, with
 `CHECK_<LANE>`, `CI_WORKFLOWS_<LANE>` and `CI_SKIPS_<LANE>` in `land.local.sh` (its comments show them). A light
 ship goes through the line with no CI and no push; a lane's run goes to `land/<lane>/<branch>`, so `'land/**'` still

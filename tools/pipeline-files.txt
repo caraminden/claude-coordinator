@@ -60,6 +60,8 @@ test/scheme-setup-land-local.test.ts
 test/scheme-setup-land-lanes.test.ts
 test/scheme-setup-land-build.test.ts
 test/scheme-setup-land-early.test.ts
+test/scheme-setup-land-hooks.test.ts
+test/scheme-setup-land-merges.test.ts
 test/kit-land-drift.test.ts
 # Not test/run-tests.test.ts: its leak test loads the real test/leak-guard.ts, which imports src/ through helpers.ts.
 test/run-tests-scope.test.ts

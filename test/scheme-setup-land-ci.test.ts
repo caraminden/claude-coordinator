@@ -4,49 +4,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { env, git, landLockFree, sleep, until, queueSetup, timingLines } from './scheme-setup-land-fixture.ts';
+import { env, git, landLockFree, sleep, until, queueSetup, timingLines, ciSetup, GREEN, RED, LOST } from './scheme-setup-land-fixture.ts';
 
-// The CI gate and the stack (#537). CI is faked two ways: a CI_STATUS command that answers from a file named after
-// the commit (its exit code; no file: not started; "<code> once": that answer one time, then not started), and for
-// the built-in reader a gh that prints what the test wrote (runs.once.tsv one time, then runs.tsv; branch-runs for
-// the scratch branch's unfinished runs, "<id>\t<commit>" a line).
-// Either way a gh stands first in PATH, so no test reaches GitHub.
-function ciSetup(branches: number, { stack = '', batch = '', check = 'true', builtin = false, files = (i: number) => `f${i}.txt`, local = undefined as string | undefined } = {}) {
-  const config: Record<string, string> = { ...(builtin ? { CI_WORKFLOWS: 'ci.yml slow.yml' } : { CI_STATUS: '"$CI_FAKE"' }), ...(stack ? { CI_STACK: stack } : {}) }; // no stack: the template's own depth, 3
-  const q = queueSetup(branches, check, config, files, local);
-  const ci = join(q.dir, 'ci');
-  const bin = join(q.dir, 'bin');
-  mkdirSync(ci);
-  mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *head_sha=*) if [ -e "$CI_DIR/runs.once.tsv" ]; then cat "$CI_DIR/runs.once.tsv"; rm "$CI_DIR/runs.once.tsv"; else cat "$CI_DIR/runs.tsv" 2>/dev/null; fi ;; *status=in_progress*) cat "$CI_DIR/busy" 2>/dev/null ;; *skipped*) cat "$CI_DIR/skipped-jobs" 2>/dev/null || echo 0 ;; */jobs*) cat "$CI_DIR/failed-steps" 2>/dev/null ;; *branch=*) cat "$CI_DIR/branch-runs" 2>/dev/null ;; esac\nexit 0\n', { mode: 0o755 });
-  writeFileSync(join(ci, 'status.sh'), '#!/bin/bash\nf=$CI_DIR/${1:0:12}\nread -r code once <"$f" 2>/dev/null || code=3\n[ -z "$once" ] || rm "$f"\nexit "$code"\n', { mode: 0o755 });
-  const ciEnv = { CI_DIR: ci, CI_FAKE: join(ci, 'status.sh'), PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', LAND_BATCH: batch === 'default' ? '' : batch || '1' }; // no batch: off, so a test of one landing's run isn't batched by the template's default (4)
-  const started: ReturnType<typeof q.land>[] = [];
-  const land = (i: number, extra: Record<string, string> = {}) => started[started.push(q.land(i, { ...ciEnv, ...extra })) - 1];
-  type L = ReturnType<typeof land>;
-  // The commits a landing sent to CI, oldest first, as land.sh names them (12 characters).
-  const sent = (l: L) => [...l.stderr().matchAll(/waiting for CI on ([0-9a-f]{12}) \(origin/g)].map((m) => m[1]);
-  /** Waits until the landing has sent its nth commit to CI, and returns it. */
-  const tip = async (l: L, nth = 1) => { await until(`CI run ${nth}: ${l.stderr()}`, () => sent(l).length >= nth); return sent(l)[nth - 1]; };
-  const verdict = (sha: string, code: number, once = false) => writeFileSync(join(ci, sha), `${code}${once ? ' once' : ''}\n`);
-  const parent = (sha: string) => git(q.main, 'rev-parse', `${sha}^`).slice(0, 12);
-  const mainAt = () => git(q.main, 'rev-parse', 'main').slice(0, 12);
-  const scratch = () => git(q.origin, 'for-each-ref', '--format=%(refname:short) %(objectname)', 'refs/heads/land').split('\n').filter(Boolean).map((l) => l.replace(/^(\S+ .{12}).*/, '$1'));
-  const on = (i: number) => git(q.wts[i - 1], 'branch', '--show-current');
-  const stop = () => { for (const l of started) if (l.child.exitCode === null && l.child.signalCode === null) l.child.kill('SIGKILL'); };
-  /** Starts these landings one after another, so their places in line are the order given. */
-  const lands = async (...is: number[]) => {
-    const out: L[] = [];
-    for (const i of is) {
-      const had = q.issued();
-      out.push(land(i));
-      await until(`landing ${i}'s ticket`, () => q.issued() === had + 1);
-    }
-    return out;
-  };
-  return { ...q, ci, land, lands, sent, tip, verdict, parent, mainAt, scratch, on, stop };
-}
-const GREEN = 0, RED = 1, LOST = 4;
 
 test('CI gate: the commit goes to a scratch branch, and lands only once CI passed exactly that commit', async () => {
   const c = ciSetup(1, { stack: '1' });
@@ -1013,7 +972,8 @@ test('batches: with land_deploy the head deploys the batch once, in the main che
     c.open();
     const td = await c.tip(all[2]);
     c.verdict(td, GREEN);
-    await until('the members waiting on the deploy', () => c.waiting() === 2);
+    // The members can wait on the deploy before the head's hook has written its line: wait for both.
+    await until('the members waiting on the deploy, and the head deploying', () => c.waiting() === 2 && c.deploys().length > 0);
     const full = git(c.main, 'rev-parse', td);
     assert.deepEqual(c.deploys(), [`${full} ${full}`], 'once, for the deepest commit, with main checked out there');
     assert.equal(c.mainAt(), td, 'main moved');

@@ -105,7 +105,8 @@ test('a person writing to a Taskmaster continues every minion of the scheme with
   assert.equal(kinds(store, b.id, 'loop_continued').length, 1);
   assert.equal(kinds(store, coordinator.id, 'loop_continued').filter((c) => c.minion === coordinator.id).length, 1);
   // A few reads for the chats with loops (and the sends of their held messages), not one of each per minion: 300.
-  assert.ok(calls.settingKeys < 10 && calls.getSetting < 60 && calls.ownerCoordinator < 10, JSON.stringify(calls));
+  // getSetting: about a dozen per chat's view, so a new view field adds a few (58 → 60 with #1636's asleep); one per minion would be 300+.
+  assert.ok(calls.settingKeys < 10 && calls.getSetting < 70 && calls.ownerCoordinator < 10, JSON.stringify(calls));
   assert.equal(runner.continueLoops(store.listTickets(project.id).map((t) => t.id), 'Cara'), 0);
 
   // One minion with no loop to lift reads its own loop state, not its Taskmaster.

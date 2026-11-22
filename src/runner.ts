@@ -1076,8 +1076,8 @@ export class Runner {
       // Whose its cards are (#1449: the owner's once its assignee left the scheme), as push and Needs you count it; null for anyone's.
       assignee: ticket.kind === 'ticket' ? nameOf(this.store.minionPerson(ticket, 'assigned', props, hears)) : null,
       preview: !!this.store.getSetting(previewKey(ticket.id)),
-      // Asleep (#1636): when and who, for the header's Wake, the list's Asleep section and list_tickets.
-      asleep: closed ? null : this.store.getSetting<Sleep>(sleepKey(ticket.id)),
+      // Asleep (#1636): when and who, for the header's Wake, the list's moon and list_tickets; a Taskmaster never sleeps.
+      asleep: closed || ticket.kind !== 'ticket' ? null : this.store.getSetting<Sleep>(sleepKey(ticket.id)),
       // What its turns have cost so far, at API prices.
       cost: this.store.ticketCost(ticket.id),
       // What its kind of work usually costs and its two marks (#1114), for the minion page's "$X of about $Y".
@@ -3146,8 +3146,8 @@ export class Runner {
       const parkedAs = this.parkedAs.get(ticket.id);
       this.parkedAs.delete(ticket.id);
       // Any turn wakes an asleep minion (#1636; Cara picked "Anything that starts a turn", 2026-11-22): a card's answer, a message, a wake it asked for. A keepalive never gets here (its gate).
-      if (this.store.getSetting(sleepKey(ticket.id))) {
-        this.store.deleteSetting(sleepKey(ticket.id));
+      // One delete, not a read first: every turn start runs it (loop-guard.test's settings-read count).
+      if (this.store.deleteSetting(sleepKey(ticket.id))) {
         this.emit(ticket.id, 'note', { text: 'Awake again: a new turn started.' });
       }
       // A trailer is its own turn's: a resume that never started leaves its carried one for nobody.

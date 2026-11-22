@@ -3836,8 +3836,9 @@ export class Store {
     this.db.exec(`PRAGMA wal_autocheckpoint = ${on ? 1000 : 0}`);
   }
 
-  deleteSetting(key: string) {
-    this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+  /** Whether there was one to delete. */
+  deleteSetting(key: string): boolean {
+    return this.db.prepare('DELETE FROM settings WHERE key = ?').run(key).changes > 0;
   }
 
   /** Record a release of a scheme's target (src/releases.ts). */

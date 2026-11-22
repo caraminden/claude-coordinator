@@ -17,7 +17,7 @@ import { shellWorker } from './src/shell.ts';
 import { lendsMachine, machinesFor, mayReceive, ownerAsked, messagePerson, messageScope, turnPlace, turnRefusal } from './src/access.ts';
 import { ClaudeLink } from './src/claude-link.ts';
 import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from './src/build-cache.ts';
-import { size } from './src/build-output.ts';
+import { diskUsage, low, size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
@@ -62,6 +62,7 @@ import { waitsFor } from './src/waits-readout.ts';
 import { followOrigins } from './src/scheme-repo.ts';
 import { makeMinion, type NewMinionSpec } from './src/new-minion.ts';
 import { createTicketDir, mainSync, projectDir, projectSharedDir, syncMain } from './src/workspace.ts';
+import { depsNote, installDeps, NPM_CACHE_CAP, npmCacheDir } from './src/worktree-deps.ts';
 import { ScheduledRuns } from './src/schedules.ts';
 import { HeldStarts } from './src/held-starts.ts';
 import { curatorTarget } from './src/memory-curator.ts';
@@ -828,7 +829,15 @@ if (!BOOT_CHECK && !PREVIEW) every('standing checks', 3600_000, () => standingCh
  * nothing behind, when the worktree can't be made.
  */
 async function newMinion(project: Project, m: NewMinionSpec, by: string) {
-  return makeMinion(store, project, m, by, (id, number) => createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number, m.title, m.build ?? null), ownWrites); // a request's reply shows its folder and branch (#1244)
+  const made = await makeMinion(store, project, m, by, (id, number) => createTicketDir(DATA_DIR, project.id, project.repo_dir, id, number, m.title, m.build ?? null), ownWrites); // a request's reply shows its folder and branch (#1244)
+  // Its npm dependencies from the lockfile (#1649), on its lane: the brief sent next waits behind it, and the creation doesn't.
+  if (project.repo_dir && !PREVIEW) {
+    void runner.onLane(made.id, 'dependency install', async () => {
+      const note = depsNote(await installDeps(made.cwd, npmCacheDir(DATA_DIR)));
+      if (note) runner.leaveMail(made.id, APP_NAME, note);
+    });
+  }
+  return made;
 }
 
 // Scheduled minions (src/schedules.ts): each due schedule starts a fresh minion with its brief. Checked
@@ -888,6 +897,14 @@ if (!BOOT_CHECK && !PREVIEW) {
     // The shared Gradle build cache (#1153) under its cap.
     const t = await trimCache(gradleCacheDir(DATA_DIR), GRADLE_CACHE_CAP);
     if (t.removed) console.log(`Gradle build cache: removed ${t.removed} least recently used entries (${size(t.freed)}), ${size(t.left)} left.`);
+    // The shared npm cache (#1649): emptied once over its cap; the next install fills it again.
+    // shortcut: all or nothing, as npm's content store has no oldest-first trim; trim it by its index if refills start to cost.
+    const npmCache = npmCacheDir(DATA_DIR);
+    const npmSize = await diskUsage([npmCache]); // 0 before the first install made it
+    if (npmSize > NPM_CACHE_CAP) {
+      await low(['rm', '-rf', '--one-file-system', '--', npmCache]);
+      console.log(`npm cache: emptied it at ${size(npmSize)}, over its ${size(NPM_CACHE_CAP)} cap.`);
+    }
   }, 10 * 60_000);
   // Contraption turns' media files past 30 days (#732); first soon after boot, as deploys restart the server more often than daily.
   every('contraption media sweep', 24 * 60 * 60_000, async () => void sweepMedia(join(DATA_DIR, 'contraption-media')), 10 * 60_000);

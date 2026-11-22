@@ -2902,6 +2902,16 @@
   "m1": "400 Report is required",
   "m2": "403 A minion may only update itself"
  },
+ "POST /api/tickets/:minion1/dismiss": {
+  "anon": "401 Not logged in",
+  "person": "404 No such open card: it was answered, settled or dismissed already",
+  "member": "404 No such open card: it was answered, settled or dismissed already",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people dismiss cards",
+  "tmB": "403 Only people dismiss cards",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
  "GET /api/tickets/:minion1/doc-preview": {
   "anon": "401 Not logged in",
   "person": "404 No such page",
@@ -3709,6 +3719,16 @@
   "outsider": "403 Only the deploying minion can report its deploy",
   "tmA": "403 Only the deploying minion can report its deploy",
   "tmB": "403 Only the deploying minion can report its deploy",
+  "m1": "403 A minion may only update itself",
+  "m2": "403 A minion may only update itself"
+ },
+ "POST /api/tickets/:taskmasterA/dismiss": {
+  "anon": "401 Not logged in",
+  "person": "404 No such open card: it was answered, settled or dismissed already",
+  "member": "404 No such open card: it was answered, settled or dismissed already",
+  "outsider": "404 No such minion",
+  "tmA": "403 Only people dismiss cards",
+  "tmB": "403 Only people dismiss cards",
   "m1": "403 A minion may only update itself",
   "m2": "403 A minion may only update itself"
  },

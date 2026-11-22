@@ -23,7 +23,6 @@ writeFileSync(
   fake,
   `#!${process.execPath}
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] } }));
   if (input.includes('result-on-sigint')) process.on('SIGINT', () => {
     console.log(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, session_id: 's1', total_cost_usd: 0.42, duration_ms: 5, usage: { input_tokens: 10, output_tokens: 20 } }));
     process.exit(130);
@@ -31,6 +30,9 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   else process.on('SIGINT', () => {});
   if (input.includes('ignore-sigterm')) process.on('SIGTERM', () => {});
   setInterval(() => {}, 1000);
+  // Said last: the test stops the turn as soon as it sees this line, so the handlers above must already be in place
+  // (said first, a SIGINT landing before them killed claude with no result: the 03:52 red on Nov 22).
+  console.log(JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'working' }] } }));
 });
 `,
 );

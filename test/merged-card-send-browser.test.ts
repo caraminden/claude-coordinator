@@ -30,10 +30,10 @@ const STUB = `<script>
     if ((m = path.match(/^api\\/tickets\\/(\\d+)$/))) return reply(200, { ticket: m[1] === '100' ? coordinator : minion(Number(m[1])) });
     if ((m = path.match(/^api\\/tickets\\/(\\d+)\\/events$/))) {
       if (url.search.includes('after=')) return reply(200, []);
-      if (m[1] !== '7') return reply(200, { events: [], tasks: [], more: false });
+      if (m[1] !== '7' && m[1] !== '100') return reply(200, { events: [], tasks: [], more: false });
       return reply(200, { events: [
-        { id: 1, ticket_id: 7, kind: 'question', data: JSON.stringify({ id: 'q7', mergeable: true, questions: ALL.slice(0, 4) }), created_at: now - 60_000 },
-        { id: 2, ticket_id: 7, kind: 'question_more', data: JSON.stringify({ id: 'q7', questions: ALL }), created_at: now - 59_000 },
+        { id: 1, ticket_id: Number(m[1]), kind: 'question', data: JSON.stringify({ id: 'q7', mergeable: true, questions: ALL.slice(0, 4) }), created_at: now - 60_000 },
+        { id: 2, ticket_id: Number(m[1]), kind: 'question_more', data: JSON.stringify({ id: 'q7', questions: ALL }), created_at: now - 59_000 },
       ], tasks: [], more: false });
     }
     if (/inbox$/.test(path)) return reply(200, { items: [] });
@@ -55,14 +55,15 @@ after(async () => {
 });
 
 const sendBtn = `[...document.querySelectorAll('.qcard .row button')].find((b) => /^Send/.test(b.textContent))`;
-const open = async (opts = {}) => {
-  const page: Page = await browser.page(`${app.base}#/p/1/t/7`, { width: 1280, height: 800, ...opts });
+const open = async (opts: { width?: number; height?: number; route?: string } = {}) => {
+  const page: Page = await browser.page(`${app.base}#/p/1${opts.route ?? '/t/7'}`, { width: 1280, height: 800, ...opts });
   await waitFor(page, 'the card', `document.querySelectorAll('.qcard .q').length === 8`);
   return page;
 };
 
-test('a merged 8-question card with pick-any questions sends all eight answers', { skip }, async () => {
-  const page = await open();
+// The minion's chat, and the Taskmaster's chat as a link with ?e= opens it (where Cara's card was).
+for (const [where, route] of [['a minion chat', '/t/7'], ["the Taskmaster's chat", '?e=1']]) test(`a merged 8-question card with pick-any questions sends all eight answers in ${where}`, { skip }, async () => {
+  const page = await open({ route });
   assert.equal(await page.eval(`${sendBtn}.disabled`), true, 'nothing picked yet');
   const progress = `document.querySelector('.qcard .progress').textContent`;
   assert.equal(await page.eval(progress), '0 of 8 answered', 'a person sees why Send waits');

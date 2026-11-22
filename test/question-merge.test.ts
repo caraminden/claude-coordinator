@@ -103,11 +103,19 @@ test('a card holds 8 questions; the ninth starts a new card', async () => {
   const n = turns().length;
   await call(`/api/tickets/${ticket.id}/messages`, { method: 'POST', body: { text: 'more' } });
   await until('the turn', () => turns().length > n);
-  const a = await ask(q('x', 4));
-  const b = await ask(q('y', 4));
+  // Two of the eight take several picks (TransitionTracker's merged card, #1579).
+  const multi = (qs: any[], at: number) => qs.map((x, i) => (i === at ? { ...x, multiSelect: true } : x));
+  const a = await ask(multi(q('x', 4), 1));
+  const b = await ask(multi(q('y', 4), 2));
   assert.equal(b.id, a.id);
   const c = await ask(q('z'));
   assert.notEqual(c.id, a.id);
+  // All eight answers go through the route and reach the asking turn in one message.
+  const picks = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ selected: i === 1 || i === 6 ? ['A', 'B'] : ['B'] }));
+  await call(`/api/tickets/${ticket.id}/answer`, { method: 'POST', body: { questionId: a.id, answers: picks } });
+  const said = (await call(`/api/tickets/${ticket.id}/events?after=0`)).filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
+  const text = said.find((m: any) => m.answer?.questionId === a.id).text;
+  for (const t of ['1. x0?', '8. y3?', '→ A; B']) assert.ok(text.includes(t), `${t} in ${text}`);
   await end();
 });
 

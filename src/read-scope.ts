@@ -9,12 +9,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
 const scopes = new WeakMap<DatabaseSync, Map<string, unknown>>();
-let enabled = process.env.CITADEL_READ_SCOPE !== '0';
-
-/** Turn scopes off (the old per-row reads) or on: the test pinning that both give the same JSON. */
-export function setReadScopes(on: boolean) {
-  enabled = on;
-}
+const enabled = process.env.CITADEL_READ_SCOPE !== '0';
 
 /** Run `fn` with `db`'s reads remembered until it returns. Nested scopes share the outer one. */
 export function readScope<T>(db: DatabaseSync, fn: () => T): T {

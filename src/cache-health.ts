@@ -16,8 +16,6 @@ export interface CacheReading {
   kswapd_rate: number | null; refault_rate: number | null; server_refault_rate: number | null; pgpgin_rate: number | null; thp_fallback_rate: number | null;
 }
 
-export const NO_CACHE: CacheReading = { db_cached: null, db_size: null, kswapd_rate: null, refault_rate: null, server_refault_rate: null, pgpgin_rate: null, thp_fallback_rate: null };
-
 const num = (text: string, key: string): number | null => {
   const m = new RegExp(`^${key} (\\d+)`, 'm').exec(text);
   return m ? Number(m[1]) : null;

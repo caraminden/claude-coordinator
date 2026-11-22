@@ -256,7 +256,7 @@ test('an @mention pings only its person, even on a pinned-only device, opens at 
   await call('Cara', `/api/tickets/${t.id}/messages`, { method: 'POST', body: { text: '@josh can you look at this' } });
   // A mention is said to its person, so it reaches every device of Josh's: his first test's too.
   const got = await pushes(n, 2);
-  assert.deepEqual(Object.keys(got).sort(), ['josh', 'josh-m'], 'the sender hears nothing');
+  assert.deepEqual(Object.keys(got).sort(), ['josh', 'josh-m'], 'every device of Josh, and the sender hears nothing');
   const events = (await call('Josh', `/api/tickets/${t.id}/events`)).events.filter((e: any) => e.kind === 'user_message');
   const msg = events.at(-1);
   // The agent reads the words as typed; the message names who it mentions, for the chip.

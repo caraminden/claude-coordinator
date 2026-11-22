@@ -29,13 +29,13 @@ export async function approveHostTool(app: App, askingId: number, t: HostTool, b
     const scheme = asking && store.getProject(asking.project_id);
     const citadel = store.getProject(GLOBAL_OWNER);
     if (!citadel?.repo_dir) return tell(`${byHand ? 'Approved' : `Installed ${label}`}, but there's no ${APP_NAME} scheme repo to list it in: tell your Taskmaster.`);
-    const { id, number } = await app.newMinion(citadel, { title: `List host tool ${label}`, props: { type: 'chore' } }, APP_NAME);
-    const chore = store.getTicket(id)!;
-    const file = join(chore.cwd!, MANIFEST);
+    const { id, number, cwd } = await app.newMinion(citadel, { title: `List host tool ${label}`, props: { type: 'chore' } }, APP_NAME);
+    const chore = { ...store.getTicket(id)!, cwd };
+    const file = join(cwd, MANIFEST);
     writeFileSync(file, manifestText(withTool(readManifest(file), { ...t, approved_by: by, approved_on: pacificDay(Date.now()), asked_by: `${scheme?.name ?? '?'} #${asking?.number ?? '?'}` })));
-    await git([...await identity(chore.cwd!), 'commit', '--quiet', '-m', `#${number}: list host tool ${label}, approved by ${by} for ${scheme?.name ?? '?'} #${asking?.number ?? '?'}`, '--', MANIFEST], chore.cwd!);
+    await git([...await identity(chore.cwd!), 'commit', '--quiet', '-m', `#${number}: list host tool ${label}, approved by ${by} for ${scheme?.name ?? '?'} #${asking?.number ?? '?'}`, '--', MANIFEST], cwd);
     runner.emit(id, 'note', { text: `This minion ships one line: ${label} in ${MANIFEST}, which ${by} approved for ${scheme?.name ?? '?'} #${asking?.number ?? '?'} (${byHand ? 'an Arch package a person installs by hand' : 'installed already'}). Its commit is on this branch; if the ship fails, rebase onto main keeping every other line of the list, and hand it off again.` });
-    const handed = app.landings.handOff(id, chore.cwd!, runner.hostEnv(chore), [], { summary: `List host tool ${label}`, risk: 'low', reason: `one line in ${MANIFEST}; the tool is ${byHand ? 'installed by hand' : 'installed already'}`, deploy: false });
+    const handed = app.landings.handOff(id, cwd, runner.hostEnv(chore), [], { summary: `List host tool ${label}`, risk: 'low', reason: `one line in ${MANIFEST}; the tool is ${byHand ? 'installed by hand' : 'installed already'}`, deploy: false });
     if (handed) {
       store.updateTicket(id, { state: 'outside', note: landPhase('') });
       runner.broadcastTicket(id);

@@ -32,10 +32,13 @@ export async function makeMinion(
       const dir = await makeDir(id, number!);
       store.setTicketDir(id, dir.cwd, dir.branch);
       await afterWrites();
+      // The folder comes back from here: setTicketDir is a queued write (src/db-writer.ts), and a caller that reads the
+      // row back can be served the row before it, whose cwd is '' — a relative path, which lands in the server's own
+      // checkout (#1618: a test run's chore minion committed into the minion worktree the server was running from).
+      return { id, number: number!, notes, cwd: dir.cwd };
     } catch (err: any) {
       throw new HttpError(500, `Could not create working directory: ${errorText(err)}`);
     }
-    return { id, number: number!, notes };
   } catch (err) {
     store.deleteTicket(id);
     throw err;

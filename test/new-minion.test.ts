@@ -37,3 +37,14 @@ test('a folder that cannot be made leaves no row either', async () => {
   await assert.rejects(makeMinion(store, p, { title: 't', props: { type: 'chore' } }, 'x', async () => { throw new Error('disk'); }), /Could not create working directory: .*disk/);
   assert.equal(count(store, p.id), 0);
 });
+
+test('the folder it made comes back from the call, for callers that write in it before any turn (#1618)', async () => {
+  const store = new Store(':memory:');
+  const p = store.createProject('One', null);
+  // setTicketDir is a queued write (src/db-writer.ts): a read that gives up on the queue is served the row before it,
+  // whose cwd is ''. Here it never lands at all, which is that read's worst case.
+  store.setTicketDir = () => {};
+  const made = await makeMinion(store, p, { title: 't', props: { type: 'chore' } }, 'x', dir);
+  assert.equal(made.cwd, '/w');
+  assert.equal(store.getTicket(made.id)!.cwd, '', 'the row a caller must not read the folder from');
+});

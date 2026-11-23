@@ -698,7 +698,7 @@ queue_order() {
     [[ $t =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$Q_DIR/$t" || continue # not a ticket half-written, or the glob itself
     printf -v seg '1%05d' "$old" # the waiters from before .order (no "order" line) ahead of it, in arrival order
     if [ "${l[1]:-0}" != 0 ]; then keys+=("0 $t")
-    elif [ "${l[7]:-}" != order ]; then keys+=("${seg}3 $t") old=$((old + 1))
+    elif [ "${l[4]:-}" != order ] && [ "${l[7]:-}" != order ]; then keys+=("${seg}3 $t") old=$((old + 1))
     elif [ -n "${rank[$t]:-}" ]; then printf -v k '%010d' "${rank[$t]}"; keys+=("${seg}1$k $t")
     else keys+=("${seg}2 $t"); fi
   done

@@ -38,7 +38,7 @@ land_deploy() {
   local to=$1 old note=() ntip mark rc=0 tested=$1 c b
   # shellcheck source=tools/deploy-queue.sh
   . "$CITADEL_TOOLS/deploy-queue.sh"
-  DEPLOY_QUEUE_TICKET=${QUEUE_TICKET:-}
+  export DEPLOY_QUEUE_TICKET=${QUEUE_TICKET:-} # deploy.sh's queue_phase moves the core's ticket on
   restart_lock "$STATE" || return 1
   deploy_unchecked_back "$STATE" "$LIVE"
   # The restart ahead was rolled back while this waited for it: what it shipped came off the live checkout, and this
@@ -388,10 +388,10 @@ CITADEL_CI_ONLINE_POLL=${LAND_CI_ONLINE_POLL:-30}
 CITADEL_CI_RERUN=${LAND_CI_RERUN:-180}
 CITADEL_CI_BURN=${LAND_CI_BURN:-180}
 # Ports CI_START/CI_LIMIT/CI_POLL/CI_DOWN: the core reads these LAND_* names at its line ~586, after this file.
-# CI_LIMIT is 360 s from the push here (Citadel's counted from the runner taking the job): land_ci_more's "taken" key adds the queue time.
+# CI_LIMIT is 540 s (#1606) from the push here (Citadel's counted from the runner taking the job): land_ci_more's "taken" key adds the queue time.
 LAND_CI_START=${LAND_CI_START:-90}
-LAND_CI_TIMEOUT=${LAND_CI_TIMEOUT:-360}
-LAND_CI_POLL=${LAND_CI_POLL:-5}
+LAND_CI_TIMEOUT=${LAND_CI_TIMEOUT:-540}
+LAND_CI_POLL=${LAND_CI_POLL:-15}
 LAND_CI_DOWN=${LAND_CI_DOWN:-600}
 # Ports ci_gate as the core's CI_STATUS: the core runs it with `bash -c`, so it sources this file (absolute path) first.
 citadel_self=$(realpath -- "${BASH_SOURCE[0]}")

@@ -11,6 +11,7 @@ const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 const { route } = require('./route.cjs');
 const { reloadKey, devtoolsKey } = require('./keys.cjs');
+const { appFrame } = require('./app-frame.cjs');
 
 const START = new URL(process.env.CITADEL_URL || 'https://citadel.zip/c/');
 /** Citadel's other addresses: a link to one of these opens here, on START's host, rather than in a browser. */
@@ -109,7 +110,11 @@ function started() {
   if (file) try { writeFileSync(file, 'started'); } catch {}
 }
 
-/** Right-click in a text box (or a Shift+right-click; the page's own menu takes the rest, #1663): the edit actions and, on a link, copying its address; spelling suggestions in a text box. */
+/**
+ * Right-click in a text box (or a Shift+right-click; the page's own menu takes the rest, #1663): the edit actions and, on a link,
+ * copying its address; spelling suggestions in a text box. In an app's frame that doesn't show its own menu: Reload this app and
+ * Inspect too (#1691).
+ */
 function contextMenu(wc, p) {
   const items = [];
   for (const s of p.dictionarySuggestions ?? []) items.push({ label: s, click: () => wc.replaceMisspelling(s) });
@@ -117,6 +122,12 @@ function contextMenu(wc, p) {
   if (p.linkURL) items.push({ label: 'Copy link address', click: () => require('electron').clipboard.writeText(p.linkURL) }, { type: 'separator' });
   if (p.isEditable) items.push({ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { type: 'separator' }, { role: 'selectAll' });
   else if (p.selectionText) items.push({ role: 'copy' });
+  // In an app's frame the menu always shows (#1691): an app without the kit's own menu (rail.js) got none on plain space.
+  const app = appFrame(p.frame);
+  if (app) {
+    if (items.length && items.at(-1).type !== 'separator') items.push({ type: 'separator' });
+    items.push({ label: 'Reload this app', click: () => { try { app.reload(); } catch {} } }, { label: 'Inspect', accelerator: 'Ctrl+Shift+I', click: () => wc.inspectElement(p.x, p.y) });
+  }
   if (items.length) Menu.buildFromTemplate(items).popup();
 }
 

@@ -99,6 +99,13 @@ point, and leaves a shot at `%TEMP%\electron-drag.png`. After editing `public/`,
 `rig.ts reload` wants the Edge driver. Electron is the one in `%LOCALAPPDATA%\defender-copy`. A turn without the
 `tailscale` command sets `RIG_HOST=perigee.tail59477f.ts.net` for `rig.ts up`.
 
+`scripts/electron-app/keys.mjs` (#1691) needs no dev copy: it serves its own page (a text box and three app frames: same host,
+sandboxed, cross-site) and runs a published build (`keys.mjs 9`), the checkout's `desktop/` on the newest build's Electron
+(`keys.mjs checkout`) or an Edge app window (`keys.mjs edge`). `keys` presses Ctrl+R, F5, Ctrl+Shift+R and Ctrl+F5 with focus
+in each place; `rclick` reads the menu each right-click opens (UI Automation: Electron's menus aren't Win32 menus) and invokes
+Reload this app. While an elevated window has the box's foreground (the `front` line names it), Windows drops injected input:
+set `RIG_INPUT=cdp` to send it through DevTools, which takes the same browser-side path but skips Windows' message loop.
+
 ## What you get back
 
 - **Waiting in line:** "waiting in line for the screen … desktop CI job … for GitHub Actions has

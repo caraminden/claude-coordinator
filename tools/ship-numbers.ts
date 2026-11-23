@@ -1,8 +1,10 @@
 // Schema and ADR numbers handed out at ship time (#1221). tools/land.sh runs it; nothing else needs to.
 //
 //   merge <ours|theirs> <base> <ours> <theirs>
-//     The git merge driver land.sh sets on src/db.ts for its own merge-tree, rebase and merge (core.attributesFile:
-//     tools/ship-numbers.attributes). The first word names the side that is main (or the build a feeder goes into):
+//     The git merge driver for src/db.ts in land.sh's own merge-tree, rebase and merge (core.attributesFile:
+//     tools/ship-numbers.attributes; since #1418 through the kit core's land_merge hook in land.local.sh, whose MERGES
+//     rules then append MIGRATIONS lines; `take` below runs it alone, and git's merge for the other files listed there).
+//     The first word names the side that is main (or the build a feeder goes into):
 //     its SCHEMA_HISTORY numbers stay. The other side's new lines go after them, renumbered from its newest + 1, and
 //     the schema_version checks that side added in this file move with them. The rest of the file merges as git
 //     would. A tail that isn't a plain append on the moving side (a base line edited or dropped, or a new line the

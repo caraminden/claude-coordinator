@@ -3,7 +3,8 @@
 // land, a feeder's --into and a build's --build alike; a clash it can't sort out is refused before the line with the
 // number to take.
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
@@ -195,4 +196,83 @@ test("a feeder whose ADR renumber would rewrite a file another feeder claimed is
   assert.equal(res.status, 1, res.stderr);
   assert.match(res.stderr, /docs\/x\.md is #2's in the claims/);
   assert.equal(git(r.source, 'rev-parse', 'build/3'), before);
+});
+
+// Ship-time merges (#1418): the prompt budgets add up, the baseline is made again from the merged prompts, and both
+// sides' MIGRATIONS lines stay, by the kit core's MERGES rules (tools/land-core.sh --merge, its settings in land.local.sh).
+// Names built, not quoted: a quoted test file's name reads as a dependency to test/pipeline-files.test.ts.
+const BUDGET_FILE = `test/${'prompt-budget'}.test.ts`;
+const BASELINE = 'test/prompt-baseline.json';
+// A budget file shaped like Citadel's; PROMPT_BASELINE=write makes the baseline from it, as the real one does.
+const budget = (minion: string, minionNotes: string, kit: string, kitNotes: string) => `import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+const BUDGET = { minion: ${minion} /* ${minionNotes} */, taskmaster: 41_500 /* +100 for the ship-lessons line (#1119) */ };
+const KIT_BUDGET = ${kit}; // ${kitNotes}
+if (process.env.PROMPT_BASELINE === 'write') writeFileSync(new URL('prompt-baseline.json', import.meta.url), JSON.stringify({ made: createHash('sha256').update(readFileSync(new URL(import.meta.url))).digest('hex') }) + '\\n');
+void BUDGET, KIT_BUDGET;
+`;
+const made = (text: string) => JSON.stringify({ made: createHash('sha256').update(text).digest('hex') });
+const migrations = (...cols: string[]) =>
+  `\n\nconst MIGRATIONS: [table: string, column: string, ddl: string][] = [\n  ['tickets', 'a', 'TEXT'],\n${cols.map((c) => `  ['tickets', '${c}', 'TEXT'],\n`).join('')}];`;
+// A stand-in citadel-test for the guard tests: logs the minion budget it saw on the commit it ran on.
+function guarded(r: R) {
+  writeFileSync(join(r.source, 'tools', 'citadel-test'), `#!/usr/bin/env bash\ngrep -o "minion: [0-9_]*" ${BUDGET_FILE} >>"$GUARD_LOG"\n`);
+  chmodSync(join(r.source, 'tools', 'citadel-test'), 0o755);
+  const old = budget('37_500', '+450 on 2026-11-19 for the done-lines rule (#1115)', '10_550', '+200 on 2026-11-05 (#1148)');
+  write(r.source, { [BUDGET_FILE]: old, [BASELINE]: made(old) + '\n', 'src/db.ts': db(BASE) + migrations() }, 'budget, baseline, migrations');
+  git(r.wt, 'merge', '-q', '--ff-only', 'main');
+  return join(r.dir, 'guard.log');
+}
+
+test('two branches that each raise BUDGET and KIT_BUDGET ship one after the other: the raises add up, both notes stay, the budget test runs on the result (#1418)', () => {
+  const r = start();
+  const log = guarded(r);
+  write(r.source, { [BUDGET_FILE]: budget('37_900', '+400 for A (#2), +450 on 2026-11-19 for the done-lines rule (#1115)', '10_750', '+200 for A (#2); +200 on 2026-11-05 (#1148)') }, '#2: raise');
+  write(r.wt, { [BUDGET_FILE]: budget('37_800', '+300 for B (#1), +450 on 2026-11-19 for the done-lines rule (#1115)', '10_650', '+100 for B (#1); +200 on 2026-11-05 (#1148)') }, '#1: raise');
+  const res = r.run({ GUARD_LOG: log });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'), 'it landed');
+  const merged = show(r, 'main', BUDGET_FILE);
+  assert.match(merged, /minion: 38_200 \/\* /, "main's 37_900 plus this branch's +300, never more");
+  assert.match(merged, /KIT_BUDGET = 10_850;/);
+  for (const note of ['+400 for A (#2)', '+300 for B (#1)', '+200 for A (#2)', '+100 for B (#1)', '+450 on 2026-11-19 for the done-lines rule (#1115)', '+200 on 2026-11-05 (#1148)']) assert.ok(merged.includes(note), `${note} kept:\n${merged}`);
+  assert.equal(readFileSync(log, 'utf8').trim().split('\n').at(-1), 'minion: 38_200', 'the guard ran the budget test on the merged file');
+});
+
+test('two branches that each change the prompt baseline both ship: the baseline is made again from the merged prompts, not merged (#1418)', () => {
+  const r = start();
+  const log = guarded(r);
+  const theirs = budget('37_900', '+400 for A (#2), +450 on 2026-11-19 for the done-lines rule (#1115)', '10_550', '+200 on 2026-11-05 (#1148)');
+  write(r.source, { [BUDGET_FILE]: theirs, [BASELINE]: made(theirs) + '\n' }, '#2: raise, baseline');
+  const mine = budget('37_500', '+450 on 2026-11-19 for the done-lines rule (#1115)', '10_650', '+100 for B (#1); +200 on 2026-11-05 (#1148)');
+  write(r.wt, { [BUDGET_FILE]: mine, [BASELINE]: made(mine) + '\n' }, '#1: raise, baseline');
+  const res = r.run({ GUARD_LOG: log });
+  assert.equal(res.status, 0, res.stderr);
+  const merged = show(r, 'main', BUDGET_FILE);
+  assert.match(merged, /minion: 37_900 .*KIT_BUDGET = 10_650;/s);
+  assert.equal(show(r, 'main', BASELINE), made(merged + '\n'), 'measured again on the merged file');
+  assert.match(git(r.source, 'log', '-1', '--format=%s', 'main'), /prompt-baseline\.json measured again at ship time/);
+});
+
+test("two branches that each append to MIGRATIONS and SCHEMA_HISTORY both ship: main's lines first, then the branch's, renumbered (#1418)", () => {
+  const r = start();
+  guarded(r);
+  write(r.source, { 'src/db.ts': db([...BASE, [96, 'theirs (#2)']]) + migrations('b') }, '#2: theirs');
+  write(r.wt, { 'src/db.ts': db([...BASE, [96, 'mine (#1)']], check(96, 'mine')) + migrations('c') }, '#1: mine');
+  const res = r.run({ GUARD_LOG: join(r.dir, 'guard.log') });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(show(r, 'main', 'src/db.ts'), db([...BASE, [96, 'theirs (#2)'], [97, 'mine (#1)']], check(97, 'mine')) + migrations('b', 'c'));
+});
+
+test('a budget one side lowered is not summed: the ship is refused before the line as any conflict is, main untouched (#1418)', () => {
+  const r = start();
+  guarded(r);
+  write(r.source, { [BUDGET_FILE]: budget('37_900', '+400 for A (#2), +450 on 2026-11-19 for the done-lines rule (#1115)', '10_550', '+200 on 2026-11-05 (#1148)') }, '#2: raise');
+  write(r.wt, { [BUDGET_FILE]: budget('37_000', '-500 for B (#1), +450 on 2026-11-19 for the done-lines rule (#1115)', '10_550', '+200 on 2026-11-05 (#1148)') }, '#1: lower');
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = r.run({ GUARD_LOG: join(r.dir, 'guard.log') });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /smoke: it conflicts with main/);
+  assert.match(res.stderr, /prompt-budget\.test\.ts/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
 });

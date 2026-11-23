@@ -1088,6 +1088,19 @@ test('the start reads no landing folder before it returns, and the daily prune k
   assert.deepEqual(readdirSync(dir).sort(), ['4', '5'], 'the old finished folder goes; the old unreported one and the recent one stay');
 });
 
+test("a last run's folder a restart left mid-delete is no hand-off, and the daily prune drops it whatever its age (#1734)", async () => {
+  const data = mkdtempSync(join(root, 'prune-old-'));
+  const dir = join(data, 'run', 'landings');
+  mkdirSync(join(dir, '6.old-1700000000000'), { recursive: true });
+  writeFileSync(join(dir, '6.old-1700000000000', 'handoff.json'), '{}');
+  mkdirSync(join(dir, '6'));
+  writeFileSync(join(dir, '6', 'handoff.json'), '{}');
+  const l = new Landings(data);
+  assert.deepEqual(await l.pending(), [6], 'the renamed folder is not read as a minion');
+  await l.prune(Date.now());
+  assert.deepEqual(readdirSync(dir), ['6']);
+});
+
 test('a land settled while the start scans is not added back by the scan (#1463)', async () => {
   const data = mkdtempSync(join(root, 'scan-race-'));
   mkdirSync(join(data, 'run', 'landings', '8'), { recursive: true });

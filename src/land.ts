@@ -322,7 +322,8 @@ export class Landings {
     for (const name of names) {
       if (this.waiting.has(Number(name))) continue;
       try {
-        if (now - (await stat(join(this.root, name, 'code'))).mtimeMs > KEEP_MS) await rm(join(this.root, name), { recursive: true, force: true });
+        // A last run a restart cut off mid-delete (HostJobs.start renames it away, #1734) goes whatever its age.
+        if (/\.old-\d+$/.test(name) || now - (await stat(join(this.root, name, 'code'))).mtimeMs > KEEP_MS) await rm(join(this.root, name), { recursive: true, force: true });
       } catch {
         // Still running, or never started: left alone.
       }

@@ -29,6 +29,7 @@ import { hostCheck } from '../host-check.ts';
 import { shipRisk, shipRiskText } from '../ship-risk.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { landArgs, landConflict, landPhase, type Handoff } from '../land.ts';
+import { changedLines, parseProbe, PROBE_HELP, PROBE_LINES } from '../live-probe.ts';
 import { criticRefusal } from '../critic-gate.ts';
 import { fixLine, fixProofProblem, parseFixProof } from '../fix-proof.ts';
 import { parseLearned, queueLesson, touchedFiles } from '../ship-lessons.ts';
@@ -1437,6 +1438,20 @@ export const ticketRoutes: Route[] = [
       if (body.stay_open === true) {
         h.stayOpen = true;
         if (body.waiting_on !== undefined) h.waitingOn = str(body.waiting_on, 'waiting_on', 120);
+      }
+      // The live probe (#1741): a ship to main of PROBE_LINES or more names one check the server runs once it's live, where something of the scheme is served here.
+      if (body.probe !== undefined) {
+        if (body.into !== undefined) throw new HttpError(400, 'A probe goes with a ship to main, not a merge into a build');
+        try {
+          h.probe = parseProbe(body.probe);
+        } catch (err: any) {
+          throw new HttpError(400, `${err.message}. ${PROBE_HELP}`);
+        }
+        if (h.probe.kind === 'sql' && (await app.waiters.elsewhere(ticket.id))) throw new HttpError(400, "A sql probe reads this server's own database, so only the scheme it runs uses one: pick http, timing or page");
+      } else if (body.into === undefined) {
+        const served = !(await app.waiters.elsewhere(ticket.id)) || (body.deploy !== false && app.store.listContraptions().some((c) => c.home_scheme === ticket.project_id && !!c.repo));
+        const lines = served ? await changedLines(ticket.cwd) : 0;
+        if (lines >= PROBE_LINES) throw new HttpError(400, `Not handed off: this change is ${lines} lines (${PROBE_LINES} or more), so it names one check the server runs once it's live, with no model: a pass is a line in your chat, a fail wakes you. Pick what would show it broken live. ${PROBE_HELP}`);
       }
       let args: string[];
       try {

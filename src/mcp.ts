@@ -1719,6 +1719,7 @@ const THREAD_TOOLS = () => ([
         fix_proof: { type: 'object', description: 'A proven bug fix\'s proof, instead of go: {test, red_on, red_output, review} (self-review)' },
         stay_open: { type: 'boolean', description: 'Only when your brief has more pieces for you: it ships, you stay open in state ready' },
         waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open: a wait or after-land steps ("Cara testing on her phone"); woken once live, do them and set your state' },
+        probe: { type: 'object', description: 'Live check, for 600+ line ships (self-review)' },
         ...LAND_PROPS,
         ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: 'false: nothing to serve, so no deploy (a PC-only build, say)' } } : {}),
       },
@@ -2399,7 +2400,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'hand_off_land': {
       const body: Record<string, unknown> = {};
-      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
+      for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on', 'probe'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       if (args.outage === true) body.outage = true;
       await call('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);

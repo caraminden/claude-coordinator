@@ -484,6 +484,38 @@ test('deploy: false, a merge into a build, or a scheme with no app deploys nothi
   }
 });
 
+// #1741: a ship's live probe runs once it is live (now, after the restart, or nowhere this server serves); a fail keeps it open.
+test('a ship with a live probe hands it over with when it is live, and a fail keeps the minion open', async () => {
+  const probe = { kind: 'http' as const, path: '/api/skills', status: 200 };
+  const calls: string[] = [];
+  const cases = [['probe-live', LIVE, [], undefined, 'live'], ['probe-restart', RESTART, [], undefined, 'later'], ['probe-app', APP_LAND, [], ['peek-auras'], 'live'], ['probe-landed', APP_LAND, [], [], 'nowhere']] as const;
+  for (const [name, out, args, apps, when] of cases) {
+    const s = setup(name, apps ? { apps: [...apps], deployOps: fakeDeploys(() => ({ state: 'deployed', to: 'abc1234ffff0000' })).ops } : {});
+    s.deps.probe = async (id, p, commit, w) => { calls.push(`${name}: ${id} ${p.kind} ${commit} ${w}`); return false; };
+    await s.land(out, 0, { probe }, [...args]);
+    await s.handoffs.poll();
+    assert.equal(calls.at(-1)?.split(' ').at(-1), when, name);
+    assert.ok(s.did.some((x) => x.startsWith(when === 'later' ? 'deployPending' : 'close: ')), `${name}: a pass changes nothing: ${s.did.join(', ')}`);
+  }
+  assert.deepEqual(calls.slice(0, 2), ['probe-live: 1 http abc1234 live', 'probe-restart: 1 http def5678 later']);
+
+  const into = setup('probe-into');
+  into.deps.probe = async () => { calls.push('into'); return false; };
+  writeFileSync(join(into.cwd, 'tools', 'land.sh'), "echo 'land: merged into build/3'\n");
+  assert.ok(into.landings.handOff(1, into.cwd, { PATH: process.env.PATH! }, ['--into', 'build/3', 'test/a.test.ts'], { ...H, probe }));
+  await until('land.sh ends', () => into.landings.get(1)?.code !== null);
+  await into.handoffs.poll();
+  assert.ok(!calls.includes('into'), 'a merge into a build is not live: no probe');
+
+  const failed = setup('probe-fail');
+  failed.deps.probe = async () => true;
+  await failed.land(LIVE, 0, { probe });
+  await failed.handoffs.poll();
+  assert.equal(failed.notes.length, 1, 'the shipped line still posts');
+  assert.ok(!failed.did.some((x) => x.startsWith('close')), `the probe's wake keeps it open: ${failed.did.join(', ')}`);
+  assert.deepEqual(failed.landings.handoffs(), [], 'reported once');
+});
+
 test('a deploy that rolls back after a clean land posts the shipped line, then wakes the minion with its log and leaves it open', async () => {
   const d = fakeDeploys(() => ({ state: 'rolled back', to: 'abc1234', said: ['Fetching o/peek main.', 'Failed: Not healthy after 60s: /health not answering', 'Rolling back to 0ld0ld0.', 'Rolled back: 0ld0ld0 runs again.'] }));
   const s = setup('app-fail', { apps: ['peek-auras'], deployOps: d.ops });
@@ -703,6 +735,49 @@ test('the hand-off route refuses uncommitted work, a missing label and a high ri
     await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed', 20_000);
     assert.ok(store.listEvents(minion.id).some((e) => String(e.data).includes('Shipped abc1234')), 'the shipped line is in its chat');
 
+  } finally {
+    await srv.stop();
+  }
+});
+
+// #1741: a ship to main of 600 lines or more names a live probe; the route checks it, and the server runs it once live.
+test('the hand-off route makes a 600-line ship name a probe, refuses one that is not plain data, and runs it once live', async () => {
+  const srv = await bootServer();
+  try {
+    const store = new Store(join(srv.data, 'coordinator.db'));
+    const project = store.createProject('P', null);
+    const minion = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
+    const cwd = join(srv.root, 'wt');
+    mkdirSync(join(cwd, 'tools'), { recursive: true });
+    writeFileSync(join(cwd, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+    git(cwd, 'init', '-q', '-b', 'main');
+    git(cwd, 'add', '.');
+    git(cwd, 'commit', '-qm', 'init');
+    git(cwd, 'checkout', '-q', '-b', 'ticket/1-big');
+    writeFileSync(join(cwd, 'big.txt'), Array.from({ length: 600 }, (_, i) => `line ${i}`).join('\n') + '\n');
+    git(cwd, 'add', '.');
+    git(cwd, 'commit', '-qm', 'big');
+    store.setTicketDir(minion.id, cwd, null);
+    const token = agentToken(srv.data, minion.id);
+    const handOff = async (body: object) => {
+      const res = await fetch(`${srv.base}/api/tickets/${minion.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: res.status, error: res.status === 202 ? '' : String((await res.json()).error) };
+    };
+    const body = { summary: 'Big one', risk: 'low', risk_reason: 'test' };
+
+    const none = await handOff(body);
+    assert.equal(none.status, 400);
+    assert.match(none.error, /^Not handed off: this change is 600 lines \(600 or more\), so it names one check .* probe is one of: /);
+    assert.match((await handOff({ ...body, probe: { kind: 'shell', cmd: 'rm -rf /' } })).error, /^probe\.kind must be http, timing, sql, page or none\. probe is one of/);
+    assert.match((await handOff({ ...body, probe: { kind: 'http', path: '//elsewhere.example/' } })).error, /not a valid path/);
+    assert.match((await handOff({ ...body, into: 'build/2', files: ['test/a.test.ts'], probe: { kind: 'none', reason: 'x' } })).error, /goes with a ship to main/);
+    assert.equal(store.getTicket(minion.id)!.state, null, 'nothing was handed off');
+
+    assert.equal((await handOff({ ...body, probe: { kind: 'http', path: '/api/health', text: 'ok' } })).status, 202);
+    await until('the server reports the land', () => store.getTicket(minion.id)!.status === 'closed');
+    const said = store.listEvents(minion.id).map((e) => String(e.data));
+    assert.ok(said.some((d) => d.includes('Live probe passed: GET /api/health answers 200 with \\"ok\\"')), said.join('\n'));
+    assert.match(readFileSync(join(srv.data, 'live-probes.jsonl'), 'utf8'), /"kind":"http","result":"pass"/, "the trial's log has the row");
   } finally {
     await srv.stop();
   }

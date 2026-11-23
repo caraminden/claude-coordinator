@@ -20,6 +20,7 @@ import { ensureGradleInit, GRADLE_CACHE_CAP, gradleCacheDir, trimCache } from '.
 import { diskUsage, low, size } from './src/build-output.ts';
 import { CodexLink } from './src/codex-link.ts';
 import { LandHandoffs, Landings } from './src/land.ts';
+import { LiveProbes, probeLog, runProbe } from './src/live-probe.ts';
 import { watchLoopLag } from './src/loop-lag.ts';
 import { AnswerProbe } from './src/answer-time.ts';
 import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
@@ -527,6 +528,7 @@ function liveOn(head: string | null) {
   void (async () => {
     await waiters.check(head);
     for (const id of await waiters.pendingLive()) runner.deployLive(id);
+    await liveProbes.sweep(); // #1741: a kept probe whose ship this head has (a stay_open restart)
     // Last, so nothing above waits on it; after waiters.check, which moves the head that says whose code is live.
     await citadelServer.live(head);
     releases.poll();
@@ -1492,8 +1494,27 @@ const flakeFixes = new FlakeFixes({
   evidence: async (p, branch, file, at) => { const slug = repoSlug(p.repo_url); return slug && p.repo_dir ? ciEvidence(slug, githubOf(p.repo_dir), branch, file, at) : null; },
 });
 if (!BOOT_CHECK && !PREVIEW) every('flake fixes', 5 * 60_000, () => flakeFixes.tick(store.listProjects().filter((p) => p.repo_dir)));
+// The live probe (#1741): a big ship's own check of itself, run by the server once it is live (src/live-probe.ts).
+const liveProbes = new LiveProbes({
+  store, runner, from: APP_NAME, log: probeLog(DATA_DIR),
+  run: (id, p) => {
+    const t = store.getTicket(id);
+    const person = t?.person_id != null ? store.getUser(t.person_id) : null;
+    // Signed in as the minion's own person, in this process only: the cookie goes to this server's loopback and the shot's browser, nowhere else.
+    const cookie = person && !person.disabled_at ? auth.issueCookie(person, false).split(';')[0] : null;
+    return runProbe(p, { base: `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`, cookie, dbPath: join(DATA_DIR, 'coordinator.db'), outDir: join(DATA_DIR, 'live-probes', String(id)) });
+  },
+  isLive: async (id, commit) => {
+    const dir = store.getProject(store.getTicket(id)?.project_id ?? 0)?.repo_dir;
+    const head = waiters.head;
+    if (!commit || !dir || !head) return false;
+    return new Promise((done) => execFile('git', ['merge-base', '--is-ancestor', commit, head], { cwd: dir }, (err) => done(!err)));
+  },
+});
+runner.probeHold = (id) => liveProbes.hold(id);
 const landHandoffs = new LandHandoffs({
   landings, store, runner, from: APP_NAME,
+  probe: (id, probe, commit, when) => liveProbes.shipped(id, probe, commit, when),
   flakes: (id, output) => { const t = store.getTicket(id); if (t) recordFlakes(t.project_id, id, /main is now at ([0-9a-f]{7,40})/.exec(output)?.[1] ?? null, output); },
   failed: (id, kind) => {
     stallWatch.shipFailed(id, kind);

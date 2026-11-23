@@ -1518,6 +1518,8 @@ export class Runner {
       this.emit(ticketId, 'note', { text: `The deploy is live, but ${held}, so this minion stays open.` });
       return false;
     }
+    // #1741: a live probe still to run holds the dismissal; LiveProbes dismisses it on a pass, or wakes it on a fail.
+    if (this.probeHold?.(ticketId)) return false;
     this.store.updateTicket(ticketId, { state: null });
     this.close(ticketId, 'The deploy is live, so it dismissed this minion.');
     return true;
@@ -1558,6 +1560,9 @@ export class Runner {
    * again), or null. Set by the server; CI health's ciGreen lets it go.
    */
   ciHold?: (ticketId: number) => string | null;
+
+  /** #1741: true when this minion's live probe still has to run (LiveProbes.hold, which runs it and holds its dismissal). Set by the server. */
+  probeHold?: (ticketId: number) => boolean;
 
   /**
    * #1074: the red this minion fixed is green again, so dismiss it as its live deploy would have: after a running

@@ -28,6 +28,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes, and a person's Split first on a start card (#1674)", calls: 11 },
   'src/routes/projects.ts': { why: "tells the Taskmaster a person started a minion; a new scheme's kickoff, a tune-up and a brief a person sent", calls: 4 },
   'src/outbox.ts': { why: "the delivery queue's own interface, and a dropped-delivery note", calls: 4 },
+  'src/live-probe.ts': { why: "runs the minion's own check of its ship and wakes that minion on its fail; the minion picked the check, and the trial's stop rule (docs/adr/0030-live-probe-trial.md) counts its wrong fails", calls: 1 },
   'src/land.ts': { why: "tells a minion how its hand_off_land went; land.sh's own verdicts are the land-verdicts judge", calls: 7 },
   'src/backup.ts': { why: "a person's typed message from the backup chat", calls: 1 },
   'src/held-starts.ts': { why: 'delivers a brief held for the box', calls: 1 },

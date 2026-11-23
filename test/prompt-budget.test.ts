@@ -110,7 +110,7 @@ test("the kit's skill and agent descriptions stay within their budget", () => {
 // ship tools are held to 3,700 characters (1k tokens at reports/quality-push-2026-11/tokens.md's 3.7 a token, the handoff's bar),
 // plus 150 for hand_off_land's fix_proof (#1398: the proof field Cara's "Fixes ship; data still asks" needs, at its tersest).
 const TOOLS_BUDGET = 13_500; // +250 for ask_question's twin-card refusal and its not_duplicate flag (#1508); down from 16,950 on 2026-11-22: ask_question, message_coordinator, hand_off_land and close_self keep their first sentence, the rest moved to their results and refusals (#1575; 13,151 that day)
-const ADDED_BUDGET = 3_250; // down from 3,850 with #1575 (3,072 that day)
+const ADDED_BUDGET = 3_350; // down from 3,850 with #1575 (3,072 that day); +100 for hand_off_land's probe (#1741: the live check a 600+ line ship names, its shapes in its refusal)
 
 test("a minion's always-loaded tool definitions stay within their budget", () => {
   for (const env of [{}, { COORDINATOR_DEPLOYS: '1' }, { COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }, { COORDINATOR_DEPLOYS: '1', COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }]) {

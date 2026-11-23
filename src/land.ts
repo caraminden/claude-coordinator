@@ -16,6 +16,7 @@ import { access, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { faultPoint } from './fault-points.ts';
 import { HostJobs } from './host-job.ts';
+import type { Probe } from './live-probe.ts';
 import { pacificStamp } from './pacific.ts';
 
 export interface Landing {
@@ -53,6 +54,8 @@ export interface Handoff {
   learned?: string;
   /** The files its branch touched, for the lines' row. */
   touched?: string[];
+  /** Its live probe (#1741, src/live-probe.ts): run once the ship is live, with no model. */
+  probe?: Probe;
 }
 
 /** At most this many test files in one call: a feeder names the few its change touched. */
@@ -625,6 +628,8 @@ export interface HandoffDeps {
   failed?(id: number, kind: string | null): void;
   /** A clean land, wherever it went (main or a build): queue the minion's lines (#1119). Its errors are caught. */
   learned?(id: number, h: Handoff): void;
+  /** A ship on main with a live probe (#1741, LiveProbes.shipped): true when it failed and woke the minion. */
+  probe?(id: number, probe: Probe, commit: string | null, when: 'live' | 'later' | 'nowhere'): Promise<boolean>;
 }
 
 /**
@@ -793,6 +798,11 @@ export class LandHandoffs {
       }
       await once('told-deploy', () => runner.send(id, from, `Your handed-off land went through (${what}, ${(where[0].toLowerCase() + where.slice(1)).replace(/\.$/, '')}), but the deploy after it didn't go live:\n\n${failed.map((f) => (f.detail ? `${f.line}\n${f.detail}` : f.line)).join('\n\n')}\n\nFix the cause and hand the fix off with hand_off_land, which deploys again (deploy_contraption redeploys main as it is). close_self once nothing is left.`));
       return;
+    }
+    // Its live probe (#1741): live now runs it now, a restart keeps it for the live; a fail woke the minion, so it stays open.
+    if (!into && h.probe && this.d.probe) {
+      const when = r.kind === 'live' || (r.kind === 'landed' && deploys.length) ? 'live' : r.kind === 'restart' ? 'later' : 'nowhere';
+      if (await once('probe', () => this.d.probe!(id, h.probe!, r.commit ?? null, when))) return;
     }
     // Someone wrote while it was in line (a person, a relay): the minion answers them before it goes.
     if (this.d.landings.wasTalked(id)) {

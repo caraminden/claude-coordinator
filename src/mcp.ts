@@ -9,8 +9,7 @@ import { liveState } from './live-state.ts';
 import { instructionCost } from './prompt-cost.ts';
 import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
 import { callEnv, callCwd } from './pool-context.ts';
-import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText, RISKS } from './mcp-text.ts';
-import { money } from './minion-budget.ts';
+import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText, RISKS, money } from './mcp-text.ts';
 export { usageSplitText } from './mcp-text.ts';
 export { NOT_DEFAULT } from './mcp-media.ts';
 

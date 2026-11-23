@@ -1,7 +1,6 @@
 // The pure text formatters for the MCP tools' answers, split out of mcp.ts: each turns data the server sent into the text a tool returns.
 // They hold no state of their own (no env, no API calls).
 import { pacificDay } from './pacific.ts';
-import { money } from './minion-budget.ts';
 
 /** usage_split's answer (#905): each slice as a share of the week (all accounts together) with its dollars, against last week. */
 export function usageSplitText(w: any): string {
@@ -97,6 +96,10 @@ export function deployText(d: any): string {
   return [head, ...(todo.length ? ['To do: deployed, but it still lacks these. Get them done (a minion of its home scheme), then deploy again:', ...todo.map((t) => `- ${t}`), 'What it did:'] : []),
     ...d.said.filter((l: string) => !l.startsWith('To do: ')).map((l: string) => `- ${l}`), `Log: ${d.log}`, ...(d.state === 'running' ? [] : ['Last lines of the log:', d.tail ?? ''])].join('\n');
 }
+
+/** Dollars as people read them: cents under $10, whole dollars above. The one formatter (#1715); it lives here because
+ * the MCP server copies mcp.ts's local imports into each turn (src/turn-launch.ts), and minion-budget.ts would drag in db.ts. */
+export const money = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
 
 export const RISKS = ['unassessed', 'safe', 'interrupts', 'loses_data'];
 export const RISK_WORDS: Record<string, string> = { unassessed: 'not assessed', safe: 'safe', interrupts: 'interrupts users', loses_data: 'may lose data' };

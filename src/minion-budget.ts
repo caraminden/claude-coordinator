@@ -15,6 +15,7 @@
  */
 import { medianOrNaN as median } from './stats.ts';
 import type { Store } from './db.ts';
+import { money } from './mcp-text.ts';
 
 /** How far back the usual cost looks. */
 export const WINDOW_MS = 28 * 86_400_000;
@@ -112,8 +113,7 @@ export function budgetFor(store: Store, ticket: { id: number; model: string | nu
 /** The dollar amount of a mark for a budget. */
 export const markOf = (b: Budget, mark: { times: number; floor: number }) => Math.max(b.usd * mark.times, mark.floor);
 
-/** Dollars as people read them: cents under $10, whole dollars above. The one formatter (#1715). */
-export const money = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
+export { money };
 const usd = money;
 
 /** A minion waiting on its start card (#1674): its estimate and the card's question id; deleted once a person answers or unseals it. */

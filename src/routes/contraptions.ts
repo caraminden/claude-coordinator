@@ -39,6 +39,7 @@ function view(app: App, c: ContraptionRow) {
     relay_paths: JSON.parse(c.relay_paths) as string[],
     disk: app.services.diskUse(c), // DATA_DIR size from the background measure (#847)
     default_model: c.default_model, turn_cap: c.turn_cap, keys_at: c.keys_at, keys_dir: app.contraptions.folder(c.name),
+    restart_risk: c.restart_risk, restart_note: c.restart_note, runs: app.store.contraptionRuns(c.id, 5),
     repo: c.repo, branch: c.branch, folder: c.folder, // as set: null means main and ~/apps/<name>
     people: app.store.contraptionUsers(c.id),
     logins: app.store.contraptionUsers(c.id).map((id) => app.store.getUser(id)?.login).filter(Boolean),
@@ -63,6 +64,9 @@ function path(v: unknown, what: string): string {
   if (typeof v !== 'string' || !/^\/[\x21-\x7e]{0,199}$/.test(v)) throw new HttpError(400, `${what} must be a path starting with /, without spaces`);
   return v;
 }
+
+const RISKS = ['unassessed', 'safe', 'interrupts', 'loses_data'];
+const RISK_WORDS: Record<string, string> = { unassessed: 'not assessed', safe: 'safe', interrupts: 'interrupts users', loses_data: 'may lose data' };
 
 /** The registry fields a body sets; on create, the required ones must be there. */
 function fields(app: App, body: any, creating: boolean) {
@@ -91,6 +95,13 @@ function fields(app: App, body: any, creating: boolean) {
     const m = body.default_model;
     if (m !== null && m !== '' && (typeof m !== 'string' || !/^[\w.\[\]-]{1,60}$/.test(m))) throw new HttpError(400, 'Default model must be a model name like haiku');
     out.default_model = m || null;
+  }
+  // What Restart and Stop risk (#1682): any scheme's contraption, set by whoever manages contraptions.
+  if (body.restart_risk !== undefined) out.restart_risk = oneOf(body.restart_risk, RISKS, 'Restart risk') as ContraptionRow['restart_risk'];
+  if (body.restart_note !== undefined) {
+    const note = typeof body.restart_note === 'string' ? body.restart_note.replace(/[\x00-\x1f\x7f]/g, ' ').trim() : null;
+    if (note === null || note.length > 300) throw new HttpError(400, 'Restart note must be text of at most 300 characters');
+    out.restart_note = note;
   }
   if (body.turn_cap !== undefined) out.turn_cap = int(body.turn_cap, 'Turn cap', 1, 100_000);
   // Where it deploys from (#266): only an admin sets these, so only a repo an admin chose is ever built.
@@ -590,21 +601,40 @@ export const contraptionRoutes: Route[] = [
   // Its systemd user service (#266): what it is doing, install (writes its units from its manifest), start, stop, restart, and its journal.
   admin({
     method: 'GET', path: '/api/contraptions/:name/service',
-    handler: async ({ res, app, params }) => json(res, 200, await service(() => app.services.status(contraption(app, params.name)))),
+    handler: async ({ res, app, params }) => {
+      const c = contraption(app, params.name);
+      return json(res, 200, { ...await service(() => app.services.status(c)), restart_risk: c.restart_risk, restart_note: c.restart_note });
+    },
   }),
   admin({
     method: 'POST', path: '/api/contraptions/:name/service',
-    async handler({ req, res, app, params }) {
+    async handler({ req, res, app, params, session, caller }) {
       const c = contraption(app, params.name);
       const body = await readJson(req);
       const action = oneOf(body.action, ['install', 'start', 'stop', 'restart'], 'Action');
       if (!action) throw new HttpError(400, 'Action is required: install, start, stop or restart');
+      const risk = c.restart_risk;
+      const risky = action === 'stop' || action === 'restart';
+      // Typed name for "may lose data" (#1682): the tool passes `confirm` too, so this is the one check. Install, deploys and key rotation are not gated.
+      if (risky && risk === 'loses_data' && body.confirm !== c.name) {
+        throw new HttpError(409, `${c.name} ${action} is marked "may lose data"${c.restart_note ? `: ${c.restart_note}` : ''}. Send confirm: "${c.name}" to run it anyway.`);
+      }
+      const by = session.uid ? app.store.getUser(session.uid)?.login ?? `user ${session.uid}` : caller ? `${caller.kind} of scheme ${caller.project_id}` : 'unknown';
+      const log = (ok: boolean, said: string) => risky && app.store.addContraptionRun({ contraption_id: c.id, at: Date.now(), action, risk, by, ok: ok ? 1 : 0, said: said.slice(0, 500) });
       const said = await service(async () => {
         if (action === 'install') return app.services.install(c, { replace: body.replace === true, all: app.store.listContraptions() });
-        const { waited } = await app.services.act(c, action as 'start' | 'stop' | 'restart');
-        return [...(waited ? [waited] : []), `${{ start: 'Started', stop: 'Stopped', restart: 'Restarted' }[action]} ${app.services.unitOf(c)}.`];
+        try {
+          const { waited } = await app.services.act(c, action as 'start' | 'stop' | 'restart');
+          const done = [...(waited ? [waited] : []), `${{ start: 'Started', stop: 'Stopped', restart: 'Restarted' }[action]} ${app.services.unitOf(c)}.`];
+          log(true, done.join(' '));
+          return done;
+        } catch (err: any) {
+          log(false, String(err?.message ?? err));
+          throw err;
+        }
       });
-      return json(res, 200, { said, status: await service(() => app.services.status(c)) });
+      const note = risky ? [`Risk: ${RISK_WORDS[risk]}${c.restart_note ? ` (${c.restart_note})` : ''}.`] : [];
+      return json(res, 200, { said: [...note, ...said], status: await service(() => app.services.status(c)), restart_risk: risk, restart_note: c.restart_note });
     },
   }),
   admin({

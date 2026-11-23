@@ -2,11 +2,21 @@
 // enabled for, and rotate their keys (src/routes/contraptions.ts).
 import { account, api, h, icon, view } from './base.js';
 import { settingsHelp, settingsRow, settingsTabs, settingsTitle } from './settings.js';
+import { toneChip } from './look.js';
 import { showRail } from './rail.js';
 import { optimistic } from './ui/optimistic.js';
 
 const fail = (err) => alert(err.message);
 const when = (ms) => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+
+/** What Restart and Stop risk (#1682): its words, chip tone and the sentence a confirm opens with. */
+const RISKS = {
+  unassessed: ['Not assessed', 'neutral'],
+  safe: ['Safe', 'ok'],
+  interrupts: ['Interrupts users', 'warn'],
+  loses_data: ['May lose data', 'danger'],
+};
+const riskWords = (c) => `${RISKS[c.restart_risk]?.[0] ?? 'Not assessed'}${c.restart_note ? `: ${c.restart_note}` : ''}`;
 
 /** A unit's state in a few words. */
 const unitState = (u) => (u.load === 'not-found' ? 'not installed' : `${u.active}${u.enabled ? `, ${u.enabled}` : ''}`);
@@ -21,6 +31,9 @@ function servicePanel(c, summary) {
   const log = h('pre', { hidden: true });
   const status = h('span', { class: 'muted small', role: 'status' });
   const buttons = h('span', { class: 'row service-buttons' });
+  const [riskText, riskTone] = RISKS[c.restart_risk] ?? RISKS.unassessed;
+  const run = c.runs?.[0];
+  const lastRun = h('div', { class: 'small muted' }, run ? `Last ${run.action}: ${when(run.at)} by ${run.by} · risk ${(RISKS[run.risk] ?? RISKS.unassessed)[0].toLowerCase()} · ${run.ok ? 'worked' : 'failed'}` : '');
   const base = `api/contraptions/${c.name}/service`;
   const show = (s) => {
     summary(s.installed ? s.service.active : 'not installed');
@@ -31,13 +44,21 @@ function servicePanel(c, summary) {
       ...s.hand.map((u) => h('div', {}, `Hand-installed ${u.path}: ${unitState(u)} (${u.why}).`)));
     const live = s.hand.some((u) => u.active === 'active' || u.active === 'activating' || /^enabled/.test(u.enabled));
     const btn = (label, action, extra = {}, ask) => {
-      const b = h('button', { type: 'button', class: 'secondary small' }, label);
+      const b = h('button', { type: 'button', class: 'secondary small', title: action === 'stop' || action === 'restart' ? `Risk: ${riskWords(c)}` : undefined }, label);
       b.onclick = async () => {
-        if (ask && !confirm(ask)) return;
+        if (action === 'stop' || action === 'restart') {
+          // The risk and its note sit in every confirm; "may lose data" needs the name typed, and the server checks it again.
+          const risk = `Risk: ${riskWords(c)}.`;
+          if (c.restart_risk === 'loses_data') {
+            if (prompt(`${ask ?? `${label} ${c.title}?`}\n\n${risk}\n\nType ${c.name} to go on.`) !== c.name) return;
+            extra = { ...extra, confirm: c.name };
+          } else if (!confirm(`${ask ?? `${label} ${c.title}?`}\n\n${risk}`)) return;
+        } else if (ask && !confirm(ask)) return;
         status.textContent = `${label}…`;
         for (const x of buttons.querySelectorAll('button')) x.disabled = true;
         try {
           const r = await api(base, { method: 'POST', body: { action, ...extra } });
+          if (action === 'stop' || action === 'restart') lastRun.textContent = `Last ${action}: just now · risk ${(RISKS[c.restart_risk] ?? RISKS.unassessed)[0].toLowerCase()} · ${r.said.at(-1)}`;
           status.textContent = r.said.join(' ');
           show(r.status);
         } catch (err) {
@@ -92,7 +113,7 @@ function servicePanel(c, summary) {
     summary('service unknown');
   });
   if (c.repo) api(`api/contraptions/${c.name}/deploy`).then(showDeploy).catch(() => {});
-  return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), buttons, deployBtn), notes, status, log, deployLine, deployTodo, deployLog);
+  return h('div', { class: 'contraption-service' }, h('div', { class: 'row' }, line, h('span', { class: 'spacer' }), toneChip(riskTone, `Restart: ${riskText}`), buttons, deployBtn), h('div', { class: 'small muted', hidden: !c.restart_note }, c.restart_note), lastRun, notes, status, log, deployLine, deployTodo, deployLog);
 }
 
 const size = (b) => (b < 1e9 ? `${Math.round(b / 1e6)} MB` : `${(b / 1e9).toFixed(b < 1e11 ? 1 : 0)} GB`);
@@ -113,6 +134,8 @@ function diskLine(c) {
 // Split so src/icons.ts doesn't take it for Citadel's own icon and append ?v=<hash>.
 const ICON_HINT = '/icon' + '.svg';
 
+const riskSelect = (c) => h('select', { name: 'restart_risk' }, ...Object.entries(RISKS).map(([v, [label]]) => h('option', { value: v, selected: v === (c.restart_risk ?? 'unassessed') }, label)));
+
 /** One contraption as a row that opens (#997): who it's enabled for, its settings, its service and its keys. */
 function card(c, people, replace) {
   const field = (label, name, value, attrs = {}) => h('label', { class: attrs.wide ? 'wide' : '' }, label,
@@ -129,6 +152,8 @@ function card(c, people, replace) {
     field('Turns per person per day', 'turn_cap', c.turn_cap, { type: 'number', min: 1, placeholder: 'no cap' }),
     field('Open paths (no login)', 'open_paths', c.open_paths.join(', '), { placeholder: '/link', wide: true }),
     field('Relay paths (apps may call)', 'relay_paths', c.relay_paths.join(', '), { placeholder: '/app-api/', wide: true, title: 'Path prefixes other contraptions may call for a person. Their code must check the from claim.' }),
+    h('label', {}, 'Restart and Stop risk', riskSelect(c)),
+    field('Risk note', 'restart_note', c.restart_note, { maxlength: 300, placeholder: 'Shown in the confirm', wide: true }),
     field('Repo (deploys from)', 'repo', c.repo, { placeholder: 'owner/name' }),
     field('Branch', 'branch', c.branch, { placeholder: 'main' }),
     field('Folder', 'folder', c.folder, { placeholder: `~/apps/${c.name}`, wide: true }),

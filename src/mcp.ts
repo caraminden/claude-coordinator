@@ -969,6 +969,8 @@ const CONTRAPTION_FIELDS = {
   repo: { type: ['string', 'null'], description: 'The GitHub repo deploy_contraption builds it from, as owner/name, like caraminden/mandate. Only a repo set here is ever built.' },
   branch: { type: ['string', 'null'], description: 'The branch it deploys; null for main.' },
   folder: { type: ['string', 'null'], description: 'Where its repo is checked out; null for ~/apps/<name>.' },
+  restart_risk: { type: 'string', enum: ['unassessed', 'safe', 'interrupts', 'loses_data'], description: 'What its Stop and Restart risk: safe, interrupts (users in the middle of something), loses_data (a person types its name to run them), or unassessed (the default).' },
+  restart_note: { type: 'string', description: 'A line for whoever is about to Stop or Restart it, at most 300 characters; "" clears it.' },
 };
 
 /** Wait up to an hour for the deploy at `path` (builds take minutes), then hand back so the turn can follow again. */
@@ -1059,7 +1061,7 @@ const CONTRAPTION_TOOLS = [
   },
   {
     name: 'contraption_service',
-    description: `A contraption's systemd user service, which ${APP_NAME} writes and runs itself as citadel-app-<name> (plus citadel-app-<name>-<job> for timers its citadel-app.json names). status: its state, its manifest's problems and any hand-installed unit for it. install: write its units from the manifest in its folder, reload, enable and (re)start them; refused while a hand-installed unit for it runs or is enabled, unless replace is true, which stops and disables those first (their files stay). start, stop, restart: its service (install, stop and restart first wait up to 3 minutes for its running agent turns, holding new ones). logs: the last lines of its journal. Only on a turn a ${APP_NAME} admin asked for.`,
+    description: `A contraption's systemd user service, which ${APP_NAME} writes and runs itself as citadel-app-<name> (plus citadel-app-<name>-<job> for timers its citadel-app.json names). status: its state, its manifest's problems and any hand-installed unit for it. install: write its units from the manifest in its folder, reload, enable and (re)start them; refused while a hand-installed unit for it runs or is enabled, unless replace is true, which stops and disables those first (their files stay). start, stop, restart: its service (status shows its restart and stop risk first; read it before stopping or restarting; install, stop and restart first wait up to 3 minutes for its running agent turns, holding new ones). logs: the last lines of its journal. Only on a turn a ${APP_NAME} admin asked for.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -1067,6 +1069,7 @@ const CONTRAPTION_TOOLS = [
         action: { type: 'string', enum: ['status', 'install', 'start', 'stop', 'restart', 'logs'] },
         replace: { type: 'boolean', description: 'install only: stop and disable hand-installed units for it first.' },
         lines: { type: 'integer', description: 'logs only: how many lines, default 100, at most 1000.' },
+        confirm: { type: 'string', description: 'stop and restart only: the contraption\'s name, required when its risk is "may lose data" (status shows the risk; the refusal says it too).' },
       },
       required: ['name', 'action'],
     },
@@ -2187,7 +2190,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const path = `${contraptionPath(args)}/service`;
       if (args.action === 'status') return serviceText(await call('GET', path));
       if (args.action === 'logs') return (await call('GET', `${path}/logs?lines=${Number(args.lines) || 100}`)).log || 'No journal lines.';
-      const r = await call('POST', path, { action: args.action, replace: args.replace === true });
+      const r = await call('POST', path, { action: args.action, replace: args.replace === true, ...(args.confirm ? { confirm: args.confirm } : {}) });
       return `${r.said.join('\n')}\n${serviceText(r.status)}`;
     }
     case 'rotate_contraption_keys':

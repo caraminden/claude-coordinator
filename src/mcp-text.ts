@@ -97,6 +97,8 @@ export function deployText(d: any): string {
     ...d.said.filter((l: string) => !l.startsWith('To do: ')).map((l: string) => `- ${l}`), `Log: ${d.log}`, ...(d.state === 'running' ? [] : ['Last lines of the log:', d.tail ?? ''])].join('\n');
 }
 
+const RISK_WORDS: Record<string, string> = { unassessed: 'not assessed', safe: 'safe', interrupts: 'interrupts users', loses_data: 'may lose data' };
+
 /** A service's state as the tools show it. */
 export function serviceText(s: any): string {
   const state = (u: any) => `${u.unit}: ${u.load === 'not-found' ? 'not installed' : `${u.active}${u.sub ? ` (${u.sub})` : ''}, ${u.enabled || 'no unit file'}`}`;
@@ -104,6 +106,7 @@ export function serviceText(s: any): string {
     s.installed ? state(s.service) : `${s.unit}: not installed`,
     ...s.timers.map(state),
     `folder ${s.folder}`,
+    ...(s.restart_risk ? [`restart and stop risk: ${RISK_WORDS[s.restart_risk] ?? s.restart_risk}${s.restart_note ? ` (${s.restart_note})` : ''}`] : []),
     s.manifestError ? `manifest problem: ${s.manifestError}` : `manifest OK${s.health ? `, health ${s.health}` : ''}`,
     ...s.hand.map((u: any) => `hand-installed: ${u.path}: ${u.active}, ${u.enabled || 'no file state'} (${u.why})`),
   ].join('\n');
@@ -122,6 +125,7 @@ export function contraptionText(c: any): string {
     `turn cap ${c.turn_cap ?? 'none'}`,
     `enabled for ${c.logins.length ? c.logins.join(', ') : 'nobody'}`,
     `key folder ${c.keys_dir} (identity.pub, contraption.key)`,
+    `restart risk ${RISK_WORDS[c.restart_risk] ?? c.restart_risk}${c.restart_note ? ` (${c.restart_note})` : ''}`,
     `repo ${c.repo ? `${c.repo} ${c.branch ?? 'main'}` : 'none'}, folder ${c.folder ?? `~/apps/${c.name}`}`,
   ].join(' | ');
 }

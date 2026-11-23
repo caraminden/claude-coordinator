@@ -222,6 +222,44 @@ test('Citadel\'s Taskmaster installs and runs a contraption\'s service, as the S
   assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'reboot' })).status, 400);
 });
 
+test('restart and stop carry a risk (#1682): shown first, a typed name for "may lose data", every run logged, any scheme\'s contraption', async () => {
+  const twin = () => store.getContraption('twin')!;
+  assert.equal(twin().restart_risk, 'unassessed', 'a contraption from before the column reads "not assessed"');
+  assert.equal(twin().restart_note, '');
+  assert.match((await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'status' })).text, /restart and stop risk: not assessed$/m);
+
+  // Set by the Taskmaster's tool and by the settings route, on a contraption whose home is another scheme.
+  assert.equal((await srv.call('/api/contraptions/twin', { restart_risk: 'nope' }, 'PATCH')).status, 400);
+  assert.equal((await srv.call('/api/contraptions/twin', { restart_note: 'x'.repeat(301) }, 'PATCH')).status, 400);
+  assert.equal((await srv.call('/api/contraptions/twin', { home_scheme: Delve.id, restart_risk: 'interrupts', restart_note: 'drops open chats' }, 'PATCH')).status, 200);
+  assert.equal(twin().home_scheme, Delve.id);
+  let r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'status' });
+  assert.match(r.text, /restart and stop risk: interrupts users \(drops open chats\)/);
+  r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'restart' });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, /Risk: interrupts users \(drops open chats\)\./);
+
+  r = await tool(CitadelTM, 'update_contraption', { name: 'twin', restart_risk: 'loses_data', restart_note: 'its queue is in memory' });
+  assert.match(r.text, /restart risk may lose data \(its queue is in memory\)/);
+  const calls = fake.calls().length;
+  r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'stop' });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /"may lose data": its queue is in memory\. Send confirm: "twin"/);
+  assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'restart', confirm: 'tw' })).status, 409);
+  assert.equal(fake.calls().length, calls, 'a refused run never reaches systemd');
+  assert.equal(store.contraptionRuns(twin().id).filter((x) => x.risk === 'loses_data').length, 0, 'a refusal is not a run');
+  r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'stop', confirm: 'twin' });
+  assert.equal(r.isError, false, r.text);
+
+  const runs = store.contraptionRuns(twin().id);
+  assert.deepEqual(runs.slice(0, 2).map((x) => [x.action, x.risk, x.ok]), [['stop', 'loses_data', 1], ['restart', 'interrupts', 1]]);
+  assert.match(runs[0].by, /^coordinator of scheme \d+$/);
+  const viewed = await srv.call('/api/contraptions');
+  assert.equal(viewed.data.find((c: any) => c.name === 'twin').runs.length, 3, 'with the unassessed stop from the test before');
+  assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'start' })).status, 200, 'start has no risk gate');
+  assert.equal(store.contraptionRuns(twin().id).length, 3);
+});
+
 test('a boot check never touches systemd, even with the stand-ins set', async () => {
   const check = await bootServer({ env: { ...serviceEnv, BOOT_CHECK: '1' } });
   try {

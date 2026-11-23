@@ -23,7 +23,7 @@ export const WRITES = [
   'addGithubSeen', 'addStepTimes', 'addHealthEvent', 'setSetting', 'autoCheckpoint', 'deleteSetting', 'setSettings',
   'addRunnerLoad', 'addRunnerLoads', 'pruneRunnerLoad', 'setMachineProjects', 'deleteMachine', 'saveView',
   'setPushMuted', 'setPushEverything', 'setPushOnlyPinned', 'deletePushSubscription', 'savePushDevice', 'deletePushDevice', 'insertEvent', 'putFates',
-  'touch', 'leaveTouched', 'noteDigest', 'addPick', 'addContraptionError', 'recordGrunts', 'addHostSample', 'addFlakeEvents', 'updateFlakeFix',
+  'touch', 'leaveTouched', 'noteDigest', 'addPick', 'addContraptionError', 'addContraptionRun', 'recordGrunts', 'addHostSample', 'addFlakeEvents', 'updateFlakeFix',
   'props.backfillOther', 'props.setBuild', 'schedules.ran', 'schedules.heldNote', 'memory.deleteTicket',
 ];
 

@@ -16,6 +16,7 @@ import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
 import { ciNumberQueries } from './db/ci-numbers.ts';
+import { contraptionRunQueries } from './db/contraption-runs.ts';
 import { deliveryQueries } from './db/deliveries.ts';
 import { flakeQueries } from './db/flakes.ts';
 import { machineQueries } from './db/machines.ts';
@@ -618,6 +619,9 @@ export interface ContraptionRow {
   repo: string | null;
   branch: string | null;
   folder: string | null;
+  /** What its Restart and Stop risk (#1682): unassessed (the default), safe, interrupts or loses_data, and a note for whoever is about to press them. */
+  restart_risk: 'unassessed' | 'safe' | 'interrupts' | 'loses_data';
+  restart_note: string;
   /** The app's own folder inside its repo, like apps/notes (#1136): its citadel-app.json, units and build run there; null: the repo's root. */
   subdir: string | null;
   default_model: string | null;
@@ -1218,6 +1222,18 @@ CREATE TABLE IF NOT EXISTS contraptions (
   keys_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL
 );
+-- Each Stop and Restart run from Settings or the Taskmaster's tool (#1682, src/db/contraption-runs.ts): who, the risk it carried, the result.
+CREATE TABLE IF NOT EXISTS contraption_runs (
+  id INTEGER PRIMARY KEY,
+  contraption_id INTEGER NOT NULL REFERENCES contraptions(id) ON DELETE CASCADE,
+  at INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  risk TEXT NOT NULL,
+  by TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  said TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS contraption_runs_by_app ON contraption_runs(contraption_id, id);
 -- Who a contraption is enabled for: its own list, like project_members. Being in its home scheme grants nothing.
 CREATE TABLE IF NOT EXISTS contraption_users (
   contraption_id INTEGER NOT NULL REFERENCES contraptions(id) ON DELETE CASCADE,
@@ -1650,6 +1666,8 @@ const MIGRATIONS: [table: string, column: string, ddl: string][] = [
   ['contraptions', 'repo', 'ALTER TABLE contraptions ADD COLUMN repo TEXT'],
   ['contraptions', 'branch', 'ALTER TABLE contraptions ADD COLUMN branch TEXT'],
   ['contraptions', 'folder', 'ALTER TABLE contraptions ADD COLUMN folder TEXT'],
+  ['contraptions', 'restart_risk', "ALTER TABLE contraptions ADD COLUMN restart_risk TEXT NOT NULL DEFAULT 'unassessed'"],
+  ['contraptions', 'restart_note', "ALTER TABLE contraptions ADD COLUMN restart_note TEXT NOT NULL DEFAULT ''"],
   ['push_subscriptions', 'only_pinned', 'ALTER TABLE push_subscriptions ADD COLUMN only_pinned INTEGER NOT NULL DEFAULT 0'],
   ['push_subscriptions', 'everything', "ALTER TABLE push_subscriptions ADD COLUMN everything TEXT NOT NULL DEFAULT '[]'"],
 ];
@@ -1770,6 +1788,7 @@ export const SCHEMA_HISTORY = [
   [109, 'host_samples warm_ms, warm_mb, warm_backoffs (#1560)'],
   [110, 'host_samples.answer_time (#1559)'],
   [111, 'events_old dropped and the main file vacuumed, by the server at start (#1169 ship 3)'],
+  [112, 'contraptions.restart_risk, restart_note and contraption_runs (#1682)'],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -3903,6 +3922,7 @@ export class Store {
 // One area per line, so two branches adding areas touch different lines (#1313: a single long list here was a conflict hotspot).
 const AREAS = [
   ciNumberQueries,
+  contraptionRunQueries,
   deliveryQueries,
   flakeQueries,
   machineQueries,
@@ -3915,6 +3935,7 @@ const AREAS = [
 // The same list as a type: written out, since a type taken from AREAS would loop through Store's own type.
 type Areas =
   & typeof ciNumberQueries
+  & typeof contraptionRunQueries
   & typeof deliveryQueries
   & typeof flakeQueries
   & typeof machineQueries

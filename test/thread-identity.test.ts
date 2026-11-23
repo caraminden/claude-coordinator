@@ -37,21 +37,6 @@ async function mayCall(method: string, path: string): Promise<boolean> {
   }
 }
 
-test('a thread token may read, relabel, ask and close only its own internal id', async () => {
-  assert.ok(await mayCall('GET', `/api/tickets/${ID}`));
-  assert.ok(await mayCall('PATCH', `/api/tickets/${ID}`));
-  assert.ok(await mayCall('POST', `/api/tickets/${ID}/questions`));
-  assert.ok(await mayCall('POST', `/api/tickets/${ID}/close`));
-  assert.ok(await mayCall('POST', `/api/tickets/${ID}/coordinator`));
-  assert.ok(await mayCall('POST', `/api/tickets/${ID}/strike`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/strike`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/coordinator`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/close`));
-  assert.ok(!await mayCall('PATCH', `/api/tickets/${NUMBER}`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/status`));
-  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/messages`));
-});
-
 // A stand-in API that records what the thread's MCP server calls, and answers like `respond` says.
 const calls: { method: string; path: string; auth: string }[] = [];
 let respond = (_path: string): [number, object] => [200, { number: NUMBER, title: 'T', status: 'running', created_by: 'Cara' }];
@@ -90,6 +75,22 @@ function rpc(method: string, params: object): Promise<any> {
   return new Promise((r) => replies.set(id, r));
 }
 const tool = (name: string, args: object) => rpc('tools/call', { name, arguments: args }).then((r) => r.result);
+
+// Every test sits below the top-level await above: under the gate's force-exit, the file ran only the tests before it (#1732).
+test('a thread token may read, relabel, ask and close only its own internal id', async () => {
+  assert.ok(await mayCall('GET', `/api/tickets/${ID}`));
+  assert.ok(await mayCall('PATCH', `/api/tickets/${ID}`));
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/questions`));
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/close`));
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/coordinator`));
+  assert.ok(await mayCall('POST', `/api/tickets/${ID}/strike`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/strike`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/coordinator`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${NUMBER}/close`));
+  assert.ok(!await mayCall('PATCH', `/api/tickets/${NUMBER}`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/status`));
+  assert.ok(!await mayCall('POST', `/api/tickets/${ID}/messages`));
+});
 
 test('close_self and set_thread_status address the internal id, whatever the model passes', async () => {
   const tools = (await rpc('tools/list', {})).result.tools.map((t: any) => t.name);

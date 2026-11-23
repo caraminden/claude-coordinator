@@ -51,12 +51,6 @@ export const BY_TYPE = {
   art: { model: 'claude-opus-5-5', effort: 'high' },
 };
 
-/** The tier for a bug that is intermittent (a flaky test): the TIERS row naming it, a fresh object (#1719). */
-export function intermittentTier() {
-  const row = TIERS.find((t) => /\bintermittent\b/.test(t.work)) ?? { ...pickFor('bug') };
-  return { model: row.model, effort: row.effort };
-}
-
 /** When nothing tells the type (`other`, or no type yet). */
 export const FALLBACK = { model: 'claude-opus-5-5', effort: 'medium' };
 

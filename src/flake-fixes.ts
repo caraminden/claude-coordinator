@@ -9,7 +9,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { intermittentTier } from '../public/model-table.js';
+import { TIERS, pickFor } from '../public/model-table.js';
 import { pacificStamp } from './pacific.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { FlakeFix, Project, Store } from './db.ts';
@@ -25,6 +25,12 @@ const EVIDENCE_MAX_AGE_MS = 6 * 3_600_000;
 const SAME_SIGHTING_MS = 30 * 60_000;
 /** A broken-test line (tools/known-flakes.ts, #1487) moves its file's fix to the front of the line once it waits there, for a day. */
 const BROKEN_FRONT_MS = 24 * 3_600_000;
+
+/** The model and effort of the model table's row for an intermittent bug (#1719); the bug tier if that row is ever taken out. */
+export function intermittentTier(): { model: string; effort: string } {
+  const row = TIERS.find((t) => /\bintermittent\b/.test(t.work)) ?? pickFor('bug');
+  return { model: row.model, effort: row.effort };
+}
 
 export interface FlakeFixDeps {
   store: Store;

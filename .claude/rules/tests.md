@@ -26,3 +26,5 @@ count rises. Write the right-hand column instead.
 - A count above the baseline fails; a drop passes with a note. Lower the baseline after a fix: `FLAKE_BASELINE=write node test/one-until.test.ts`, then commit the JSON.
 - Don't edit the guard's patterns to get green; fix the test, or say why the pattern is wrong.
 - After a `git mv` of a test file the baseline (keyed by name) needs the same regenerate.
+
+Before the first hand-off, run `tools/burn-in.sh` on every test file you touched: it burns in each, and old tests with shared state fail on whoever next edits them. A failure in 10 of 10 copies is a real failure, not a race. Editing a file a judge pins needs `node tools/judge-replay.ts <id> --record`, or `test/judges.test.ts` goes red.

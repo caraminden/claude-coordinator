@@ -8,6 +8,8 @@ paths:
 
 # Checking a UI change
 
+**Critic before the hand-off.** `hand_off_land` refuses any diff under `public/**` (even a few lines, a help-text edit, or a non-visual file such as an agent script) until the ui-screenshots critic has a recorded run: run it first, shooting after the page has settled (`citadel:self-review` section 3).
+
 Moved from CLAUDE.md's "Check commands" (it points here). A UI change is also checked in a dev copy
 or preview (scheme instructions, "UI checks"): shoot and drive its pages with
 `node tools/ui-shot.ts <#route>...` (its header: widths, dark, steps, display-mode), under a second a shot

@@ -156,7 +156,7 @@ if ($Take) {
       $msg = "Waiting for the Windows test box: $(if ($ahead) { "$ahead ahead" } else { 'this job is next' }), $has ($($waiters.Count) in line)."
       # On a change, and again every minute so a long wait keeps showing in the job log.
       if ($msg -ne $told -or ((Get-Date) - $toldAt).TotalSeconds -ge 60) {
-        Write-Host "$msg Waited $([int]((Get-Date) - $began).TotalMinutes) min so far."
+        Write-Host "$msg Waited $([math]::Floor(((Get-Date) - $began).TotalMinutes)) min so far."
         if (-not $told) { Write-Host "::notice title=Waiting for the Windows test box::$msg" }
         $told = $msg; $toldAt = Get-Date
       }

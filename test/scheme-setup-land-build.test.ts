@@ -341,6 +341,7 @@ test("--into: a feeder that hands off while the build minion's claims merge is i
     writeFileSync(release, '');
     await held;
   }
+});
 
 // BUILD_WORKFLOWS (#1683): a build's --full also waits for the scheme's build workflows (Peek's desktop.yml), read by the
 // built-in reader even beside CI_STATUS. A gh first in PATH answers the runs list from runs.tsv and, on a dispatch,

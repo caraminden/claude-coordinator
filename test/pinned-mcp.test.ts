@@ -93,7 +93,7 @@ test('a re-pin makes a new folder and spares for new turns, keeps the old one fo
     assert.equal(made.now, made.second, 'turns that start now take the new pins');
     assert.equal(made.kept, true, 'the old pins stay for turns already running');
     assert.match(made.second, /mcp-\d+\.1$/);
-    assert.equal(made.spares.length, 2);
+    assert.equal(made.spares.length, 1, 'the old pins\' spares go at once: nothing can take them');
     assert.deepEqual(readdirSync(join(scratch, 'data', 'run')), ['turns'], 'every pin folder goes when its process does');
   } finally {
     rmSync(scratch, { recursive: true, force: true }); // timing-ok: own temp dir

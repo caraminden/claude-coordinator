@@ -22,11 +22,15 @@ const ready: Record<SpareKind, string[]> = { link: [], copy: [] };
 let seq = 0;
 let making: Promise<void> | null = null;
 let failed = false;
+/** The old spares' removal after a re-pin, off the loop; fillPinSpares waits for it. */
+let removing: Promise<void> = Promise.resolve();
 /** Every spares folder this process made, removed when it exits. */
 const swept = new Set<string>();
 
 /** Where this process's spares go and what they copy. Makes none yet: fillPinSpares starts that (server.ts, after boot). */
 export function pinSparesAt(dir: string, src: string): void {
+  // A re-pin (#1416): the old folder's spares can never be taken (takeSpare checks src), so they go now, not at exit.
+  if (at && at.dir !== dir) { swept.delete(at.dir); removing = rm(at.dir, { recursive: true, force: true }).catch(() => {}); }
   at = { dir, src };
   on = false;
   ready.link = [];
@@ -41,6 +45,7 @@ export function pinSparesAt(dir: string, src: string): void {
 export async function fillPinSpares(): Promise<void> {
   on = true;
   failed = false;
+  await removing;
   while (need()) await fill();
 }
 

@@ -2169,19 +2169,21 @@ process.on('SIGUSR2', () => handOver({
 }, { schema: SCHEMA_VERSION, onSocket, env: bootEnv }));
 
 // A kit/- or tools/-only deploy reaches turns that start from now on; running turns keep the pin they started with (#1416).
-async function repinIfChanged(head: string | null): Promise<void> {
-  if (!head || head === pinnedAt) return;
-  const changed = await new Promise<boolean>((done) =>
-    !pinnedAt ? done(true) : execFile('git', ['diff', '--name-only', pinnedAt, head, '--', 'kit/', 'tools/'], { cwd: import.meta.dirname }, (err, out) => done(!!err || out.trim() !== '')));
-  if (!changed) { pinnedAt = head; return; }
-  try {
-    pinTurnFiles(DATA_DIR);
+// One at a time, so two quick SIGHUPs don't both re-pin; a failure rejects, so the SIGHUP leaves liveCommit alone and deploy.sh restarts.
+let repinning: Promise<void> = Promise.resolve();
+function repinIfChanged(head: string | null): Promise<void> {
+  const next = repinning.catch(() => {}).then(async () => {
+    if (!head || head === pinnedAt) return;
+    const changed = await new Promise<boolean>((done) =>
+      !pinnedAt ? done(true) : execFile('git', ['diff', '--name-only', pinnedAt, head, '--', 'kit/', 'tools/'], { cwd: import.meta.dirname }, (err, out) => done(!!err || out.trim() !== '')));
+    if (changed) {
+      pinTurnFiles(DATA_DIR); // about 20 ms (measured 2026-11-22): the copies are small, the 7 s stalls were per-turn copies under load
+      void fillPinSpares();
+      console.log(`Re-pinned turn files on SIGHUP at ${head.slice(0, 9)}`);
+    }
     pinnedAt = head;
-    void fillPinSpares();
-    console.log(`Re-pinned turn files on SIGHUP at ${head.slice(0, 9)}`);
-  } catch (err) {
-    console.error('Re-pinning turn files on SIGHUP failed; new turns keep the old pins:', err);
-  }
+  });
+  return (repinning = next);
 }
 
 // A front-end-only deploy: re-read public/ and tell open tabs, which reload once nobody is typing.
@@ -2198,7 +2200,7 @@ process.on('SIGHUP', () => {
       if (!BOOT_CHECK) liveOn(app.liveCommit);
       if (!BOOT_CHECK && !PREVIEW && app.liveCommit) recordLive(store, app.liveCommit, Date.now());
     },
-    (err) => console.error('Reloading public/ on SIGHUP failed; still serving the old front end:', err),
+    (err) => console.error('Reloading on SIGHUP failed (re-pinning turn files or public/); still serving the old commit, so deploy.sh restarts:', err),
   );
 });
 

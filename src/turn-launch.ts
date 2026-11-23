@@ -72,6 +72,8 @@ export interface TurnPins {
 }
 let pins: TurnPins | null = null;
 let repins = 0;
+/** Every pin folder this process made: a re-pin keeps the old ones for running turns until exit. */
+const pinDirs = new Set<string>();
 
 /**
  * Make this server process's pinned copies under `dataDir`/run/mcp-<pid>, sweeping the folders of
@@ -90,7 +92,8 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   }
   rmSync(MCP_DIR, { recursive: true, force: true });
   mkdirSync(MCP_DIR);
-  process.on('exit', () => rmSync(MCP_DIR, { recursive: true, force: true }));
+  if (!pinDirs.size) process.once('exit', () => { for (const d of pinDirs) rmSync(d, { recursive: true, force: true }); });
+  pinDirs.add(MCP_DIR);
   /** Copy a server file and, first, every local file it imports, so the copy starts on its own. */
   function pinnedCopy(file: string): string {
     const copy = join(MCP_DIR, file);

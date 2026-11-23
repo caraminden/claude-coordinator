@@ -26,7 +26,7 @@
 //
 // Run as a hook: node tripwire.ts '<config json>' < hook input; exits 2 with the reason on stderr, or
 // prints a PreToolUse "ask" decision for the approval card.
-import { existsSync, opendirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, opendirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hard, under, type TripwireConfig, type Verdict, type Word } from './tripwire-base.ts';
@@ -168,26 +168,28 @@ const excludedDirs = (name: string, args: Word[]) => (name === 'rg' || name === 
 /**
  * What a recursive search over roots could reach of a closed .env file (#1030), or null when it can't: walks the part of each root
  * inside a closed folder, and answers on finding one (or a link to one), on a symlink the search would follow (`follow`), on a folder it
- * can't read or a glob it can't settle, or once it has read `limit` entries in all. It skips git's object store (files named by hash,
+ * can't read, or once it has read `limit` entries in all. A root with a glob is expanded against the disk first (#1729, globRoot). It skips git's object store (files named by hash,
  * the bulk of a repo's entries) and the folders the search itself excludes (`skip`, globs). So a search of a scheme's src with no .env below passes without an --exclude.
  */
 export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, skip: string[] = [], limit = ENV_WALK_LIMIT): string | null {
   const todo: string[] = [];
-  for (const root of roots) {
-    for (const r of cfg.envFiles ?? []) {
-      const start = under(root, r) ? root : under(r, root) ? r : null;
-      if (!start) continue;
-      let st;
-      try { st = statSync(start); } catch (e) {
-        // Nothing there: grep finds nothing either, unless the shell expands it as a glob.
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT' && !/[*?[]/.test(start)) continue;
-        return `${start}, which it could not check`;
+  const budget = { seen: 0, limit };
+  for (const glob of roots) {
+    const expanded = /[*?[(]/.test(glob) ? globRoot(glob, cfg.envFiles ?? [], budget) : [glob];
+    if (typeof expanded === 'string') return expanded;
+    for (const root of expanded) {
+      for (const r of cfg.envFiles ?? []) {
+        const start = under(root, r) ? root : under(r, root) ? r : null;
+        if (!start) continue;
+        let st;
+        // Nothing there: grep finds nothing either.
+        try { st = statSync(start); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ENOTDIR') continue; return `${start}, which it could not check`; }
+        if (!st.isDirectory()) { if (ENV_FILE.test(basename(start))) return start; continue; }
+        todo.push(start);
       }
-      if (!st.isDirectory()) { if (ENV_FILE.test(basename(start))) return start; continue; }
-      todo.push(start);
     }
   }
-  let seen = 0;
+  let seen = budget.seen;
   while (todo.length) {
     const dir = todo.pop()!;
     let d;
@@ -213,6 +215,39 @@ export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, 
     } finally { d.closeSync(); }
   }
   return null;
+}
+
+/**
+ * What a glob root could expand to, for the .env walk (#1729): each globbed segment matched against its folder's entries, dotfiles too (a
+ * `*` the shell wouldn't match to a .env still over-includes safely), and every entry read counted against the walk's budget. Each match
+ * is kept at its real place when it's a link into a closed folder. `**`, zsh's qualifiers and any other syntax it can't match end the
+ * expansion: the folder above is walked whole, which covers whatever the shell picks. A refusal reason when a folder on the way can't be
+ * read or the budget runs out; a quoted glob is checked the same way (a file literally named `a*` matches `a*` too).
+ */
+function globRoot(glob: string, closed: string[], budget: { seen: number; limit: number }): string[] | string {
+  const reaches = (p: string) => closed.some((r) => under(p, r) || under(r, p));
+  const keep = (ps: string[]) => ps.flatMap((p) => { if (reaches(p)) return [p]; try { const real = realpathSync(p); return real !== p && reaches(real) ? [real] : []; } catch { return []; } });
+  let paths = ['/'];
+  for (const part of glob.split('/').filter(Boolean)) {
+    if (!/[*?[(]/.test(part)) { paths = paths.map((p) => join(p, part)); continue; }
+    // shortcut: a folder outside the closed ones is walked without links, so a link below it into one is missed; upgrade if a Taskmaster's ** ever runs through such links.
+    if (/\*\*|[(){}|~^#<>]/.test(part)) return keep(paths);
+    const re = globRe(part);
+    const next: string[] = [];
+    for (const dir of paths) {
+      let names: string[];
+      try { names = readdirSync(dir); } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ENOTDIR') continue;
+        return `${dir}, which it could not read`;
+      }
+      for (const name of names) {
+        if (++budget.seen > budget.limit) return `more than ${budget.limit} files to check for them`;
+        if (re.test(name)) next.push(join(dir, name));
+      }
+    }
+    paths = next;
+  }
+  return keep(paths);
 }
 
 /** For a recursive search: a secret readReason guards that lies inside this folder, or null. */

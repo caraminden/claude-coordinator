@@ -1176,8 +1176,9 @@ test('a Taskmaster\'s recursive search passes when no .env sits below its root, 
     assert.equal(run(`grep -rn SECRET --exclude-dir=node_modules ${repo}/web`), null);
     assert.equal(run(`grep -rn SECRET --exclude-dir 'node_*' ${repo}/web`), null);
     // A glob the walk can't settle refuses: the shell may expand it to a folder with a .env.
-    assert.match(run(`grep -rn SECRET ${repo}/a*`) ?? '', /\.env|could not check/);
-    assert.match(run(`grep -rn SECRET '${repo}/a*'`) ?? '', /could not check/);
+    // A glob is expanded against the disk (#1729): app matches a*, so both forms refuse on its .env (a quoted one is checked as if expanded).
+    assert.match(run(`grep -rn SECRET ${repo}/a*`) ?? '', /app\/\.env\.local/);
+    assert.match(run(`grep -rn SECRET '${repo}/a*'`) ?? '', /app\/\.env\.local/);
     // A folder it can't read refuses rather than passes.
     mkdirSync(join(repo, 'src/locked'));
     chmodSync(join(repo, 'src/locked'), 0o000);
@@ -1227,6 +1228,44 @@ test('a search refused for the credentials below its root names the folders to s
   assert.ok(instead('grep -rn token ~/.claude-3').includes(`${home}/.claude-3/projects`));
   const grepTool = tripwire({ tool_name: 'Grep', tool_input: { pattern: 'token', path: data }, cwd: worktree }, cfg)?.reason ?? '';
   assert.match(grepTool, new RegExp(`would read .*\`${data}/projects/2/repo\``));
+});
+
+test('a Taskmaster\'s search of a glob root expands it and checks each match, refusing on a .env, an unreadable folder or a fan-out past the budget (#1729)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-envglob-'));
+  try {
+    const d = join(tmp, 'data');
+    for (const n of [2, 6, 12]) mkdirSync(join(d, `projects/${n}/repo/src/lib`), { recursive: true }), mkdirSync(join(d, `projects/${n}/repo/tools`), { recursive: true });
+    for (const n of [2, 6, 12]) writeFileSync(join(d, `projects/${n}/repo/tools/land.sh`), 'x'), writeFileSync(join(d, `projects/${n}/repo/src/a.ts`), 'x');
+    writeFileSync(join(d, 'projects/12/repo/.env'), 'SECRET=x');
+    const c: TripwireConfig = { ...cfg, home: tmp, data: d, checkout: join(tmp, 'live'), envFiles: [d] };
+    const run = (command: string, cwd = join(d, 'projects/2/coordinator')) => tripwire({ tool_name: 'Bash', tool_input: { command, description: 'read the schemes' }, cwd }, c)?.reason ?? null;
+    // No .env below any match: passes, the brief's roots included.
+    for (const cmd of [`grep -rn X ${d}/projects/2/repo/src/*.ts`, `grep -rn X ${d}/projects/*/repo/tools/land.sh`, `grep -rn X '${d}/projects/*/repo/src'`, `grep -rn X ${d}/projects/[26]/repo`, `grep -rn X ${d}/projects/?/repo/tools`, `grep -rn X ${d}/nothing/*/here`])
+      assert.equal(run(cmd), null, cmd);
+    assert.equal(run('grep -rn X projects/*/repo/tools/land.sh', d), null, 'relative to the folder the turn is in');
+    // A match with a .env, or a .env the glob itself matches (dotfiles count), refuses.
+    for (const cmd of [`grep -rn X ${d}/projects/*/repo`, `grep -rn X ${d}/projects/12/repo/*`, `grep -rn X ${d}/projects/1?/repo`, `grep -rn X ${d}/projects/*/repo/.e*`])
+      assert.match(run(cmd) ?? '', /projects\/12\/repo\/\.env/, cmd);
+    // A glob before the closed folder (here only one repo is closed) is expanded too: today's walk skipped it.
+    const one: TripwireConfig = { ...c, envFiles: [join(d, 'projects/12/repo')] };
+    assert.match(tripwire({ tool_name: 'Bash', tool_input: { command: `grep -rn X ${d}/projects/*/repo`, description: 'x' }, cwd: d }, one)?.reason ?? '', /projects\/12\/repo\/\.env/);
+    assert.equal(envBelow([`${d}/projects/*/repo/tools`], one, false), null);
+    // A glob that reaches a closed folder through a symlink is checked at the link's real place.
+    mkdirSync(join(tmp, 'links'));
+    symlinkSync(join(d, 'projects/12/repo'), join(tmp, 'links/r12'));
+    assert.match(envBelow([`${tmp}/links/r*`], c, false) ?? '', /\.env/);
+    // zsh's ** and qualifiers: the expansion stops there and the folder above is walked whole.
+    for (const g of [`${d}/projects/**/src`, `${d}/projects/1*/**/*.ts`, `${d}/projects/*(/)`]) assert.match(envBelow([g], c, false) ?? '', /projects\/12\/repo\/\.env/, g);
+    assert.equal(envBelow([`${d}/projects/2/**/*.ts`], c, false), null);
+    // Every entry the expansion reads counts against the walk's one budget.
+    for (let i = 0; i < 30; i++) mkdirSync(join(d, `projects/2/repo/src/lib/d${i}`));
+    assert.equal(envBelow([`${d}/projects/2/repo/src/lib/*/x.ts`], c, false, [], 40), null);
+    assert.match(envBelow([`${d}/projects/2/repo/src/lib/*/x.ts`], c, false, [], 20) ?? '', /more than 20 files/);
+    assert.match(envBelow([`${d}/projects/2/repo/src/lib/*/x.ts`, `${d}/projects/2/repo/src/lib/d*`], c, false, [], 40) ?? '', /more than 40 files/, 'one budget for expanding and walking every root');
+    // A folder on the glob's way that can't be read refuses.
+    chmodSync(join(d, 'projects/6/repo'), 0o000);
+    try { if (process.getuid?.() !== 0) assert.match(envBelow([`${d}/projects/6/repo/*/x`], c, false) ?? '', /could not read/); } finally { chmodSync(join(d, 'projects/6/repo'), 0o755); }
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
 test('the path-in-a-variable and piped-SQL refusals name a command that passes (#1030)', () => {

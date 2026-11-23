@@ -98,7 +98,7 @@
  "src/taskmaster-files.ts": 8,
  "src/tmp-sweep.ts": 5,
  "src/tripwire-git.ts": 5,
- "src/tripwire.ts": 12,
+ "src/tripwire.ts": 14,
  "src/turn-launch.ts": 46,
  "src/turn-tmp.ts": 6,
  "src/ultrareview.ts": 10,

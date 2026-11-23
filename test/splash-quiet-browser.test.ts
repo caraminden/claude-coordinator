@@ -47,3 +47,14 @@ test('a stale stamp (the reload never happened) does not hide a later cold open'
   await waitFor(page, 'the page', 'window.ready');
   assert.deepEqual(await page.eval(state), { splash: true, stamp: null });
 });
+
+// The installed app's window buttons sit on the theme-color metas' colour: the map's top while the splash shows, so
+// they're no white strip over it, and the page's plain colour once it lifts (#1691).
+test('while the splash shows, the title bar takes the map colour, and gets its plain one back when it lifts', { skip }, async () => {
+  const page = await browser.page(app.base);
+  const bar = `[...document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')].map((m) => m.content).join(' ')`;
+  await waitFor(page, 'the page', 'window.ready');
+  assert.equal(await page.eval(bar), '#f3e9d2 #16142a');
+  await waitFor(page, 'the splash to lift', `document.getElementById('splash')?.classList.contains('gone') ?? true`);
+  assert.equal(await page.eval(bar), '#f6f5f2 #161514');
+});

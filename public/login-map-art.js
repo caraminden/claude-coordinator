@@ -29,12 +29,25 @@
   try { quiet = Number(sessionStorage.getItem('cc-no-splash')) || 0; sessionStorage.removeItem('cc-no-splash'); } catch {}
   if (Date.now() - quiet < 15_000) return splash.remove();
   draw(splash.querySelector('.scene'), 'sp-');
+  // While it shows, the installed app's window buttons sit on the map's top colour, not on a white strip (#1691). The
+  // map's colour is tintTitleBar's base (data-base) till then, so the app's boot putting back the plain one keeps it,
+  // and a colour an app's top bar set meanwhile is left alone when it lifts.
+  const metas = [...document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')];
+  const top = (m) => (/dark/.test(m.media) ? '#16142a' : '#f3e9d2');
+  for (const m of metas) { m.dataset.plain = m.content; m.dataset.base = m.content = top(m); }
+  const untint = () => {
+    for (const m of metas) {
+      m.dataset.base = m.dataset.plain;
+      if (m.content === top(m)) m.content = m.dataset.plain;
+    }
+  };
   const shown = performance.now();
   let lifting = false;
   const lift = () => {
     if (lifting) return;
     lifting = true;
     setTimeout(() => {
+      untint();
       splash.classList.add('gone');
       setTimeout(() => splash.remove(), still.matches ? 0 : 600);
     }, Math.max(0, shown + 1000 - performance.now()));

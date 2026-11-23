@@ -470,10 +470,22 @@ export class ContraptionTurns {
     // happens while nothing but `start` has gone out; its own `start` is dropped, the app has had one.
     let sent = false;
     let retrying = false;
+    let toolSince = false;
+    let lastMessage: string | null = null;
     const out: Emit = (event, data) => {
       if (event === 'start' && retrying) return;
       if (event !== 'start') sent = true;
-      if (event === 'text' && live.audit && (data as { parent: string | null }).parent === null) live.audit.output += (data as { delta: string }).delta;
+      // A new message id, or a tool call since the last text, starts a new paragraph, as the chat shows it (#1726).
+      if (event === 'tool' && (data as { parent: string | null }).parent === null) toolSince = true;
+      if (event === 'text' && live.audit && (data as { parent: string | null }).parent === null) {
+        const { delta, message } = data as { delta: string; message?: string };
+        if (delta) {
+          if (live.audit.output && (toolSince || (message ?? null) !== lastMessage)) live.audit.output += '\n\n';
+          live.audit.output += delta;
+          toolSince = false;
+          lastMessage = message ?? null;
+        }
+      }
       emit(event, data);
     };
     try {

@@ -597,7 +597,7 @@ test('every turn leaves an audit row (#844): the system text and prompt as claud
   assert.equal(row.system, lastRun().system, 'the whole system text Citadel sent, its tool-names line included');
   assert.match(row.system, /^You are the Acolyte\.\n\n.*mcp__mandate__/s);
   assert.equal(row.prompt, 'Move my dentist to Thursday.');
-  assert.equal(row.output, 'Moved it to Thursday.', 'top-level text only, each message once');
+  assert.equal(row.output, 'Moved it\n\n to Thursday.', 'top-level text only, each message once, a new message a new paragraph (#1726)');
   assert.equal(row.model, 'claude-haiku-test'); // the model that ran, from claude's init, not the alias asked for
   assert.equal(row.blind, 0);
   assert.equal(row.verdict, null);
@@ -1204,4 +1204,9 @@ test('a turn cut off by SIGTERM ends interrupted with one retry, not failed; a s
   }
   // A cancel is still canceled, and a crash still failed.
   assert.equal(errorOf(await turn(peek, { session: 'cut-crash', prompt: 'crash' })), 'failed');
+});
+
+test('the audit reply keeps each message and each side of a tool call as its own paragraph (#1726)', async () => {
+  const evs = await turn(mandate, { session: 'audit-glue', prompt: 'grunts please' });
+  assert.equal(store.turnAudit(evs[0].data.turn)!.output, 'Asking. \n\nDone.', 'narration before the tool call, a blank line, then the answer');
 });

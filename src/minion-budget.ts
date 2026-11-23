@@ -13,7 +13,7 @@
  * which held 48% of that week's spend (plain 2x: 33%); the wake on 3%, about 33 a week. Medians per scheme or per effort
  * fired on as many, so the usual cost is one per type and model family, every scheme pooled.
  */
-import { median as statsMedian } from './stats.ts';
+import { medianOrNaN as median } from './stats.ts';
 import type { Store } from './db.ts';
 
 /** How far back the usual cost looks. */
@@ -70,8 +70,6 @@ export function family(model: string | null | undefined): string | null {
 }
 const familyName = (f: string) => f[0].toUpperCase() + f.slice(1);
 
-export const median = (xs: number[]): number => statsMedian(xs) ?? NaN;
-
 /** Medians by "type family" and by family alone, from the rows Store.minionCosts gives. */
 export function medians(rows: { type: string | null; model: string | null; cost: number }[]): Map<string, { usd: number; n: number }> {
   const groups = new Map<string, number[]>();
@@ -114,8 +112,9 @@ export function budgetFor(store: Store, ticket: { id: number; model: string | nu
 /** The dollar amount of a mark for a budget. */
 export const markOf = (b: Budget, mark: { times: number; floor: number }) => Math.max(b.usd * mark.times, mark.floor);
 
-const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
-export const money = usd;
+/** Dollars as people read them: cents under $10, whole dollars above. The one formatter (#1715). */
+export const money = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
+const usd = money;
 
 /** A minion waiting on its start card (#1674): its estimate and the card's question id; deleted once a person answers or unseals it. */
 export const startHoldKey = (ticketId: number) => `start_hold:${ticketId}`;

@@ -7,6 +7,9 @@ export function median(xs: number[]): number | null {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
+/** `median`, with NaN for an empty list, for callers that keep plain numbers. */
+export const medianOrNaN = (xs: number[]): number => median(xs) ?? NaN;
+
 /** Nearest-rank percentile: the smallest value at least `p` (0 to 1) of the list is at or below; null when empty. Takes unsorted input. */
 export function percentile(xs: number[], p: number): number | null {
   if (!xs.length) return null;

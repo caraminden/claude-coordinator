@@ -1,10 +1,11 @@
 // The pure text formatters for the MCP tools' answers, split out of mcp.ts: each turns data the server sent into the text a tool returns.
 // They hold no state of their own (no env, no API calls).
 import { pacificDay } from './pacific.ts';
+import { money } from './minion-budget.ts';
 
 /** usage_split's answer (#905): each slice as a share of the week (all accounts together) with its dollars, against last week. */
 export function usageSplitText(w: any): string {
-  const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
+  const usd = money;
   const pct = (n: number) => { const p = (n / w.weekUsd) * 100; return p && p < 0.1 ? '<0.1' : p < 10 ? p.toFixed(1) : String(Math.round(p)); };
   const amount = (n: number) => (w.weekUsd ? `${pct(n)}% (${usd(n)})` : usd(n));
   const line = (s: any) => `- ${s.name}: ${amount(s.usd)}, last week ${amount(s.lastWeek)}${s.estimated > 0.005 ? `, ${usd(s.estimated)} estimated` : ''}`;
@@ -97,7 +98,8 @@ export function deployText(d: any): string {
     ...d.said.filter((l: string) => !l.startsWith('To do: ')).map((l: string) => `- ${l}`), `Log: ${d.log}`, ...(d.state === 'running' ? [] : ['Last lines of the log:', d.tail ?? ''])].join('\n');
 }
 
-const RISK_WORDS: Record<string, string> = { unassessed: 'not assessed', safe: 'safe', interrupts: 'interrupts users', loses_data: 'may lose data' };
+export const RISKS = ['unassessed', 'safe', 'interrupts', 'loses_data'];
+export const RISK_WORDS: Record<string, string> = { unassessed: 'not assessed', safe: 'safe', interrupts: 'interrupts users', loses_data: 'may lose data' };
 
 /** A service's state as the tools show it. */
 export function serviceText(s: any): string {

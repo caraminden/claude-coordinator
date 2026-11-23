@@ -14,7 +14,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export type Cause = 'flaky' | 'main' | 'change' | 'unknown';
-export const CAUSES: readonly Cause[] = ['change', 'flaky', 'main', 'unknown'];
 
 /** A CI run as GitHub lists it, the fields this reads. */
 export interface LandRun { id: number; head_branch: string; status: string; conclusion: string | null; created_at: string; updated_at?: string; html_url?: string }

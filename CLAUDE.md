@@ -3,7 +3,7 @@
 Citadel: a shared web UI that runs headless Claude Code sessions as minions.
 What it does, its layout and how to run it: `README.md`. Where does X live: the "## Layout" table there (read on
 demand; `test/layout-map.test.ts` fails when a module under `src/`, `src/routes/`, `src/db/`, `public/` or `tools/` has no row). Node 24+ runs the TypeScript
-directly; there are no dependencies and no build step.
+directly; the only dependency is dev-only (fast-check) and there is no build step.
 
 ## Working rules
 

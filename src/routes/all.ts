@@ -6,6 +6,7 @@ import { peopleRoutes } from './people.ts';
 import { projectRoutes } from './projects.ts';
 import { reviewRoutes } from './reviews.ts';
 import { ticketRoutes } from './tickets.ts';
+import { proposalRoutes } from './proposals.ts';
 import { memoryCuratorRoutes } from './memory-curator.ts';
 import { fileRoutes } from './files.ts';
 import { machineRoutes } from './machines.ts';
@@ -17,4 +18,4 @@ import { unitRoutes } from './units.ts';
 import { contraptionRoutes } from './contraptions.ts';
 import { skillRoutes } from './skills.ts';
 
-export const apiRoutes = [...usageRoutes, ...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...desktopRoutes, ...pushRoutes, ...unitRoutes, ...contraptionRoutes, ...skillRoutes];
+export const apiRoutes = [...usageRoutes, ...appRoutes, ...peopleRoutes, ...projectRoutes, ...reviewRoutes, ...ticketRoutes, ...proposalRoutes, ...memoryCuratorRoutes, ...fileRoutes, ...machineRoutes, ...jobRoutes, ...ciStoreRoutes, ...desktopRoutes, ...pushRoutes, ...unitRoutes, ...contraptionRoutes, ...skillRoutes];

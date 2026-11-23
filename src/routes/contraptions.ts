@@ -3,6 +3,7 @@
 // the ones enabled for them, for the app rail; a contraption's own server sends its people's bug
 // reports, feature asks and data to its home scheme (src/contraption-asks.ts) and runs turns for its people through the turn API (src/contraption-turns.ts).
 import { parseSpend } from '../outside-spend.ts';
+import { RISKS, RISK_WORDS } from '../mcp-text.ts';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { extname } from 'node:path';
@@ -65,8 +66,6 @@ function path(v: unknown, what: string): string {
   return v;
 }
 
-const RISKS = ['unassessed', 'safe', 'interrupts', 'loses_data'];
-const RISK_WORDS: Record<string, string> = { unassessed: 'not assessed', safe: 'safe', interrupts: 'interrupts users', loses_data: 'may lose data' };
 
 /** The registry fields a body sets; on create, the required ones must be there. */
 function fields(app: App, body: any, creating: boolean) {

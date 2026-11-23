@@ -6,7 +6,8 @@
  * the projects folder every container mounts, so a second worktree on the same lockfile unpacks from it in seconds.
  * The daily sweep keeps it under NPM_CACHE_CAP. Only new worktrees: server.ts runs it on the minion's lane after
  * creating it, so the first turn waits for it; a failed or cut-off install leaves the minion held mail saying so.
- * A repo with no lockfile (Citadel's own) is a no-op.
+ * A repo with no lockfile is a no-op; Citadel's own tracks package-lock.json (dev-only fast-check, ADR 0029), so its
+ * new minions run `npm ci` before the first turn.
  */
 import { execFile, spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';

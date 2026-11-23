@@ -9,7 +9,8 @@ import { liveState } from './live-state.ts';
 import { instructionCost } from './prompt-cost.ts';
 import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
 import { callEnv, callCwd } from './pool-context.ts';
-import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText } from './mcp-text.ts';
+import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText, RISKS } from './mcp-text.ts';
+import { money } from './minion-budget.ts';
 export { usageSplitText } from './mcp-text.ts';
 export { NOT_DEFAULT } from './mcp-media.ts';
 
@@ -969,7 +970,7 @@ const CONTRAPTION_FIELDS = {
   repo: { type: ['string', 'null'], description: 'The GitHub repo deploy_contraption builds it from, as owner/name, like caraminden/mandate. Only a repo set here is ever built.' },
   branch: { type: ['string', 'null'], description: 'The branch it deploys; null for main.' },
   folder: { type: ['string', 'null'], description: 'Where its repo is checked out; null for ~/apps/<name>.' },
-  restart_risk: { type: 'string', enum: ['unassessed', 'safe', 'interrupts', 'loses_data'], description: 'What its Stop and Restart risk: safe, interrupts (users in the middle of something), loses_data (a person types its name to run them), or unassessed (the default).' },
+  restart_risk: { type: 'string', enum: RISKS, description: 'What its Stop and Restart risk: safe, interrupts (users in the middle of something), loses_data (a person types its name to run them), or unassessed (the default).' },
   restart_note: { type: 'string', description: 'A line for whoever is about to Stop or Restart it, at most 300 characters; "" clears it.' },
 };
 
@@ -1398,8 +1399,6 @@ function registryReply(r: any, done: string): string {
   if (r.warnings?.length) return `Nothing changed; it looks like a near-duplicate:\n${r.warnings.map((w: string) => `- ${w}`).join('\n')}`;
   return [done, ...(r.notes ?? [])].join('\n');
 }
-
-const money = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
 
 function ticketLine(t: any): string {
   return [

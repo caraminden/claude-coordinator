@@ -30,7 +30,8 @@ let root = new URL(inContraption ? '../../c/' : './', import.meta.url);
  * Citadel and a contraption's page may be on different origins (src/apps.ts, APPS_DOMAIN), so they talk only by
  * postMessage, each checking the other window is the one it framed or was framed by. Contraption → Citadel: hello
  * { installed }, rail { open }, bar (its .cui-topbar, frames.js), key and blur (Alt+`, appswitch.js). Citadel →
- * contraption: state { hasRail, narrow, own, apps, domain, title, desktop }, strip { vars }. Its right-click menu (app-menu.js) to
+ * contraption: state { hasRail, narrow, own, apps, domain, title, desktop }, strip { vars }, deployed { auto } (a new version is
+ * live: reload, or with `auto` answer held while unsent text would be lost; it answers reloading before it does, #1690). Its right-click menu (app-menu.js) to
  * Citadel: point { note, draw, crop | rect }, inspect { x, y } (pick.js). A contraption's installed window → Citadel's page in its
  * layer: layer { app }, go { app }; and back: layer-close. Nothing secret goes in one, so the target is '*'.
  */
@@ -655,6 +656,13 @@ if (typeof document !== 'undefined') {
     } else if (host && isMessage(e, framedIn) && d.type === 'strip') {
       // The title bar strip's room, for a page whose .cui-topbar runs up into it (frames.js fit).
       for (const k of STRIP_VARS) if (Number.isFinite(d.vars?.[k])) document.documentElement.style.setProperty(`--citadel-${k}`, `${d.vars[k]}px`);
+    } else if (host && isMessage(e, framedIn) && d.type === 'deployed') {
+      // This app's new version is live (frames.js appDeployed): reload where the page is, but never over unsent text by itself.
+      if (d.auto && unsentHere()) post(framedIn, 'held');
+      else {
+        post(framedIn, 'reloading');
+        location.reload();
+      }
     } else if (!host && layer && isMessage(e, layer.firstChild?.contentWindow) && d.type === 'layer-close') closeLayer();
   });
   narrow?.addEventListener('change', () => {
@@ -667,6 +675,19 @@ if (typeof document !== 'undefined') {
       slot.append(nav);
     }
   });
+}
+
+let typedAt = 0;
+if (typeof document === 'object' && host) for (const t of ['input', 'keydown']) document.addEventListener(t, () => { typedAt = Date.now(); }, true);
+const TYPING_MS = 5000; // as Citadel's own reload waits (core.js QUIET_MS)
+const TEXT_FIELDS = 'textarea, input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], input[type=tel], input[type=number], [contenteditable]:not([contenteditable=false])';
+/**
+ * Whether reloading this framed page would lose something typed (#1690): typing in the last few seconds, or a text field
+ * holding text it didn't load with. A field the page fills in itself counts too, so that one gets the offer, not a reload.
+ */
+function unsentHere() {
+  if (Date.now() - typedAt < TYPING_MS) return true;
+  return [...document.querySelectorAll(TEXT_FIELDS)].some((el) => (el.isContentEditable ? el.textContent.trim() !== '' : el.value.trim() !== '' && el.value !== el.defaultValue));
 }
 
 const STRIP_VARS = ['strip-h', 'strip-start', 'strip-end', 'strip-row', 'safe-top'];

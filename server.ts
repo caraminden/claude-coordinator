@@ -997,6 +997,8 @@ const apkBuilds = new ApkBuilds({
 });
 services.onDeploy = (view) => {
   if (view.finished_at === null) return releases.poll();
+  // Its frames open in Citadel catch up to the new version (#1690, public/frames.js appDeployed).
+  if (view.state === 'deployed') broadcast({ type: 'app-deployed', name: view.name });
   const live = view.state === 'deployed' && !services.opts.off ? store.getContraption(view.name) : undefined;
   if (live) void apkBuilds.schedule(live, view.by);
   contraptionReader.record(view).catch((err) => console.error(`Recording ${view.name}'s deploy failed:`, err)).finally(() => void releases.refresh());

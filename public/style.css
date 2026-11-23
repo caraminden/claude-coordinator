@@ -410,6 +410,12 @@ html.framed .update-banner { position: fixed; top: 0; left: var(--citadel-rail, 
 }
 html.frame-topbar .frame-nav { display: inline-flex; }
 .frame-strip { display: none; }
+/* frames.js's offer once an app's new version is live (#1690): floats over the frame, under its top bar, centred on it, so nothing moves. */
+.frame-update { position: fixed; z-index: 2; top: calc(var(--banner-h, 0px) + var(--top-inset, 0px) + 3.75rem); left: calc(var(--citadel-rail, 0px) + (100vw - var(--citadel-rail, 0px)) / 2);
+  transform: translateX(-50%); display: flex; align-items: center; gap: 0.5rem; max-width: calc(100vw - var(--citadel-rail, 0px) - 1.5rem); box-sizing: border-box; box-shadow: 0 4px 12px rgb(0 0 0 / 0.12); }
+.frame-update > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frame-update .cui-btn { flex: none; app-region: no-drag; }
+@media (max-width: 800px) { .frame-update { left: 50%; max-width: calc(100vw - 1.5rem); } }
 /* The frame's .cui-topbar as the window's drag regions (#667, frames.js mirrorBar): invisible, and takes no clicks. */
 .frame-drag { position: fixed; pointer-events: none; }
 .frame-drag > div { position: absolute; }

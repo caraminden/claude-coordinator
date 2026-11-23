@@ -31,10 +31,10 @@ function fit() {
   const bar = got?.bar ?? null;
   document.documentElement.classList.toggle('frame-topbar', !!bar);
   const name = frame.dataset.app;
-  const entry = document.querySelector(`.citadel-rail a[data-app="${CSS.escape(name)}"]`);
+  const entry = railEntry(name);
   strip.replaceChildren(
     h('img', { src: entry?.querySelector('img')?.src ?? `/apps/_citadel/icon/${name}`, alt: '' }),
-    h('b', {}, entry?.querySelector('.label')?.textContent || got?.title || name));
+    h('b', {}, appTitle(frame)));
   // In the installed app the window controls take the bar's colour (under a modal's backdrop), or the strip's.
   tintTitleBar(bar && got.color, got?.backdrop);
   mirrorBar(got, frame);
@@ -45,6 +45,10 @@ function fit() {
   const vars = { 'strip-h': area.height, 'strip-start': Math.max(0, area.left - left), 'strip-end': innerWidth - end.left, 'strip-row': end.height, 'safe-top': area.top };
   frame.contentWindow.postMessage({ protocol: FRAME, type: 'strip', vars }, '*');
 }
+
+const railEntry = (name) => document.querySelector(`.citadel-rail a[data-app="${CSS.escape(name)}"]`);
+/** A frame's app as people know it: its rail label, else its page's title, else its name. */
+const appTitle = (frame) => railEntry(frame.dataset.app)?.querySelector('.label')?.textContent || bars.get(frame)?.title || frame.dataset.app;
 
 /** A rectangle from a frame's message, or null if it isn't one. */
 const rect = (r) => (r && ['left', 'top', 'width', 'height'].every((k) => Number.isFinite(r[k])) ? r : null);
@@ -76,6 +80,7 @@ function mirrorBar(got, frame) {
 if (typeof window !== 'undefined') {
   addEventListener('resize', fit);
   navigator.windowControlsOverlay?.addEventListener('geometrychange', fit);
+  document.addEventListener('visibilitychange', () => stale.size && catchUp());
   // A frame's page (rail.js): its bar, and Alt+` while it has the keys (appswitch.js). Only from Citadel's own frames.
   addEventListener('message', (e) => {
     const frame = [...frames.values()].find((f) => f.contentWindow === e.source);
@@ -84,7 +89,9 @@ if (typeof window !== 'undefined') {
     if (d.type === 'bar') {
       bars.set(frame, { title: typeof d.title === 'string' ? d.title : '', bar: rect(d.bar), controls: d.controls, color: typeof d.color === 'string' ? d.color : null, backdrop: typeof d.backdrop === 'string' ? d.backdrop : null });
       if (!frame.hidden) fit();
-    } else if (d.type === 'key' && d.event && typeof d.event === 'object') frameKey(d.event);
+    } else if (d.type === 'held' && stale.has(frame.dataset.app)) frame.dataset.update = 'held';
+    else if (d.type === 'reloading' && stale.has(frame.dataset.app)) frame.dataset.update = 'reloading';
+    else if (d.type === 'key' && d.event && typeof d.event === 'object') frameKey(d.event);
     else if (d.type === 'blur') frameKey(null);
     else if (d.type === 'leave') leave();
   });
@@ -197,7 +204,14 @@ export function showFrame(name, src) {
     frame.src = src ?? `/apps/${name}/`;
     frame.title = name;
     frame.dataset.app = name;
-    frame.addEventListener('load', fit);
+    frame.addEventListener('load', () => {
+      // Each load of its page is the version live then: whatever was waiting for a deploy is done.
+      stale.delete(name);
+      dismissed.delete(name);
+      showOffer();
+      delete frame.dataset.update;
+      fit();
+    });
     box.append(frame);
     frames.set(name, frame);
   } else if (src) {
@@ -221,8 +235,75 @@ export const framed = () => document.documentElement.classList.contains('framed'
 export function dropFrames() {
   setFramed(false);
   box?.remove();
-  box = probe = nav = strip = drag = null;
+  box = probe = nav = strip = drag = offer = null;
   frames.clear();
+  stale.clear();
+  dismissed.clear();
+  clearTimeout(askTimer);
+}
+
+/**
+ * An app's deploy reaches its open frame (#1690, Cara 2026-11-23, "In Citadel, every app"): a frame keeps the page it loaded,
+ * so after a deploy it ran the old code until someone knew to reload it. As Citadel's own front end does (core.js
+ * reloadWhenIdle, "Reload out of sight"), a frame catches up out of sight: while another view shows or the window is hidden,
+ * its page (rail.js) is asked to reload itself where it is, and says `held` instead while it holds unsent text. A frame on
+ * screen, or held, gets a one-click offer; leaving it or hiding the window asks it again. Pages without Citadel's rail.js
+ * never answer, so they only get the offer.
+ */
+export function appDeployed(name) {
+  const frame = frames.get(name);
+  if (!frame) return;
+  stale.add(name);
+  dismissed.delete(name);
+  frame.dataset.update = 'new';
+  catchUp();
+}
+
+const stale = new Set(); // apps whose open frame runs an older version than the live one
+const dismissed = new Set(); // their offer put away with ✕: they still reload out of sight
+const ASK_EVERY = 5000; // a held frame is asked again: its text may have been sent since
+let askTimer = null;
+let offer = null;
+const onScreen = (frame) => !frame.hidden && framed() && !document.hidden;
+
+function catchUp() {
+  clearTimeout(askTimer);
+  askTimer = null;
+  for (const name of stale) {
+    const frame = frames.get(name);
+    if (frame && !onScreen(frame)) frame.contentWindow?.postMessage({ protocol: FRAME, type: 'deployed', auto: true }, '*');
+  }
+  if (stale.size) askTimer = setTimeout(catchUp, ASK_EVERY);
+  showOffer();
+}
+
+/** The offer over the frame on screen, if its app has a newer version and it wasn't put away. */
+function showOffer() {
+  const frame = [...frames.values()].find((f) => !f.hidden);
+  const name = frame?.dataset.app;
+  if (!box || !name || !stale.has(name) || dismissed.has(name)) {
+    offer?.remove();
+    offer = null;
+    return;
+  }
+  if (offer?.dataset.app === name) return;
+  offer?.remove();
+  offer = h('div', { class: 'cui-notice frame-update', 'data-tone': 'info', 'data-app': name, role: 'status' },
+    h('span', {}, `${appTitle(frame)} has a new version`),
+    h('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => reloadFrame(frame) }, 'Reload'),
+    h('button', { type: 'button', class: 'cui-btn cui-ghost', 'aria-label': 'Later', title: 'Later: it reloads by itself once you leave it', onclick: () => { dismissed.add(name); showOffer(); } }, '✕'));
+  box.append(offer);
+}
+
+/** Reload: the offer goes at once and the page reloads where it is; one that can't (no rail.js) starts again at its address in Citadel. */
+function reloadFrame(frame) {
+  const name = frame.dataset.app;
+  dismissed.add(name);
+  showOffer();
+  frame.contentWindow?.postMessage({ protocol: FRAME, type: 'deployed', auto: false }, '*');
+  setTimeout(() => {
+    if (frames.get(name) === frame && stale.has(name) && frame.dataset.update !== 'reloading') frame.src = frame.src;
+  }, 1500);
 }
 
 function setFramed(on) {
@@ -230,6 +311,7 @@ function setFramed(on) {
   // Leaving a contraption gives the window controls back their plain colour.
   if (!on) tintTitleBar(null);
   for (const el of document.querySelectorAll('body > .topbar, body > main')) el.inert = on;
+  if (stale.size) catchUp(); // a frame just left catches up out of sight; one just shown gets its offer
 }
 
 // The contraptions that take shares from the phone's Share sheet (#375), in order of preference. Only

@@ -35,7 +35,7 @@ import { lightbox } from './ui/media.js';
 import { annotator, canvasBlob, drawable } from './annotate.js';
 import { parseMarks } from './ui/marks.js';
 import { hideRail, showRail } from './rail.js';
-import { dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
+import { appDeployed, dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
 import { appSrc } from './extlinks.js';
 import { toast } from './ui/status.js';
 import { optimistic } from './ui/optimistic.js';
@@ -444,6 +444,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'artifact-data') onArtifactData(msg.store);
     if (msg.type === 'project') onProjectUpdate(msg.project);
     if (msg.type === 'app-instructions') onAppInstructionsUpdate(msg.instructions);
+    if (msg.type === 'app-deployed' && typeof msg.name === 'string') appDeployed(msg.name);
     if (msg.type === 'properties') onPropertiesChanged(msg.projectId);
     if (msg.type === 'schedules') onSchedulesChanged(msg.projectId);
     if (msg.type === 'reviews') onReviewsChanged(msg.projectId);

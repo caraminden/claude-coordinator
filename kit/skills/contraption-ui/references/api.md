@@ -147,6 +147,12 @@ On every request, open path or not:
   - **A page load** (a browser's GET asking for HTML) gets a 503 "Can't reach <title>" page in the
     kit's look, with Retry, Back to Citadel, and a check that reloads it once you answer.
   - **Anything else** (a `fetch`, a POST): 502, `<title> is not answering`.
+- **After a deploy goes live, your page open in Citadel catches up by itself** (#1690, tested in a browser): Citadel
+  asks your framed page's `rail.js` to reload where it is while the frame is out of sight (another view or app showing,
+  or the window hidden). It holds off while someone typed in the last 5 s or a text field (`textarea`, a text-like
+  `input`, `contenteditable`) holds text it didn't load with, and the frame on screen gets a one-click "new version"
+  offer instead. A field your code fills in counts as unsent, so it gets the offer too. A page without the kit's
+  `rail.js` only gets the offer, which reloads it at its start.
 
 **Open paths** (the registry's `open_paths`) skip the login and carry **no** identity header. A
 path matches when it equals an open path or sits under it; a path containing `%2e`, `%2f`, `%5c` or

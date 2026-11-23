@@ -585,6 +585,10 @@ test("landResult reads the real deploy.sh's lines: live, already live, and a res
     };
     await as('queued', fake('idle-bin', 'exit 0'), [/^deploy: restart queued as /, /^deploy: not live yet after 1 s/], 'restart', { DEPLOY_HEALTHY_WAIT: '0', DEPLOY_SETTLE: '0', DEPLOY_TEST_LIVE_GRACE: '1' });
     await as('joined', fake('joined-bin', 'echo "Failed to start transient service unit: Unit cc-restart-when-idle.service already exists." >&2; exit 1'), [/^deploy: a restart is already queued as/], 'restart');
+    // #1417: a restart held for a starved box (its note in <state>/hold) says when it expects to go, in the words the
+    // shipped line reads (src/land.ts's held).
+    const hold = join(r.live, '.git', 'cc-deploy', 'hold');
+    await as('held', fake('held-bin', `echo "$(( $(date +%s) + 600 )) CPU pressure 63%" >'${hold}'; exit 0`), [/^deploy: not live yet: the box is starved \(CPU pressure 63%\), so the restart waits for it to ease, live by about \d\d?:\d\d P[SD]T at the latest/], 'restart');
   }, () => (running ? { commit: running } : {}));
 });
 

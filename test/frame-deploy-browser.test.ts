@@ -19,18 +19,18 @@ const pub = join(import.meta.dirname, '..', 'public');
 const FRAMER = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/c/style.css"><body><main></main>
 <script type="module">
   import { showRail } from '/c/rail.js';
-  import { appDeployed, hideFrames, showFrame } from '/c/frames.js';
+  import { appDeployed, deploysSince, hideFrames, showFrame } from '/c/frames.js';
   window.echo = { peek: {}, toc: {} };
   addEventListener('message', (e) => { if (e.data?.test) window.echo[e.data.app][e.data.test] = e.data.value; });
   showRail();
-  Object.assign(window, { appDeployed, hideFrames, showFrame });
+  Object.assign(window, { appDeployed, deploysSince, hideFrames, showFrame });
   window.frameOf = (app) => document.querySelector('#frames iframe[data-app="' + app + '"]');
   window.tell = (app, msg) => frameOf(app).contentWindow.postMessage(msg, '*');
   window.ready = true;
 </script>`;
 
 // An app's page: a textarea, and how many times it has loaded in this tab, told to Citadel on each load.
-const APP = `<!doctype html><meta charset="utf-8"><body><textarea id="t"></textarea>
+const APP = `<!doctype html><meta charset="utf-8"><body><textarea id="t"></textarea><input id="i" value="loaded with">
 <script type="module">
   await import('/apps/_citadel/rail.js');
   const app = location.pathname.split('/')[2];
@@ -38,7 +38,7 @@ const APP = `<!doctype html><meta charset="utf-8"><body><textarea id="t"></texta
   sessionStorage.setItem('loads:' + app, String(loads));
   const tell = (test, value) => parent.postMessage({ app, test, value }, '*');
   // Text left in the box, as a draft someone stopped typing: no input event, so only the box's value holds a reload back.
-  addEventListener('message', (e) => { if (typeof e.data?.fill === 'string') { document.getElementById('t').value = e.data.fill; tell('filled', e.data.fill); } });
+  addEventListener('message', (e) => { if (typeof e.data?.fill === 'string') { document.getElementById(e.data.id ?? 't').value = e.data.fill; tell('filled', e.data.fill); } });
   tell('href', location.href);
   tell('loads', loads);
 </script>`;
@@ -137,4 +137,21 @@ test('a frame on screen is never reloaded under the person: it offers, and reloa
   await waitFor(page, "toc's frame to reload once left", 'echo.toc.loads === 2');
   await page.eval(`showFrame('toc')`);
   assert.equal(await page.eval(`!!${offer}`), false, 'the offer is gone with the old version');
+});
+
+test('a field emptied of the text it loaded with is unsent too: no reload by itself', { skip }, async () => {
+  const page = await twoFrames();
+  await page.eval(`tell('peek', { fill: '', id: 'i' })`);
+  await waitFor(page, 'the field emptied in peek', `echo.peek.filled === ''`);
+  await page.eval(`appDeployed('peek')`);
+  await waitFor(page, 'peek to say it holds unsent text', `frameOf('peek').dataset.update === 'held'`);
+  assert.equal(await page.eval('echo.peek.loads'), 1);
+});
+
+test('a deploy the stream missed (it has no replay) is caught from the rail list: only an app deployed since its frame loaded', { skip }, async () => {
+  const page = await twoFrames();
+  await page.eval(`deploysSince([{ name: 'peek', deployed: Date.now() + 1000 }, { name: 'toc', deployed: Date.now() - 3600e3 }, { name: 'gone', deployed: Date.now() }])`);
+  await waitFor(page, "peek's frame to reload", 'echo.peek.loads === 2');
+  assert.equal(await page.eval(`!!${offer}`), false, "toc's last deploy was before its frame loaded: no offer over it");
+  assert.equal(await page.eval('echo.toc.loads'), 1);
 });

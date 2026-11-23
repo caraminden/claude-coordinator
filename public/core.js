@@ -35,7 +35,7 @@ import { lightbox } from './ui/media.js';
 import { annotator, canvasBlob, drawable } from './annotate.js';
 import { parseMarks } from './ui/marks.js';
 import { hideRail, showRail } from './rail.js';
-import { appDeployed, dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
+import { appDeployed, deploysMissed, dropFrames, framed, hideFrames, shareTarget, showFrame } from './frames.js';
 import { appSrc } from './extlinks.js';
 import { toast } from './ui/status.js';
 import { optimistic } from './ui/optimistic.js';
@@ -392,7 +392,10 @@ function connectStream(catchUp = false) {
     streamRetry = 0;
     reconnecting(false);
     // Anything broadcast while we were disconnected was missed; fetch it.
-    if (catchUp) resync();
+    if (catchUp) {
+      resync();
+      deploysMissed();
+    }
     catchUp = true;
   };
   es.onmessage = (e) => {
@@ -737,8 +740,11 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') return void ((hiddenAt = Date.now()), (frozen = false));
   if (!me) return;
   if (!stream) connectStream(true);
-  else if (view?.kind === 'project' && missedNews(hiddenAt, heardAt, Date.now(), frozen)) resync();
-  else countsIfOwed();
+  else if (missedNews(hiddenAt, heardAt, Date.now(), frozen)) {
+    deploysMissed();
+    if (view?.kind === 'project') resync();
+    else countsIfOwed();
+  } else countsIfOwed();
 });
 
 async function resync() {

@@ -174,13 +174,17 @@ export class Contraptions {
   /**
    * The contraptions enabled for a person in their rail order, each with whether it is up: the rail's list (GET /api/contraptions/mine).
    * `clipboard: true` when its live citadel-app.json says `"clipboard": "write"`: only its frame may use navigator.clipboard (#1086).
+   * `deployed`: when its last deploy went live (ms), so a frame open across a dropped stream still catches up (#1690, frames.js deploysSince).
    */
   mine(uid: number) {
     return Promise.all(inOrder(this.store.contraptionsFor(uid), (c) => c.name, this.store.listOrder(uid, 'apps'))
-      .map(async (c) => ({
-        name: c.name, title: c.title, icon: c.icon, up: await this.up(c), ...(this.appsDomain ? { url: this.appUrl(c.name) } : {}),
-        ...(await this.clipboard(c) ? { clipboard: true } : {}),
-      })));
+      .map(async (c) => {
+        const deployed = this.store.listContraptionDeploys(c.name, 1, 'deployed')[0]?.finished_at;
+        return {
+          name: c.name, title: c.title, icon: c.icon, up: await this.up(c), ...(this.appsDomain ? { url: this.appUrl(c.name) } : {}),
+          ...(await this.clipboard(c) ? { clipboard: true } : {}), ...(deployed ? { deployed } : {}),
+        };
+      }));
   }
 
   /** Whether an app's live manifest asks for clipboard writes in its frame; an app with no readable manifest doesn't. */

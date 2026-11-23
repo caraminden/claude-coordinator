@@ -683,11 +683,11 @@ const TYPING_MS = 5000; // as Citadel's own reload waits (core.js QUIET_MS)
 const TEXT_FIELDS = 'textarea, input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], input[type=tel], input[type=number], [contenteditable]:not([contenteditable=false])';
 /**
  * Whether reloading this framed page would lose something typed (#1690): typing in the last few seconds, or a text field
- * holding text it didn't load with. A field the page fills in itself counts too, so that one gets the offer, not a reload.
+ * changed from what it loaded with (emptied too). A field the page fills in itself counts too, so that one gets the offer, not a reload.
  */
 function unsentHere() {
   if (Date.now() - typedAt < TYPING_MS) return true;
-  return [...document.querySelectorAll(TEXT_FIELDS)].some((el) => (el.isContentEditable ? el.textContent.trim() !== '' : el.value.trim() !== '' && el.value !== el.defaultValue));
+  return [...document.querySelectorAll(TEXT_FIELDS)].some((el) => (el.isContentEditable ? el.textContent.trim() !== '' : el.value !== el.defaultValue));
 }
 
 const STRIP_VARS = ['strip-h', 'strip-start', 'strip-end', 'strip-row', 'safe-top'];

@@ -206,6 +206,7 @@ export function showFrame(name, src) {
     frame.dataset.app = name;
     frame.addEventListener('load', () => {
       // Each load of its page is the version live then: whatever was waiting for a deploy is done.
+      loadedAt.set(name, Date.now());
       stale.delete(name);
       dismissed.delete(name);
       showOffer();
@@ -237,6 +238,7 @@ export function dropFrames() {
   box?.remove();
   box = probe = nav = strip = drag = offer = null;
   frames.clear();
+  loadedAt.clear();
   stale.clear();
   dismissed.clear();
   clearTimeout(askTimer);
@@ -259,6 +261,22 @@ export function appDeployed(name) {
   catchUp();
 }
 
+/**
+ * Deploys the stream didn't bring (it has no replay: a laptop asleep, a phone page frozen), from the rail's list
+ * (GET api/contraptions/mine, each app's `deployed`): a frame loaded before its app's last deploy catches up as above.
+ */
+export function deploysSince(mine) {
+  for (const app of Array.isArray(mine) ? mine : []) {
+    if (Number.isFinite(app?.deployed) && app.deployed > (loadedAt.get(app.name) ?? Infinity)) appDeployed(app.name);
+  }
+}
+
+/** The same, fetched: after the stream broke, or a page hidden long enough to have missed news; nothing to fetch with no frame open. */
+export function deploysMissed() {
+  if (frames.size) api('api/contraptions/mine').then(deploysSince, () => {});
+}
+
+const loadedAt = new Map(); // when each app's frame last loaded its page (this device's clock)
 const stale = new Set(); // apps whose open frame runs an older version than the live one
 const dismissed = new Set(); // their offer put away with ✕: they still reload out of sight
 const ASK_EVERY = 5000; // a held frame is asked again: its text may have been sent since
@@ -291,7 +309,7 @@ function showOffer() {
   offer = h('div', { class: 'cui-notice frame-update', 'data-tone': 'info', 'data-app': name, role: 'status' },
     h('span', {}, `${appTitle(frame)} has a new version`),
     h('button', { type: 'button', class: 'cui-btn cui-small', onclick: () => reloadFrame(frame) }, 'Reload'),
-    h('button', { type: 'button', class: 'cui-btn cui-ghost', 'aria-label': 'Later', title: 'Later: it reloads by itself once you leave it', onclick: () => { dismissed.add(name); showOffer(); } }, '✕'));
+    h('button', { type: 'button', class: 'cui-btn cui-ghost', 'aria-label': 'Later', 'data-tip': 'Later: it reloads by itself once you leave it, unless it holds unsent text', onclick: () => { dismissed.add(name); showOffer(); } }, '✕'));
   box.append(offer);
 }
 

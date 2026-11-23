@@ -25,6 +25,17 @@ const josh = store.createUser({ name: 'Josh', login: 'josh' });
 const mode = (p: string) => statSync(p).mode & 0o777;
 const file = (name: string, f: string) => readFileSync(join(keys, name, f), 'utf8');
 
+test("the rail's list says when each app's last deploy went live, so a frame open across a dropped stream catches up (#1690)", async () => {
+  const dee = store.createUser({ name: 'Dee', login: 'dee' });
+  store.setContraptionUser(peek.id, dee.id, true, cara.id);
+  assert.equal('deployed' in (await c.mine(dee.id))[0], false, 'never deployed: nothing to catch up to');
+  const deploy = (finished_at: number, outcome: string) => store.addContraptionDeploy({ name: 'peek-auras', from_sha: null, to_sha: null, by: 'Mia', started_at: finished_at - 10, finished_at, outcome, stages: '{}', changes: '[]' });
+  deploy(1_000, 'deployed');
+  deploy(2_000, 'deployed');
+  deploy(3_000, 'failed');
+  assert.equal((await c.mine(dee.id))[0].deployed, 2_000, 'the newest that went live; a failed one left the old version up');
+});
+
 test('a contraption is enabled only for the people on its list, and disabling takes at once', () => {
   const scheme = store.createProject('Mandate', null, cara.id);
   store.addMember(scheme.id, josh.id);

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { budgetFor, budgetFrom, budgetKey, markOf, medians, passed, turnLine, ASK, WAKE } from '../src/minion-budget.ts';
+import { budgetCard, budgetFor, budgetFrom, budgetKey, CARD, markOf, medians, passed, turnLine, wakeText, ASK, WAKE } from '../src/minion-budget.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
@@ -40,9 +40,44 @@ test('a mark is its multiple or its floor, whichever is more, and each fires onc
   assert.deepEqual(passed(dear, 16, {}), ['ask']);
   assert.deepEqual(passed(dear, 40, {}), ['ask', 'wake']); // a jump past both still asks
   assert.deepEqual(passed(dear, 40, { asked: 1 }), ['wake']);
-  assert.deepEqual(passed(dear, 400, { asked: 1, woke: 2 }), []);
+  assert.deepEqual(passed(dear, 63.9, { asked: 1, woke: 2 }), []);
   assert.match(turnLine(dear, 2), /usually cost about \$8\.00.*used \$2\.00 so far.*Past \$16 you'll be asked/);
   assert.match(turnLine(dear, 17), /past 2x: if you haven't yet, say in one line why/);
+});
+
+test('past the 4x wake, the Taskmaster is woken again at each doubling, and past 10x (at least $50) the owner gets a card (#1672)', () => {
+  const dear = { usd: 8, n: 9, basis: 'a feature on Opus' };
+  const cheap = { usd: 0.5, n: 9, basis: 'a chore on Sonnet' };
+  assert.deepEqual([markOf(dear, CARD), markOf(cheap, CARD)], [80, 50]);
+  const after4 = { asked: 1, woke: 2 };
+  // 8x is $64, 16x $128: each once, and a jump past several doublings wakes once.
+  assert.deepEqual(passed(dear, 64, after4), ['wake']);
+  assert.deepEqual(passed(dear, 70, { ...after4, wakes: 2 }), []);
+  assert.deepEqual(passed(dear, 127, { ...after4, wakes: 2 }), ['card']);
+  assert.deepEqual(passed(dear, 128, { ...after4, wakes: 2, carded: 3 }), ['wake']);
+  assert.deepEqual(passed(dear, 600, { ...after4, wakes: 3, carded: 3 }), ['wake']);
+  assert.deepEqual(passed(dear, 1000, { ...after4, wakes: 7, carded: 3 }), []);
+  // A minion woken before this shipped kept only `woke`: that counts as the 4x wake.
+  assert.deepEqual(passed(dear, 60, after4), []);
+  // The cheap one: wakes at $10, $20, $40; the card at $50, not 10x's $5.
+  assert.deepEqual(passed(cheap, 40, { asked: 1, woke: 2 }), ['wake']);
+  assert.deepEqual(passed(cheap, 49.9, { asked: 1, woke: 2, wakes: 3 }), []);
+  assert.deepEqual(passed(cheap, 50, { asked: 1, woke: 2, wakes: 3 }), ['card']);
+  // A jump from nothing past everything gives each kind once.
+  assert.deepEqual(passed(dear, 200, {}), ['ask', 'wake', 'card']);
+
+  // A Taskmaster's carry on lasts to the next mark, and it checks what it asked for last time.
+  assert.match(wakeText(dear, 64, 2), /over 8x the usual \$8\.00/);
+  assert.match(wakeText(dear, 64, 2), /carry on lasts only until the next mark, \$128/);
+  assert.match(wakeText(dear, 64, 2), /conditions you set last time/);
+  assert.match(wakeText(dear, 33, 1), /over 4x the usual/);
+
+  const card = budgetCard(dear, 81, 'fixing the flaky ship test');
+  assert.match(card.question, /used about \$81, over 10x the usual \$8\.00 for a feature on Opus/);
+  assert.match(card.question, /fixing the flaky ship test/);
+  assert.deepEqual(card.options.map((o) => o.label), ['Carry on', 'Split', 'Stop']);
+  assert.match(card.options[0].description!, /\$128/);
+  assert.doesNotMatch(budgetCard(dear, 81, null).question, /null/);
 });
 
 // A real turn (the spend-turn harness, #723): a fake `claude -p` streams $10 Opus messages, `before` of them, then waits
@@ -85,6 +120,8 @@ test('a turn past 2x gets the ask once, in the chat and the turn, and past 4x it
   const runner = new Runner(store, () => {}, () => ({}), fake);
   const wakes: { ticket: number; text: string }[] = [];
   runner.onBudgetWake = (ticket, text) => wakes.push({ ticket, text });
+  const cards: { ticket: number; question: string }[] = [];
+  runner.onBudgetCard = (ticket, q) => cards.push({ ticket, question: q.question });
   const make = (type: string) => {
     const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Josh' });
     store.setTicketDir(t.id, root, null);
@@ -130,9 +167,10 @@ test('a turn past 2x gets the ask once, in the chat and the turn, and past 4x it
 
   // Nor after a dismissal and a reopen (2R1): the marks outlive the close.
   await runner.close(id, 'Dismissed.');
-  writeFileSync(script, JSON.stringify({ before: 3, after: 0 }));
+  writeFileSync(script, JSON.stringify({ before: 1, after: 0 }));
   runner.send(id, 'Josh', 'reopened');
   await until('the reopened turn to end', () => store.listEvents(id).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'result').length === 3 && !runner.isRunning(id));
   assert.equal(notes().length, 1);
-  assert.equal(wakes.length, 1);
+  assert.equal(wakes.length, 2);
+  assert.equal(cards.length, 1);
 });

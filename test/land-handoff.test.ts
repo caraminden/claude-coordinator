@@ -111,6 +111,18 @@ test('a clean land waiting for the restart sets pending-deploy, and a restart al
   assert.ok(early.did.includes('deployLive'), 'its restart went live before land.sh ended: no report will come, so it is dismissed now');
 });
 
+// #1417: a restart held for a starved box says when it expects to be live, in the shipped line and the minion's note.
+test('a land whose restart is held for a starved box says when it expects to be live, and still waits for the restart', async () => {
+  const s = setup('restart-held');
+  await s.land('land: main is now at def5678 "#9: server bit"\ndeploy: restart queued as citadel-restart: running turns carry on through it, and it reports here\ndeploy: not live yet: the box is starved (CPU pressure 63%), so the restart waits for it to ease, live by about 14:05 PST at the latest, and reports here when it is live\n');
+  await s.handoffs.poll();
+  assert.match(s.notes[0], /^Shipped def5678 "#9: server bit": .* Waiting for the restart, held while the box is starved \(CPU pressure 63%\): live by about 14:05 PST at the latest\.$/);
+  assert.equal(s.ticket.state, 'pending-deploy', 'dismissed only once its restart is live');
+  assert.equal(s.ticket.note, 'deployed, starved box: live by about 14:05 PST');
+  assert.ok(!s.did.some((d) => d.startsWith('close')), s.did.join('\n'));
+  assert.ok(!s.did.includes('deployLive'), 'not live yet');
+});
+
 test('stay_open: a clean land still posts the shipped line but never dismisses, live now or after the restart (#909)', async () => {
   const live = setup('stay-live');
   await live.land(LIVE, 0, { stayOpen: true });

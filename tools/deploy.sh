@@ -50,6 +50,9 @@ REPORT_WAIT=${DEPLOY_REPORT_WAIT:-30} # seconds to wait for the server to take a
 REPORT_RETRY=${DEPLOY_REPORT_RETRY:-60} # and how long to keep trying one that never reached it
 REMOTE=${DEPLOY_REMOTE-origin} # set it empty to skip the push (dev copies)
 BACKUPS=${DEPLOY_BACKUPS:-3} # pre-deploy copies of the database to keep
+HOLD=${DEPLOY_PRESSURE_HOLD:-600} # the longest a restart waits for a starved box, then it goes anyway (#1417)
+# The starved line is src/pressure.ts's (and citadel-heavy's): "some avg60" CPU pressure at 50 %, memory at 20 %.
+MAX_CPU=${CITADEL_HEAVY_MAX_PRESSURE:-50} MAX_MEM=${CITADEL_HEAVY_MAX_MEM_PRESSURE:-20}
 # Tests only (test/deploy.test.ts, test/land-deploy.test.ts, test/land-recover-fixture.ts), so their waits take tenths of a second. Only tests set these
 # (scriptEnv drops every DEPLOY_* a person exports), and the queued restart unit is never handed them.
 HEALTH_TIMEOUT=${DEPLOY_TEST_HEALTH_TIMEOUT:-3} # seconds one /api/health ask waits for its answer
@@ -58,6 +61,7 @@ LIVE_GRACE=${DEPLOY_TEST_LIVE_GRACE:-15} # seconds a deploy watches for live pas
 LIVE_POLL=${DEPLOY_TEST_LIVE_POLL:-1} # seconds between a deploy's looks for live; a test's fraction keeps the watch's length (#1615)
 IDLE_RECHECK=${DEPLOY_TEST_IDLE_RECHECK:-2} # seconds the restart waits before it asks again that no turn started (#1615)
 REPORT_PAUSE=${DEPLOY_TEST_REPORT_PAUSE:-} # set: every pause between a report's tries, in place of the 1, 2, 4 s backoff
+PSI_CPU=${DEPLOY_TEST_PSI_CPU:-/proc/pressure/cpu} PSI_MEM=${DEPLOY_TEST_PSI_MEMORY:-/proc/pressure/memory} # the box's pressure files (#1417)
 
 say() { echo "deploy: $*" >&2; }
 git_live() { git -C "$LIVE" "$@"; }
@@ -75,7 +79,7 @@ retro_log() (
   [ -n "${COORDINATOR_SHARED_DIR:-}" ] || exit 0
   dir=$COORDINATOR_SHARED_DIR/retro-log/$(date -u +%F)
   mkdir -p "$dir" || exit 0
-  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started), a `broken test` line per file tools/known-flakes.ts calls a broken test, not a flake (#1487), and per fresh CI run after one cut off before any test failed (cut-off rerun, the same results), and a `bisect run` line per CI run of a red train'"'"'s bisect that gave a verdict. A `smoke` line per landing the smoke check refused before the line (#1012: what failed, its seconds; no timing line for it). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it; then restart or handover: how the new server took over, #1170).' >>"$dir/land.md"
+  [ -e "$dir/land.md" ] || printf '%s\n\n' '# Retro log: land.sh' 'Written by tools/land.sh, tools/run-tests.sh and the queued restart in tools/deploy.sh (no session id, so one file per day). One line per rebase conflict, per landing that fell back from CI to the suite on perigee, per test file that failed in a land or deploy run and passed alone (flake), and per fresh CI run after a red of flakes only (flake rerun: green, red, no answer or not started), a `broken test` line per file tools/known-flakes.ts calls a broken test, not a flake (#1487), and per fresh CI run after one cut off before any test failed (cut-off rerun, the same results), and a `bisect run` line per CI run of a red train'"'"'s bisect that gave a verdict. A `smoke` line per landing the smoke check refused before the line (#1012: what failed, its seconds; no timing line for it). Phase times in whole seconds (#565), - for a phase never reached: a `timing` line per landing that got in line, landed or not (line: waiting for the deploy lock; rebase; ci-queue: until a runner took the job; ci-run; fallback: the wait for a CI that gave no answer + the suite on perigee; deploy: pull, boot check and tests if any, until the restart was queued or the front end reloaded; live: from then until the deploy saw it live, the restart'"'"'s settle check included), and a `restart` line per queued restart (idle-wait: for the turns it would cut off and the lock; backup: the database copy; healthy: restart to the first healthy answer; settle: the check after it; then restart or handover: how the new server took over, #1170; then the outcome, and held <n> s for a starved box when it waited for one, #1417).' >>"$dir/land.md"
   printf -- '- %sZ · %s\n' "$(date -u +%T)" "$1" >>"$dir/land.md"
 ) >/dev/null 2>&1 || true
 
@@ -357,7 +361,7 @@ restart_timing() (
   now=$(date +%s)
   span() { if [ -n "$1" ]; then echo $((${2:-$now} - $1)); else echo -; fi; } # <start> [<end>, else now]; - if it never started
   read -r up settled <<<"${R_FIRST-$R_UP $R_SETTLED}"
-  retro_log "restart · ${R_COMMIT:-$(git_live rev-parse --short HEAD)} · idle-wait $(span "$R_START" "$R_LOCK") · backup $(span "$R_LOCK" "$R_BACKUP") · healthy $([ -n "$up" ] && span "$R_RESTART" "$up" || echo -) · settle $([ -n "$settled" ] && span "$up" "$settled" || echo -) · ${R_FIRST_HOW:-${R_HOW:-restart}} · $R_OUT"
+  retro_log "restart · ${R_COMMIT:-$(git_live rev-parse --short HEAD)} · idle-wait $(span "$R_START" "$R_LOCK") · backup $(span "$R_LOCK" "$R_BACKUP") · healthy $([ -n "$up" ] && span "$R_RESTART" "$up" || echo -) · settle $([ -n "$settled" ] && span "$up" "$settled" || echo -) · ${R_FIRST_HOW:-${R_HOW:-restart}} · $R_OUT${R_HOLD:+ · $R_HOLD}"
 ) >/dev/null 2>&1
 
 # How many running turns a restart would cut off ($1), and which (#584): "2 running turns (Citadel #412 Usage bar,
@@ -384,15 +388,53 @@ turns() {
   if [ -n "$names" ]; then echo " ($names)"; else echo; fi
 }
 
-# Queued as the restart unit: restart once no turn would be cut off (at once with --now), roll back if
-# the new code doesn't come up or stay up.
+# "CPU pressure 63%" while the box is starved by src/pressure.ts's line, else nothing. No pressure file: not starved.
+starved() {
+  local name f max v
+  for name in CPU memory; do
+    if [ "$name" = CPU ]; then f=$PSI_CPU max=$MAX_CPU; else f=$PSI_MEM max=$MAX_MEM; fi
+    [[ $(grep -m1 '^some' "$f" 2>/dev/null) =~ avg60=([0-9]+) ]] || continue
+    v=$((10#${BASH_REMATCH[1]}))
+    [ "$v" -lt "$max" ] || { echo "$name pressure $v%"; return 0; }
+  done
+}
+
+# "live by about 14:05 PST": a starved restart's latest go (<state>/hold's first field) plus a minute to come up.
+live_by() { echo "live by about $(TZ=America/Los_Angeles date -d "@$(($1 + 60))" '+%H:%M %Z')"; }
+
+# The starved-box hold (#1417): once no turn would be cut off, a starved box holds the restart, at most HOLD s from the
+# first starved look, then it goes anyway and says so. A roll back, a fix's restart (<state>/urgent: LAND_FIX, the land
+# tool's fix: true) and one while lands wait for a fix (<state>/bad) never wait; --now skips the whole wait loop.
+# Returns 0 while it holds. <state>/hold ("<latest go> <why>") tells the deploy and the riders when it expects to go.
+held_since='' R_HOLD=''
+hold() {
+  local why
+  if [ -n "$PIN" ] || [ -e "$STATE/urgent" ] || [ -s "$STATE/bad" ] || ! why=$(starved) || [ -z "$why" ]; then
+    rm -f "$STATE/hold"
+    [ -z "$held_since" ] || [ -n "$R_HOLD" ] || R_HOLD="held $((SECONDS - held_since)) s for a starved box"
+    return 1
+  fi
+  if [ -z "$held_since" ]; then
+    held_since=$SECONDS
+    echo "$(($(date +%s) + HOLD)) $why" >"$STATE/hold"
+    say "the box is starved ($why), so the restart waits for it to ease, at most $((HOLD / 60)) min, then goes anyway"
+  fi
+  [ $((SECONDS - held_since)) -ge "$HOLD" ] || return 0
+  R_HOLD="held $((SECONDS - held_since)) s for a starved box, $why, then went anyway"
+  say "the box is still starved ($why) after $((SECONDS - held_since)) s: restarting anyway"
+  rm -f "$STATE/hold"
+  return 1
+}
+
+# Queued as the restart unit: restart once no turn would be cut off (at once with --now) and the box isn't starved
+# (hold), roll back if the new code doesn't come up or stay up.
 restart() {
   case "$0" in */cc-deploy/restart-*.sh) rm -f "$0" ;; esac # the unit's private copy (see deploy), never the tracked script; bash keeps reading it from the open file
   init_state
   # Its timing line (#565): epoch seconds of each step, and how it ended (any exit not given one was cut off).
   unset R_FIRST
   R_START=$(date +%s) R_LOCK='' R_BACKUP='' R_RESTART='' R_UP='' R_SETTLED='' R_COMMIT='' R_TARGET='' R_OUT=stopped
-  trap 'restart_timing || true; rm -f "$STATE/restart"; [ -z "$PIN" ] || rm -f "$STATE/rolling-back"' EXIT
+  trap 'restart_timing || true; rm -f "$STATE/restart" "$STATE/hold"; [ -z "$PIN" ] || rm -f "$STATE/rolling-back"' EXIT
   local i=0 n unknown='' told=''
   # $STATE/now: a --now deploy that found this restart already queued and waiting.
   while [ -z "$NOW" ] && [ ! -e "$STATE/now" ]; do
@@ -400,7 +442,7 @@ restart() {
     if [ "$n" = 0 ]; then
       sleep "$IDLE_RECHECK"
       n=$(interruptible)
-      [ "$n" = 0 ] && break
+      if [ "$n" = 0 ]; then hold || break; sleep "$IDLE_POLL"; continue; fi
     fi
     # A server that stays up but silent (#553: seen after a failed rollback) can't say whether a turn runs, and
     # would never say none does: after a short while that is a broken server, which a restart is the cure for.
@@ -437,7 +479,7 @@ restart() {
   fi
   flock 7
   R_LOCK=$(date +%s)
-  rm -f "$STATE/now"
+  rm -f "$STATE/now" "$STATE/urgent"
   local target good saved
   restart_phase "copying the database"
   target=$(git_live rev-parse HEAD)
@@ -480,7 +522,7 @@ restart() {
     rm -f "$STATE/bad"
     local pushed kind=ok
     pushed=$(push_github "$target") || kind=warn
-    report "$kind" "Deployed $(short "$target"): the server restarted and is healthy.$pushed"
+    report "$kind" "Deployed $(short "$target"): the server restarted and is healthy.${R_HOLD:+ The restart $R_HOLD.}$pushed"
     return 0
   fi
   local why="the server did not answer healthy on it within ${HEALTHY_WAIT} s"
@@ -721,6 +763,7 @@ deploy() {
   # Before the unit can start, under both locks: deploys and lands refuse while it is there and the unit runs.
   [ -z "$TO" ] || { echo "$prev $new $(date +%s)" >"$STATE/rolling-back"; rm -f "$STATE/rolled-back"; }
   local out
+  [ -z "${LAND_FIX:-}" ] || touch "$STATE/urgent" # a fix's restart skips the starved-box hold, this one or the one it rides (#1417)
   if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE (tools/deploy.sh)" \
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
     --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_HANDOVER_WAIT="$HANDOVER_WAIT" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \
@@ -747,7 +790,7 @@ deploy() {
     else say "a restart is already queued as $UNIT; it will deploy this too and report here"; fi
     return 0
   else
-    rm -f "$copy"
+    rm -f "$copy" "$STATE/urgent"
     [ -z "$TO" ] || rm -f "$STATE/rolling-back"
     say "could not queue the restart ($(grep -v '^[[:space:]]*$' <<<"$out" | head -n 1 | cut -c1-200)), so nothing restarted: the live checkout is at $(short "$new"), but the server still runs $(health commit | cut -c1-7). Run tools/deploy.sh again to queue it"
     exit 1
@@ -769,6 +812,7 @@ deploy() {
       systemctl --user is-active -q "$UNIT" 2>/dev/null || break
       continue
     fi
+    [ ! -s "$STATE/hold" ] || break # held for a starved box: not live within this watch, so say so now (#1417)
     if git_live merge-base --is-ancestor "$new" last-good 2>/dev/null; then
       mark live
       say "live now: the server restarted on $(short "$new") and stayed healthy"
@@ -781,9 +825,11 @@ deploy() {
     fi
   done
   # The usual reason (#553): the restart waits for running turns, up to 2 h, and this line was all the landing heard.
-  local n
+  local n hold_at hold_why
   n=$(interruptible)
   if [ -n "$TO" ] && ! systemctl --user is-active -q "$UNIT" 2>/dev/null; then :
+  elif [ -z "$TO" ] && [ -s "$STATE/hold" ] && read -r hold_at hold_why <"$STATE/hold"; then
+    say "not live yet: the box is starved ($hold_why), so the restart waits for it to ease, $(live_by "$hold_at") at the latest, and reports here when it is live"
   elif [ -z "$NOW" ] && [[ $n =~ ^[1-9][0-9]*$ ]]; then
     say "not live yet: the restart is waiting for $(turns "$n") a restart would cut off to finish (at most $((IDLE_TRIES * 10 / 60)) min more), and reports here when it is live. To restart without waiting: tools/deploy.sh --now (see journalctl --user -u $UNIT)"
   else

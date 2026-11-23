@@ -1487,7 +1487,7 @@ const LAND_PROPS = {
   files: { type: 'array', items: { type: 'string' }, maxItems: 200, description: 'With into: the test files to run (none: docs only)' },
   full: { type: 'boolean', description: 'With into: the build minion takes main in; the whole suite runs' },
   build: { type: 'boolean', description: 'The build minion shipping its build to main, alone' },
-  fix: { type: 'boolean', description: 'Only for the fix or revert of a rolled-back deploy that land.sh refused for' },
+  fix: { type: 'boolean', description: 'Only for the fix or revert of a rolled-back deploy that land.sh refused for, or a fix for shipping or an outage that is broken right now: its restart also skips the wait for a starved box' },
 };
 
 const MARK_IMAGE = {

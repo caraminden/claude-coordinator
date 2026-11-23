@@ -759,7 +759,9 @@ export class LandHandoffs {
     const into = h.args[0] === '--into' ? h.args[1] : null;
     if (!into && r.commit) await once('landed', () => this.d.landed?.(id, r.commit!));
     const what = r.commit ? `${r.commit}${r.subject === undefined ? '' : ` "${r.subject}"`}` : into ? `into ${into}` : 'the branch';
-    const where = r.kind === 'live' ? 'Live now.' : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build ships.` : 'Shipped.';
+    // #1417: a restart held for a starved box says when it expects to go: "the box is starved (CPU pressure 63%), … live by about 14:05 PST".
+    const held = r.kind === 'restart' ? /^deploy: not live yet: .*the box is starved \(([^)]*)\).*?(live by about \d\d?:\d\d [A-Z]{3,4})/m.exec(run.output) : null;
+    const where = r.kind === 'live' ? 'Live now.' : held ? `Waiting for the restart, held while the box is starved (${held[1]}): ${held[2]} at the latest.` : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build ships.` : 'Shipped.';
     const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');
     // On main, the scheme's apps go out now rather than at auto-deploy's next quiet spell (#712), and the line says how.
     const apps = !into && h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
@@ -778,7 +780,7 @@ export class LandHandoffs {
     const t = store.getTicket(id);
     if (!t || t.status === 'closed') return;
     if (r.kind === 'restart' && !h.stayOpen) {
-      store.updateTicket(id, { state: 'pending-deploy', note: 'deployed, live after the restart' });
+      store.updateTicket(id, { state: 'pending-deploy', note: held ? `deployed, starved box: ${held[2]}` : 'deployed, live after the restart' });
       runner.deployPending(id);
       runner.broadcastTicket(id);
     }
@@ -788,7 +790,7 @@ export class LandHandoffs {
         store.updateTicket(id, { state: null, note: null });
         runner.broadcastTicket(id);
       }
-      await once('told-deploy', () => runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}), but the deploy after it didn't go live:\n\n${failed.map((f) => (f.detail ? `${f.line}\n${f.detail}` : f.line)).join('\n\n')}\n\nFix the cause and hand the fix off with hand_off_land, which deploys again (deploy_contraption redeploys main as it is). close_self once nothing is left.`));
+      await once('told-deploy', () => runner.send(id, from, `Your handed-off land went through (${what}, ${(where[0].toLowerCase() + where.slice(1)).replace(/\.$/, '')}), but the deploy after it didn't go live:\n\n${failed.map((f) => (f.detail ? `${f.line}\n${f.detail}` : f.line)).join('\n\n')}\n\nFix the cause and hand the fix off with hand_off_land, which deploys again (deploy_contraption redeploys main as it is). close_self once nothing is left.`));
       return;
     }
     // Someone wrote while it was in line (a person, a relay): the minion answers them before it goes.
@@ -798,7 +800,7 @@ export class LandHandoffs {
         runner.broadcastTicket(id);
       }
       // light (#951): a land that landed is a success notice; whoever wrote meanwhile keeps the minion's own effort.
-      await once('told-talked', () => runner.send(id, from, `Your handed-off land went through (${what}, ${where.toLowerCase().replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`, [], { light: true }));
+      await once('told-talked', () => runner.send(id, from, `Your handed-off land went through (${what}, ${(where[0].toLowerCase() + where.slice(1)).replace(/\.$/, '')}). Someone wrote to you while it was in line, so the server left this minion open: ${r.kind === 'restart' && !h.stayOpen ? 'it stays in pending-deploy unless you set another state' : 'close_self once nothing is left for them'}.`, [], { light: true }));
       return;
     }
     if (h.stayOpen && h.waitingOn) {
@@ -810,7 +812,7 @@ export class LandHandoffs {
       const queued = restart ? await once('waiter', () => this.d.wakeWhenLive?.(id, r.commit ?? null, text('live now'))) : undefined;
       store.updateTicket(id, { state: queued ? 'outside' : null, note: `${queued ? 'shipped, wakes once live' : 'shipped'}; waiting on: ${h.waitingOn}`.slice(0, 120) });
       runner.broadcastTicket(id);
-      if (!queued) await once('told-live', () => runner.send(id, from, text(r.kind !== 'restart' ? where.toLowerCase().replace(/\.$/, '') : queued === undefined && restart ? 'live after the restart' : 'live now'), [], { light: true }));
+      if (!queued) await once('told-live', () => runner.send(id, from, text(r.kind !== 'restart' ? (where[0].toLowerCase() + where.slice(1)).replace(/\.$/, '') : queued === undefined && restart ? 'live after the restart' : 'live now'), [], { light: true }));
       return;
     }
     if (h.stayOpen) {

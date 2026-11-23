@@ -911,3 +911,73 @@ test('a deploy hands over warm, and restarts as before when the handover is off,
   assert.equal(killed('warm-old'), false);
   assert.equal(old.restarts, 1);
 });
+
+// #1417: once no turn would be cut off, a box starved by src/pressure.ts's line (CPU "some avg60" at 50 %, memory at 20 %)
+// holds the restart, at most DEPLOY_PRESSURE_HOLD s, then it goes anyway and says so in the report and the ship log. A roll
+// back, a fix's restart (<state>/urgent) and one while lands wait for a fix (<state>/bad) never wait.
+test('a restart waits for a starved box at most its hold, then goes anyway and says so; roll backs and fixes never wait (#1417)', { timeout: 120_000 }, async () => {
+  const psi = (name: string, cpu: number, mem = 0) => {
+    const f = (kind: string, v: number) => {
+      const p = join(root, `${name}-psi-${kind}`);
+      writeFileSync(p, `some avg10=${v}.00 avg60=${v}.21 avg300=1.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n`);
+      return p;
+    };
+    return { DEPLOY_TEST_PSI_CPU: f('cpu', cpu), DEPLOY_TEST_PSI_MEMORY: f('mem', mem) };
+  };
+  const shared = (name: string) => join(root, `${name}-shared`);
+  const state = (name: string) => join(root, `${name}-live`, '.git', 'cc-deploy');
+  const waiting = { DEPLOY_NOW: '', DEPLOY_IDLE_POLL: '0.2', DEPLOY_TEST_IDLE_RECHECK: '0' };
+  const health = (restarts: number, { good, target }: { good: string; target: string }) => JSON.stringify({ ok: true, commit: restarts >= 1 ? target : good, interruptible: 0 });
+  const restartLine = (name: string) => readdirSync(join(shared(name), 'retro-log')).flatMap((d) => readFileSync(join(shared(name), 'retro-log', d, 'land.md'), 'utf8').split('\n')).filter((l) => l.includes(' · restart · '));
+
+  // Starved past the hold: it goes anyway, and the report and the ship log say so.
+  const anyway = await restartWith('starved', (restarts, _n, c) => health(restarts, c), { ...waiting, ...psi('starved', 63), DEPLOY_PRESSURE_HOLD: '1', COORDINATOR_SHARED_DIR: shared('starved') });
+  assert.equal(anyway.status, 0, anyway.stderr);
+  assert.match(anyway.stderr, /the box is starved \(CPU pressure 63%\), so the restart waits for it to ease, at most 0 min, then goes anyway/);
+  assert.match(anyway.stderr, /the box is still starved \(CPU pressure 63%\) after [1-9]\d* s: restarting anyway/);
+  assert.equal(anyway.restarts, 1);
+  assert.equal(anyway.lastGood, anyway.target);
+  assert.match(anyway.reports[0].text, /^Deployed [0-9a-f]{7} "target": the server restarted and is healthy\. The restart held [1-9]\d* s for a starved box, CPU pressure 63%, then went anyway\./);
+  assert.match(restartLine('starved')[0], /· restart · live · held [1-9]\d* s for a starved box, CPU pressure 63%, then went anyway$/);
+  assert.equal(existsSync(join(state('starved'), 'hold')), false, 'the hold note goes once it ends');
+
+  // The box eases during the hold: it goes then, before the hold is out. The hold note says when it would go at the latest.
+  let latest = 0;
+  const eased = await restartWith('eased', (restarts, _n, c) => {
+    const hold = join(state('eased'), 'hold');
+    if (!latest && existsSync(hold)) {
+      latest = Number(readFileSync(hold, 'utf8').split(' ')[0]);
+      writeFileSync(join(root, 'eased-psi-cpu'), 'some avg10=5.00 avg60=5.00 avg300=1.00 total=1\n');
+    }
+    return health(restarts, c);
+  }, { ...waiting, ...psi('eased', 63), DEPLOY_PRESSURE_HOLD: '600', COORDINATOR_SHARED_DIR: shared('eased') });
+  assert.equal(eased.status, 0, eased.stderr);
+  assert.ok(latest > Date.now() / 1000 + 500, `the hold note names its latest go, 600 s on: ${latest}`);
+  assert.doesNotMatch(eased.stderr, /restarting anyway/);
+  assert.equal(eased.restarts, 1);
+  assert.match(eased.reports[0].text, /The restart held \d+ s for a starved box\./);
+  assert.match(restartLine('eased')[0], /· restart · live · held \d+ s for a starved box$/);
+
+  // Memory pressure at its line starves the box too.
+  const mem = await restartWith('starved-mem', (restarts, _n, c) => health(restarts, c), { ...waiting, ...psi('starved-mem', 10, 25), DEPLOY_PRESSURE_HOLD: '1' });
+  assert.equal(mem.status, 0, mem.stderr);
+  assert.match(mem.stderr, /the box is starved \(memory pressure 25%\)/);
+
+  // Never held: under the line, a roll back, a fix's restart, a restart while lands wait for a fix.
+  const quiet = async (name: string, cpu: number, extra: Record<string, string> = {}, file?: string) => {
+    const r = await restartWith(name, (restarts, _n, c) => health(restarts, c), () => {
+      if (file) writeFileSync(join(state(name), file), file === 'bad' ? `${'e'.repeat(40)} x 1 y\n` : '');
+      return { ...waiting, ...psi(name, cpu), DEPLOY_PRESSURE_HOLD: '600', ...extra };
+    });
+    assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /starved/, name);
+    assert.equal(r.restarts, 1, name);
+    return r;
+  };
+  await quiet('calm', 49);
+  const rollBack = await quiet('starved-rollback', 90, { DEPLOY_PIN: 'f'.repeat(40) });
+  assert.match(rollBack.reports[0].text, /^Rolled back to /);
+  await quiet('starved-fix', 90, {}, 'urgent');
+  assert.equal(existsSync(join(state('starved-fix'), 'urgent')), false, "a fix's mark is used up by the restart that carries it");
+  await quiet('starved-bad', 90, {}, 'bad');
+});

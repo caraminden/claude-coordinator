@@ -23,7 +23,9 @@ const seen: { path: string; headers: IncomingHttpHeaders; sub: string | null }[]
 const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
 const stub = createServer((req: IncomingMessage, res: ServerResponse) => {
   const identity = verifyIdentity(req.headers['x-citadel-identity'] as string | undefined, pub, 'stub');
-  seen.push({ path: req.url!, headers: req.headers, sub: identity?.sub ?? null });
+  // Citadel's own GET of the page, to read the manifest and icons (server.ts's static-paths backfill, 20 s after boot), isn't
+  // recorded: no test here sends the page itself to the contraption, and one landing mid-test breaks a count (#1666, as #1660).
+  if (req.url !== '/apps/stub/') seen.push({ path: req.url!, headers: req.headers, sub: identity?.sub ?? null });
   const path = req.url!.split('?')[0];
   if (path === '/apps/stub/icon.svg') return void res.writeHead(200, { 'Content-Type': 'image/svg+xml' }).end(svg);
   if (path !== '/apps/stub/link' && !identity) return void res.writeHead(401).end('no identity');

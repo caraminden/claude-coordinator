@@ -38,12 +38,14 @@ chmodSync(fakeClaude, 0o755);
 
 const LIST = [{ name: 'today', description: "Today's items", input_schema: { type: 'object', properties: { day: { type: 'string' } } } }];
 // The stand-in Mandate's read commands: today answers, big floods, tick isn't read-only, the rest don't exist.
+// Only app-api calls are recorded: Citadel also GETs an app's page to read its manifest and icons (server.ts's static-paths
+// backfill, 20 s after boot), which would break the counts on a loaded box (#1666, as #1660).
 const seen: { method: string; path: string; headers: IncomingHttpHeaders; body: string }[] = [];
 const mandate = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
-    seen.push({ method: req.method!, path: req.url!, headers: req.headers, body });
+    if (req.url!.startsWith('/apps/mandate/app-api/')) seen.push({ method: req.method!, path: req.url!, headers: req.headers, body });
     const send = (status: number, data: unknown) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(data));
     if (req.method === 'GET' && req.url === '/apps/mandate/app-api/read') return send(200, LIST);
     if (req.method === 'POST' && req.url === '/apps/mandate/app-api/read/today') return send(200, { items: [{ title: 'Review PR #13' }], asked: JSON.parse(body) });

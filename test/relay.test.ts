@@ -17,11 +17,13 @@ let olive = 0;
 const seen: { method: string; path: string; headers: IncomingHttpHeaders; body: string }[] = [];
 
 // The stub Mandate: /apps/mandate/app-api/teapot answers 418 with its own type; anything else echoes what it saw.
+// Only relayed calls are recorded: Citadel also GETs an app's page to read its manifest and icons (server.ts's static-paths
+// backfill, 20 s after boot), which would break an exact count or `seen.at(-1)` on a loaded box (#1666, as #1660).
 const stub = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
-    seen.push({ method: req.method!, path: req.url!, headers: req.headers, body });
+    if (req.url!.startsWith('/apps/mandate/app-api/')) seen.push({ method: req.method!, path: req.url!, headers: req.headers, body });
     if (req.url!.startsWith('/apps/mandate/app-api/hang')) return;
     if (req.url!.startsWith('/apps/mandate/app-api/teapot')) return void res.writeHead(418, { 'Content-Type': 'application/vnd.teapot+json', 'X-Other': 'dropped' }).end('{"short":"and stout"}');
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true }));

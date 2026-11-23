@@ -21,7 +21,7 @@ import { fellBackWhy, LAND_CAP_MS } from '../src/ci-land-gate.ts';
 const root = mkdtempSync(join(tmpdir(), 'ci-health-'));
 after(() => rmSync(root, { recursive: true, force: true }));
 
-const NOW = Date.parse('2026-11-05T12:00:00Z');
+const NOW = Date.parse('2026-11-05T20:00:00Z'); // noon PST: outside the 2-9 AM quiet hours that push back a held ring (#1662)
 const iso = (msAgo: number) => new Date(NOW - msAgo).toISOString();
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -65,7 +65,7 @@ test('work stuck on offline runners rings after 10 min, naming the runners, sinc
   assert.equal(p.title, `CI: 2 jobs on self-hosted, peek-auras-ci have waited for a runner since ${clock(NOW - 14 * MIN)}`);
   assert.equal(p.why, `every runner that serves self-hosted, peek-auras-ci (DESKTOP-G248IJ8, DESKTOP-G248IJ8-2) is offline, since ${clock(NOW - 3 * HOUR)}`);
   assert.match(p.fix!, /^turn on DESKTOP-G248IJ8 or restart its runner service/);
-  assert.match(clock(NOW), /^Nov 5, 04:00 PST$/, 'times are Pacific');
+  assert.match(clock(NOW), /^Nov 5, 12:00 PST$/, 'times are Pacific');
 
   assert.deepEqual(stuckProblems(down, [queued(WAIT_MS - 1)], offline, NOW), [], 'under 10 min it waits');
   assert.deepEqual(stuckProblems(down, [], offline, NOW), [], 'offline with nothing waiting is the page\'s');
@@ -365,7 +365,7 @@ test('a problem is one Mandate alert per admin with Mandate, cleared when fixed,
   await w.health.tick(t0 + HOUR + WAIT_MS);
   assert.equal(w.puts.length, 1);
   assert.deepEqual(w.puts[0].slice(0, 2), ['Cara', 'ci.open']);
-  assert.match(w.puts[0][2]!, /^Peek Auras: 1 CI job can't start: DESKTOP-G248IJ8-desktop is offline \(since Nov 5, 04:05 PST\)\. .*Turn on DESKTOP-G248IJ8-desktop/);
+  assert.match(w.puts[0][2]!, /^Peek Auras: 1 CI job can't start: DESKTOP-G248IJ8-desktop is offline \(since Nov 5, 12:05 PST\)\. .*Turn on DESKTOP-G248IJ8-desktop/);
   assert.equal(w.from[0], 'CI health', 'from CI health, not the scheme');
   await w.health.tick(t0 + HOUR + WAIT_MS + 5 * MIN);
   assert.equal(w.puts.length, 1, 'unchanged: not put again');
@@ -879,13 +879,13 @@ test('a run a minion dispatched on its branch wakes it once with its result, red
   assert.equal(red[0], mine.id);
   assert.equal(red[2], false, 'a red run is work to do');
   assert.equal(red[1], [
-    'Your dispatched stress run on ticket/12-stress failed, at stress › Run it (abc1234, finished Nov 5, 03:55 PST): https://github.com/caraminden/peek-auras/actions/runs/5001',
+    'Your dispatched stress run on ticket/12-stress failed, at stress › Run it (abc1234, finished Nov 5, 11:55 PST): https://github.com/caraminden/peek-auras/actions/runs/5001',
     "GitHub's error lines:",
     '- bar_fill: 3 of 100 runs failed',
     "Its files in Citadel's CI store (ci_files with run: 5001): stress-5001.txt (report).",
     '`ci-failures 5001 -R caraminden/peek-auras` prints its failing tests.',
   ].join('\n'));
-  assert.deepEqual(green, [mine.id, 'Your dispatched stress run on ticket/12-stress passed (feedfac, finished Nov 5, 03:55 PST): https://github.com/caraminden/peek-auras/actions/runs/5002', true]);
+  assert.deepEqual(green, [mine.id, 'Your dispatched stress run on ticket/12-stress passed (feedfac, finished Nov 5, 11:55 PST): https://github.com/caraminden/peek-auras/actions/runs/5002', true]);
   assert.deepEqual(w.told, [], 'none of these is the Taskmaster\'s');
 
   await health.tick(NOW + 5 * MIN);
@@ -918,7 +918,7 @@ test('every workflow but a quiet one is watched: a red on main from any trigger 
   await health.tick(NOW + 10 * MIN);
   assert.equal(told.length, 1);
   assert.equal(told[0][1], true, 'it wakes the Taskmaster');
-  assert.match(told[0][0], /^Peek Auras's main went red: desktop\.yml \(Desktop\) run 8001 failed on bad0001 \(push by caraminden, finished Nov 5, 03:30 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/8001\nFailing jobs: build › Run tests; package\n/);
+  assert.match(told[0][0], /^Peek Auras's main went red: desktop\.yml \(Desktop\) run 8001 failed on bad0001 \(push by caraminden, finished Nov 5, 11:30 PST\): https:\/\/github\.com\/caraminden\/peek-auras\/actions\/runs\/8001\nFailing jobs: build › Run tests; package\n/);
   assert.match(told[0][0], /Start a fix minion now and put run 8001 in its brief/);
 
   // Later red runs in the streak, and one still running, say nothing, across a restart too.
@@ -931,7 +931,7 @@ test('every workflow but a quiet one is watched: a red on main from any trigger 
   w.gh.mainRuns = [push({ id: 8004, event: 'schedule', head_sha: 'a00d000fff', created_at: iso(-MIN), updated_at: iso(-10 * MIN) }), ...w.gh.mainRuns.slice(1)];
   await health.tick(NOW + 25 * MIN);
   await health.tick(NOW + 30 * MIN);
-  assert.deepEqual(told.slice(1), [["Peek Auras's Desktop is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/8004 (a00d000, Nov 5, 04:10 PST), after run 8001 failed.", false]]);
+  assert.deepEqual(told.slice(1), [["Peek Auras's Desktop is back to green on main: https://github.com/caraminden/peek-auras/actions/runs/8004 (a00d000, Nov 5, 12:10 PST), after run 8001 failed.", false]]);
 
   // The next red waits, untold, while there's no Taskmaster; a re-run of it going green ends it.
   taskmaster = false;
@@ -1028,7 +1028,7 @@ test('a red on main the Taskmaster heard of is a quiet item, ringing an hour on 
   w.gh.mainRuns = [red(9001, 20 * MIN)];
   await health.tick(NOW);
   const item = (k = 'ci.red:7') => said(w, health, k);
-  assert.match(item()!, /^Peek Auras: CI "desktop" is failing on main \(windows › Test\)\. .*If no fix minion has started by Nov 5, 05:00 PST, this rings\.$/);
+  assert.match(item()!, /^Peek Auras: CI "desktop" is failing on main \(windows › Test\)\. .*If no fix minion has started by Nov 5, 13:00 PST, this rings\.$/);
   assert.ok(!w.puts.length, 'no phone hears while the Taskmaster has an hour');
   assert.equal(item('ci.open'), undefined);
 
@@ -1824,4 +1824,17 @@ test('every kind of CI alert reads as plain words: the scheme and what is broken
     assert.match(text, /#971 is fixing it/, name);
     assert.ok(text.length <= 500, name);
   }
+});
+
+test('a problem that opens 2-9 AM Pacific counts its hour from 9, when its Taskmaster hears, before it rings (#1662)', async () => {
+  const { held } = await import('../src/ci-problems.ts');
+  const four = Date.parse('2026-11-05T12:00:00Z'); // 4 AM PST
+  const ten = Date.parse('2026-11-05T18:00:00Z');
+  const x = held({ key: 'k', title: 'CI: t', plain: { what: 'w', next: 'n.' } }, four, four);
+  assert.deepEqual([x.quiet, x.held, x.since], [true, ten, four]);
+  assert.equal(x.plain!.next, "n; if it's still broken at Nov 5, 10:00 PST, people's phones ring");
+  assert.equal(held({ key: 'k', title: 'CI: t' }, four, ten - 1).quiet, true, 'still held just before 10');
+  assert.equal(held({ key: 'k', title: 'CI: t' }, four, ten).quiet, undefined, 'rings at 10');
+  const noon = Date.parse('2026-11-05T20:00:00Z');
+  assert.equal(held({ key: 'k', title: 'CI: t' }, noon, noon).held, noon + RED_FIX_MS, 'by day the hour starts at once');
 });

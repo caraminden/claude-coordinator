@@ -8,12 +8,16 @@
 // is woken as it fails (not 2-9 AM Pacific), and the item goes out only if it is still failing RED_FIX_MS later.
 import type { ContraptionRow, Project, Store, User } from './db.ts';
 import type { TimerRun } from './app-services.ts';
-import { clock, RED_FIX_MS } from './ci-health.ts';
+import { BROKEN_PAGE, clock, RED_FIX_MS } from './ci-health.ts';
+import { cap } from './ci-problems.ts';
 import { quietUntil } from './alert-wakes.ts';
 import type { BrokenRow } from './ci-health.ts';
 import { every, type Job } from './every.ts';
 
 const POLL_MS = 5 * 60_000;
+
+/** When a failure rings: RED_FIX_MS after its Taskmaster can hear (one at 2-9 AM Pacific counts from 9). One kept from before #1662 has no `since` and had rung already. */
+const ringsAt = (o: { since?: number }) => (o.since == null ? 0 : (quietUntil(o.since) ?? o.since) + RED_FIX_MS);
 /** Settings key: the failed jobs, by unit → who the item comes from, its key and title, who has it, when it failed (absent before #1662) and whether its Taskmaster heard. */
 export const OUT = 'timer-alerts';
 type Sender = Pick<Project, 'id' | 'name'>;
@@ -108,17 +112,19 @@ export class TimerAlerts {
       from: home ? { id: home.id, name: home.name } : { id: 0, name: 'Contraption timers' },
       key: `timer.${run.unit.replace(/\.service$/, '')}`.replace(/[^A-Za-z0-9._:-]+/g, '_').slice(0, 128),
       title: alertTitle(run, await this.deps.journal(run.unit), now),
-      link: home ? `/c/#/p/${home.id}` : '/c/',
+      link: home ? BROKEN_PAGE : '/c/',
       users: [],
       since: now,
     });
-    const ringsAt = (o.since ?? now) + RED_FIX_MS;
-    if (!o.woke && o.since != null && now < ringsAt && quietUntil(now) === null && this.deps.wake) {
-      o.woke = this.deps.wake(o.from, `${o.title}\nStart a fix minion for it now, or ask people with a card if it needs a person. If it's still failing at ${clock(ringsAt)}, people's phones ring.`);
+    const due = ringsAt(o);
+    if (!o.woke && now < due && quietUntil(now) === null && this.deps.wake) {
+      o.woke = this.deps.wake(o.from, `${o.title}\nStart a fix minion for it now, or ask people with a card if it needs a person. If it's still failing at ${clock(due)}, people's phones ring.`);
     }
-    if (now < ringsAt) return;
+    if (now < due) return;
+    // What is broken, that it still is, and what was done (Cara, 2026-11-22: "which thing is broken and what is being done").
+    const text = o.since == null ? o.title : cap(o.title.replace(/^(.*? timer failed [^.]*?\))\. /, `$1, and is still failing an hour on${o.woke ? '; its Taskmaster was asked to fix it' : ''}. `));
     for (const u of this.recipients(run.app)) {
-      if (!o.users.includes(u.id) && (await this.deps.mandate(o.from, u, o.key, o.title, o.link))) o.users.push(u.id);
+      if (!o.users.includes(u.id) && (await this.deps.mandate(o.from, u, o.key, text, o.link))) o.users.push(u.id);
     }
   }
 
@@ -137,13 +143,13 @@ export class TimerAlerts {
 }
 
 /** Failed timer jobs as rows of Home's "Broken now" (#1662), for the schemes `canSee` allows (by the app's home scheme). */
-export function timerBroken(store: Store, canSee: (projectId: number) => boolean): BrokenRow[] {
+export function timerBroken(store: Store, canSee: (projectId: number) => boolean, now = Date.now()): BrokenRow[] {
   const out = store.getSetting<Out>(OUT) ?? {};
   // shortcut: an app with no home scheme (sender 0) is left out; give it a row for admins if one turns up.
   return Object.entries(out).filter(([, o]) => o.from.id && canSee(o.from.id)).map(([unit, o]) => {
-    const ringing = o.since == null || Date.now() >= o.since + RED_FIX_MS;
+    const ringing = now >= ringsAt(o);
     return { scheme: o.from.name, schemeId: o.from.id, key: `timer:${unit}`, what: o.title.split(/\. (Last lines|Its journal)/)[0], since: o.since ?? null, ringing,
-      ...(!ringing && { ringsAt: o.since! + RED_FIX_MS }),
+      ...(!ringing && { ringsAt: ringsAt(o) }),
       who: ringing ? { kind: 'person' as const, label: 'Needs you', href: `#/p/${o.from.id}` } : { kind: 'taskmaster' as const, label: 'Taskmaster looking', href: `#/p/${o.from.id}` } };
   });
 }

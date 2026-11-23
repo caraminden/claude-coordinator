@@ -7,7 +7,7 @@ import type { TimerRun } from '../src/app-services.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
 import { RED_FIX_MS } from '../src/ci-health.ts';
-import { alertTitle, redact, TimerAlerts } from '../src/timer-alerts.ts';
+import { alertTitle, redact, TimerAlerts, timerBroken } from '../src/timer-alerts.ts';
 
 // A contraption's failed timer job is one Mandate alert, for admins and its home-scheme owner, cleared by a good run (#555).
 // Since #1662 its Taskmaster hears first, and the item goes out only if the job is still failing an hour (RED_FIX_MS) later.
@@ -57,9 +57,9 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   await alerts.tick(AT + H);
   assert.deepEqual(calls.map((x) => x.who).sort(), ['Cara', 'Josh'], 'still failing an hour on: it rings');
   assert.equal(calls[0].from, 'Mandate', "from the app's home scheme");
-  assert.equal(calls[0].link, `/c/#/p/${scheme.id}`);
+  assert.equal(calls[0].link, '/c/#/home/broken', 'the ring opens Home\'s Broken now list');
   assert.equal(calls[0].key, 'timer.citadel-app-mandate-backup');
-  assert.match(calls[0].title!, /^Mandate's backup timer failed Nov 11, \d\d:00 PST \(exit 1\)\. Last lines: Copying data for 3 people \| copy failed for josh: EACCES token=\[hidden\] \| Backup failed: 1 of 3 files$/);
+  assert.match(calls[0].title!, /^Mandate's backup timer failed Nov 11, \d\d:00 PST \(exit 1\), and is still failing an hour on; its Taskmaster was asked to fix it\. Last lines: Copying data for 3 people \| copy failed for josh: EACCES token=\[hidden\] \| Backup failed: 1 of 3 files$/);
 
   down = '';
   calls.length = 0;
@@ -104,7 +104,7 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   assert.deepEqual(calls, [], 'a round that cannot read the runs clears nothing');
 });
 
-test('a job fixed inside the hour rings no one, and 2-9 AM Pacific its Taskmaster is not woken (#1662)', async () => {
+test('a job fixed inside the hour rings no one; one failing 2-9 AM Pacific wakes its Taskmaster at 9 and rings at 10; Broken now lists it; one kept from before #1662 rings as it did (#1662)', async () => {
   const store = new Store(join(root, 'quick.db'));
   const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
   const scheme = store.createProject('Peek', null, cara.id);
@@ -130,9 +130,28 @@ test('a job fixed inside the hour rings no one, and 2-9 AM Pacific its Taskmaste
   const night = Date.UTC(2026, 10, 12, 12, 0); // 4 AM PST
   active = 'failed';
   await alerts.tick(night);
-  assert.deepEqual(wakes, ['Peek'], 'not woken in quiet hours');
   await alerts.tick(night + H);
-  assert.equal(calls.length, 1, 'it still rings once the hour is up');
+  assert.deepEqual([wakes, calls], [['Peek'], []], 'not woken in quiet hours, nor ringing an hour on');
+  const nine = Date.UTC(2026, 10, 12, 17, 0); // 9 AM PST
+  const row = () => timerBroken(store, (id) => id === scheme.id, nine + 60_000);
+  assert.deepEqual(row().map((r) => [r.scheme, r.what, r.ringing, r.ringsAt, r.who.label]),
+    [['Peek', "Peek's sync timer failed Nov 11, 11:00 PST (exit 1)", false, nine + H, 'Taskmaster looking']]);
+  assert.deepEqual(timerBroken(store, () => false, nine), [], "hidden from who can't see its scheme");
+  await alerts.tick(nine);
+  assert.deepEqual([wakes, calls], [['Peek', 'Peek'], []], 'woken at 9');
+  await alerts.tick(nine + H - 60_000);
+  assert.equal(calls.length, 0);
+  await alerts.tick(nine + H);
+  assert.equal(calls.length, 1, 'rings at 10');
+  assert.deepEqual(timerBroken(store, () => true, nine + H).map((r) => [r.ringing, r.who.label]), [[true, 'Needs you']]);
+
+  active = 'inactive';
+  await alerts.tick(nine + H + 60_000);
+  calls.length = 0;
+  store.setSetting('timer-alerts', { 'citadel-app-peek-sync.service': { from: { id: scheme.id, name: 'Peek' }, key: 'timer.old', title: 'old words', link: '/c/', users: [] } });
+  active = 'failed';
+  await alerts.tick(nine + 2 * H);
+  assert.deepEqual(calls, ['timer.old old words'], 'one kept from before #1662 (no since) had rung: its retries go out at once, in its own words');
 });
 
 test('redact hides secret-looking values and the title keeps within 500 characters', () => {

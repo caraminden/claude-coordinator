@@ -2,6 +2,7 @@
 import { lines } from './approvals.ts';
 import type { Project } from './db.ts';
 import { pacific } from './pacific.ts';
+import { quietUntil } from './alert-wakes.ts';
 import type { Job, Run, Runner } from './ci-health.ts';
 import { LONG_MINUTES, type LongJob } from './long-jobs.ts';
 
@@ -79,9 +80,9 @@ export function problemLink(x: Problem, scheme: number, wakes: WakeAt, titleOf: 
 
 export const WAKE_STEPS = "People's phones ring for this. Start a fix minion now and name this problem in its brief; if it needs a person (billing, a machine that's off, a runner), ask them with a card instead. If it's expected, add the workflow to the scheme's quiet CI workflows (set_project_settings quiet_workflows).";
 
-/** `x` waiting from `since` (#1662): quiet and `held` until RED_FIX_MS later, its next step saying when it rings; then as it was. */
+/** `x` waiting from `since` (#1662): quiet and `held` until RED_FIX_MS after its Taskmaster can hear (2-9 AM Pacific counts from 9), its next step saying when it rings; then as it was. */
 export function held(x: Problem, since: number, now: number): Problem {
-  const ringsAt = since + RED_FIX_MS;
+  const ringsAt = (quietUntil(since) ?? since) + RED_FIX_MS;
   if (now >= ringsAt) return { ...x, since: x.since ?? since };
   const rings = `if it's still broken at ${clock(ringsAt)}, people's phones ring`;
   return { ...x, since: x.since ?? since, quiet: true, held: ringsAt, plain: x.plain && { ...x.plain, next: `${x.plain.next.replace(/\.$/, '')}; ${rings}` } };

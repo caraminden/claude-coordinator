@@ -499,10 +499,13 @@ const shortAgo = (ms) => (Date.now() - ms < 60_000 ? `${Math.max(0, Math.round((
  * (every app on All), the one picked showing its tiles. The page's list picks the scheme, so other schemes' apps are a click
  * there. `onData` gets each read, for the list's dots on this tab; `show` points it at a scheme.
  */
+let servicePanel = null;
 export function statusPane(onData = () => {}) {
   let scope = null;
   let picked = 'citadel';
   let data = null;
+  let contraptions = null; // api/contraptions, once: admins only, so a 403 leaves it empty and no controls show
+  const panels = new Map(); // one built panel per app, so a redraw keeps its status text, journal and followed deploy
   const pills = h('nav', { class: 'chips st-apps', 'aria-label': 'Citadel and the apps' });
   const detail = h('div', { class: 'st-detail' }, h('p', { class: 'muted' }, 'Reading status…'));
   const el = h('div', { class: 'st-page' }, pills, detail);
@@ -510,6 +513,20 @@ export function statusPane(onData = () => {}) {
   const pill = (key, name, v) => h('button', { type: 'button', class: `chip st-app${picked === key ? ' on' : ''}`, 'aria-pressed': String(picked === key), 'data-key': key, title: v.reasons[0] ?? WORD[v.tone],
     onclick: () => { picked = key; draw(); } },
   h('span', { class: `dot ${DOT[v.tone]}` }), name);
+  /** Start, Restart, Stop and Deploy for an app, the very panel Settings → Contraptions draws; admins only, as there. */
+  const controls = (name) => {
+    if (panels.has(name)) return panels.get(name) ?? '';
+    if (contraptions) {
+      const c = contraptions.find((x) => x.name === name);
+      panels.set(name, c ? h('div', { class: 'st-controls' }, servicePanel(c)) : null);
+      return panels.get(name) ?? '';
+    }
+    if (contraptions === null) {
+      contraptions = false;
+      Promise.all([api('api/contraptions'), import('./contraptions.js')]).then(([cs, m]) => { contraptions = cs; servicePanel = m.servicePanel; draw(); }, () => {});
+    }
+    return '';
+  };
   const draw = () => {
     const { citadel, apps, days, now, shipTimes = [] } = data;
     const mine = apps.filter((a) => scope === 'all' || a.scheme === scope).sort((x, y) => x.title.localeCompare(y.title));
@@ -529,6 +546,7 @@ export function statusPane(onData = () => {}) {
         app ? h('a', { href: `/apps/${app.name}/`, target: '_blank', rel: 'noopener' }, 'Open it') : '',
         h('span', { class: 'muted small' }, `read ${ago(now)}`)),
       h('p', { class: 'st-why' }, ...(v.reasons.length ? why : [app ? 'Running, deployed and quiet.' : 'Up, no failed service, no long stalls, memory, disk and CI fine.'])),
+      app ? controls(app.name) : '',
       h('div', { class: 'st-tiles' }, ...(app ? appTiles(app, days, shipTimes, draw) : [...citadelTiles(citadel, days, now, shipTimes, draw), lines])));
   };
   let tried = false;

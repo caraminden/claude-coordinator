@@ -25,7 +25,7 @@ const unitState = (u) => (u.load === 'not-found' ? 'not installed' : `${u.active
  * Its systemd user service, which Citadel writes and runs (#266): state, the buttons, and the journal on ask.
  * Fetched once the card is drawn; a boot check or preview answers 409 and the panel says why.
  */
-function servicePanel(c, summary) {
+export function servicePanel(c, summary = () => {}) {
   const line = h('span', { class: 'small' }, 'Service: checking…');
   const notes = h('div', { class: 'small muted' });
   const log = h('pre', { hidden: true });
@@ -54,17 +54,20 @@ function servicePanel(c, summary) {
             extra = { ...extra, confirm: c.name };
           } else if (!confirm(`${ask ?? `${label} ${c.title}?`}\n\n${risk}`)) return;
         } else if (ask && !confirm(ask)) return;
-        status.textContent = `${label}…`;
-        for (const x of buttons.querySelectorAll('button')) x.disabled = true;
-        try {
-          const r = await api(base, { method: 'POST', body: { action, ...extra } });
+        // The click shows at once ("Restarting…", buttons held); a failure rolls that back with a toast and a Retry.
+        const before = status.textContent;
+        const hold = (on) => { for (const x of buttons.querySelectorAll('button')) x.disabled = on; };
+        optimistic({
+          key: `contraption-service:${c.name}`,
+          apply: () => { status.textContent = `${label}…`; hold(true); },
+          send: () => api(base, { method: 'POST', body: { action, ...extra } }),
+          undo: () => { status.textContent = before; hold(false); },
+          label: `${label.toLowerCase()} ${c.title}`,
+        }).then((r) => {
           if (action === 'stop' || action === 'restart') lastRun.textContent = `Last ${action}: just now · risk ${(RISKS[c.restart_risk] ?? RISKS.unassessed)[0].toLowerCase()} · ${r.said.at(-1)}`;
           status.textContent = r.said.join(' ');
           show(r.status);
-        } catch (err) {
-          status.textContent = err.message;
-          for (const x of buttons.querySelectorAll('button')) x.disabled = false;
-        }
+        }, () => {});
       };
       return b;
     };

@@ -71,8 +71,9 @@ export function chainsOf(input: ChainInput): Chain[] {
     return key;
   };
   const edge = (from: string, to: string, kind: EdgeKind, label: string) => {
-    if (from === to || seen.has(`${from}>${to}`)) return;
-    seen.add(`${from}>${to}`);
+    // Once per pair and kind: #12 can both start after #11 and queue behind it, and the card shows both.
+    if (from === to || seen.has(`${from}>${to}>${kind}`)) return;
+    seen.add(`${from}>${to}>${kind}`);
     edges.push({ from, to, kind, label });
   };
 
@@ -117,14 +118,18 @@ export function chainsOf(input: ChainInput): Chain[] {
   for (const k of nodes.keys()) parent.set(k, k);
   for (const e of edges) parent.set(root(e.from), root(e.to));
 
-  // Columns: a minion sits one right of the furthest minion it waits on. A loop (two minions waiting on each other) stops at the node count.
+  // Columns: a minion sits one right of the furthest minion it waits on. In a loop (two minions waiting on each other)
+  // the wait back to a minion still being placed counts for nothing, so the loop takes one column per minion in it.
   const waitsOn = new Map<string, string[]>();
   for (const e of edges) waitsOn.set(e.from, [...(waitsOn.get(e.from) ?? []), e.to]);
   const cols = new Map<string, number>();
-  const colOf = (k: string, depth = 0): number => {
+  const placing = new Set<string>();
+  const colOf = (k: string): number => {
     if (cols.has(k)) return cols.get(k)!;
-    if (depth > nodes.size) return 0;
-    const c = Math.max(-1, ...(waitsOn.get(k) ?? []).map((to) => colOf(to, depth + 1))) + 1;
+    if (placing.has(k)) return -1;
+    placing.add(k);
+    const c = Math.max(-1, ...(waitsOn.get(k) ?? []).map(colOf)) + 1;
+    placing.delete(k);
     cols.set(k, c);
     return c;
   };

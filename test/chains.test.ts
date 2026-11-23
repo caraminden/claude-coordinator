@@ -57,5 +57,20 @@ test('kinds that meet join one chain; claims and builds sort first; two minions 
   assert.equal(chains[0].title, 'Pipeline lane');
   assert.deepEqual(chains[0].kinds, ['claim', 'wait']);
   assert.deepEqual(chains[0].nodes.map((n) => n.number), [1, 2, 3]);
-  assert.deepEqual(chains[1].nodes.map((n) => n.number).sort(), [5, 6]);
+  assert.deepEqual(chains[1].nodes.map((n) => [n.number, n.col]), [[6, 0], [5, 1]], 'a loop takes one column per minion, from 0');
+});
+
+test('a loop beside an unrelated chain still starts at column 0', () => {
+  const ts = [T(1, 1), T(2, 2), T(3, 3), T(4, 4), T(5, 5)];
+  const chains = chainsOf(input(ts, { 1: [wait(2)], 2: [wait(1)], 3: [wait(4)], 5: [wait(4)] }));
+  const loop = chains.find((c) => c.nodes.some((n) => n.number === 1))!;
+  assert.deepEqual(loop.nodes.map((n) => n.col).sort(), [0, 1]);
+});
+
+test('a minion that both starts after another and queues behind it keeps both, so the queue still names the chain', () => {
+  const ts = [T(11, 11), T(12, 12)];
+  const [c] = chainsOf(input(ts, { 12: [wait(11, 'chain')] }, { claims: [{ name: 'pipeline-lane', holder: 11, waiting: [12] }] }));
+  assert.equal(c.title, 'Pipeline lane');
+  assert.deepEqual(c.kinds, ['claim', 'start_after']);
+  assert.deepEqual(c.edges.map((e) => e.kind).sort(), ['claim', 'start_after']);
 });

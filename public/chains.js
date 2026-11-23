@@ -18,17 +18,18 @@ const KIND = {
 const POLL_MS = 15_000;
 const STALE_MS = 20_000;
 
-/** Each scheme's last read: { at, chains, loading }. The page and the chat head's link share it. */
+/** Each scheme's last read: { at, chains, error, loading, after }. The page and the chat head's link share it, and every caller's `after` runs when it lands. */
 const cache = new Map();
-let pageEl = null, focus = null, timer = null, drawnSig = '', entered = false;
+let pageEl = null, pageProject = null, focus = null, timer = null, drawnSig = '', entered = false;
 
 function read(projectId, after) {
-  const c = cache.get(projectId) ?? { at: 0, chains: null };
+  const c = cache.get(projectId) ?? { at: 0, chains: null, after: [] };
+  if (after) c.after.push(after);
   if (c.loading) return c.loading;
   c.loading = api(`api/projects/${projectId}/chains`)
     .then(({ chains }) => { c.chains = chains; c.error = null; })
     .catch((ex) => { c.error = ex.message; })
-    .finally(() => { c.at = Date.now(); c.loading = null; after?.(); });
+    .finally(() => { c.at = Date.now(); c.loading = null; for (const f of c.after.splice(0)) f(); });
   cache.set(projectId, c);
   return c.loading;
 }
@@ -40,6 +41,7 @@ export function chainsPage(projectId, number) {
   focus = number ?? null;
   entered = false;
   drawnSig = '';
+  pageProject = projectId;
   pageEl = h('section', { class: 'artifacts-main chains-main' });
   draw(projectId);
   read(projectId, () => draw(projectId));
@@ -61,11 +63,13 @@ function stateOf(n) {
   }
   if (n.status === 'build') return { word: 'Build', fam: 'idle' };
   if (n.status === 'closed') return { word: 'Dismissed', fam: 'idle' };
-  return { word: n.state || n.status, fam: n.status === 'running' ? 'work' : 'idle', pulse: n.status === 'running' };
+  // ADR 0027: people read "sealed", never the stored "parked".
+  return { word: n.state === 'parked' ? 'sealed' : n.state || n.status, fam: n.status === 'running' ? 'work' : 'idle', pulse: n.status === 'running' };
 }
 
 function draw(projectId) {
-  if (!pageEl?.isConnected && pageEl?.childNodes.length) return;
+  // A read for a scheme whose page has since been left (switched schemes mid-fetch) draws nothing.
+  if (projectId !== pageProject || (!pageEl?.isConnected && pageEl?.childNodes.length)) return;
   const c = cache.get(projectId);
   const chains = c?.chains;
   // A redraw that would change nothing keeps what's on screen (and the hover a person is tracing).
@@ -73,7 +77,9 @@ function draw(projectId) {
   if (sig === drawnSig) return;
   drawnSig = sig;
   const head = h('div', { class: 'ticket-head' },
-    h('div', { class: 'row' }, h('h2', {}, 'Chains'), h('span', { class: 'spacer' }),
+    h('div', { class: 'row' }, h('h2', {}, 'Chains'),
+      // A failed refresh keeps the last chains, marked in the head's free room so nothing below moves.
+      chains && c.error ? h('span', { class: 'chains-stale', title: c.error }, toneChip('danger', 'Not refreshed')) : '', h('span', { class: 'spacer' }),
       h('a', { class: 'close-view', href: `#/p/${projectId}`, title: 'Back to the Taskmaster', 'aria-label': 'Close' }, icon('close'))),
     h('p', { class: 'chains-lede' }, 'Who waits on whom: minions that start after another, wait on its work or a note from it, queue for a claim like the pipeline lane, or feed a build.'));
   const body = !c || (!chains && !c.error) ? [loadingLine('Loading…')]
@@ -91,7 +97,8 @@ function draw(projectId) {
 }
 
 function summary(chains) {
-  const waiting = new Set(chains.flatMap((c) => c.edges.map((e) => e.from)));
+  // A build with no build minion is a node, not a minion: it counts in neither total.
+  const waiting = new Set(chains.flatMap((c) => c.edges.map((e) => e.from)).filter((k) => !k.startsWith('build:')));
   const lane = chains.flatMap((c) => c.edges).filter((e) => e.kind === 'claim').length;
   return statTiles([chains.length, chains.length === 1 ? 'chain' : 'chains', 'accent'], [waiting.size, waiting.size === 1 ? 'minion waiting' : 'minions waiting', 'waiting'],
     lane ? [lane, 'in a claim queue', 'held'] : null);
@@ -118,9 +125,11 @@ function chainCard(ch) {
   const kinds = ch.kinds.map((k) => toneChip(KIND[k].tone, KIND[k].word));
   return h('article', { class: `chain-card${here ? ' focus' : ''}`, 'data-hue': KIND[ch.kinds[0]]?.hue ?? 'running', 'data-key': ch.key },
     h('header', { class: 'chain-head' }, h('span', { class: 'chain-tile', 'aria-hidden': 'true' }, '⛓'),
-      h('b', { class: 'chain-title' }, ch.title), ...kinds, h('span', { class: 'chain-count' }, `${ch.nodes.length} minions`)),
+      h('b', { class: 'chain-title' }, ch.title), ...kinds, h('span', { class: 'chain-count' }, minions(ch.nodes.filter((n) => n.id != null).length))),
     flow);
 }
+
+const minions = (n) => `${n} minion${n === 1 ? '' : 's'}`;
 
 /** Each minion straight after the one it comes after, so a phone's indented list reads as a tree; the desktop grid places them by column either way. */
 function treeOrder(ch) {
@@ -138,9 +147,16 @@ function treeOrder(ch) {
 
 function node(n, ch, row, here) {
   const s = stateOf(n);
-  const after = ch.edges.filter((e) => e.from === n.key).map((e) => {
-    const to = ch.nodes.find((x) => x.key === e.to);
-    return `${to?.number ? `#${to.number}` : to?.title ?? '?'}${e.kind === 'claim' || e.kind === 'build' ? ` · ${e.label}` : ''}`;
+  // One entry per minion it comes after, with each claim or build that puts it there (a pair can be both start_after and a queue).
+  const byTo = new Map();
+  for (const e of ch.edges.filter((x) => x.from === n.key)) {
+    const labels = byTo.get(e.to) ?? [];
+    if (e.kind === 'claim' || e.kind === 'build') labels.push(e.label);
+    byTo.set(e.to, labels);
+  }
+  const after = [...byTo].map(([key, labels]) => {
+    const to = ch.nodes.find((x) => x.key === key);
+    return `${to?.number ? `#${to.number}` : to?.title ?? '?'}${labels.length ? ` · ${labels.join(' · ')}` : ''}`;
   });
   const other = n.project !== view.projectId ? view.projects?.find((p) => p.id === n.project) : null;
   const tag = n.number ? 'a' : 'div';

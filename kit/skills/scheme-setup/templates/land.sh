@@ -132,7 +132,7 @@ FACTS=CLAUDE.md
 CI_WORKFLOWS=''
 CI_STATUS=''
 # BUILD_WORKFLOWS: more workflow files a major build's --full run (below, "Build branches") must see green on its
-#   commit besides the gate's, split by spaces: 'desktop.yml' always, 'desktop.yml:tools/desktop-run/paths' only when
+#   commit besides the gate's, split by spaces: 'desktop.yml' always, 'desktop.yml:tools/desktop-paths' only when
 #   the build changes (since it forked from $BRANCH) a path that repo file names: a bash case pattern a line (* also
 #   matches /), '#' comments, and a line starting with ! rules a path out. The file is read from $BRANCH, else the
 #   branch's own; on neither, the workflow runs. Each is judged by the built-in reader's rules above, CI_STATUS or not.
@@ -1390,7 +1390,12 @@ build_lanes() {
   echo "${out# }"
 }
 BUILD_LW=''
-[ "$mode" != full ] || [ -z "$BUILD_WORKFLOWS" ] || { BUILD_LW=$(set -f; build_lanes) && CI_ON+=$BUILD_LW; }
+if [ "$mode" = full ] && [ -n "$BUILD_WORKFLOWS" ]; then
+  BUILD_LW=$(set -f; build_lanes)
+  # With no gate of its own, setup left CI no time (CI_LIMIT 0): the build's workflows get the usual limit.
+  [ -z "$BUILD_LW" ] || [ -n "$CI_ON" ] || CI_LIMIT=${LAND_CI_TIMEOUT:-2700}
+  CI_ON+=$BUILD_LW
+fi
 slug=''
 if [ -n "$CI_ON" ]; then
   slug=$(git -C "$MAIN" remote get-url origin 2>/dev/null) || refuse "the CI gate is on, but there is no origin remote to run CI from"
@@ -1527,12 +1532,13 @@ ci_runs() {
 # and ci_open.
 ci_read() {
   local sha=$1 runs w path id status result url one failed skipped j rank worst=0 worst_rank=0 open_rank=0
-  ci_open=0
+  ci_open=0 ci_seen='' # ci_seen: the workflows with a run on the commit, a queued one too
   runs=$(hub gh api "repos/$slug/actions/runs?head_sha=$sha&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[] | [.path, .id, .status, .conclusion // "-", .html_url] | @tsv' 2>>"$cilog") || return 5
   for w in $LW; do
     one=3
     while IFS=$'\t' read -r path id status result url; do
       [[ ${path%%@*} == */"$w" ]] || continue
+      ci_seen+=" $w"
       case $status:$result in
         completed:success)
           # Green only when every job ran: a run whose jobs were skipped (an `if:` that came out false) concludes success too.
@@ -2397,12 +2403,13 @@ smoke() {
 verify_ci() {
   rc=0
   ci_runs || rc=$?
-  gate_rc=$rc
+  gate_rc=$rc # the gate's own verdict, its open one when it is red, as it stood before BUILD_WORKFLOWS
+  [ "$rc" != 1 ] || [ "$ci_open" = 0 ] || gate_rc=$ci_open
   [ -z "$BUILD_LW" ] || build_ci
   [ "$rc" != 1 ] || [ "$ci_open" = 0 ] || { ci_red=1 rc=$ci_open; }
 }
 # --full's BUILD_WORKFLOWS, each read on its own and folded into rc and ci_open as one more of the gate's workflows. One
-# with no run on $tip CI_GRACE after the push is dispatched on $CI_REF; build_again names the ones to dispatch again
+# with no run at all on $tip (a queued one is waited for) CI_GRACE after the push is dispatched on $CI_REF; build_again names the ones to dispatch again
 # (no verdict, on the retry), whose old run doesn't count for CI_GRACE after that.
 ci_rank() { case $1 in 0) echo 0 ;; 2) echo 1 ;; 1) echo 5 ;; 4) echo 4 ;; 3) echo 3 ;; *) echo 2 ;; esac; } # worst last
 build_ci() {
@@ -2416,11 +2423,16 @@ build_ci() {
     else LW=$w LS='' ci_read "$tip" || x=$?; fi
     if [ "$x" = 1 ]; then :
     elif [[ " $build_again " == *" $w "* ]]; then
-      if [[ " $build_resent " != *" $w "* ]]; then build_resent+=" $w" x=3; build_dispatch "$w" || x=1
+      if [[ " $build_resent " != *" $w "* ]]; then
+        x=3 && build_dispatch "$w" || x=$?
+        [ "$x" = 2 ] && x=3 || build_resent+=" $w" # GitHub gave no answer: dispatch it on the next poll
       elif [ "$x" != 0 ] && [ "$x" != 2 ] && [ $((SECONDS - build_at)) -lt "$CI_GRACE" ]; then x=3; fi
-    elif [ "$x" = 3 ] && [[ " $build_sent " != *" $w "* ]]; then
+    elif [ "$x" = 3 ] && [ -z "$ci_seen" ] && [[ " $build_sent " != *" $w "* ]]; then
       build_wait=1
-      if [ -n "$pushed" ] && [ $((SECONDS - pushed_at)) -ge "$CI_GRACE" ]; then build_sent+=" $w"; build_dispatch "$w" || x=1; fi
+      if [ -n "$pushed" ] && [ $((SECONDS - pushed_at)) -ge "$CI_GRACE" ]; then
+        build_dispatch "$w" || x=$?
+        [ "$x" = 2 ] && x=3 || build_sent+=" $w"
+      fi
     fi
     [ "$x" != 4 ] || build_lost+=" $w"
     [ "$(ci_rank "$x")" -le "$(ci_rank "$rc")" ] || rc=$x
@@ -2429,13 +2441,18 @@ build_ci() {
   ci_open=0
   [ "$rc" != 1 ] || ci_open=$open
 }
-# build_dispatch <workflow>: starts it on $CI_REF (its workflow_dispatch trigger); a refusal is its red from then on (build_bad).
+# build_dispatch <workflow>: starts it on $CI_REF (its workflow_dispatch trigger). GitHub's refusal (an HTTP 4xx) is its red
+# from then on (build_bad), 1; no answer (a 5xx, a timeout) is 2, to try again.
 build_dispatch() {
   local err
   build_at=$SECONDS
   if err=$(hub gh api -X POST "repos/$slug/actions/workflows/$1/dispatches" -f ref="$CI_REF" 2>&1 >/dev/null); then
     say "dispatched $1 on $CI_REF: it doesn't start on the push"
     return 0
+  fi
+  if [[ $err != *"HTTP 4"[0-9][0-9]* ]]; then
+    echo "$1: couldn't dispatch it on $CI_REF, trying again: ${err//$'\n'/ }" >>"$cilog"
+    return 2
   fi
   build_bad+="$1: couldn't dispatch it on $CI_REF (it needs a workflow_dispatch trigger, or land/** among its push branches): ${err//$'\n'/ }"$'\n'
   printf '%s\n' "${build_bad%$'\n'}" | tail -n 1 >>"$cilog"

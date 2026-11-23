@@ -220,8 +220,9 @@ line costs time, never safety; `tools/land.sh --lane` prints the lane a commit w
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
 `CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. When a major build's
 `--full` run must also see a workflow the gate leaves out (Peek's `desktop.yml`, which runs on main only), name it in
-`BUILD_WORKFLOWS` in `land.local.sh`: `'desktop.yml'` for every build, or `'desktop.yml:tools/desktop-run/paths'` only
-when the build changes a path that file lists. `--full` dispatches it on the build's `land/` branch when the push didn't
+`BUILD_WORKFLOWS` in `land.local.sh`: `'desktop.yml'` for every build, or `'desktop.yml:<paths file>'` only when the build
+changes a path that file lists. That file must name everything the workflow tests (the code too, not just its harness),
+or a build that changes only that code skips it; when in doubt, use the plain form. `--full` dispatches it on the build's `land/` branch when the push didn't
 start it (it needs `workflow_dispatch`), waits for it, and refuses the build on its red, CI_STATUS or not. Exit 75 means
 CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion
 calls `wake_when_runners_back`, seals itself, and runs it again once Citadel says the runners are back. Say all of this in the "How a

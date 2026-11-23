@@ -36,8 +36,9 @@
 #   doesn't hold a red back.
 # CI_STATUS=''
 # BUILD_WORKFLOWS: more workflows a major build's --full must see green, read by the core's own reader even beside
-#   CI_STATUS and dispatched when the push doesn't start them: 'desktop.yml' always, 'desktop.yml:tools/desktop-run/paths'
-#   only when the build changes a path that file lists (a bash case pattern a line, ! rules one out).
+#   CI_STATUS and dispatched when the push doesn't start them: 'desktop.yml' always, 'desktop.yml:<paths file>' only
+#   when the build changes a path that file lists (a bash case pattern a line, ! rules one out). The file must name all
+#   the workflow tests, its code as well as its harness; in doubt, the plain form.
 # BUILD_WORKFLOWS=''
 
 # How many landings at the front of the line run CI at once. Runners that can't carry three runs at once: 2.

@@ -344,16 +344,17 @@ test("--into: a feeder that hands off while the build minion's claims merge is i
 
 // BUILD_WORKFLOWS (#1683): a build's --full also waits for the scheme's build workflows (Peek's desktop.yml), read by the
 // built-in reader even beside CI_STATUS. A gh first in PATH answers the runs list from runs.tsv and, on a dispatch,
-// puts dispatched.tsv's line at its top, so the dispatched run is the newest.
+// puts dispatched.tsv's line at its top, so the dispatched run is the newest. A `blip` file fails the next dispatch with a
+// 502, and a later.tsv replaces runs.tsv on the fourth runs read.
 function buildCi(config: Record<string, string>, dispatched = '') {
   const b = buildSetup({ CI_STATUS: 'true', ...config });
   const ci = join(b.dir, 'ci');
   const bin = join(b.dir, 'bin');
   mkdirSync(ci);
   mkdirSync(bin);
-  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *dispatches*) [ ! -e "$CI_DIR/refuse" ] || { echo "HTTP 422: no workflow_dispatch trigger" >&2; exit 1; }; cat "$CI_DIR/dispatched.tsv" "$CI_DIR/runs.tsv" >"$CI_DIR/r" 2>/dev/null; mv "$CI_DIR/r" "$CI_DIR/runs.tsv" ;; *head_sha=*) cat "$CI_DIR/runs.tsv" 2>/dev/null ;; *skipped*) echo 0 ;; */jobs*) echo "1 1" ;; esac\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *dispatches*) [ ! -e "$CI_DIR/blip" ] || { rm "$CI_DIR/blip"; echo "HTTP 502: Bad Gateway" >&2; exit 1; }; [ ! -e "$CI_DIR/refuse" ] || { echo "HTTP 422: no workflow_dispatch trigger" >&2; exit 1; }; cat "$CI_DIR/dispatched.tsv" "$CI_DIR/runs.tsv" >"$CI_DIR/r" 2>/dev/null; mv "$CI_DIR/r" "$CI_DIR/runs.tsv" ;; *head_sha=*) echo >>"$CI_DIR/reads"; [ ! -e "$CI_DIR/later.tsv" ] || [ "$(wc -l <"$CI_DIR/reads")" -lt 4 ] || mv "$CI_DIR/later.tsv" "$CI_DIR/runs.tsv"; cat "$CI_DIR/runs.tsv" 2>/dev/null ;; *skipped*) echo 0 ;; */jobs*) echo "1 1" ;; esac\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(ci, 'dispatched.tsv'), dispatched ? `.github/workflows/${dispatched}\t7\tcompleted\t${dispatched.endsWith(' red') ? 'failure' : 'success'}\thttps://x/7\n`.replace(/ (red|green)\t/, '\t') : '');
-  const full = () => spawnSync('bash', [join(b.wts[2], 'tools', 'land.sh'), '--into', 'build/1', '--full'], { cwd: b.wts[2], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: join(b.dir, 'ran'), CI_DIR: ci, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0' } });
+  const full = (more: Record<string, string> = {}) => spawnSync('bash', [join(b.wts[2], 'tools', 'land.sh'), '--into', 'build/1', '--full'], { cwd: b.wts[2], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: join(b.dir, 'ran'), CI_DIR: ci, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0', ...more } });
   const ghLog = () => (existsSync(join(ci, 'gh.log')) ? readFileSync(join(ci, 'gh.log'), 'utf8') : '');
   return { ...b, full, ghLog };
 }
@@ -380,6 +381,19 @@ test('BUILD_WORKFLOWS: --full dispatches a build workflow with no run on its com
   assert.equal(ok.status, 0, ok.stderr);
   assert.equal(green.at('build/1'), git(green.wts[2], 'rev-parse', 'HEAD'));
   assert.equal(green.ghLog().match(/dispatches/g)?.length, 1, 'dispatched once');
+
+  // GitHub giving no answer (a 5xx, a timeout) is not a refusal: the dispatch is tried again on the next poll.
+  const blip = buildCi({ BUILD_WORKFLOWS: 'desktop.yml' }, 'desktop.yml green');
+  writeFileSync(join(blip.dir, 'ci', 'blip'), '');
+  const retry = blip.full();
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.equal(blip.ghLog().match(/dispatches/g)?.length, 2, 'the 502, then the dispatch that ran');
+
+  // With no gate of its own (CI_STATUS and CI_WORKFLOWS empty), the build's workflows still get CI's time limit.
+  const only = buildCi({ CI_STATUS: '', BUILD_WORKFLOWS: 'desktop.yml' }, 'desktop.yml green');
+  const solo = only.full();
+  assert.equal(solo.status, 0, solo.stderr);
+  assert.equal(only.at('build/1'), git(only.wts[2], 'rev-parse', 'HEAD'));
 });
 
 test('BUILD_WORKFLOWS: a run that started on the push is waited for, not dispatched again, a lost one runs once more; with nothing set, --full asks GitHub nothing new', () => {
@@ -389,6 +403,14 @@ test('BUILD_WORKFLOWS: a run that started on the push is waited for, not dispatc
   assert.equal(res.status, 1, res.stderr);
   assert.match(res.stderr, /desktop\.yml: completed failure/);
   assert.doesNotMatch(b.ghLog(), /dispatches/);
+
+  // A run still queued (the runners busy) is waited for, never dispatched again.
+  const queued = buildCi({ CI_STATUS: '', CI_WORKFLOWS: 'ci.yml', BUILD_WORKFLOWS: 'desktop.yml' });
+  writeFileSync(join(queued.dir, 'ci', 'runs.tsv'), '.github/workflows/ci.yml\t1\tcompleted\tsuccess\tu\n.github/workflows/desktop.yml\t2\tqueued\t-\tu\n');
+  writeFileSync(join(queued.dir, 'ci', 'later.tsv'), '.github/workflows/ci.yml\t1\tcompleted\tsuccess\tu\n.github/workflows/desktop.yml\t2\tcompleted\tsuccess\tu\n');
+  const wait = queued.full();
+  assert.equal(wait.status, 0, wait.stderr);
+  assert.doesNotMatch(queued.ghLog(), /dispatches/);
 
   // One that ends without a verdict (cancelled: its runner went away) is dispatched once more, and that run decides.
   const lost = buildCi({ BUILD_WORKFLOWS: 'desktop.yml' }, 'desktop.yml green');
@@ -400,6 +422,13 @@ test('BUILD_WORKFLOWS: a run that started on the push is waited for, not dispatc
   const none = buildCi({});
   assert.equal(none.full().status, 0);
   assert.equal(none.ghLog(), '', 'CI_STATUS alone: no gh call');
+
+  // Nothing set, a red gate workflow beside one with no run: the commit is still pushed so the other can run, as before.
+  const gate = buildCi({ CI_STATUS: '', CI_WORKFLOWS: 'ci.yml other.yml' });
+  writeFileSync(join(gate.dir, 'ci', 'runs.tsv'), '.github/workflows/ci.yml\t1\tcompleted\tfailure\tu\n');
+  const pushedRed = gate.full({ LAND_CI_START: '0' }); // other.yml never starts: the red decides at once
+  assert.equal(pushedRed.status, 1, pushedRed.stderr);
+  assert.match(pushedRed.stderr, /waiting for CI on/);
 });
 
 test('BUILD_WORKFLOWS: <file>:<paths file> runs the workflow only when the build changes a path main\'s file names', () => {

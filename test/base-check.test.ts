@@ -87,9 +87,9 @@ test('picks the runner\'s command and the cargo target', () => {
   mkdirSync(join(ws, 'crates', 'core', 'tests', 'fake'), { recursive: true });
   writeFileSync(join(ws, 'crates', 'core', 'tests', 'suite', 'main.rs'), 'mod copied;\n');
   writeFileSync(join(ws, 'crates', 'core', 'tests', 'fake.rs'), 'mod keep;\n');
-  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/suite/copied.rs', ['keeps_copy']), ['-p', 'peek-core', '--test', 'suite', '--', 'keeps_copy']);
-  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/suite/deep/more.rs'), ['-p', 'peek-core', '--test', 'suite']);
-  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/fake/keep.rs', ['k']), ['-p', 'peek-core', '--test', 'fake', '--', 'k'], 'tests/fake.rs mods in tests/fake/');
+  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/suite/copied.rs', ['keeps_copy']), ['-p', 'peek-core', '--test', 'suite', '--', 'copied::keeps_copy'], 'qualified: another module\'s keeps_copy must not stand in');
+  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/suite/deep/more.rs'), ['-p', 'peek-core', '--test', 'suite', '--', 'deep::more::']);
+  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/fake/keep.rs', ['k']), ['-p', 'peek-core', '--test', 'fake', '--', 'keep::k'], 'tests/fake.rs mods in tests/fake/');
   assert.equal(cargoTest(ws, 'crates/core/tests/suite/copied.rs'), true);
   assert.equal(cargoTest(ws, 'crates/core/tests/common/mod.rs'), false, 'a shared helper module is not a test target');
   assert.equal(cargoTest(ws, 'crates/app/src/poe_log_tests.rs') && cargoTest(ws, 'crates/core/tests/busy_cara.rs') && cargoTest(ws, 'crates/core/tests/suite/main.rs'), true);
@@ -102,6 +102,7 @@ test('picks the runner\'s command and the cargo target', () => {
   assert.match(cargoNoTarget('error: no library targets found in package `peek-app`\n') ?? '', /^no library targets found/);
   assert.equal(cargoNoTarget('error[E0425]: cannot find value\n'), null);
   assert.ok(isTestPath('crates/core/tests/common/mod.rs') && isTestPath('src/a.spec.ts') && !isTestPath('src/latest.ts'));
+  assert.ok(isTestPath('crates/app/src/tools/copy_tests.rs') && !isTestPath('crates/app/src/contests.rs'), 'a suffixed Rust test module is a test file (#1724)');
 });
 
 test('judges a file: a case passing on the base is flagged; failing, not loading or skipped is not', () => {
@@ -126,6 +127,8 @@ test('judges a file: a case passing on the base is flagged; failing, not loading
 test('reads citadel-test\'s output, which names only failures (#1724)', () => {
   const out = '✖ 31 passed, 1 failed (+4 repo-wide files) in 22.5 s\n\n✖ test/u.test.ts:193 › only a person can start one\n  Expected values to be strictly equal:\n\n✖ test/v.test.ts:9 › menus › opens\nfull output: /tmp/citadel-test.log\n';
   assert.deepEqual(parseResults(out), [{ name: 'only a person can start one', ok: false }, { name: 'menus > opens', ok: false }]);
+  assert.deepEqual(parseResults(out, 'test/v.test.ts'), [{ name: 'menus > opens', ok: false }], "another file's failure is not this file's");
+  assert.deepEqual(parseResults('✖ /tmp/t/test/v.test.ts:9 › opens\n', 'test/v.test.ts'), [{ name: 'opens', ok: false }], 'an absolute path');
   const e = { path: 'test/u.test.ts', cases: ['only a person can start one', 'other'] };
   assert.deepEqual(judge(e, { status: 1, out, timedOut: false, parsed: true }).map((v) => v.kind), ['red', 'skipped'], 'a case it didn\'t list may have passed or never run');
 });

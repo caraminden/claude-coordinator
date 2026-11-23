@@ -61,7 +61,7 @@ export function isTestPath(p: string, script = '', rel = p): boolean {
     const d = dirname(rel);
     return script.split(/\s+/).map((a) => a.replace(/^['"]|['"]$/g, '')).some((a) => a === rel || globs(rel, a) || (d !== '.' && (a.replace(/\/$/, '') === d || a.startsWith(d + '/'))));
   }
-  return SH_TEST.test(name) || JS_TEST.test(name) || PY_TEST.test(name) || /(?:^|\/)tests?\.rs$/.test(p) || /_test\.go$/.test(name) || /Tests?\.cs$/.test(name);
+  return SH_TEST.test(name) || JS_TEST.test(name) || PY_TEST.test(name) || /(?:^|\/|_)tests?\.rs$/.test(p) || /_test\.go$/.test(name) || /Tests?\.cs$/.test(name);
 }
 
 /** Lines of a Rust file from its trailing `#[cfg(test)] mod … {` to the end, or null when its tests aren't that shape. */
@@ -120,7 +120,7 @@ export function changedCases(base: string | null, head: string, lang: 'js' | 'rs
 }
 
 /** Per-case results from node --test's TAP, vitest's tap-flat, cargo test's and pytest -rA's output. */
-export function parseResults(out: string): Result[] {
+export function parseResults(out: string, path?: string): Result[] {
   const res: Result[] = [];
   for (const line of out.split('\n')) {
     let m = /^\s*(not ok|ok) \d+ - (.*?)(?: # (SKIP|TODO)\b.*| # time=.*)?$/.exec(line);
@@ -139,8 +139,9 @@ export function parseResults(out: string): Result[] {
       continue;
     }
     // citadel-test's "✖ test/a.test.ts:12 › suite › case": it lists failures only, never a passing case.
-    m = /^✖ \S+ › (.+)$/.exec(line);
-    if (m) res.push({ name: m[1].split(' › ').join(' > '), ok: false });
+    // With a path, another file's failure with the same name is not this file's.
+    m = /^✖ (\S+?)(?::\d+)? › (.+)$/.exec(line);
+    if (m && (!path || m[1] === path || m[1].endsWith('/' + path) || path.endsWith('/' + m[1]))) res.push({ name: m[2].split(' › ').join(' > '), ok: false });
   }
   return res;
 }
@@ -167,7 +168,7 @@ export function firstError(out: string): string {
 export function judge(entry: Pick<Entry, 'path' | 'cases'> & { runner?: Runner | null }, run: { status: number | null; out: string; timedOut: boolean; parsed: boolean }): Verdict[] {
   const { path, cases } = entry;
   if (run.timedOut) return [{ kind: 'skipped', label: path, detail: 'timed out on the base' }];
-  const results = run.parsed ? parseResults(run.out) : [];
+  const results = run.parsed ? parseResults(run.out, path) : [];
   if (cases?.length === 0) return [{ kind: 'skipped', label: path, detail: 'no new or changed case found (only shared setup or helpers changed): judge it by hand' }];
   if (cases === null) {
     if (run.status === 0 && run.parsed && results.length === 0) return [{ kind: 'skipped', label: path, detail: 'ran no tests on the base' }];
@@ -358,9 +359,13 @@ export function cargoArgs(root: string, path: string, cases: string[] = []): str
   const rel = relative(dir, path).split(sep).join('/');
   let m = /^tests\/([^/]+?)(?:\.rs|\/main\.rs)$/.exec(rel);
   if (m) return ['-p', pkg, '--test', m[1]];
-  // A module of a multi-file test target: that target, filtered to the changed cases.
-  m = /^tests\/([^/]+)\/.+\.rs$/.exec(rel);
-  if (m) return ['-p', pkg, '--test', m[1], ...(cases.length ? ['--', ...cases] : [])];
+  // A module of a multi-file test target: that target, filtered to the module's changed cases (qualified, so another
+  // module's test of the same name can't stand in for one that never ran).
+  m = /^tests\/([^/]+)\/(.+)\.rs$/.exec(rel);
+  if (m) {
+    const mod = m[2].split('/').filter((s) => s !== 'mod').join('::');
+    return ['-p', pkg, '--test', m[1], '--', ...(cases.length ? cases.map((c) => `${mod}::${c}`) : [`${mod}::`])];
+  }
   m = /^src\/(.*)\.rs$/.exec(rel);
   if (!m) return `${rel} is not under tests/ or src/ of ${pkg}`;
   // The changed cases as name filters, so only they run, not the whole lib or bin target.

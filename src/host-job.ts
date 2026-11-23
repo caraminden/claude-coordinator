@@ -65,13 +65,30 @@ function onDisk(tmp: string | undefined): boolean {
   return !!tmp && !/^\/(tmp|var\/tmp|dev\/shm|run)(\/|$)/.test(tmp);
 }
 
-/** Delete `dir`'s renamed-away last runs, this start's and any a restart cut off mid-delete. */
+/**
+ * Rename `dir` away (one metadata op) and delete it off the server's thread, with any earlier one a restart cut off
+ * mid-delete. A missing `dir` is fine.
+ */
+export function moveAside(dir: string): void {
+  try {
+    renameSync(dir, `${dir}.old-${Date.now()}`);
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  void dropOld(dir);
+}
+
 async function dropOld(dir: string): Promise<void> {
   const prefix = `${basename(dir)}.old-`;
+  let names: string[];
   try {
-    for (const name of await readdir(dirname(dir))) if (name.startsWith(prefix)) await rm(join(dirname(dir), name), { recursive: true, force: true });
-  } catch (err: any) {
-    console.error(`Could not delete the old job folders beside ${dir}: ${err?.message ?? err}`);
+    names = await readdir(dirname(dir));
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix)) continue;
+    await rm(join(dirname(dir), name), { recursive: true, force: true }).catch((err) => console.error(`Could not delete the old job folder ${join(dirname(dir), name)}: ${err?.message ?? err}`));
   }
 }
 
@@ -101,12 +118,7 @@ export class HostJobs {
     const { dir } = job;
     // The last run's folder (a land's keeps thousands of test files) is renamed away and deleted off the server's thread:
     // deleted here, it held the thread 9.9 s under load (#1734).
-    try {
-      renameSync(dir, `${dir}.old-${Date.now()}`);
-    } catch (err: any) {
-      if (err?.code !== 'ENOENT') throw err;
-    }
-    void dropOld(dir);
+    moveAside(dir);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const lines = Object.entries(job.env).filter(([k, v]) => v !== undefined && VALID.test(k) && !SKIP.test(k)).map(([k, v]) => `export ${k}=${quote(String(v))}\n`);
     // Scratch on disk, never in perigee's RAM-backed /tmp (#1339): boot-check's database copy and a test run's files

@@ -8,10 +8,9 @@
 // nobody, and land.sh lets them through (LAND_KNOWN_RED).
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { HostJobs } from './host-job.ts';
+import { moveAside, type HostJobs } from './host-job.ts';
 
 const run = promisify(execFile);
 
@@ -226,7 +225,7 @@ export class FastMode {
     // A folder whose .git file points at an entry the repo no longer has (a prune that couldn't see the folder, as a
     // container turn can't) is no worktree: start it over, losing only what the check installed in it.
     if (existsSync(join(wt, '.git')) && !(await this.git(wt, 'rev-parse', '--git-dir').then(() => true, () => false))) {
-      await rm(wt, { recursive: true, force: true }); // off the server's thread: a worktree with its installs is big (#1734)
+      moveAside(wt); // off the server's thread (a worktree with its installs is big), and never left half deleted by a restart (#1734)
       console.log(`Fast mode for scheme ${projectId}: its worktree had lost its git link; rebuilding it.`);
     }
     if (!existsSync(join(wt, '.git'))) {

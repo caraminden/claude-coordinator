@@ -14,14 +14,14 @@ test("a job's start renames the last run's folder away and deletes it, and any a
   const dir = join(root, '7');
   mkdirSync(join(dir, 'tmp'), { recursive: true });
   for (let i = 0; i < 300; i++) writeFileSync(join(dir, 'tmp', `f${i}`), 'x');
-  writeFileSync(join(dir, 'code'), '0');
+  writeFileSync(join(dir, 'last-run'), '');
   mkdirSync(join(root, '7.old-1'));
   writeFileSync(join(root, '7.old-1', 'left'), 'by a restart mid-delete');
   mkdirSync(join(root, '70'));
   new HostJobs(() => false).start({ dir, cwd: root, argv: ['true'], env: {}, unit: 'u', description: 'd', ticketId: 7 });
   const olds = readdirSync(root).filter((n) => n.startsWith('7.old-'));
   assert.equal(olds.length, 2, 'the last run is renamed away, not deleted, before start returns');
-  assert.ok(!readdirSync(dir).includes('code'), "the new folder starts empty of the last run's files");
+  assert.ok(!readdirSync(dir).includes('last-run'), "the new folder starts empty of the last run's files");
   await until('the old folders are deleted in the background', () => readdirSync(root).sort().join() === '7,70');
   await until('the job ends', () => readdirSync(dir).includes('code'));
 });

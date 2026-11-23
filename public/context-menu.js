@@ -26,7 +26,11 @@ const KIND = {
   part: { kind: 'Part', tone: 'neutral' },
   page: { kind: 'Page', tone: 'neutral' },
 };
-const FOOT = 'Shift+right-click: the browser\'s own menu';
+// The desktop app (Electron) has no menu of its own to fall back to, and sends a Citadel link opened "in a new tab"
+// back into its one window (desktop/main.cjs), so there it shows no foot and no new tab for Citadel's own links.
+// A touch screen has no Shift+right-click either.
+const desktop = !!window.citadelDesktop;
+const FOOT = desktop || matchMedia('(pointer: coarse)').matches ? undefined : 'Shift+right-click: the browser\'s own menu';
 
 const shorten = (t, n = 60) => {
   const s = String(t ?? '').replace(/\s+/g, ' ').trim();
@@ -37,7 +41,8 @@ const copy = (text, what) => copyText(text).then((ok) => toast(ok ? `${what} cop
 // While the live stream is down (core.js's Reconnecting… chip), what needs the server is greyed with the reason.
 const offline = () => !!document.querySelector('body > .cui-chip.reconnecting');
 const needsServer = (item) => (offline() ? { ...item, disabled: true, reason: 'reconnecting…' } : item);
-const newTab = (href) => ({ label: 'Open in a new tab', icon: '↗', run: () => window.open(href, '_blank', 'noopener') });
+const newTab = (href) => (desktop && new URL(href, location.href).origin === location.origin ? null
+  : { label: desktop ? 'Open in browser' : 'Open in a new tab', icon: '↗', run: () => window.open(href, '_blank', 'noopener') });
 
 const pointItems = (el, label = 'Point at this') => [
   { label, icon: '📍', keys: 'Alt+Shift+P', point: true, run: () => pointAtElement(el) },
@@ -192,7 +197,6 @@ function releaseMenu(ver, row) {
     ...pointItems(row),
     { label: `Copy version ${name}`, icon: '⧉', run: () => copy(name, name) },
     ver.href && { label: 'Open release', icon: '→', run: () => window.open(ver.href, '_blank', 'noopener') },
-    ver.href && { label: 'Copy release link', icon: '🔗', run: () => copy(ver.href, 'Link') },
     dl && { label: 'Copy download link', icon: '⤓', run: () => copy(dl.href, 'Download link') },
   ] };
 }

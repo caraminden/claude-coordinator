@@ -335,6 +335,7 @@
 :where(.cui-menu-point) { color: var(--citadel-accent); font-weight: 600; }
 :where(.cui-menu-danger) { color: var(--citadel-danger); }
 :where(.cui-menu-item[aria-disabled="true"]) { opacity: 0.45; cursor: default; }
+@media (max-width: 800px) { :where(.cui-menu-item) { min-height: var(--citadel-control-h); } }
 :where(.cui-menu-sep) { height: 0; margin: 4px 6px; border: 0; border-top: 1px solid var(--citadel-border); }
 :where(.cui-menu-from) { padding: 6px 8px 2px; color: var(--citadel-muted); font-size: var(--citadel-size-meta); font-weight: 600; }
 :where(.cui-menu-foot) { padding: 6px 8px 3px; margin-top: 4px; border-top: 1px solid var(--citadel-border); color: var(--citadel-muted); font-size: var(--citadel-size-meta); }

@@ -700,7 +700,7 @@ background: var(--citadel-warn-tint);</code></pre></div>
       <div class="mk-show doc-col">
         <div class="cui-menu doc-menu-static" role="menu" aria-label="Minion actions">
           <div class="cui-menu-head"><span class="cui-chip cui-menu-kind" data-tone="info">Minion</span><span class="cui-menu-name">#1663 Right-click menu</span></div>
-          <button type="button" class="cui-menu-item cui-menu-point" role="menuitem"><span class="cui-menu-icon" aria-hidden="true">🎯</span><span class="cui-menu-label">Point at this</span><span class="cui-menu-keys">Alt+Shift+P</span></button>
+          <button type="button" class="cui-menu-item cui-menu-point" role="menuitem"><span class="cui-menu-icon" aria-hidden="true">📍</span><span class="cui-menu-label">Point at this</span><span class="cui-menu-keys">Alt+Shift+P</span></button>
           <button type="button" class="cui-menu-item cui-menu-point" role="menuitem"><span class="cui-menu-icon" aria-hidden="true">✎</span><span class="cui-menu-label">Point and draw…</span></button>
           <hr class="cui-menu-sep">
           <button type="button" class="cui-menu-item" role="menuitem"><span class="cui-menu-icon" aria-hidden="true">↗</span><span class="cui-menu-label">Open in a new tab</span></button>
@@ -1161,6 +1161,7 @@ row.innerHTML =
 .cui-scope .cui-menu-point { color: var(--citadel-accent); font-weight: 600; }
 .cui-scope .cui-menu-danger { color: var(--citadel-danger); }
 .cui-scope .cui-menu-item[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+@media (max-width: 800px) { .cui-scope .cui-menu-item { min-height: var(--citadel-control-h); } }
 .cui-scope .cui-menu-sep { height: 0; margin: 4px 6px; border: 0; border-top: 1px solid var(--citadel-border); }
 .cui-scope .cui-menu-foot { padding: 6px 8px 3px; margin-top: 4px; border-top: 1px solid var(--citadel-border); color: var(--citadel-muted); font-size: var(--citadel-size-meta); }
 .cui-scope .doc-tip-demo { margin: 0; }

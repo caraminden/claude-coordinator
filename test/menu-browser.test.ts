@@ -101,13 +101,21 @@ test('Shift+F10 on a focused minion row opens its menu; Escape puts focus back',
   const page = await open('Menu keyboard');
   // The sidebar redraws as the chat settles and a redraw drops focus, so focus and press in one step.
   // (A real Shift+F10 through DevTools reaches the same keydown; the race is only the test's.)
+  // A redraw after the menu closed drops focus again, which is the page's doing and not the menu's: so the focus is read
+  // in the microtask that follows the menu's removal, in the same task as the Escape keydown, before any redraw can run.
   const row = 'a.thread-row[data-id]:not(.coordinator)';
-  await page.eval(`(() => { const r = document.querySelector('${row}'); r.focus(); r.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })); })()`);
+  await page.eval(`(() => {
+    window.focusAfterClose = null;
+    new MutationObserver((recs) => {
+      if (recs.some((r) => [...r.removedNodes].some((n) => n.classList?.contains('cui-menu')))) window.focusAfterClose = document.activeElement.matches('${row}');
+    }).observe(document.body, { childList: true, subtree: true });
+    const r = document.querySelector('${row}'); r.focus(); r.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+  })()`);
   await waitFor(page, 'the menu', menuOpen);
   assert.equal(await page.eval('document.querySelector(".cui-menu .cui-menu-kind").textContent'), 'Minion');
   await esc(page);
   await waitFor(page, 'the menu to close', `!${menuOpen}`);
-  assert.equal(await page.eval(`document.activeElement.matches('${row}')`), true, 'focus is back on the row');
+  assert.equal(await page.eval('window.focusAfterClose'), true, 'focus is back on the row');
 });
 
 test('a scroll of what it is about closes it; a redraw\'s scroll elsewhere doesn\'t', { skip }, async () => {

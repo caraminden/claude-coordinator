@@ -402,16 +402,18 @@ starved() {
 # "live by about 14:05 PST": a starved restart's latest go (<state>/hold's first field) plus a minute to come up.
 live_by() { echo "live by about $(TZ=America/Los_Angeles date -d "@$(($1 + 60))" '+%H:%M %Z')"; }
 
-# The starved-box hold (#1417): once no turn would be cut off, a starved box holds the restart, at most HOLD s from the
-# first starved look, then it goes anyway and says so. A roll back, an urgent fix's restart (<state>/urgent: LAND_URGENT
+# The starved-box hold (#1417): once no turn would be cut off, a starved box holds the restart, at most HOLD s in all
+# (held_total carries the stretches a running turn broke up, so a box that stays starved while turns keep starting
+# can't hold it for good), then it goes anyway and says so. A roll back, an urgent fix's restart (<state>/urgent: LAND_URGENT
 # or LAND_FIX, the land tool's outage: true or fix: true) and one while lands wait for a fix (<state>/bad) never wait; --now skips the whole wait loop.
 # Returns 0 while it holds. <state>/hold ("<latest go> <why>") tells the deploy and the riders when it expects to go.
-held_since='' R_HOLD=''
+held_since='' held_total=0 R_HOLD=''
 # Ends a hold that didn't run out: the box eased, or a turn started (its own wait follows, and a later starved look holds
 # afresh). The first hold is the one reported.
 unhold() {
   rm -f "$STATE/hold"
   [ -z "$held_since" ] || [ -n "$R_HOLD" ] || R_HOLD="held $((SECONDS - held_since)) s for a starved box"
+  [ -z "$held_since" ] || held_total=$((held_total + SECONDS - held_since))
   held_since=''
 }
 hold() {
@@ -420,14 +422,16 @@ hold() {
     unhold
     return 1
   fi
-  if [ -z "$held_since" ]; then
+  if [ -z "$held_since" ] && [ "$held_total" -lt "$HOLD" ]; then
     held_since=$SECONDS
-    echo "$(($(date +%s) + HOLD)) $why" >"$STATE/hold"
-    say "the box is starved ($why), so the restart waits for it to ease, at most $((HOLD / 60)) min, then goes anyway"
+    echo "$(($(date +%s) + HOLD - held_total)) $why" >"$STATE/hold"
+    say "the box is starved ($why), so the restart waits for it to ease, at most $(((HOLD - held_total) / 60)) min, then goes anyway"
   fi
-  [ $((SECONDS - held_since)) -ge "$HOLD" ] || return 0
-  R_HOLD="held $((SECONDS - held_since)) s for a starved box, $why, then went anyway"
-  say "the box is still starved ($why) after $((SECONDS - held_since)) s: restarting anyway"
+  local spent=$held_total
+  [ -z "$held_since" ] || spent=$((spent + SECONDS - held_since))
+  [ "$spent" -ge "$HOLD" ] || return 0
+  R_HOLD="held $spent s for a starved box, $why, then went anyway"
+  say "the box is still starved ($why) after $spent s in all: restarting anyway"
   rm -f "$STATE/hold"
   return 1
 }

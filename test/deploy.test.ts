@@ -934,7 +934,7 @@ test('a restart waits for a starved box at most its hold, then goes anyway and s
   const anyway = await restartWith('starved', (restarts, _n, c) => health(restarts, c), { ...waiting, ...psi('starved', 63), DEPLOY_PRESSURE_HOLD: '1', COORDINATOR_SHARED_DIR: shared('starved') });
   assert.equal(anyway.status, 0, anyway.stderr);
   assert.match(anyway.stderr, /the box is starved \(CPU pressure 63%\), so the restart waits for it to ease, at most 0 min, then goes anyway/);
-  assert.match(anyway.stderr, /the box is still starved \(CPU pressure 63%\) after [1-9]\d* s: restarting anyway/);
+  assert.match(anyway.stderr, /the box is still starved \(CPU pressure 63%\) after [1-9]\d* s in all: restarting anyway/);
   assert.equal(anyway.restarts, 1);
   assert.equal(anyway.lastGood, anyway.target);
   assert.match(anyway.reports[0].text, /^Deployed [0-9a-f]{7} "target": the server restarted and is healthy\. The restart held [1-9]\d* s for a starved box, CPU pressure 63%, then went anyway\./);
@@ -977,6 +977,18 @@ test('a restart waits for a starved box at most its hold, then goes anyway and s
   assert.match(turned.stderr, /waiting for 1 running turn a restart would cut off/);
   assert.equal(turned.restarts, 1);
   assert.match(restartLine('turned')[0], /· restart · live · held \d+ s for a starved box$/);
+
+  // A box that stays starved while turns keep starting: each turn ends one stretch of holding and the next starved look
+  // starts another, but HOLD caps the stretches together, so it still goes anyway (ultra review 2026-11-23, fix B). Before,
+  // each stretch got a fresh HOLD and held polls didn't count toward IDLE_TRIES, so it waited until the turn polls ran
+  // out and gave up with nothing live.
+  const flicker = await restartWith('flicker', (restarts, n, c) => (restarts === 0 && n % 4 === 0 ? JSON.stringify({ ok: true, commit: c.good, interruptible: 1 }) : health(restarts, c)),
+    { ...waiting, ...psi('flicker', 63), DEPLOY_PRESSURE_HOLD: '2', DEPLOY_IDLE_TRIES: '30', COORDINATOR_SHARED_DIR: shared('flicker') });
+  assert.equal(flicker.status, 0, flicker.stderr);
+  assert.doesNotMatch(flicker.stderr, /Gave up/);
+  assert.match(flicker.stderr, /the box is still starved \(CPU pressure 63%\) after [2-9] s in all: restarting anyway/);
+  assert.equal(flicker.restarts, 1);
+  assert.match(restartLine('flicker')[0], /· restart · live · held [2-9] s for a starved box, CPU pressure 63%, then went anyway$/);
 
   // Memory pressure at its line starves the box too.
   const mem = await restartWith('starved-mem', (restarts, _n, c) => health(restarts, c), { ...waiting, ...psi('starved-mem', 10, 25), DEPLOY_PRESSURE_HOLD: '1' });

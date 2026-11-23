@@ -300,6 +300,8 @@ export function mountTips(root = document.body, o = {}) {
     if (!el) return;
     const actor = e.target.closest(acts);
     if (!o.tapOpens && actor && el.contains(actor)) return;
+    // A link inside a tap-to-open thing is its own action (a wait chip's "⇢ #N" opens that minion).
+    if (o.tapOpens && e.target.closest('a[href]') && el.contains(e.target.closest('a[href]'))) return;
     if (o.tapOpens) e.preventDefault();
     // A click or tap on a thing that only shows something: open and keep it, or close it again.
     if (at === el && pinned) return close();

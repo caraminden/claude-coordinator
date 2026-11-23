@@ -155,6 +155,8 @@
 .thread-row .state[data-tip-id] { cursor: help; }
 /* The wait chip (ADR 0021 step 7): its slot is drawn even when empty, at a fixed width, so waits coming and going move nothing. */
 .thread-row .wait-chip { align-self: center; margin-left: 0.4rem; box-sizing: border-box; min-width: 5.2em; text-align: center; white-space: nowrap; font-size: 0.78em; font-weight: 650; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums; background: color-mix(in srgb, var(--waiting, #7c5cd6) 14%, transparent); color: var(--waiting, #7c5cd6); cursor: help; }
+.thread-row .wait-chip a.wait-chip-link { color: inherit; text-decoration: none; cursor: pointer; }
+.thread-row .wait-chip a.wait-chip-link:hover, .thread-row .wait-chip a.wait-chip-link:focus-visible { text-decoration: underline; }
 .thread-row .wait-chip.empty { visibility: hidden; }
 .thread-row .wait-chip.gone, .wait-line.gone { opacity: 0.5; }
 /* The waits popover (#1512): a headline per wait that wraps, the waiter's first sentence under it, and a click opens the summary in place. */

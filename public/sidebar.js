@@ -577,7 +577,9 @@ function waitChip(t, coord) {
   if (changed && waitTips.tips?.open?.dataset.waitId === String(t.id)) queueMicrotask(() => waitTips.tips.refresh());
   waitTips.tips ??= mountTips(document.body, { selector: '.thread-row .wait-chip[data-wait-id]', body: (el) => waitBody(Number(el.dataset.waitId)), role: 'dialog', label: 'Waits', tapOpens: true, className: 'why-tip' });
   const more = live.length > 1 ? ` +${live.length - 1}` : '';
-  return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, 'data-tip-wait': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.headline ?? w.what).join('; ')}` }, shown.chip, more);
+  return h('span', { class: `wait-chip${live.length ? '' : ' gone'}`, 'data-wait-id': t.id, 'data-tip-wait': t.id, tabindex: 0, title: '', 'aria-label': `Waits: ${rows.map((w) => w.headline ?? w.what).join('; ')}` },
+    // The minion it names opens from the chip itself (Cara, 2026-11-22: "this should link to the minion it is waiting on"); the click stays off the row and the popover.
+    shown.link ? h('a', { class: 'wait-chip-link', href: `#/p/${shown.link.project}/t/${shown.link.number}`, title: `Waits on #${shown.link.number}`, 'aria-label': `Waits on #${shown.link.number}`, onclick: (e) => e.stopPropagation() }, shown.chip) : shown.chip, more);
 }
 export const drawnWaits = new Map();
 /**

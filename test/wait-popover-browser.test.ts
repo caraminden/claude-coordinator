@@ -12,7 +12,7 @@ const STUB = `<script>
   const now = Date.now();
   const coordinator = { id: 100, project_id: 1, kind: 'coordinator', number: 0, title: 'Taskmaster', status: 'idle', updated_at: 0 };
   const w = (id, chip, what, extra) => ({ id, state: 'waiting', chip, what, cancellable: true, ...extra });
-  window.a = { id: 101, project_id: 1, kind: 'ticket', number: 1, title: 'Minion A', status: 'parked', updated_at: now, created_at: now - 600_000, outbox_waits: [w(1, '⇢ #2', 'the deploy of #2')] };
+  window.a = { id: 101, project_id: 1, kind: 'ticket', number: 1, title: 'Minion A', status: 'parked', updated_at: now, created_at: now - 600_000, outbox_waits: [w(1, '⇢ #2', 'the deploy of #2', { link: { project: 1, number: 2 } })] };
   const relay = { headline: 'Note from #1 once its change is live', line: 'Main is green again.', text: 'Main is green again. One. Two. Three and four.', facts: ['Set by #1 at 12:54 PST', 'waits for fa4fb3f to go live'], link: { project: 1, number: 1 } };
   window.b = { id: 102, project_id: 1, kind: 'ticket', number: 2, title: 'Minion B', status: 'parked', updated_at: now - 1, created_at: now - 600_000, outbox_waits: [w(2, '⏱ 01:32', 'check the run'), w(3, '⇢ #1', 'a second wait', relay), w(4, '⇢ live', 'x', { headline: 'Wakes when abc1234 is live', line: '', text: '', facts: [] })] };
   const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -105,4 +105,15 @@ test('a wait line is a headline with its first sentence under it; a click opens 
   await waitFor(page, 'the second opening to settle', `document.querySelector('.why-tip:popover-open').getAnimations({ subtree: true }).every((a) => a.playState !== 'running')`);
   await click(page, await page.centre('.why-tip:popover-open .wait-line.open .wait-line-hd'));
   await waitFor(page, 'closed', `!document.querySelector('.why-tip:popover-open .wait-line.open')`);
+});
+
+// #1676 (Cara, 2026-11-22: "this should link to the minion it is waiting on"): the chip's "⇢ #N" opens that minion, not the row or the popover.
+test('a wait chip naming a minion links to it, and the click opens neither the row\'s chat nor the popover', { skip }, async () => {
+  const page = await browser.page(`${app.base}#/p/1`, { width: 1280, height: 800 });
+  await waitFor(page, 'the link', `!!document.querySelector('.wait-chip[data-wait-id="101"] a.wait-chip-link')`);
+  assert.equal(await page.eval(`document.querySelector('.wait-chip[data-wait-id="101"] a').getAttribute('aria-label')`), 'Waits on #2');
+  assert.equal(await page.eval(`document.querySelector('.wait-chip[data-wait-id="102"] a')`), null, 'a clock wait names no minion');
+  await click(page, await page.centre('.wait-chip[data-wait-id="101"] a'));
+  await waitFor(page, 'minion #2', `location.hash === '#/p/1/t/2'`);
+  assert.equal(await page.eval(`!!document.querySelector('.why-tip:popover-open')`), false);
 });

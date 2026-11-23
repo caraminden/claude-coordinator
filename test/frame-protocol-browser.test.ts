@@ -25,7 +25,7 @@ const FRAMER = `<!doctype html><meta charset="utf-8"><meta name="viewport" conte
   import { initAppSwitch } from '/c/appswitch.js';
   window.echo = {};
   window.upward = [];
-  addEventListener('message', (e) => { if (e.data?.test) window.echo[e.data.test] = e.data.value; if (['ext', 'app', 'go-url'].includes(e.data?.type)) window.upward.push(e.data.type + ' ' + e.data.url); });
+  addEventListener('message', (e) => { if (e.data?.test) window.echo[e.data.test] = e.data.value; if (['ext', 'app', 'go-url'].includes(e.data?.type)) window.upward.push(e.data.type + ' ' + e.data.url); if (e.data?.type === 'point') window.upward.push('point ' + e.data.note?.label + (e.data.draw ? ' draw' : '')); });
   showRail();
   initAppSwitch('josh');
   showFrame('peek', new URLSearchParams(location.search).get('src'));
@@ -66,6 +66,15 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
   }, 50);
   // Links to click from the test (a clickLink message): what the page's handler did with each, reported back.
   document.body.insertAdjacentHTML('beforeend', '<a id="same" href="/apps/peek/ingest">a</a><a id="other" href="http://voice.test/apps/voice/rate/">b</a><a id="out" href="https://example.com/x">c</a><a id="zip" target="_blank" href="https://docs.citadel.zip/">d</a>');
+  // Its own right-click item (#1665), and what its menu shows, told up for the test (a menu message): the labels, or picks one.
+  window.citadel.menu.add('header button', () => [{ label: 'Mark done', icon: '✓', run: () => tell('marked', true) }], { name: (el) => el.textContent });
+  addEventListener('message', (e) => {
+    if (e.data?.where) { const r = document.querySelector(e.data.where).getBoundingClientRect(); tell('where', { x: r.left + r.width / 2, y: r.top + r.height / 2 }); }
+    if (e.data?.menu === undefined) return;
+    const m = document.querySelector('.cui-menu');
+    if (e.data.menu) [...(m?.querySelectorAll('.cui-menu-item') ?? [])].find((b) => b.textContent.includes(e.data.menu))?.click();
+    tell('menu', m ? [...m.querySelectorAll('.cui-menu-kind, .cui-menu-name, .cui-menu-from, .cui-menu-label, .cui-menu-sep')].map((x) => (x.localName === 'hr' ? '-' : x.textContent)).join(' | ') : null);
+  });
   // A handled click is stopped before it reaches the document: that, or a prevented default, is what the test reads.
   addEventListener('message', (e) => {
     const id = e.data?.clickLink;
@@ -251,4 +260,28 @@ test("a framed app's own links stay in it; another app and Citadel's domain go u
   assert.equal(await click('out'), false, 'an outside link is the browser\'s');
   assert.equal(await click('zip'), true);
   assert.deepEqual(await page.eval(`window.upward`), ['app http://voice.test/apps/voice/rate/', 'go-url https://docs.citadel.zip/']);
+});
+
+test("right-click in a framed app gets Citadel's menu with the app's own items under its name, and Point goes up to Citadel (#1665)", { skip }, async () => {
+  const page = await framer({ width: 1000, height: 600 });
+  await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
+  const ask = (data: object) => page.eval(`document.querySelector('#frames iframe').contentWindow.postMessage(${JSON.stringify(data)}, '*')`);
+  await ask({ where: 'header button' });
+  await waitFor(page, "the button's place in the frame", `!!window.echo.where`);
+  const at = await page.eval<{ x: number; y: number }>(`(() => { const f = document.querySelector('#frames iframe').getBoundingClientRect(); return { x: f.left + window.echo.where.x, y: f.top + window.echo.where.y }; })()`);
+  // Citadel's state, with the app's title, has to reach the frame before the menu can name it.
+  await until('a menu naming Peek', async () => {
+    for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'right', buttons: type === 'mousePressed' ? 2 : 0, clickCount: 1 });
+    await page.eval(`delete window.echo.menu`);
+    await ask({ menu: '' });
+    await waitFor(page, 'the menu told', `'menu' in window.echo`);
+    return /From Peek/.test(await page.eval<string>(`String(window.echo.menu)`));
+  }, 10_000);
+  assert.equal(await page.eval(`window.echo.menu`), 'Peek item | Menu | Point at this | Point and draw… | - | From Peek | Mark done | - | Copy text');
+  await ask({ menu: 'Mark done' });
+  await waitFor(page, "the app's own item run", `window.echo.marked === true`);
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'right', buttons: type === 'mousePressed' ? 2 : 0, clickCount: 1 });
+  await ask({ menu: 'Point at this' });
+  await waitFor(page, 'Point told to Citadel', `window.upward.some((u) => u.startsWith('point '))`);
+  assert.match(await page.eval<string>(`window.upward.find((u) => u.startsWith('point '))`), /^point Menu · Peek · \d+×\d+ light$/);
 });

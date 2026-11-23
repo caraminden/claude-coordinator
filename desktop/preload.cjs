@@ -2,7 +2,13 @@
 // down the live stream, a way to bring the window forward), and gives it the installed web app's title bar layout.
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('citadelDesktop', { app: 'electron', show: () => ipcRenderer.send('citadel:show') });
+// capture and inspect serve the right-click menu (#1665, pick.js): Point's screenshot crop and Inspect.
+contextBridge.exposeInMainWorld('citadelDesktop', {
+  app: 'electron',
+  show: () => ipcRenderer.send('citadel:show'),
+  capture: (rect) => ipcRenderer.invoke('citadel:capture', rect),
+  inspect: (x, y) => ipcRenderer.send('citadel:inspect', x, y),
+});
 
 // The window's controls sit over the page (main.cjs titleBarOverlay) and Chromium reports their strip
 // (navigator.windowControlsOverlay, env(titlebar-area-*)), but answers `display-mode` with "browser", and the page asks

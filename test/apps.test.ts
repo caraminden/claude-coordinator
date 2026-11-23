@@ -316,6 +316,13 @@ test('the rail and drawers: their scripts are served to contraptions, and lists 
   const ext = await get('/apps/_citadel/extlinks.js');
   assert.equal(ext.status, 200);
   assert.match(await ext.text(), /export function classifyLink/);
+  // And the right-click menu and the crop it points with, which rail.js imports too (#1665).
+  const appMenu = await get('/apps/_citadel/app-menu.js');
+  assert.equal(appMenu.status, 200);
+  assert.match(await appMenu.text(), /export function mountAppMenu/);
+  const pickCrop = await get('/apps/_citadel/pick-crop.js');
+  assert.equal(pickCrop.status, 200);
+  assert.match(await pickCrop.text(), /export async function cropPart/);
   // With their types beside them (#286).
   for (const f of ['rail', 'drawers']) {
     const types = await get(`/apps/_citadel/${f}.d.ts`);

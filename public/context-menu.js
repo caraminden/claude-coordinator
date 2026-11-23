@@ -210,7 +210,18 @@ function linkMenu(a) {
   ] };
 }
 
+/** In the desktop app every menu ends with Inspect (#1665): DevTools on what was right-clicked, or the focused thing's middle from the keyboard. */
+function withInspect(spec, target, e) {
+  if (!spec) return null;
+  const r = target.getBoundingClientRect();
+  const [x, y] = e?.clientX || e?.clientY ? [e.clientX, e.clientY] : [r.left + r.width / 2, r.top + r.height / 2];
+  return { ...spec, items: [...spec.items, '-', { label: 'Inspect', icon: '⌕', keys: 'Ctrl+Shift+I', run: () => window.citadelDesktop.inspect?.(x, y) }] };
+}
+
 // A phone's long press (#1664) opens the sheet on the things Cara listed (rows, cards, files, code blocks, releases,
 // links), not on message text, which keeps the phone's own selection, or on bare page and part menus.
 const LONG_PRESS = new Set(['Minion', 'Card', 'File', 'Code block', 'Release', 'Link']);
-mountMenus({ menuFor, longPress: (t, spec) => LONG_PRESS.has(spec.kind) && !t.closest('[data-reorder]') });
+mountMenus({
+  menuFor: desktop ? (target, e) => withInspect(menuFor(target), target, e) : menuFor,
+  longPress: (t, spec) => LONG_PRESS.has(spec.kind) && !t.closest('[data-reorder]'),
+});

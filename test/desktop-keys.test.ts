@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
-const { reloadKey } = createRequire(import.meta.url)('../desktop/keys.cjs');
+const { reloadKey, devtoolsKey } = createRequire(import.meta.url)('../desktop/keys.cjs');
 const down = (key: string, mods: object = {}) => reloadKey({ type: 'keyDown', key, control: false, shift: false, alt: false, meta: false, ...mods });
 
 test('Ctrl+R and F5 reload', () => {
@@ -23,4 +23,16 @@ test('plain R, key-ups and other combinations do nothing', () => {
   assert.equal(down('F5', { shift: true }), null);
   assert.equal(reloadKey({ type: 'keyUp', key: 'F5' }), null);
   assert.equal(reloadKey(null), null);
+});
+
+test('Ctrl+Shift+I opens DevTools, and nothing near it does (#1665)', () => {
+  const key = (k: string, mods: object = {}) => devtoolsKey({ type: 'keyDown', key: k, control: false, shift: false, alt: false, meta: false, ...mods });
+  assert.equal(key('I', { control: true, shift: true }), true);
+  assert.equal(key('i', { control: true, shift: true }), true);
+  assert.equal(key('i', { control: true }), false);
+  assert.equal(key('I', { shift: true }), false);
+  assert.equal(key('I', { control: true, shift: true, alt: true }), false);
+  assert.equal(devtoolsKey({ type: 'keyUp', key: 'I', control: true, shift: true }), false);
+  assert.equal(devtoolsKey(null), false);
+  assert.equal(down('I', { control: true, shift: true }), null);
 });

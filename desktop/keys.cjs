@@ -2,6 +2,7 @@
 // can run it. The window has no menu (main.cjs), so Electron's own Ctrl+R / F5 accelerators are gone: the window asks here.
 //   Ctrl+R, F5                 -> 'reload'
 //   Ctrl+Shift+R, Ctrl+F5      -> 'reload-hard' (ignoring the cache)
+//   Ctrl+Shift+I               -> devtoolsKey: DevTools (#1665, the right-click menu's Inspect names the key)
 // `input` is the object Electron's before-input-event gives; anything else is null.
 function reloadKey(input) {
   if (!input || input.type !== 'keyDown' || input.alt || input.meta) return null;
@@ -10,4 +11,9 @@ function reloadKey(input) {
   if (key === 'f5' && !input.shift) return input.control ? 'reload-hard' : 'reload';
   return null;
 }
-module.exports = { reloadKey };
+
+/** Ctrl+Shift+I: the browser's key for DevTools. */
+function devtoolsKey(input) {
+  return !!input && input.type === 'keyDown' && !!input.control && !!input.shift && !input.alt && !input.meta && String(input.key || '').toLowerCase() === 'i';
+}
+module.exports = { reloadKey, devtoolsKey };

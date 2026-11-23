@@ -2,6 +2,7 @@
 // A stable API: names are only ever added (test/ui-contract.test.ts checks this file against the
 // module's exports). How a page includes it: kit/skills/contraption-ui/rail-and-drawers.md.
 // Loaded as a <script type="module">, it draws the rail by itself, unless <html data-citadel-rail="slot">.
+import type { MenuItem } from './ui/menu.js';
 
 /**
  * The protocol name on every message between Citadel's page and a framed contraption's rail.js (postMessage,
@@ -71,3 +72,17 @@ export const chromeIntent: (url: URL) => string;
 
 /** Whether the page runs inside an app's native shell (Capacitor WebView or a "CitadelApp" user agent), where the rail never renders. */
 export function inNativeApp(win?: unknown): boolean;
+
+/**
+ * Citadel's right-click menu on the page (#1665), mounted by rail.js; also `window.citadel.menu`. add() gives what
+ * matches `selector` its own items, under a "From <app>" line between Point and Copy; the deepest match wins. `items` is
+ * called at each right-click with the matched element. `kind` is the menu's header chip ("<app> item" by default) and
+ * `name` its text. Returns a function that removes them. Docs: kit/skills/contraption-ui/references/menu.md.
+ */
+export const menu: {
+  add(
+    selector: string,
+    items: (el: Element, event: Event) => Array<MenuItem | '-' | null | undefined | false>,
+    options?: { kind?: string; name?: (el: Element) => string },
+  ): () => void;
+};

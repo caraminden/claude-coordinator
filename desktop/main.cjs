@@ -10,7 +10,7 @@ const { app, BrowserWindow, Menu, Tray, nativeTheme, screen, shell, ipcMain } = 
 const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { dirname, join } = require('node:path');
 const { route } = require('./route.cjs');
-const { reloadKey } = require('./keys.cjs');
+const { reloadKey, devtoolsKey } = require('./keys.cjs');
 
 const START = new URL(process.env.CITADEL_URL || 'https://citadel.zip/c/');
 /** Citadel's other addresses: a link to one of these opens here, on START's host, rather than in a browser. */
@@ -89,6 +89,7 @@ function open(url = START.href) {
   });
   // No menu means no Ctrl+R / F5 accelerators (#1526): handle the browser's reload keys here, in every window.
   wc.on('before-input-event', (e, input) => {
+    if (devtoolsKey(input)) { e.preventDefault(); return wc.toggleDevTools(); }
     const k = reloadKey(input);
     if (!k) return;
     e.preventDefault();
@@ -108,7 +109,7 @@ function started() {
   if (file) try { writeFileSync(file, 'started'); } catch {}
 }
 
-/** Right-click: the edit actions and, on a link, copying its address; spelling suggestions in a text box. */
+/** Right-click in a text box (or a Shift+right-click; the page's own menu takes the rest, #1663): the edit actions and, on a link, copying its address; spelling suggestions in a text box. */
 function contextMenu(wc, p) {
   const items = [];
   for (const s of p.dictionarySuggestions ?? []) items.push({ label: s, click: () => wc.replaceMisspelling(s) });
@@ -159,6 +160,18 @@ function shortcuts() {
 }
 
 ipcMain.on('citadel:show', show);
+
+// The page's right-click menu (#1665): Point's crop is a screenshot of the part (window CSS pixels), exact inside an app's
+// frame too, and Inspect opens DevTools on the element at (x, y).
+ipcMain.handle('citadel:capture', async (e, r) => {
+  const n = (v) => (Number.isFinite(v) ? Math.round(v) : NaN);
+  const rect = { x: n(r?.left), y: n(r?.top), width: n(r?.width), height: n(r?.height) };
+  if (!(rect.x >= 0 && rect.y >= 0 && rect.width > 0 && rect.height > 0 && rect.width <= 8192 && rect.height <= 8192)) return null;
+  return (await e.sender.capturePage(rect)).toPNG();
+});
+ipcMain.on('citadel:inspect', (e, x, y) => {
+  if (Number.isFinite(x) && Number.isFinite(y)) e.sender.inspectElement(Math.round(x), Math.round(y));
+});
 app.on('second-instance', show);
 app.on('before-quit', () => { remember(); quitting = true; });
 // The second copy only hands over (second-instance above): it quits before making a window or a tray icon.

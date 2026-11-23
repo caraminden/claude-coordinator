@@ -3,6 +3,27 @@
 Part of `citadel:contraption-ui` (its SKILL.md has the file list, tokens and rules). Citadel's own pages use
 it for their right-click menu (#1663); its look is `.cui-menu` in base.css.
 
+## Your app already has one (rail.js)
+
+A page that loads `/apps/_citadel/rail.js` gets Citadel's right-click menu with nothing else to do (#1665): Point at
+this and Point and draw… (inside Citadel's frame: the chip lands in Citadel's chat box, with a crop), Copy for a
+selection, Open and Copy link address on a link, and Copy link and Reload for the page. In the desktop app it ends
+with Inspect (Ctrl+Shift+I). Add your own items for your own things; they sit under a "From <your app>" line:
+
+```js
+// After rail.js has loaded (it sets window.citadel.menu), or: import { menu } from '/apps/_citadel/rail.js';
+const remove = window.citadel.menu.add('.item[data-id]', (el, event) => [
+  { label: 'Mark done', icon: '✓', run: () => markDone(el.dataset.id) },
+  { label: 'Open item', icon: '↗', run: () => openItem(el.dataset.id) },
+], { kind: 'Item', name: (el) => el.querySelector('.title').textContent });  // the header chip and name, both optional
+```
+
+The deepest match wins when selectors nest. The items function runs at each right-click, so read state then
+(falsy entries are skipped). Don't mount your own `mountMenus` beside rail.js's: one page, one menu. A page without
+rail.js keeps the browser's menu unless it mounts one as below.
+
+## Your own menu
+
 ```js
 import { mountMenus, openMenu, closeMenu } from '/apps/_citadel/ui/menu.js';
 

@@ -218,7 +218,11 @@ ship goes through the line with no CI and no push; a lane's run goes to `land/<l
 catches every run and `'land/<lane>/**'` routes one lane's. Anything the map doesn't list is full, so a missing
 line costs time, never safety; `tools/land.sh --lane` prints the lane a commit would take. When "every workflow
 green" is not the rule (a workflow that only blocks when red, one that runs for some paths), set
-`CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. Exit 75 means
+`CI_STATUS` to the scheme's own verdict command; the header gives its exit codes. When a major build's
+`--full` run must also see a workflow the gate leaves out (Peek's `desktop.yml`, which runs on main only), name it in
+`BUILD_WORKFLOWS` in `land.local.sh`: `'desktop.yml'` for every build, or `'desktop.yml:tools/desktop-run/paths'` only
+when the build changes a path that file lists. `--full` dispatches it on the build's `land/` branch when the push didn't
+start it (it needs `workflow_dispatch`), waits for it, and refuses the build on its red, CI_STATUS or not. Exit 75 means
 CI gave no verdict (the runners' machine is off): nothing is wrong with the branch, so the minion
 calls `wake_when_runners_back`, seals itself, and runs it again once Citadel says the runners are back. Say all of this in the "How a
 change ships" line, and that the worktree sits on a detached commit while a ship waits.

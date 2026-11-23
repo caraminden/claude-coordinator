@@ -26,7 +26,8 @@
 #       and what the LANES map marks light) that names no test files runs no check (#1684).
 #   tools/land.sh --into build/<n> --full           the build minion's merge of $BRANCH: build/<n> must already be
 #       under its branch (it ran git merge build/<n>; no rebase, which would flatten the build's merges), then the
-#       full CHECK and CI on land/<branch>, as --verify runs them, then the same compare-and-swap. Out of the line.
+#       full CHECK and CI on land/<branch>, as --verify runs them, with the BUILD_WORKFLOWS the build needs, then the
+#       same compare-and-swap. Out of the line.
 #   tools/land.sh --build                            ships the build its branch is at the tip of, through the line:
 #       $BRANCH comes in by merge (not rebase), then the check, CI, the fast-forward and the push as for any land,
 #       then build/<n> is deleted, here and on origin. Only as the head of the line, never stacked, never in fast mode.
@@ -130,6 +131,14 @@ FACTS=CLAUDE.md
 #   ended without one.
 CI_WORKFLOWS=''
 CI_STATUS=''
+# BUILD_WORKFLOWS: more workflow files a major build's --full run (below, "Build branches") must see green on its
+#   commit besides the gate's, split by spaces: 'desktop.yml' always, 'desktop.yml:tools/desktop-run/paths' only when
+#   the build changes (since it forked from $BRANCH) a path that repo file names: a bash case pattern a line (* also
+#   matches /), '#' comments, and a line starting with ! rules a path out. The file is read from $BRANCH, else the
+#   branch's own; on neither, the workflow runs. Each is judged by the built-in reader's rules above, CI_STATUS or not.
+#   One with no run on the commit CI_GRACE after the push to land/<branch> is dispatched there once (it needs a
+#   workflow_dispatch trigger), and once more if it ends without a verdict. '' none: --full waits for the gate alone.
+BUILD_WORKFLOWS=''
 # Lanes: off while LANES is empty, and then every landing is full, as above. LANES is the repo path of the scheme's
 #   lane map (tools/lanes), always read from $BRANCH's copy, never the landing's, so a commit can't loosen its own
 #   lane. A map line is "<lane> <pattern>...": a path takes the lane of the first line with a pattern that matches
@@ -1359,6 +1368,29 @@ LOCK_FILE=${LOCK_FILE:-$state/land.lock} QUEUE_DIR=${QUEUE_DIR:-$state/land-queu
 [[ $QUEUE_DIR == /* ]] || QUEUE_DIR=$MAIN/$QUEUE_DIR
 
 CI_REF=land/$branch
+# The BUILD_WORKFLOWS this build's --full waits for, split by spaces, saying why a path-picked one is in or out.
+build_lanes() {
+  local e w pf list p f fork found out='' pats outs
+  fork=$(git merge-base "refs/heads/$BRANCH" HEAD 2>/dev/null) || fork=''
+  for e in $BUILD_WORKFLOWS; do
+    w=${e%%:*} pf=${e#*:}
+    if [ "$e" = "$w" ]; then out+=" $w"; continue; fi
+    if ! list=$(git show "refs/heads/$BRANCH:$pf" 2>/dev/null || git show "HEAD:$pf" 2>/dev/null); then
+      say "$w: $pf is on neither $BRANCH nor $branch, so it runs" && out+=" $w" && continue
+    fi
+    [ -n "$fork" ] || { say "$w: couldn't find where $branch forked from $BRANCH, so it runs" && out+=" $w" && continue; }
+    pats=() outs=() found=''
+    while read -r p _; do case $p in '' | '#'*) ;; '!'*) outs+=("${p#!}") ;; *) pats+=("$p") ;; esac; done <<<"$list"
+    while IFS= read -r -d '' f; do
+      for p in "${outs[@]}"; do case $f in $p) continue 2 ;; esac; done
+      for p in "${pats[@]}"; do case $f in $p) found=$f && break 2 ;; esac; done
+    done < <(git diff --no-renames --name-only -z "$fork" HEAD)
+    if [ -n "$found" ]; then say "$w: $found is on $pf, so it runs" && out+=" $w"; else say "$w is not needed: the build changes nothing on $pf"; fi
+  done
+  echo "${out# }"
+}
+BUILD_LW=''
+[ "$mode" != full ] || [ -z "$BUILD_WORKFLOWS" ] || { BUILD_LW=$(set -f; build_lanes) && CI_ON+=$BUILD_LW; }
 slug=''
 if [ -n "$CI_ON" ]; then
   slug=$(git -C "$MAIN" remote get-url origin 2>/dev/null) || refuse "the CI gate is on, but there is no origin remote to run CI from"
@@ -1475,7 +1507,7 @@ main_red() {
 
 # ci_open: the same verdict over the workflows that aren't red (0 when they're green), so a waived red waits for the rest.
 ci_runs() {
-  local sha=${1:-$tip} ln=${2:-$ci_lane} runs w path id status result one failed skipped j rank worst=0 worst_rank=0 open_rank=0 rc=0
+  local sha=${1:-$tip} ln=${2:-$ci_lane} rc=0
   : >"$cilog"
   ci_skipped='' ci_open=0
   lane_ci "$ln" || return 0
@@ -1489,6 +1521,13 @@ ci_runs() {
     fi
     return "$rc"
   fi
+  ci_read "$sha"
+}
+# ci_read <commit>: the built-in reader over the workflows in LW (jobs LS may skip), appending to $cilog: ci_runs' verdict
+# and ci_open.
+ci_read() {
+  local sha=$1 runs w path id status result url one failed skipped j rank worst=0 worst_rank=0 open_rank=0
+  ci_open=0
   runs=$(hub gh api "repos/$slug/actions/runs?head_sha=$sha&per_page=100" --jq '.workflow_runs | sort_by(.created_at) | reverse | .[] | [.path, .id, .status, .conclusion // "-", .html_url] | @tsv' 2>>"$cilog") || return 5
   for w in $LW; do
     one=3
@@ -2358,10 +2397,53 @@ smoke() {
 verify_ci() {
   rc=0
   ci_runs || rc=$?
+  gate_rc=$rc
+  [ -z "$BUILD_LW" ] || build_ci
   [ "$rc" != 1 ] || [ "$ci_open" = 0 ] || { ci_red=1 rc=$ci_open; }
+}
+# --full's BUILD_WORKFLOWS, each read on its own and folded into rc and ci_open as one more of the gate's workflows. One
+# with no run on $tip CI_GRACE after the push is dispatched on $CI_REF; build_again names the ones to dispatch again
+# (no verdict, on the retry), whose old run doesn't count for CI_GRACE after that.
+ci_rank() { case $1 in 0) echo 0 ;; 2) echo 1 ;; 1) echo 5 ;; 4) echo 4 ;; 3) echo 3 ;; *) echo 2 ;; esac; } # worst last
+build_ci() {
+  local w x open=$rc gate_open=$ci_open
+  [ "$rc" != 1 ] || open=$gate_open # the gate's verdict apart from its reds
+  build_lost='' build_wait=''
+  [ -z "$build_bad" ] || printf '%s' "$build_bad" >>"$cilog"
+  for w in $BUILD_LW; do
+    x=0
+    if [[ $build_bad == *"$w: couldn't dispatch"* ]]; then x=1
+    else LW=$w LS='' ci_read "$tip" || x=$?; fi
+    if [ "$x" = 1 ]; then :
+    elif [[ " $build_again " == *" $w "* ]]; then
+      if [[ " $build_resent " != *" $w "* ]]; then build_resent+=" $w" x=3; build_dispatch "$w" || x=1
+      elif [ "$x" != 0 ] && [ "$x" != 2 ] && [ $((SECONDS - build_at)) -lt "$CI_GRACE" ]; then x=3; fi
+    elif [ "$x" = 3 ] && [[ " $build_sent " != *" $w "* ]]; then
+      build_wait=1
+      if [ -n "$pushed" ] && [ $((SECONDS - pushed_at)) -ge "$CI_GRACE" ]; then build_sent+=" $w"; build_dispatch "$w" || x=1; fi
+    fi
+    [ "$x" != 4 ] || build_lost+=" $w"
+    [ "$(ci_rank "$x")" -le "$(ci_rank "$rc")" ] || rc=$x
+    [ "$x" = 1 ] || [ "$(ci_rank "$x")" -le "$(ci_rank "$open")" ] || open=$x
+  done
+  ci_open=0
+  [ "$rc" != 1 ] || ci_open=$open
+}
+# build_dispatch <workflow>: starts it on $CI_REF (its workflow_dispatch trigger); a refusal is its red from then on (build_bad).
+build_dispatch() {
+  local err
+  build_at=$SECONDS
+  if err=$(hub gh api -X POST "repos/$slug/actions/workflows/$1/dispatches" -f ref="$CI_REF" 2>&1 >/dev/null); then
+    say "dispatched $1 on $CI_REF: it doesn't start on the push"
+    return 0
+  fi
+  build_bad+="$1: couldn't dispatch it on $CI_REF (it needs a workflow_dispatch trigger, or land/** among its push branches): ${err//$'\n'/ }"$'\n'
+  printf '%s\n' "${build_bad%$'\n'}" | tail -n 1 >>"$cilog"
+  return 1
 }
 verify_run() {
   local rc=0 log="$state/land-verify.log" red="" ids="" ci="" ci_red="" chk=$CHECK want=${LAND_VERIFY_IDS:-} files
+  local gate_rc=0 build_bad='' build_sent='' build_resent='' build_again='' build_lost='' build_wait='' build_at=0
   tip=$(git rev-parse HEAD) ci_lane=full
   say "verify: ${tip:0:12}"
   if [ -n "$want" ]; then
@@ -2390,12 +2472,17 @@ verify_run() {
   if [ -n "$CI_ON" ]; then
     ci_clock=$SECONDS
     verify_ci
-    [ "$rc" = 0 ] || [ "$rc" = 1 ] || [ "$rc" = 2 ] || ci_push
+    # The gate's own verdict decides a push; a build workflow to dispatch needs the commit on $CI_REF too.
+    { [ "$gate_rc" = 0 ] || [ "$gate_rc" = 1 ] || [ "$gate_rc" = 2 ]; } && [ -z "$build_wait" ] || ci_push
     while [ "$rc" != 0 ] && [ "$rc" != 1 ]; do
       sleep "$CI_POLL"
       verify_ci
       [ "$rc" != 2 ] || ci_begun=1
-      if [ "$rc" = 4 ] && [ -z "$retried" ]; then retried=1 && ci_push; continue; fi
+      if [ "$rc" = 4 ] && [ -z "$retried" ]; then
+        retried=1 build_again=$build_lost
+        [ "$gate_rc" != 4 ] && { [ -n "$pushed" ] || [ -z "$build_again" ]; } || ci_push
+        continue
+      fi
       if [ "$rc" = 4 ] || { [ -z "$ci_begun" ] && [ $((SECONDS - ci_clock)) -ge "$CI_START" ]; } || [ $((SECONDS - ci_clock)) -ge "$CI_LIMIT" ]; then
         cat "$cilog" >&2
         # A workflow already red is a verdict even if the others never finish.

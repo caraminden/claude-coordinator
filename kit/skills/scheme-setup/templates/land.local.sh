@@ -35,6 +35,10 @@
 #   In another shape a known CI red never matches unless land_failures (below) reads it, and a workflow still going
 #   doesn't hold a red back.
 # CI_STATUS=''
+# BUILD_WORKFLOWS: more workflows a major build's --full must see green, read by the core's own reader even beside
+#   CI_STATUS and dispatched when the push doesn't start them: 'desktop.yml' always, 'desktop.yml:tools/desktop-run/paths'
+#   only when the build changes a path that file lists (a bash case pattern a line, ! rules one out).
+# BUILD_WORKFLOWS=''
 
 # How many landings at the front of the line run CI at once. Runners that can't carry three runs at once: 2.
 # CI_STACK=${LAND_STACK_DEPTH:-3}

@@ -2,7 +2,7 @@
 // and the plain land's guard), each on a throwaway scheme repo. Citadel's own tools/land.sh: land-build.test.ts.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { env, git, queueSetup, rebasedCalls, rebasedHook, until } from './scheme-setup-land-fixture.ts';
@@ -341,4 +341,82 @@ test("--into: a feeder that hands off while the build minion's claims merge is i
     writeFileSync(release, '');
     await held;
   }
+
+// BUILD_WORKFLOWS (#1683): a build's --full also waits for the scheme's build workflows (Peek's desktop.yml), read by the
+// built-in reader even beside CI_STATUS. A gh first in PATH answers the runs list from runs.tsv and, on a dispatch,
+// puts dispatched.tsv's line at its top, so the dispatched run is the newest.
+function buildCi(config: Record<string, string>, dispatched = '') {
+  const b = buildSetup({ CI_STATUS: 'true', ...config });
+  const ci = join(b.dir, 'ci');
+  const bin = join(b.dir, 'bin');
+  mkdirSync(ci);
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), '#!/bin/bash\necho "$*" >>"$CI_DIR/gh.log"\ncase "$*" in *dispatches*) [ ! -e "$CI_DIR/refuse" ] || { echo "HTTP 422: no workflow_dispatch trigger" >&2; exit 1; }; cat "$CI_DIR/dispatched.tsv" "$CI_DIR/runs.tsv" >"$CI_DIR/r" 2>/dev/null; mv "$CI_DIR/r" "$CI_DIR/runs.tsv" ;; *head_sha=*) cat "$CI_DIR/runs.tsv" 2>/dev/null ;; *skipped*) echo 0 ;; */jobs*) echo "1 1" ;; esac\nexit 0\n', { mode: 0o755 });
+  writeFileSync(join(ci, 'dispatched.tsv'), dispatched ? `.github/workflows/${dispatched}\t7\tcompleted\t${dispatched.endsWith(' red') ? 'failure' : 'success'}\thttps://x/7\n`.replace(/ (red|green)\t/, '\t') : '');
+  const full = () => spawnSync('bash', [join(b.wts[2], 'tools', 'land.sh'), '--into', 'build/1', '--full'], { cwd: b.wts[2], encoding: 'utf8', timeout: 90_000, env: { ...env, RAN: join(b.dir, 'ran'), CI_DIR: ci, PATH: `${bin}:${env.PATH}`, LAND_CI_POLL: '0', LAND_CI_GRACE: '0' } });
+  const ghLog = () => (existsSync(join(ci, 'gh.log')) ? readFileSync(join(ci, 'gh.log'), 'utf8') : '');
+  return { ...b, full, ghLog };
+}
+
+test('BUILD_WORKFLOWS: --full dispatches a build workflow with no run on its commit and waits for it; a red one leaves the build untouched', () => {
+  const red = buildCi({ BUILD_WORKFLOWS: 'desktop.yml' }, 'desktop.yml red');
+  const res = red.full();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /desktop\.yml: completed failure/);
+  assert.match(res.stderr, /the full check or CI is red on ticket\/3-x/);
+  assert.match(red.ghLog(), /actions\/workflows\/desktop\.yml\/dispatches -f ref=land\/ticket\/3-x/);
+  assert.equal(red.at('build/1'), red.at('main'));
+
+  // One GitHub won't dispatch (no workflow_dispatch trigger) is red at once, with GitHub's reason, not a wait for a runner.
+  const refused = buildCi({ BUILD_WORKFLOWS: 'desktop.yml' });
+  writeFileSync(join(refused.dir, 'ci', 'refuse'), '');
+  const no = refused.full();
+  assert.equal(no.status, 1, no.stderr);
+  assert.match(no.stderr, /desktop\.yml: couldn't dispatch it on land\/ticket\/3-x .*HTTP 422: no workflow_dispatch trigger/);
+  assert.equal(refused.at('build/1'), refused.at('main'));
+
+  const green = buildCi({ BUILD_WORKFLOWS: 'desktop.yml' }, 'desktop.yml green');
+  const ok = green.full();
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.equal(green.at('build/1'), git(green.wts[2], 'rev-parse', 'HEAD'));
+  assert.equal(green.ghLog().match(/dispatches/g)?.length, 1, 'dispatched once');
+});
+
+test('BUILD_WORKFLOWS: a run that started on the push is waited for, not dispatched again, a lost one runs once more; with nothing set, --full asks GitHub nothing new', () => {
+  const b = buildCi({ CI_STATUS: '', CI_WORKFLOWS: 'ci.yml', BUILD_WORKFLOWS: 'desktop.yml' });
+  writeFileSync(join(b.dir, 'ci', 'runs.tsv'), '.github/workflows/ci.yml\t1\tcompleted\tsuccess\tu\n.github/workflows/desktop.yml\t2\tcompleted\tfailure\tu\n');
+  const res = b.full();
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /desktop\.yml: completed failure/);
+  assert.doesNotMatch(b.ghLog(), /dispatches/);
+
+  // One that ends without a verdict (cancelled: its runner went away) is dispatched once more, and that run decides.
+  const lost = buildCi({ BUILD_WORKFLOWS: 'desktop.yml' }, 'desktop.yml green');
+  writeFileSync(join(lost.dir, 'ci', 'runs.tsv'), '.github/workflows/desktop.yml\t2\tcompleted\tcancelled\tu\n');
+  const again = lost.full();
+  assert.equal(again.status, 0, again.stderr);
+  assert.equal(lost.ghLog().match(/dispatches/g)?.length, 1, 'dispatched once more, not on every poll');
+
+  const none = buildCi({});
+  assert.equal(none.full().status, 0);
+  assert.equal(none.ghLog(), '', 'CI_STATUS alone: no gh call');
+});
+
+test('BUILD_WORKFLOWS: <file>:<paths file> runs the workflow only when the build changes a path main\'s file names', () => {
+  const b = buildCi({ BUILD_WORKFLOWS: 'desktop.yml:tools/desktop-run/paths' }, 'desktop.yml green');
+  // On main only, after the branch forked: the list is main's, not the branch's.
+  b.commit(b.main, 'tools/desktop-run/paths', '# the desktop harness\n!ci-win/setup.ps1 # run by hand\nci-win/*\n.github/workflows/desktop.yml\n');
+  git(b.wts[2], 'merge', '-q', '--no-edit', 'build/1');
+  let res = b.full();
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /desktop\.yml is not needed/);
+  b.commit(b.wts[2], 'ci-win/setup.ps1', 'x\n');
+  res = b.full();
+  assert.equal(res.status, 0, res.stderr);
+  assert.doesNotMatch(b.ghLog(), /dispatches/, 'a path the list rules out runs nothing');
+  b.commit(b.wts[2], 'ci-win/run.ps1', 'x\n');
+  res = b.full();
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stderr, /desktop\.yml: ci-win\/run\.ps1 is on tools\/desktop-run\/paths/);
+  assert.match(b.ghLog(), /desktop\.yml\/dispatches/);
 });

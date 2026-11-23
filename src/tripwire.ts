@@ -26,7 +26,7 @@
 //
 // Run as a hook: node tripwire.ts '<config json>' < hook input; exits 2 with the reason on stderr, or
 // prints a PreToolUse "ask" decision for the approval card.
-import { existsSync, opendirSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, opendirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hard, under, type TripwireConfig, type Verdict, type Word } from './tripwire-base.ts';
@@ -174,12 +174,13 @@ const excludedDirs = (name: string, args: Word[]) => (name === 'rg' || name === 
 export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, skip: string[] = [], limit = ENV_WALK_LIMIT): string | null {
   const todo: string[] = [];
   const budget = { seen: 0, limit };
-  for (const glob of roots) {
-    const expanded = /[*?[(]/.test(glob) ? globRoot(glob, cfg.envFiles ?? [], budget) : [glob];
+  for (const root of roots) {
+    const expanded = /[*?[(]/.test(root) ? globRoot(root, cfg.envFiles ?? [], budget) : [];
     if (typeof expanded === 'string') return expanded;
-    for (const root of expanded) {
+    // The word as written too: a quoted 'app[1]' names a folder its own pattern doesn't match.
+    for (const path of [root, ...expanded]) {
       for (const r of cfg.envFiles ?? []) {
-        const start = under(root, r) ? root : under(r, root) ? r : null;
+        const start = under(path, r) ? path : under(r, path) ? r : null;
         if (!start) continue;
         let st;
         // Nothing there: grep finds nothing either.
@@ -220,30 +221,33 @@ export function envBelow(roots: string[], cfg: TripwireConfig, follow: boolean, 
 /**
  * What a glob root could expand to, for the .env walk (#1729): each globbed segment matched against its folder's entries, dotfiles too (a
  * `*` the shell wouldn't match to a .env still over-includes safely), and every entry read counted against the walk's budget. Each match
- * is kept at its real place when it's a link into a closed folder. `**`, zsh's qualifiers and any other syntax it can't match end the
- * expansion: the folder above is walked whole, which covers whatever the shell picks. A refusal reason when a folder on the way can't be
- * read or the budget runs out; a quoted glob is checked the same way (a file literally named `a*` matches `a*` too).
+ * counts where it sits and where it leads (a link named cfg to a .env is the .env). `**`, zsh's qualifiers, POSIX classes and any other
+ * syntax it can't match end the expansion: the folder above is walked whole, which covers whatever the shell picks. A refusal reason when
+ * a folder at or around a closed one can't be read, or the budget runs out.
  */
 function globRoot(glob: string, closed: string[], budget: { seen: number; limit: number }): string[] | string {
   const reaches = (p: string) => closed.some((r) => under(p, r) || under(r, p));
-  const keep = (ps: string[]) => ps.flatMap((p) => { if (reaches(p)) return [p]; try { const real = realpathSync(p); return real !== p && reaches(real) ? [real] : []; } catch { return []; } });
+  const keep = (ps: string[]) => ps.flatMap((p) => { let real = p; try { real = realpathSync(p); } catch { /* missing: grep finds nothing */ } return (real === p ? [p] : [p, real]).filter(reaches); });
   let paths = ['/'];
   for (const part of glob.split('/').filter(Boolean)) {
     if (!/[*?[(]/.test(part)) { paths = paths.map((p) => join(p, part)); continue; }
     // shortcut: a folder outside the closed ones is walked without links, so a link below it into one is missed; upgrade if a Taskmaster's ** ever runs through such links.
-    if (/\*\*|[(){}|~^#<>]/.test(part)) return keep(paths);
+    if (/\*\*|[(){}|~^#<>]|\[[:=.]/.test(part)) return keep(paths);
     const re = globRe(part);
     const next: string[] = [];
     for (const dir of paths) {
-      let names: string[];
-      try { names = readdirSync(dir); } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ENOTDIR') continue;
+      let d;
+      try { d = opendirSync(dir); } catch (e) {
+        // The shell can't list it either, so it matches nothing there; still refused at or around a closed folder.
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ENOTDIR' || !reaches(dir)) continue;
         return `${dir}, which it could not read`;
       }
-      for (const name of names) {
-        if (++budget.seen > budget.limit) return `more than ${budget.limit} files to check for them`;
-        if (re.test(name)) next.push(join(dir, name));
-      }
+      try {
+        for (let e = d.readSync(); e; e = d.readSync()) {
+          if (++budget.seen > budget.limit) return `more than ${budget.limit} files to check for them`;
+          if (re.test(e.name)) next.push(join(dir, e.name));
+        }
+      } finally { d.closeSync(); }
     }
     paths = next;
   }

@@ -1246,7 +1246,7 @@ test('a Taskmaster\'s search of a glob root expands it and checks each match, re
     // A match with a .env, or a .env the glob itself matches (dotfiles count), refuses.
     for (const cmd of [`grep -rn X ${d}/projects/*/repo`, `grep -rn X ${d}/projects/12/repo/*`, `grep -rn X ${d}/projects/1?/repo`, `grep -rn X ${d}/projects/*/repo/.e*`])
       assert.match(run(cmd) ?? '', /projects\/12\/repo\/\.env/, cmd);
-    // A glob before the closed folder (here only one repo is closed) is expanded too: today's walk skipped it.
+    // A glob before the closed folder (here only one repo is closed) is expanded and walked.
     const one: TripwireConfig = { ...c, envFiles: [join(d, 'projects/12/repo')] };
     assert.match(tripwire({ tool_name: 'Bash', tool_input: { command: `grep -rn X ${d}/projects/*/repo`, description: 'x' }, cwd: d }, one)?.reason ?? '', /projects\/12\/repo\/\.env/);
     assert.equal(envBelow([`${d}/projects/*/repo/tools`], one, false), null);
@@ -1254,8 +1254,19 @@ test('a Taskmaster\'s search of a glob root expands it and checks each match, re
     mkdirSync(join(tmp, 'links'));
     symlinkSync(join(d, 'projects/12/repo'), join(tmp, 'links/r12'));
     assert.match(envBelow([`${tmp}/links/r*`], c, false) ?? '', /\.env/);
-    // zsh's ** and qualifiers: the expansion stops there and the folder above is walked whole.
-    for (const g of [`${d}/projects/**/src`, `${d}/projects/1*/**/*.ts`, `${d}/projects/*(/)`]) assert.match(envBelow([g], c, false) ?? '', /projects\/12\/repo\/\.env/, g);
+    // A quoted 'app[1]' is the folder grep opens, which its own pattern doesn't match; a match that's a link to a .env counts as the .env.
+    mkdirSync(join(d, 'projects/2/repo/app[1]'));
+    writeFileSync(join(d, 'projects/2/repo/app[1]/.env'), 'x');
+    assert.match(run(`grep -rn X '${d}/projects/2/repo/app[1]'`) ?? '', /app\[1\]\/\.env/);
+    rmSync(join(d, 'projects/2/repo/app[1]'), { recursive: true });
+    symlinkSync(join(d, 'projects/12/repo/.env'), join(d, 'projects/2/repo/cfg'));
+    assert.match(run(`grep -rn X ${d}/projects/2/repo/c*`) ?? '', /projects\/12\/repo\/\.env/);
+    rmSync(join(d, 'projects/2/repo/cfg'));
+    // A folder far from the closed ones that can't be listed matches nothing for the shell either, so it passes.
+    mkdirSync(join(tmp, 'shut'), { mode: 0o000 });
+    try { assert.equal(envBelow([`${tmp}/shut/*/x`], c, false), null); } finally { chmodSync(join(tmp, 'shut'), 0o755); }
+    // zsh's ** and qualifiers, and POSIX classes: the expansion stops there and the folder above is walked whole.
+    for (const g of [`${d}/projects/**/src`, `${d}/projects/1*/**/*.ts`, `${d}/projects/*(/)`, `${d}/projects/[[:digit:]]*/repo`]) assert.match(envBelow([g], c, false) ?? '', /projects\/12\/repo\/\.env/, g);
     assert.equal(envBelow([`${d}/projects/2/**/*.ts`], c, false), null);
     // Every entry the expansion reads counts against the walk's one budget.
     for (let i = 0; i < 30; i++) mkdirSync(join(d, `projects/2/repo/src/lib/d${i}`));

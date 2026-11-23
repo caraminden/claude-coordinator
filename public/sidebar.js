@@ -1,7 +1,7 @@
 // The scheme switcher and the minions list: search and rows.
 import { weekShare } from './cost.js';
 import { gloss } from './help-words.js';
-import { account, ago, pacificWeekdayClock, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, phase, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
+import { account, ago, todayPacific, api, costText, dismissedWhen, h, noAutofill, isCoordinator, heldWhilePressed, phase, isSeen, jumpHref, listGroupsOf, me, setView, statusLabel, taskmasterLabel, TYPES, threadFullName, threadHref, view } from './base.js';
 import { app, crumbs, openHash, stopChat, stoppingIds, usage } from './core.js';
 import { propFilter, renderPropFilter } from './properties.js';
 import { matchesPicks } from './propfilter.js';
@@ -18,7 +18,6 @@ import { pendingRelease, releaseOrder } from './releases.js';
 import { replaceHash } from './navstack.js';
 import { openDialog } from './ui/dialog.js';
 import { mountTips } from './ui/tip.js';
-import { toast } from './ui/status.js';
 import { optimistic } from './ui/optimistic.js';
 import { chainsHref } from './chains.js';
 

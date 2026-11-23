@@ -42,7 +42,7 @@ import { optimistic } from './ui/optimistic.js';
 import { showPart } from './show-part.js';
 import { initAppSwitch } from './appswitch.js';
 import { onPresenceMsg, presenceHello, reportPresence } from './presence.js';
-import { codexHigh, codexLevel, codexTop, codexWindows, windowName } from './codexusage.js';
+import { codexLevel, codexTop, codexWindows, windowName } from './codexusage.js';
 import { mountLoginMap } from './login-map.js';
 
 /** Every Settings and Orders page's route, built from the one table of pages (settings-pages.js). */

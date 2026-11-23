@@ -1,10 +1,12 @@
 // A waiting heavy run's newest output line under the readout, and a toggle for its last 20 (#1681). The server redacts
 // the lines (src/wait-tail.ts). The readout is rebuilt on every change, so the lines and the toggle live here by minion,
-// and one timer refreshes whatever .wait-tail is on the page every few seconds.
-import { api, h } from './base.js';
+// and one poller refreshes whatever .wait-tail is on the page every few seconds.
+import { api, h, poller } from './base.js';
 
 const state = new Map(); // ticket id -> { lines, open }
 const REFRESH_MS = 4000;
+
+const loop = poller(() => refresh(), REFRESH_MS); // waits while the tab is hidden, one read at a time (#1610)
 
 const paint = (el) => {
   const s = state.get(Number(el.dataset.ticket)) ?? { lines: [], open: false };
@@ -22,11 +24,13 @@ export function waitTail(ticketId, w) {
     h('pre', {}),
     h('button', { type: 'button', onclick: () => { s.open = !s.open; paint(el); } }));
   paint(el);
+  if (typeof document !== 'undefined') loop.now();
   return el;
 }
 
 async function refresh() {
   const els = [...document.querySelectorAll('.wait-tail')];
+  if (!els.length) return false; // no tail on screen: the loop rests until the next one is built
   const ids = new Set(els.map((el) => Number(el.dataset.ticket)));
   for (const id of [...state.keys()]) if (!ids.has(id)) state.delete(id); // the run ended or the chat moved on: nothing stays
   for (const el of els) {
@@ -38,4 +42,3 @@ async function refresh() {
     } catch { /* the next look tries again */ }
   }
 }
-if (typeof document !== 'undefined') { setInterval(refresh, REFRESH_MS); setTimeout(refresh, 300); }

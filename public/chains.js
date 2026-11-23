@@ -3,7 +3,7 @@
 // She picked its own page, a "See the chain →" link in the wait chip's popover, and every wait on another minion
 // counting. Each chain runs left to right from the minion nobody in it waits on, wires between them (hover one to trace
 // what it waits on and what waits on it); on a phone it is an indented list. It only reads: src/chains.ts builds it.
-import { api, h, icon, phase, view } from './base.js';
+import { api, h, icon, phase, poller, view } from './base.js';
 import { usage } from './core.js';
 import { rowState, spokenCell } from './threadstate.js';
 import { emptyCard, schemeTag, statTiles, toneChip } from './look.js';
@@ -20,7 +20,7 @@ const STALE_MS = 20_000;
 
 /** Each scheme's last read: { at, chains, error, loading, after }. The page and the chat head's link share it, and every caller's `after` runs when it lands. */
 const cache = new Map();
-let pageEl = null, pageProject = null, focus = null, timer = null, drawnSig = '', entered = false;
+let pageEl = null, pageProject = null, focus = null, drawnSig = '', entered = false;
 
 function read(projectId, after) {
   const c = cache.get(projectId) ?? { at: 0, chains: null, after: [] };
@@ -45,12 +45,14 @@ export function chainsPage(projectId, number) {
   pageEl = h('section', { class: 'artifacts-main chains-main' });
   draw(projectId);
   read(projectId, () => draw(projectId));
-  clearInterval(timer);
-  // Fresh while it's on screen; the timer ends itself once the page is gone.
-  timer = setInterval(() => {
-    if (!pageEl?.isConnected) return clearInterval(timer);
-    if (!document.hidden) read(projectId, () => draw(projectId));
-  }, POLL_MS);
+  // Fresh while it's on screen: the poller waits while the tab is hidden and stops once the page is gone.
+  const el = pageEl;
+  let first = true; // the read above is this one: the page isn't attached yet, so the first tick only starts the wait
+  poller(async () => {
+    if (first) { first = false; return true; }
+    if (!el.isConnected) return false;
+    await read(projectId, () => draw(projectId));
+  }, POLL_MS).now();
   return pageEl;
 }
 

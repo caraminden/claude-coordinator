@@ -12,6 +12,12 @@ import { ci, git, seen, setup, landAsync } from './land-fixture.ts';
 import { line, shipped, bad, realOf, shared } from './land-train-fixture.ts';
 import { until } from './wait.ts';
 
+// Red on main too (#1430): main's own tip fails test/real.test.ts run alone (Nov 21 00:00 PST's clock test), so every
+// train is red on it. Ship through (#1478, Cara, 2026-11-21, on #1430's card: "Ship through"): when that is the run's only
+// real failure (its other reds passed alone: flakes) and no ship on it touched the test, the train is no worse than main,
+// so it ships, saying so, and main's fix ships separately. It used to go back in line, its front refused. Ship 1 lands
+// green (its CI isn't told the red file).
+
 test("a train red only on a test that fails on main too ships through main's red, and says so (#1478)", async () => {
   const l = await line(
     [{ env: { FAKE_RED_PATH: 'nothing.txt' } }, {}, {}, {}],

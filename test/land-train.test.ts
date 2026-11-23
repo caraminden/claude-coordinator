@@ -334,10 +334,3 @@ test('a scan-style guard test that imports nothing still pins the ship that turn
   for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();
 });
-
-// #1479: the guard tests (land.sh's guards(), #1240) on the train, not just its front. On Nov 21, 03:46 to 04:20 PST,
-// #1460 rode trains with a break of the one-until guard that passed on its front in 1 s, and it took 6 CI runs to
-// refuse it. A stand-in citadel-test: the guard run (the one naming the one-until guard) fails on a commit whose
-// test/loop-lag.test.ts says "sleep", and logs "guard <commit> <exit>" for each guard run into the fake gh's call log,
-// so a test can see whether a commit's guard run came before CI was asked about it.
-// Built, not quoted: a quoted test file's name reads as a dependency to test/pipeline-files.test.ts.

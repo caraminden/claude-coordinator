@@ -65,6 +65,7 @@ src/properties.ts: test/access-matrix.test.ts
 src/machines.ts: test/access-matrix.test.ts
 src/appname.ts: test/access-matrix.test.ts
 test/helpers.ts: test/access-matrix.test.ts
+test/land-train-fixture.ts: test/land-train.test.ts test/land-train-riders.test.ts test/land-train-early.test.ts
 test/access-matrix.snapshot.json: test/access-matrix.test.ts
 
 # The front end: Citadel UI's contract, relative URLs under previews, hand-built parts, the theme, the service worker.

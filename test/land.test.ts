@@ -768,7 +768,7 @@ test('CI with no answer and a perigee busy past the limit refuse the ship: main 
 });
 
 // #1360 (Cara, 2026-11-20, "Refused ships keep their place"): a refusal by the pipeline, not the ship's change, keeps its
-// ticket and goes again once; alone in line it goes again at once (no ship to let by: land-train.test.ts has the line).
+// ticket and goes again once; alone in line it goes again at once (no ship to let by: land-train-riders.test.ts has the line).
 const retries = (shared: string) => landLog(shared).split('\n').filter((l) => l.includes(' · retry in place · '));
 // A test file that fails on the runs FLAKY_FAIL names (1,3: the 1st and 3rd), counted in FLAKY_COUNT.
 const flaky = "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.FLAKY_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if ((process.env.FLAKY_FAIL ?? '').split(',').includes(String(n))) throw new Error('flaky');\n}\n";

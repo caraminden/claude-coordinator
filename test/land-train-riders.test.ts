@@ -10,6 +10,13 @@ import { ci, git, seen, setup, tickets, issued, quietProc } from './land-fixture
 import { line, shipped, shared } from './land-train-fixture.ts';
 import { until } from './wait.ts';
 
+// #1479: the guard tests (land.sh's guards(), #1240) on the train, not just its front. On Nov 21, 03:46 to 04:20 PST,
+// #1460 rode trains with a break of the one-until guard that passed on its front in 1 s, and it took 6 CI runs to
+// refuse it. A stand-in citadel-test: the guard run (the one naming the one-until guard) fails on a commit whose
+// test/loop-lag.test.ts says "sleep", and logs "guard <commit> <exit>" for each guard run into the fake gh's call log,
+// so a test can see whether a commit's guard run came before CI was asked about it.
+// Built, not quoted: a quoted test file's name reads as a dependency to test/pipeline-files.test.ts.
+
 const oneUntil = `test/${'one-until'}.test.ts`;
 function guarded(r: ReturnType<typeof setup>) {
   mkdirSync(join(r.source, 'test'), { recursive: true });
@@ -393,9 +400,3 @@ test('a retried ship whose train goes red is bisected like any rider, and refuse
   assert.deepEqual(retried(l), ['· retry in place · ticket/2-x · CI and perigee both busy for 0 min · refused']);
   l.done();
 });
-
-// Red on main too (#1430): main's own tip fails test/real.test.ts run alone (Nov 21 00:00 PST's clock test), so every
-// train is red on it. Ship through (#1478, Cara, 2026-11-21, on #1430's card: "Ship through"): when that is the run's only
-// real failure (its other reds passed alone: flakes) and no ship on it touched the test, the train is no worse than main,
-// so it ships, saying so, and main's fix ships separately. It used to go back in line, its front refused. Ship 1 lands
-// green (its CI isn't told the red file).

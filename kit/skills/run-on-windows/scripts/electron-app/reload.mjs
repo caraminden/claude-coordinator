@@ -9,16 +9,18 @@ import net from 'node:net';
 import path from 'node:path';
 
 const [cfgUrl, routeArg, nArg] = process.argv.slice(2);
-const cfg = await (await fetch(`${cfgUrl.replace(/\/$/, '')}/config`)).json();
+// An https:// first argument is a live Citadel, signed out: what its sign-in page costs to reload.
+const live = /^https:/.test(cfgUrl);
+const cfg = live ? { upstream: '', route: '', cookie: '' } : await (await fetch(`${cfgUrl.replace(/\/$/, '')}/config`)).json();
 const route = routeArg && routeArg !== '-' ? routeArg : `#${cfg.route.replace(/^#/, '')}`;
 const N = Number(nArg ?? 5);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const repo = path.resolve(import.meta.dirname, '../../../../..');
 const [uh, up] = cfg.upstream.split(':');
 
-const fwd = net.createServer((c) => { const u = net.connect(Number(up), uh); c.pipe(u).pipe(c); c.on('error', () => u.destroy()); u.on('error', () => c.destroy()); });
-const port = await new Promise((res) => fwd.listen(0, '127.0.0.1', () => res(fwd.address().port)));
-const origin = `http://localhost:${port}`;
+const fwd = live ? null : net.createServer((c) => { const u = net.connect(Number(up), uh); c.pipe(u).pipe(c); c.on('error', () => u.destroy()); u.on('error', () => c.destroy()); });
+const port = live ? 0 : await new Promise((res) => fwd.listen(0, '127.0.0.1', () => res(fwd.address().port)));
+const origin = live ? new URL(cfgUrl).origin : `http://localhost:${port}`;
 const dbg = 20000 + Math.floor(Math.random() * 9000);
 const electron = path.join(process.env.LOCALAPPDATA, 'defender-copy', 'node_modules', 'electron', 'dist', 'electron.exe');
 const app = spawn(electron, [`--remote-debugging-port=${dbg}`, path.join(repo, 'desktop')], { env: { ...process.env, CITADEL_URL: `${origin}/c/` }, stdio: 'ignore' });
@@ -33,7 +35,7 @@ let id = 0; const waits = new Map();
 ws.onmessage = (m) => { const d = JSON.parse(m.data); const w = waits.get(d.id); if (w) { waits.delete(d.id); d.error ? w.j(new Error(d.error.message)) : w.r(d.result); } };
 const send = (method, params = {}, sessionId) => new Promise((r, j) => { const n = ++id; waits.set(n, { r, j }); ws.send(JSON.stringify({ id: n, method, params, sessionId })); });
 const [cn, cv] = [cfg.cookie.slice(0, cfg.cookie.indexOf('=')), cfg.cookie.slice(cfg.cookie.indexOf('=') + 1)];
-await send('Storage.setCookies', { cookies: [{ name: cn, value: cv, domain: 'localhost', path: '/' }] });
+if (!live) await send('Storage.setCookies', { cookies: [{ name: cn, value: cv, domain: 'localhost', path: '/' }] });
 let page;
 for (let i = 0; i < 60 && !page; i++) { page = (await send('Target.getTargets')).targetInfos.find((t) => t.type === 'page'); if (!page) await sleep(500); }
 const s = (await send('Target.attachToTarget', { targetId: page.targetId, flatten: true })).sessionId;
@@ -80,5 +82,5 @@ for (let i = 0; i < N; i++) {
 }
 const med = (k) => { const v = rows.map((r) => r[k]).filter((x) => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
 console.log(`MEDIAN reload→drawn ${med('toDrawn')} ms, reload→splash gone ${med('toGone')} ms, files 200 ${med('ok200')} / 304 ${med('ok304')}, ${med('kb')} KB`);
-app.kill(); fwd.close(); ws.close();
+app.kill(); fwd?.close(); ws.close();
 process.exit(0);

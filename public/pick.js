@@ -40,13 +40,11 @@ export function startPick() {
   // The dim catches every press, so nothing under it acts on the click that picks.
   const dim = h('div', { class: 'pick-dim' });
   document.body.append(dim, box, hint);
-  let target = null;
   const under = (x, y) => {
     const el = document.elementsFromPoint(x, y).find((e) => e !== dim && e !== box && !hint.contains(e));
     return el && el !== document.documentElement && el !== document.body ? el.closest(PICKABLE) ?? el : null;
   };
   const show = (el) => {
-    target = el;
     box.hidden = !el;
     if (!el) return;
     const r = el.getBoundingClientRect();

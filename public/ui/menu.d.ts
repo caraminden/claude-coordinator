@@ -38,7 +38,7 @@ export interface MenuSpec {
   foot?: string;
   /** The menu's accessible name (default "<kind> actions"). */
   label?: string;
-  /** Where focus goes back on Escape (default: what had focus when it opened). */
+  /** Where focus goes back on Escape (default: what had focus when it opened; if a redraw replaced it, its copy with the same id or data-id). */
   returnTo?: HTMLElement;
   /** Called once when it closes, however it closes. */
   onClose?(): void;

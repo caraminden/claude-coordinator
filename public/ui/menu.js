@@ -129,12 +129,20 @@ export function openMenu(spec, x, y) {
     else if (e.key === 'Tab') { e.preventDefault(); close(true); }
   };
   const onPress = (e) => { if (!menu.contains(e.target)) close(false); };
-  const onScroll = (e) => { if (!menu.contains(e.target)) close(false); };
+  // A scroll that moves what the menu is about (or the page) closes it; a redraw's scroll elsewhere (a list
+  // rebuilt by a live update) doesn't, or menus would vanish in a busy scheme. A wheel always does.
+  const onScroll = (e) => {
+    const s = e.target;
+    if (s instanceof Node && menu.contains(s)) return;
+    if (!(s instanceof Element) || s === document.documentElement || !returnTo?.isConnected || s.contains(returnTo)) close(false);
+  };
+  const onWheel = (e) => { if (!menu.contains(e.target)) close(false); };
   const onResize = () => close(false);
   const onBlur = () => close(false);
   menu.addEventListener('keydown', onKey);
   addEventListener('pointerdown', onPress, true);
   addEventListener('scroll', onScroll, true);
+  addEventListener('wheel', onWheel, { capture: true, passive: true });
   addEventListener('resize', onResize);
   addEventListener('blur', onBlur);
   addEventListener('hashchange', onResize);
@@ -143,16 +151,25 @@ export function openMenu(spec, x, y) {
     open = null;
     removeEventListener('pointerdown', onPress, true);
     removeEventListener('scroll', onScroll, true);
+    removeEventListener('wheel', onWheel, { capture: true });
     removeEventListener('resize', onResize);
     removeEventListener('blur', onBlur);
     removeEventListener('hashchange', onResize);
     menu.remove();
-    if (refocus && returnTo?.isConnected) returnTo.focus({ preventScroll: true });
+    if (refocus) (returnTo?.isConnected ? returnTo : redrawnCopy(returnTo))?.focus({ preventScroll: true });
     spec.onClose?.();
   };
   open = { el: menu, close };
   focusAt(0);
   return menu;
+}
+
+/** The element a redraw put in place of `gone`: same tag, same id or data-id. Null when there's none to tell by. */
+function redrawnCopy(gone) {
+  if (!gone) return null;
+  if (gone.id) return document.getElementById(gone.id);
+  const id = gone.dataset?.id;
+  return id ? document.querySelector(`${gone.localName}[data-id="${CSS.escape(id)}"]`) : null;
 }
 
 /** Text boxes keep the browser's own menu: spelling suggestions and Paste need it. */

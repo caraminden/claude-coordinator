@@ -39,9 +39,10 @@ export interface Browser {
   close(): Promise<void>;
 }
 
-export async function launch(bin: string): Promise<Browser> {
+/** `args`: more Chromium switches, e.g. `--blink-settings=…` for a mouse device's (hover: hover) and (pointer: fine). */
+export async function launch(bin: string, args: string[] = []): Promise<Browser> {
   const dir = mkdtempSync(join(tmpdir(), 'ui-browser-'));
-  const chrome: ChildProcess = spawn(bin, ['--headless', '--remote-debugging-pipe', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
+  const chrome: ChildProcess = spawn(bin, ['--headless', '--remote-debugging-pipe', `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', ...args, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
   let log = '';
   chrome.stderr!.on('data', (d) => (log += d));
   const [input, output] = [chrome.stdio[3] as Writable, chrome.stdio[4] as Readable];

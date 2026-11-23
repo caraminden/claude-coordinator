@@ -68,6 +68,41 @@ test('it asks GitHub for a run token for the store and posts the counts with it,
   }
 });
 
+test("stopped once the tests end, it sends the run's last counts on its way out, though run-tests.sh has removed the file", async () => {
+  const got: any[] = [];
+  const server = createServer((req, res) => {
+    let text = '';
+    req.on('data', (c) => (text += c));
+    req.on('end', () => {
+      if (req.url!.startsWith('/token')) return res.end(JSON.stringify({ value: 'run-token' }));
+      got.push(JSON.parse(text));
+      res.statusCode = 202;
+      res.end('{}');
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${(server.address() as any).port}`;
+  const file = join(dir, 'last.progress');
+  writeFileSync(file, '5\n5\n\ntest/a.test.ts\n');
+  const env = { ...process.env, ACTIONS_ID_TOKEN_REQUEST_URL: `${url}/token?x=1`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'ask-token', CITADEL_STORE_URL: url, CI_PROGRESS_EVERY: '0.05', RUNNER_ENVIRONMENT: 'self-hosted' };
+  const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'tools', 'ci-progress.ts'), file], { env, stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', (c) => (stderr += c));
+  const exited = new Promise((r) => child.once('exit', (code, signal) => r({ code, signal })));
+  try {
+    await until('the counts sent', () => got.length > 0, undefined, () => stderr);
+    rmSync(file); // run-tests.sh removes it as the suite ends, then the step stops the sender
+    const before = got.length;
+    child.kill('SIGTERM');
+    assert.deepEqual(await exited, { code: 0, signal: null }, `it ends by itself once the last counts are sent: ${stderr}`);
+    assert.ok(got.length > before, 'a last send after it was told to stop');
+    assert.deepEqual(got.at(-1), { done: 5, total: 5, file: '', failed: ['test/a.test.ts'], phase: 'suite' });
+  } finally {
+    child.kill();
+    server.close();
+  }
+});
+
 test('with no run token, or on a GitHub-hosted runner, it sends nothing and ends at once with no error', async () => {
   for (const extra of [{ ACTIONS_ID_TOKEN_REQUEST_URL: '' }, { ACTIONS_ID_TOKEN_REQUEST_URL: 'http://x/', ACTIONS_ID_TOKEN_REQUEST_TOKEN: 't', RUNNER_ENVIRONMENT: 'github-hosted' }]) {
     const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'tools', 'ci-progress.ts'), join(dir, 'none')], { env: { ...process.env, ACTIONS_ID_TOKEN_REQUEST_TOKEN: '', ...extra }, stdio: ['ignore', 'ignore', 'pipe'] });

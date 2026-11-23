@@ -19,7 +19,7 @@ export const SLOW_MS = 60_000;
 /** A finished run's pass or fail stays this long, until its minion hears of it. */
 export const KEEP_MS = 5 * 60_000;
 const RATE_LIMITED_MS = 15 * 60_000;
-/** A run's test counts show while its job sent them this recently (it sends about every 10 s while its suite runs). */
+/** A run's test counts show while its job sent them this recently (it sends about every 2 s while its suite runs). */
 export const TESTS_FRESH_MS = 45_000;
 const USUAL_MS = 60 * 60_000;
 /** land.sh's CI workflow (CI_WORKFLOW there). */

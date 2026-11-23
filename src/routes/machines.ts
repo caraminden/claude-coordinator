@@ -177,7 +177,7 @@ export const agentRoutes: Route[] = [
   ciUploadRoute,
   ciNumbersRoute,
   ...ciJobReadRoutes,
-  // A CI job's test file counts while its suite runs, about every 10 s (#1368): its run comes from its run token, as an
+  // A CI job's test file counts while its suite runs, about every 2 s (#1368, #1667): its run comes from its run token, as an
   // upload's does, and shows on its landing's wait and Releases. {done, total, file}: tools/progress-reporter.ts's lines; failed: the
   // files failed so far; phase 'rerun' while run-tests.sh reruns them alone, the counts then being the reruns'.
   {

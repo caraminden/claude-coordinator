@@ -974,7 +974,7 @@ export class Runner {
       const ids = tickets.map((t) => t.id);
       const properties = this.store.props.forTargets('minion', ids);
       const open = tickets.filter((t) => t.status !== 'closed');
-      this.store.warmSettings(tickets.flatMap((t) => [queueKey(t.id), previewKey(t.id), contextKey(t.id), windowKey(t.id), freshKey(t.id), sleepKey(t.id)]));
+      this.store.warmSettings(tickets.flatMap((t) => [queueKey(t.id), previewKey(t.id), contextKey(t.id), windowKey(t.id), freshKey(t.id), sleepKey(t.id), budgetKey(t.id)]));
       this.store.warmTurnTotals(ids);
       this.store.warmTouches(open);
       this.store.warmEvents(open.flatMap((t) => this.queue.heldMail(t.id).flatMap((m) => m.id ?? [])));

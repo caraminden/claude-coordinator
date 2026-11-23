@@ -130,7 +130,13 @@ export function parseResults(out: string): Result[] {
       continue;
     }
     m = /^(PASSED|FAILED|ERROR|XPASS|XFAIL) (\S+::\S+)/.exec(line);
-    if (m) res.push({ name: m[2], ok: m[1] === 'XFAIL' ? 'skip' : m[1] === 'PASSED' || m[1] === 'XPASS' });
+    if (m) {
+      res.push({ name: m[2], ok: m[1] === 'XFAIL' ? 'skip' : m[1] === 'PASSED' || m[1] === 'XPASS' });
+      continue;
+    }
+    // citadel-test's "✖ test/a.test.ts:12 › suite › case": it lists failures only, never a passing case.
+    m = /^✖ \S+ › (.+)$/.exec(line);
+    if (m) res.push({ name: m[1].split(' › ').join(' > '), ok: false });
   }
   return res;
 }
@@ -150,11 +156,11 @@ export function firstError(out: string): string {
     const hit = lines.find((l) => re.test(l) && !/^(?:throw |at |error: 'test failed'|code: 'ERR_TEST_FAILURE')/.test(l));
     if (hit) return hit.slice(0, 200);
   }
-  return (lines.filter(Boolean).at(-1) ?? '').slice(0, 200);
+  return (lines.filter((l) => l && !/^full output:/.test(l)).at(-1) ?? '').slice(0, 200);
 }
 
 /** One file's verdicts from its run on the base. */
-export function judge(entry: Pick<Entry, 'path' | 'cases'>, run: { status: number | null; out: string; timedOut: boolean; parsed: boolean }): Verdict[] {
+export function judge(entry: Pick<Entry, 'path' | 'cases'> & { runner?: Runner | null }, run: { status: number | null; out: string; timedOut: boolean; parsed: boolean }): Verdict[] {
   const { path, cases } = entry;
   if (run.timedOut) return [{ kind: 'skipped', label: path, detail: 'timed out on the base' }];
   const results = run.parsed ? parseResults(run.out) : [];
@@ -164,17 +170,24 @@ export function judge(entry: Pick<Entry, 'path' | 'cases'>, run: { status: numbe
     return [run.status === 0 ? { kind: 'flag', label: path, detail: 'the whole file passed on the base' } : { kind: 'red', label: path, detail: firstError(run.out) }];
   }
   if (run.status === 0 && run.parsed && results.length === 0) return [{ kind: 'skipped', label: path, detail: 'ran no tests on the base' }];
-  // A file that failed with none of its cases reported never ran them: one line, with the reason.
-  if (run.status !== 0 && !cases.some((name) => results.some((r) => matches(r.name, name)))) {
-    return [{ kind: 'red', label: path, detail: `didn't run on the base (${cases.length} new or changed case${cases.length === 1 ? '' : 's'}): ${firstError(run.out)}` }];
+  const n = `${cases.length} new or changed case${cases.length === 1 ? '' : 's'}`;
+  // A --cmd whose output names no case: its exit status can fail the file, but a 0 passes no case it may never have run.
+  if (!run.parsed) {
+    if (run.status !== 0) return [{ kind: 'red', label: path, detail: `failed on the base, and its output names no case (${n}): ${firstError(run.out)}` }];
+    return cases.map((name) => ({ kind: 'skipped', label: `${path} › ${name}`, detail: "the command passed, but its output names no case, so it can't be judged: leave out --cmd, or run it on the base by hand" }));
+  }
+  // A file that failed with nothing reported but its own load or build: it never ran them. One line, with the reason.
+  const fileOnly = (r: Result) => r.ok === false && (r.name === '(the file itself)' || r.name.endsWith(basename(path)));
+  if (run.status !== 0 && !cases.some((name) => results.some((r) => matches(r.name, name))) && results.every(fileOnly)) {
+    return [{ kind: 'red', label: path, detail: `didn't run on the base (${n}): ${firstError(run.out)}` }];
   }
   return cases.map((name): Verdict => {
     const mine = results.filter((r) => matches(r.name, name));
     const label = `${path} › ${name}`;
+    // Unnamed, it wasn't judged: node may have ended the file early, a filter or cfg may have left it out (#1724).
     if (mine.length === 0) {
-      return run.status === 0
-        ? { kind: 'flag', label, detail: 'not named in the output, and the whole file passed on the base' }
-        : { kind: 'red', label, detail: `not named in the output, and the file failed on the base` };
+      const why = entry.runner === 'cmd' ? ' (a runner that lists only failures, like citadel-test, never names a passing case: leave out --cmd)' : '';
+      return { kind: 'skipped', label, detail: `not named in the run's output, so it can't be judged (it may never have run)${why}: run it on the base by hand` };
     }
     if (mine.some((r) => r.ok === false)) return { kind: 'red', label, detail: '' };
     if (mine.every((r) => r.ok === 'skip')) return { kind: 'skipped', label, detail: 'skipped or todo on the base' };
@@ -218,8 +231,9 @@ function onPath(cmd: string): string | null {
 export function nodeCommand(script: string, file: string): string[] {
   const first = script.trim().split(/\s+/)[0] ?? '';
   const launcher = /--test\b/.test(script) && first && first !== 'node' && !first.includes('=') ? first : 'node';
-  const flags = [...script.matchAll(/(?:^|\s)(--test-global-setup=\S+|--test-timeout=\d+|--experimental-[\w-]+(?:=\S+)?|--(?:import|require)(?:=|\s+)\S+)/g)].flatMap((m) => m[1].split(/\s+/));
-  return [launcher, '--test', '--test-force-exit', '--test-reporter=tap', ...flags.map((f) => f.replace(/^['"]|['"]$/g, '')), file];
+  // --test-force-exit only as the script has it: it ends a file whose top-level await follows a test before its later tests exist (#1724).
+  const flags = [...script.matchAll(/(?:^|\s)(--test-force-exit|--test-global-setup=\S+|--test-timeout=\d+|--experimental-[\w-]+(?:=\S+)?|--(?:import|require)(?:=|\s+)\S+)/g)].flatMap((m) => m[1].split(/\s+/));
+  return [launcher, '--test', '--test-reporter=tap', ...flags.map((f) => f.replace(/^['"]|['"]$/g, '')), file];
 }
 
 const globs = (rel: string, a: string): boolean => {
@@ -311,7 +325,8 @@ function plan(root: string, base: string, changes: Change[], cmd: string | null)
       if (/\bjest\b/.test(script)) why = 'jest is not supported yet';
       else runner = /\bvitest\b/.test(script) ? 'vitest' : 'node';
     } else if (PY_TEST.test(name)) runner = 'pytest';
-    else if (c.path.endsWith('.rs') && (/(?:^|\/)tests\/[^/]+\.rs$/.test(c.path) || /(?:^|\/)tests\/[^/]+\/main\.rs$/.test(c.path) || /(?:^|\/)src\/.*tests?\.rs$/.test(c.path))) runner = 'cargo';
+    else if (c.status === 'A' && /(?:^|\/)src\/.*\.rs$/.test(c.path)) why = "a new Rust test module: the base's code doesn't declare it, so it can't run there: can't judge, show its red by hand";
+    else if (cargoTest(root, c.path)) runner = 'cargo';
     else if (other) why = `${other[1]} are not supported yet: run it on the base by hand`;
     else if (SH_TEST.test(name)) runner = 'sh';
     else if (ANY_TEST.test(name)) why = 'no runner for this kind of test file: run it on the base by hand';
@@ -319,6 +334,14 @@ function plan(root: string, base: string, changes: Change[], cmd: string | null)
     entries.push({ path: c.path, runner, why, cases: lang && runner ? changedCases(baseText, head, lang) : null });
   }
   return { entries, writes };
+}
+
+/** A Rust file cargo runs tests from: an integration test target, a module of a multi-file one, or a src/ test module. */
+export function cargoTest(root: string, path: string): boolean {
+  if (/(?:^|\/)tests\/[^/]+\.rs$/.test(path) || /(?:^|\/)tests\/[^/]+\/main\.rs$/.test(path) || /(?:^|\/)src\/.*tests?\.rs$/.test(path)) return true;
+  // tests/<target>/…/x.rs belongs to the target tests/<target>/main.rs or tests/<target>.rs; with neither it's a shared helper (tests/common/).
+  const m = /^(.*?(?:^|\/)tests)\/([^/]+)\/.+\.rs$/.exec(path);
+  return !!m && (existsSync(join(root, m[1], m[2], 'main.rs')) || existsSync(join(root, m[1], `${m[2]}.rs`)));
 }
 
 /** The crate's name and the cargo target arguments that run this file's tests. */
@@ -331,6 +354,9 @@ export function cargoArgs(root: string, path: string, cases: string[] = []): str
   const rel = relative(dir, path).split(sep).join('/');
   let m = /^tests\/([^/]+?)(?:\.rs|\/main\.rs)$/.exec(rel);
   if (m) return ['-p', pkg, '--test', m[1]];
+  // A module of a multi-file test target: that target, filtered to the changed cases.
+  m = /^tests\/([^/]+)\/.+\.rs$/.exec(rel);
+  if (m) return ['-p', pkg, '--test', m[1], ...(cases.length ? ['--', ...cases] : [])];
   m = /^src\/(.*)\.rs$/.exec(rel);
   if (!m) return `${rel} is not under tests/ or src/ of ${pkg}`;
   // The changed cases as name filters, so only they run, not the whole lib or bin target.

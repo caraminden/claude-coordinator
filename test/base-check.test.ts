@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { cargoArgs, cargoNoTarget, casesOf, changedCases, isTestPath, judge, matches, nodeCommand, parseResults, pyLeaks, pyPath, spliceRust } from '../kit/skills/self-review/scripts/base-check.ts';
+import { cargoArgs, cargoNoTarget, cargoTest, casesOf, changedCases, isTestPath, judge, matches, nodeCommand, parseResults, pyLeaks, pyPath, spliceRust } from '../kit/skills/self-review/scripts/base-check.ts';
 import { git } from './git.ts';
 
 const SCRIPT = join(import.meta.dirname, '..', 'kit', 'skills', 'self-review', 'scripts', 'base-check.ts');
@@ -63,9 +63,12 @@ test('splices the branch\'s trailing Rust test module onto the base\'s code', ()
 });
 
 test('picks the runner\'s command and the cargo target', () => {
-  assert.deepEqual(nodeCommand('tools/citadel-node --test --test-concurrency=${N:-2} --test-global-setup=test/leak-guard.ts test/', 'test/a.test.ts'), ['tools/citadel-node', '--test', '--test-force-exit', '--test-reporter=tap', '--test-global-setup=test/leak-guard.ts', 'test/a.test.ts']);
-  assert.deepEqual(nodeCommand('node --test --test-concurrency=1 --test-timeout=120000 test/', 'test/a.test.ts'), ['node', '--test', '--test-force-exit', '--test-reporter=tap', '--test-timeout=120000', 'test/a.test.ts']);
-  assert.deepEqual(nodeCommand('', 'a.test.ts'), ['node', '--test', '--test-force-exit', '--test-reporter=tap', 'a.test.ts']);
+  assert.deepEqual(nodeCommand('tools/citadel-node --test --test-concurrency=${N:-2} --test-global-setup=test/leak-guard.ts test/', 'test/a.test.ts'), ['tools/citadel-node', '--test', '--test-reporter=tap', '--test-global-setup=test/leak-guard.ts', 'test/a.test.ts']);
+  assert.deepEqual(nodeCommand('node --test --test-concurrency=1 --test-timeout=120000 test/', 'test/a.test.ts'), ['node', '--test', '--test-reporter=tap', '--test-timeout=120000', 'test/a.test.ts']);
+  assert.deepEqual(nodeCommand('', 'a.test.ts'), ['node', '--test', '--test-reporter=tap', 'a.test.ts']);
+  // --test-force-exit only when the package's own script has it: it ends a file whose top-level await follows its
+  // first test before the later tests are even registered, so they would never run (#1724).
+  assert.deepEqual(nodeCommand('node --test --test-force-exit test/', 'a.test.ts'), ['node', '--test', '--test-reporter=tap', '--test-force-exit', 'a.test.ts']);
   const ws = join(root, 'cargo-ws');
   mkdirSync(join(ws, 'crates', 'core', 'src', 'parse'), { recursive: true });
   writeFileSync(join(ws, 'crates', 'core', 'Cargo.toml'), '[package]\nname = "peek-core"\nversion = "0.1.0"\n\n[dependencies]\nname = "x"\n');
@@ -78,6 +81,18 @@ test('picks the runner\'s command and the cargo target', () => {
   assert.deepEqual(cargoArgs(ws, 'crates/core/src/lib.rs', ['clamps', 'rounds']), ['-p', 'peek-core', '--lib', '--', 'clamps', 'rounds']);
   assert.deepEqual(cargoArgs(ws, 'crates/core/src/main.rs', ['clamps']), ['-p', 'peek-core', '--bins', '--', 'clamps']);
   assert.deepEqual(cargoArgs(ws, 'crates/core/tests/busy_cara.rs', ['x']), ['-p', 'peek-core', '--test', 'busy_cara'], 'an integration test file is its own target');
+  // A module of a multi-file test target (tests/suite/main.rs or tests/suite.rs mods it in): that target, its changed cases only (#1724).
+  mkdirSync(join(ws, 'crates', 'core', 'tests', 'suite', 'deep'), { recursive: true });
+  mkdirSync(join(ws, 'crates', 'core', 'tests', 'common'), { recursive: true });
+  mkdirSync(join(ws, 'crates', 'core', 'tests', 'fake'), { recursive: true });
+  writeFileSync(join(ws, 'crates', 'core', 'tests', 'suite', 'main.rs'), 'mod copied;\n');
+  writeFileSync(join(ws, 'crates', 'core', 'tests', 'fake.rs'), 'mod keep;\n');
+  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/suite/copied.rs', ['keeps_copy']), ['-p', 'peek-core', '--test', 'suite', '--', 'keeps_copy']);
+  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/suite/deep/more.rs'), ['-p', 'peek-core', '--test', 'suite']);
+  assert.deepEqual(cargoArgs(ws, 'crates/core/tests/fake/keep.rs', ['k']), ['-p', 'peek-core', '--test', 'fake', '--', 'k'], 'tests/fake.rs mods in tests/fake/');
+  assert.equal(cargoTest(ws, 'crates/core/tests/suite/copied.rs'), true);
+  assert.equal(cargoTest(ws, 'crates/core/tests/common/mod.rs'), false, 'a shared helper module is not a test target');
+  assert.equal(cargoTest(ws, 'crates/app/src/poe_log_tests.rs') && cargoTest(ws, 'crates/core/tests/busy_cara.rs') && cargoTest(ws, 'crates/core/tests/suite/main.rs'), true);
   // A crate with no library (a binary-only app crate): its modules' tests run as the bin target, never `--lib`.
   mkdirSync(join(ws, 'crates', 'app', 'src'), { recursive: true });
   writeFileSync(join(ws, 'crates', 'app', 'Cargo.toml'), '[package]\nname = "peek-app"\nversion = "0.1.0"\n');
@@ -99,7 +114,20 @@ test('judges a file: a case passing on the base is flagged; failing, not loading
   assert.deepEqual(judge(e, run(0, '')).map((v) => v.kind), ['skipped'], 'a run that reports nothing proves nothing');
   assert.deepEqual(judge(e, { ...run(0, ''), timedOut: true }).map((v) => v.kind), ['skipped']);
   assert.deepEqual(judge({ path: 't', cases: null }, { status: 0, out: 'whatever', timedOut: false, parsed: false }).map((v) => v.kind), ['flag'], 'a --cmd run with no parsed cases: the exit status decides');
+  // A case the output never names wasn't judged: it may never have run (#1724). Never a pass, and never a guessed red.
+  assert.deepEqual(judge(e, run(0, 'ok 1 - other')), [{ kind: 'skipped', label: 't.test.ts › new', detail: "not named in the run's output, so it can't be judged (it may never have run): run it on the base by hand" }, { kind: 'flag', label: 't.test.ts › other', detail: '' }]);
+  assert.deepEqual(judge(e, run(1, 'not ok 1 - other')).map((v) => v.kind), ['skipped', 'red']);
+  assert.deepEqual(judge(e, { status: 0, out: 'all good', timedOut: false, parsed: false }).map((v) => v.kind), ['skipped', 'skipped'], 'a --cmd whose output names no case: exit 0 is no pass for a case');
+  const unparsed = judge(e, { status: 1, out: 'boom\nfull output: /tmp/x.log', timedOut: false, parsed: false });
+  assert.deepEqual(unparsed, [{ kind: 'red', label: 't.test.ts', detail: 'failed on the base, and its output names no case (2 new or changed cases): boom' }], 'a --cmd failure is not "didn\'t run"');
   assert.deepEqual(judge({ path: 't.test.ts', cases: [] }, run(0, 'ok 1 - old')), [{ kind: 'skipped', label: 't.test.ts', detail: 'no new or changed case found (only shared setup or helpers changed): judge it by hand' }], 'a file whose cases are all unchanged is not a finding');
+});
+
+test('reads citadel-test\'s output, which names only failures (#1724)', () => {
+  const out = '✖ 31 passed, 1 failed (+4 repo-wide files) in 22.5 s\n\n✖ test/u.test.ts:193 › only a person can start one\n  Expected values to be strictly equal:\n\n✖ test/v.test.ts:9 › menus › opens\nfull output: /tmp/citadel-test.log\n';
+  assert.deepEqual(parseResults(out), [{ name: 'only a person can start one', ok: false }, { name: 'menus > opens', ok: false }]);
+  const e = { path: 'test/u.test.ts', cases: ['only a person can start one', 'other'] };
+  assert.deepEqual(judge(e, { status: 1, out, timedOut: false, parsed: true }).map((v) => v.kind), ['red', 'skipped'], 'a case it didn\'t list may have passed or never run');
 });
 
 /** A repo with a little module and its test on main, and a branch on top. */
@@ -239,4 +267,29 @@ test('helper is executable', () => assert.equal(execFileSync(new URL('./run.sh',
   const r = check(dir);
   assert.match(r.stdout, /^PASSES ON BASE +test\/fixtures\.test\.ts › binary fixture is intact$/m, r.stdout + r.stderr);
   assert.match(r.stdout, /^PASSES ON BASE +test\/fixtures\.test\.ts › helper is executable$/m, r.stdout + r.stderr);
+});
+
+test('a new case after a top-level await is judged red on the base, never passed for the cases that did run (#1724)', () => {
+  // #1399's thread-identity.test.ts: a test, then `await` setup, then the new case. With --test-force-exit node
+  // ended the file once the first test was done, before the new case was registered, and the unnamed case read as a pass.
+  const dir = repo('await');
+  writeFileSync(join(dir, 'math.ts'), 'export const double = (n: number) => n * 2 + 0;\n');
+  writeFileSync(join(dir, 'test', 'math.test.ts'), "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\nimport { double } from '../math.ts';\n\ntest('doubles', () => assert.equal(double(2), 4));\n\nconst ready = await Promise.resolve(true);\n\ntest('negative zero doubles to zero', () => assert.ok(ready && Object.is(double(-0), 0)));\n");
+  commit(dir);
+  const r = check(dir);
+  assert.match(r.stdout, /^red +test\/math\.test\.ts › negative zero doubles to zero$/m, r.stdout + r.stderr);
+  // The await line sits in the first case's text, so it counts as changed, and it really does pass on the base.
+  assert.match(r.stdout, /^PASSES ON BASE +test\/math\.test\.ts › doubles$/m);
+});
+
+test('a new Rust test module is "can\'t judge" on the base, not run and not dropped (#1724)', () => {
+  const dir = repo('rsmod');
+  mkdirSync(join(dir, 'crates', 'link', 'src', 'tools'), { recursive: true });
+  writeFileSync(join(dir, 'crates', 'link', 'Cargo.toml'), '[package]\nname = "link"\nversion = "0.1.0"\n');
+  writeFileSync(join(dir, 'crates', 'link', 'src', 'tools', 'mod.rs'), '#[cfg(test)]\nmod tests;\n');
+  writeFileSync(join(dir, 'crates', 'link', 'src', 'tools', 'tests.rs'), '#[test]\nfn pairs() {}\n');
+  git(dir, 'add', '-A');
+  commit(dir);
+  const r = check(dir);
+  assert.match(r.stdout, /^skipped +crates\/link\/src\/tools\/tests\.rs: a new Rust test module: the base's code doesn't declare it, so it can't run there: can't judge, show its red by hand$/m, r.stdout + r.stderr);
 });

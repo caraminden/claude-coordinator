@@ -315,7 +315,7 @@
    "ok": 0
   }
  },
- "land-train.test.ts": {
+ "land-train-riders.test.ts": {
   "sleep": {
    "n": 3,
    "ok": 1

@@ -46,6 +46,7 @@ test/git.ts
 test/wait.ts
 test/quiet-proc.ts
 test/land-fixture.ts
+test/land-train-fixture.ts
 test/land-recover-fixture.ts
 test/scheme-setup-land-fixture.ts
 test/land.test.ts
@@ -54,6 +55,8 @@ test/land-build.test.ts
 test/land-numbers.test.ts
 test/land-queue.test.ts
 test/land-train.test.ts
+test/land-train-riders.test.ts
+test/land-train-early.test.ts
 test/land-known-flakes.test.ts
 test/land-burn-in.test.ts
 test/burn-in.test.ts

@@ -1488,7 +1488,7 @@ const LAND_PROPS = {
   full: { type: 'boolean', description: 'With into: the build minion takes main in; the whole suite runs' },
   build: { type: 'boolean', description: 'The build minion shipping its build to main, alone' },
   fix: { type: 'boolean', description: 'Only for the fix or revert of a rolled-back deploy that land.sh refused for' },
-  urgent: { type: 'boolean', description: 'A fix for shipping or an outage that is broken right now: its restart skips the wait for a starved box (nothing else)' },
+  outage: { type: 'boolean', description: 'A fix for shipping or an outage that is broken right now: its restart skips the wait for a starved box (nothing else)' },
 };
 
 const MARK_IMAGE = {
@@ -2402,7 +2402,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const body: Record<string, unknown> = {};
       for (const k of ['summary', 'learned', 'risk', 'risk_reason', 'go', 'fix_proof', 'into', 'files', 'full', 'build', 'deploy', 'stay_open', 'waiting_on'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
-      if (args.urgent === true) body.urgent = true;
+      if (args.outage === true) body.outage = true;
       await call('POST', `/api/tickets/${C().TICKET}/land/handoff`, body);
       return handOffResult(args, C().HOME_CONTRAPTIONS, C().DEPLOYS);
     }
@@ -2411,7 +2411,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const body: Record<string, unknown> = {};
       for (const k of ['into', 'files', 'full', 'build'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
-      if (args.urgent === true) body.urgent = true;
+      if (args.outage === true) body.outage = true;
       let r = await call('POST', `/api/tickets/${C().TICKET}/land`, body);
       while (r.code === null) {
         await new Promise((resolve) => setTimeout(resolve, 5000));

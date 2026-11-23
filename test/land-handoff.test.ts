@@ -589,7 +589,7 @@ test("landResult reads the real deploy.sh's lines: live, already live, and a res
     // shipped line reads (src/land.ts's held).
     const hold = join(r.live, '.git', 'cc-deploy', 'hold');
     await as('held', fake('held-bin', `echo "$(( $(date +%s) + 600 )) CPU pressure 63%" >'${hold}'; exit 0`), [/^deploy: not live yet: the box is starved \(CPU pressure 63%\), so the restart waits for it to ease, live by about \d\d?:\d\d P[SD]T at the latest/], 'restart');
-    // An urgent fix's deploy (the land tool's urgent: true) marks the restart it queues or rides to skip the hold.
+    // An urgent fix's deploy (the land tool's outage: true) marks the restart it queues or rides to skip the hold.
     rmSync(hold);
     const urgent = join(r.live, '.git', 'cc-deploy', 'urgent');
     assert.equal(existsSync(urgent), false);

@@ -1640,7 +1640,7 @@ export const ticketRoutes: Route[] = [
       const token = String(req.headers.authorization).replace(/^Bearer /, '');
       const env = app.runner.hostEnv(ticket, token);
       if (body?.fix === true) env.LAND_FIX = '1';
-      if (body?.urgent === true) env.LAND_URGENT = '1'; // { urgent: true }: its restart skips deploy.sh's starved-box hold (#1417)
+      if (body?.outage === true) env.LAND_URGENT = '1'; // { outage: true }: its restart skips deploy.sh's starved-box hold (#1417)
       // { into, files, full, build }: land.sh's build-branch forms (#597), checked to the shapes it accepts.
       let args: string[];
       try {
@@ -1764,7 +1764,7 @@ export const ticketRoutes: Route[] = [
       if (dirty) throw new HttpError(409, `Not handed off: your worktree has uncommitted changes. Commit them first.\n${dirty.slice(0, 2000)}`);
       const env = app.runner.hostEnv(ticket, String(req.headers.authorization).replace(/^Bearer /, ''));
       if (body.fix === true) env.LAND_FIX = '1';
-      if (body.urgent === true) env.LAND_URGENT = '1'; // its restart skips deploy.sh's starved-box hold (#1417)
+      if (body.outage === true) env.LAND_URGENT = '1'; // its restart skips deploy.sh's starved-box hold (#1417)
       // Fast mode (#1017): low and medium lands go live on the smoke check; every land in the scheme is let through on known reds.
       const scheme = app.store.getProject(ticket.project_id);
       if (scheme?.land_mode === 'fast') {

@@ -404,7 +404,7 @@ live_by() { echo "live by about $(TZ=America/Los_Angeles date -d "@$(($1 + 60))"
 
 # The starved-box hold (#1417): once no turn would be cut off, a starved box holds the restart, at most HOLD s from the
 # first starved look, then it goes anyway and says so. A roll back, an urgent fix's restart (<state>/urgent: LAND_URGENT
-# or LAND_FIX, the land tool's urgent: true or fix: true) and one while lands wait for a fix (<state>/bad) never wait; --now skips the whole wait loop.
+# or LAND_FIX, the land tool's outage: true or fix: true) and one while lands wait for a fix (<state>/bad) never wait; --now skips the whole wait loop.
 # Returns 0 while it holds. <state>/hold ("<latest go> <why>") tells the deploy and the riders when it expects to go.
 held_since='' R_HOLD=''
 # Ends a hold that didn't run out: the box eased, or a turn started (its own wait follows, and a later starved look holds

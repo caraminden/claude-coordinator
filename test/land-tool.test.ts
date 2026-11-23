@@ -63,7 +63,7 @@ test("any scheme's minion lands through the tool when its worktree has tools/lan
 
 // A container turn couldn't land the fix for a commit whose deploy was rolled back: land.sh wants LAND_FIX=1 for one
 // that changes none of its files, and the tool had no way to pass it (#553's handoff).
-test('the land tool passes LAND_FIX=1 only when asked to with fix: true, and LAND_URGENT=1 with urgent: true', async () => {
+test('the land tool passes LAND_FIX=1 only when asked to with fix: true, and LAND_URGENT=1 with outage: true', async () => {
   const store = new Store(join(srv.data, 'coordinator.db'));
   const project = store.createProject('Fix', null);
   store.setProjectRepoDir(project.id, join(srv.root, 'fix-repo'));
@@ -83,7 +83,7 @@ test('the land tool passes LAND_FIX=1 only when asked to with fix: true, and LAN
   assert.equal(await land({}), 'fix:none');
   assert.equal(await land({ fix: 'yes' }), 'fix:none', 'only true');
   assert.equal(await land({ fix: true }), 'fix:1');
-  assert.equal(await land({ urgent: true }), 'fix:none urgent', 'urgent is its own mark: no LAND_FIX, so no critic skip');
+  assert.equal(await land({ outage: true }), 'fix:none urgent', 'outage is its own mark: no LAND_FIX, so no critic skip');
 });
 
 test("a container turn of any scheme is offered the land tool; a host turn is not", async () => {

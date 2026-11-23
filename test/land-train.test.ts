@@ -1352,7 +1352,7 @@ test('light check: no verdict joins the line; with the side runner busy, or LAND
 });
 
 // #1417: the front's restart held for a starved box (deploy.sh's <state>/hold) tells each rider when it expects to be
-// live, and an urgent fix riding the train (the land tool's urgent: true) marks that restart to skip the hold.
+// live, and an urgent fix riding the train (the land tool's outage: true) marks that restart to skip the hold.
 test("riders of a restart held for a starved box say when it expects to be live; only an urgent rider marks it to skip the hold (#1417)", async () => {
   for (const urgent of [false, true]) {
     const l = await line([{}, { env: { FAKE_NOT_LIVE: '1' } }, { env: urgent ? { LAND_URGENT: '1' } : {} }, {}]);

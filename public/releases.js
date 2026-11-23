@@ -468,9 +468,9 @@ function deployBar(projectId, tv) {
   return h('div', { class: 'rel-deploy' },
     busy ? h('span', { class: 'rel-deploying', role: 'status' }, 'Deploying…')
       : d.can ? h('button', { type: 'button', class: 'secondary', onclick: press, title: 'Deploy the next release now' }, 'Deploy') : '',
-    h('label', { class: 'rel-auto', title: 'Deploys by itself about 5 minutes after main last moved' },
+    h('label', { class: 'rel-auto', title: 'Deploys by itself right after main moves, or once the ships still coming have gone (10 minutes at most)' },
       h('input', { type: 'checkbox', checked: d.auto, onchange: (e) => flip(e.target.checked) }), 'Auto-deploy'),
-    d.due && !busy ? h('span', { class: 'muted' }, 'deploys by itself ', etaText(d.due)) : '');
+    d.due && !busy ? h('span', { class: 'muted' }, d.more ? 'waiting for ships in line, deploys by itself ' : 'deploys by itself ', etaText(d.due)) : '');
 }
 
 /** Targets whose Roll back to last green was pressed here, until the server's view stops offering it: "projectId/target". */

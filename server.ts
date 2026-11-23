@@ -121,7 +121,8 @@ import { usageName } from './src/usage-ledger.ts';
 import { ArtifactScanner } from './src/artifact-scan.ts';
 import { ShipStatus } from './src/ship-status.ts';
 import { Builds } from './src/builds.ts';
-import { Waits, readHeavy } from './src/waits.ts';
+import { Waits, readHeavy, readQueue } from './src/waits.ts';
+import { lineFor } from './src/ship-stop.ts';
 import { CITADEL_TARGET, CitadelServer, git, previewCopies, Releases } from './src/releases.ts';
 import { attachFailures, recordFailure } from './src/ship-failures.ts';
 import { earlyCi, landNews, readTail } from './src/land-news.ts';
@@ -1206,6 +1207,11 @@ const autoDeploy = new AutoDeploy({
   store, targets: () => targetFinder.list(), view: () => releases.view(() => true), held: lastGreen,
   failed: (t, why) => tellHome(t.projectId, `Auto-deploy of ${t.name} couldn't start: ${why}`),
   enabled: () => !services.opts.off,
+  // More is coming (#1736): a ship in the scheme's line, or a hand-off's land still running.
+  shipping: (id) => {
+    const at = lineFor(app, id);
+    return (!!at && readQueue(at.q, at.orderAt).length > 0) || landings.handoffs().some((t) => store.getTicket(t)?.project_id === id && landings.get(t)?.code === null);
+  },
   deployers: {
     contraption: {
       // The reader's next release waits at its deploy call while main is ahead and no deploy runs.

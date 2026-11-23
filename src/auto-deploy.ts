@@ -1,17 +1,21 @@
 // Auto-deploy and the Deploy button (#629). Cara, 2026-11-12: "Yes, a few minutes after main moves, but also not
 // just contraptions, mobile and desktop apps and everything else" and, for the release cards' button, "Yes, on any
-// target that can deploy". A target whose kind has a Deployer deploys by itself once its main has been still for
-// QUIET_MS (so a burst of landings goes out as one deploy, and one drain of agent turns), unless its scheme turned
-// that off for it; any member of its scheme can deploy it at once from its card. One try per commit: a deploy that
-// fails or rolls back isn't tried again by itself until main moves, so a broken commit can't redeploy on a loop.
+// target that can deploy". A target whose kind has a Deployer deploys by itself, unless its scheme turned that off; any
+// member of its scheme can deploy it at once from its card. One try per commit: a deploy that fails or rolls back isn't
+// tried again by itself until main moves, so a broken commit can't redeploy on a loop.
+// The wait (#1736), Cara, 2026-11-23: "maybe it would be better if we only wait if there are things in the deploy
+// pipeline that are expected to come in soon?" and, on the card, "Wait only if more is coming" and "Same rule as web
+// apps" (Android and desktop too, no 5-minute wait of their own): a target deploys on the tick after its head moved,
+// unless a ship is waiting or landing in its scheme (shipping(); which target it touches isn't known, so any ship in
+// the scheme counts); then it waits for it, at most MAX_WAIT_MS from when its head first moved.
 import type { Store } from './db.ts';
 import { HttpError } from './http.ts';
 import type { Found, Kind } from './release-targets.ts';
 import type { SchemeReleases, TargetView } from './releases.ts';
 import type { LastGreen } from './last-green.ts';
 
-/** How long a target's main must sit still before it deploys by itself. */
-export const QUIET_MS = 5 * 60_000;
+/** The longest a target waits for ships still coming, counted from when its head first moved. */
+export const MAX_WAIT_MS = 10 * 60_000;
 /** { off: ["<projectId>/<target>", …], tried: { "<projectId>/<target>": sha } }: kept, as a Citadel restart forgets memory. */
 const SETTING = 'auto-deploy';
 /** Who an auto-deploy is by, as the deploy's log and the card say it. */
@@ -37,6 +41,8 @@ export interface DeployInfo {
   auto: boolean;
   /** When auto-deploy will start it (ms), or null: off, nothing waits, or this commit was tried already. */
   due: number | null;
+  /** A ship is waiting or landing in its scheme, so `due` is the cap rather than the next tick. */
+  more: boolean;
 }
 
 export interface AutoDeployDeps {
@@ -52,6 +58,8 @@ export interface AutoDeployDeps {
   enabled?: () => boolean;
   /** Targets a Roll back to last green pinned (#1016): auto-deploy leaves them be, a person's deploy lets go, a minion's is refused. */
   held?: Pick<LastGreen, 'pinned' | 'unpin'>;
+  /** Whether a ship is waiting in the scheme's line or landing (a hand-off running), so more may be coming. */
+  shipping?: (projectId: number) => boolean;
   now?: () => number;
 }
 
@@ -64,8 +72,8 @@ const keyOf = (projectId: number, target: string) => `${projectId}/${target}`;
 
 export class AutoDeploy {
   private d: AutoDeployDeps;
-  /** Each waiting target's branch head, and when it was first seen there: the quiet time counts from that. */
-  private moved = new Map<string, { head: string; at: number }>();
+  /** Each waiting target's branch head, when the head was first seen waiting (`first`, the cap counts from it) and when it last moved. */
+  private moved = new Map<string, { head: string; at: number; first: number }>();
   /** Targets whose start() hasn't settled (an APK downloading, say), so nothing starts them twice. */
   private starting = new Set<string>();
   constructor(d: AutoDeployDeps) {
@@ -112,8 +120,9 @@ export class AutoDeploy {
     const can = deployer.waits(t, tv) && !this.starting.has(key);
     const auto = this.isOn(tv.target.projectId, tv.target.id);
     const m = this.moved.get(key);
-    const due = can && auto && m && this.saved().tried[key] !== m.head && !this.d.held?.pinned(t.projectId, t.id) ? m.at + QUIET_MS : null;
-    return { can, auto, due };
+    const more = !!this.d.shipping?.(t.projectId);
+    const due = can && auto && m && this.saved().tried[key] !== m.head && !this.d.held?.pinned(t.projectId, t.id) ? (more ? m.first + MAX_WAIT_MS : m.at) : null;
+    return { can, auto, due, more };
   }
 
   /** Deploy a target now (the card's button, publish_release), as a person or a minion. Throws what the deploy refused with; answers what start said. */
@@ -167,13 +176,14 @@ export class AutoDeploy {
   }
 
   /**
-   * Note each waiting target's head, and start the deploys that are due: on, waiting, QUIET_MS since its head last
-   * moved, and not tried at that head yet. Called after each read of the release monitor's slow parts.
+   * Note each waiting target's head, and start the deploys that are due: on, waiting, seen at this head on an earlier
+   * tick, nothing shipping in its scheme or MAX_WAIT_MS since its head first moved, and not tried at that head yet. Called after each read of the release monitor's slow parts.
    */
   async tick() {
     if (this.d.enabled && !this.d.enabled()) return;
     const now = this.now();
     const waiting = new Set<string>();
+    const shipping = new Map<number, boolean>();
     const all = this.d.targets();
     for (const s of this.d.view()) {
       for (const tv of s.targets) {
@@ -186,11 +196,14 @@ export class AutoDeploy {
         waiting.add(key);
         const m = this.moved.get(key);
         if (!m || m.head !== head) {
-          this.moved.set(key, { head, at: now });
+          this.moved.set(key, { head, at: now, first: m?.first ?? now });
           continue;
         }
-        if (now - m.at < QUIET_MS || !this.isOn(t.projectId, t.id) || this.saved().tried[key] === head || this.starting.has(key) || this.d.held?.pinned(t.projectId, t.id)) continue;
+        if (!shipping.has(t.projectId)) shipping.set(t.projectId, !!this.d.shipping?.(t.projectId));
+        if ((shipping.get(t.projectId) && now - m.first < MAX_WAIT_MS) || !this.isOn(t.projectId, t.id) || this.saved().tried[key] === head || this.starting.has(key) || this.d.held?.pinned(t.projectId, t.id)) continue;
         this.mark(key, head);
+        this.moved.delete(key); // the next head starts a fresh cap
+        waiting.delete(key);
         // Not awaited: a slow start (an APK downloading) mustn't hold up the other targets' checks.
         this.starting.add(key);
         void (async () => deployer.start(t, AUTO_BY, null))()

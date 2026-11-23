@@ -124,8 +124,8 @@ button.secondary:is(.act-reopen, .act-unpark) { --act: var(--done); }
   .ticket-head .head-line:has(> .progress:not([hidden])) > .head-state { display: none; }
   .ticket-head .head-line > .progress:not([hidden]) { display: contents; }
   .ticket-head .head-line .progress-line { flex: 1 1 0; width: auto; min-width: 0; min-height: var(--control-h); }
-  .ticket-head .head-line :is(.meter, .seg-track, .progress-cap, .progress-detail) { order: 1; flex: none; }
-  .ticket-head .head-line :is(.seg-track, .progress-cap) { width: calc(100% - 0.4rem); }
+  .ticket-head .head-line :is(.meter, .seg-track, .progress-cap, .progress-detail, .wait-tail) { order: 1; flex: none; }
+  .ticket-head .head-line :is(.seg-track, .progress-cap, .wait-tail) { width: calc(100% - 0.4rem); }
   .ticket-head .head-line .progress-detail { width: 100%; }
   .ticket-head .head-sub[hidden] { display: none; }
   /* A minion's ✎ for a new person note (#146): just the pen on phones. */

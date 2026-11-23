@@ -439,6 +439,7 @@ elif [ -n "$forced" ]; then say "the box is still busy ($(load_text)) after $(du
 # which Citadel shows as the holder's wait; another command leaves it alone, and shows elapsed time only.
 progress="$dir/slot-$slot.progress"
 # What the command prints is also teed into slot-N.out, whose end Citadel shows under the minion's wait (#1681).
+# shortcut: the file grows with the run's output (a suite's is under 1 MB) and is truncated per run and removed when it ends; cap it if a run ever prints GBs.
 out="$dir/slot-$slot.out"
 rm -f "$progress" "$progress.tmp" 2>/dev/null
 : >"$out" 2>/dev/null || out=/dev/null

@@ -82,13 +82,13 @@ from: bugs where feeders meet only show beside the other feeders' merged code (P
 found 2 Must fix and 5 Should fix at those seams in the whole-build review, too late, after four
 feeders had closed). Right before starting the review Grunts:
 
-1. Save `git merge-base HEAD build/<n>`, run `git rebase build/<n>`, and when that brought commits in
-   (the facts' `BEHIND:` line lists them), re-run the tests you touched.
+1. Run `git rebase build/<n>`. When it brought commits in (the facts' `BEHIND:` line lists them),
+   re-run the tests you touched.
 2. Every reviewer's brief gets the same two lines: the kit's reviewer and each of the scheme's own
    reviewing agents your diff triggers (Project facts or the "Kit reviewers" line names them, with
-   their trigger paths). The lines are: the change is `git diff build/<n>...HEAD`, and "Other
-   feeders merged into the build since this one started: `git log --oneline <saved>..build/<n>`;
-   check where this change meets their code."
+   their trigger paths). The lines are: the change is `git diff build/<n>...HEAD`, and "The other
+   feeders' work this change now sits on: `git log --oneline --no-merges main..build/<n>`; check
+   where this change meets their code." (That `main` stays main: it is what the build adds.)
 3. Fix real findings in your branch (section 3) before you merge in. A finding in another feeder's code
    goes to the build minion (`message_minion`).
 

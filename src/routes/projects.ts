@@ -38,6 +38,7 @@ import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { deleteNote, indexNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
+import { timerBroken } from '../timer-alerts.ts';
 import { mailParksUnderOldRule } from '../rule-parks.ts';
 import { heldPlan, readVerdicts, ruleHome, saveInstructions, settingsOverlaps, verdictPrompt, type FindReplace } from '../instructions-save.ts';
 import { runDescribe } from '../review-describe.ts';
@@ -535,7 +536,7 @@ export const projectRoutes: Route[] = [
   {
     // Home (#1140): what waits on you across your schemes, what's working in them, and what shipped since your last visit here.
     method: 'GET', path: '/api/home', who: ['person'],
-    handler: async ({ res, app: { store, runner }, session }) => {
+    handler: async ({ res, app: { store, runner, ciHealth }, session }) => {
       await homeBuckets.ready(store);
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
       const home = homeView(store, runner.approvals, session, busy, homeSince(store, session.name, Date.now()), Date.now(), homeBuckets);
@@ -543,7 +544,10 @@ export const projectRoutes: Route[] = [
       const ids = [...new Set(home.items.map((i) => i.ticketId))];
       const seen: Record<number, number> = {};
       for (const s of home.schemes) for (const [id, at] of Object.entries(store.seenTimes(session.name, s.id))) if (ids.includes(Number(id))) seen[Number(id)] = at;
-      json(res, 200, { ...home, tickets: runner.views(ids.map((id) => store.getTicket(id)).filter((t): t is Ticket => !!t)), seen });
+      // #1662: what's broken now in the schemes they can see, for the strip at the top (CI problems, then failed timer jobs).
+      const see = (id: number) => store.canSee(session, id);
+      const broken = [...(ciHealth?.broken(see) ?? []), ...timerBroken(store, see)];
+      json(res, 200, { ...home, tickets: runner.views(ids.map((id) => store.getTicket(id)).filter((t): t is Ticket => !!t)), seen, broken });
     },
   },
   {

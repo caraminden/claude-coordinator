@@ -32,12 +32,20 @@
 //   - an offline runner ("Ring when work waits"): only once a job has waited WAIT_MS on labels only offline runners serve;
 //   - a busy queue ("Nothing; page only"): rings only for a runner on one job over HUNG_MS, which is probably hung;
 //   - no verdict for hours ("Drop it") and green with jobs skipped ("Page only"): the CI page shows them, no item;
-//   - the land gate ("Quiet, ring after 1 h"): a quiet item at the old thresholds, ringing at LAND_RING_MS or LAND_RING_STREAK.
+//   - the land gate ("Quiet, ring after 1 h"): since #1662 it waits, like the rest.
 // Jobs that never started (a billing block) still ring.
 // #983 (Cara, 2026-11-18: "CI alerts need to wake their respective taskmasters to fix the issue"): every problem that rings
 // also wakes its scheme's Taskmaster once as it opens (wakeFor; the land gate wakes the live checkout's scheme), so a ring
 // is never the first anyone hears of it. The person ring stays the backup, and the #869 wake no longer sends CI's bundle to Citadel's.
 // #1017: in a scheme in fast mode, a land's push going red on main is fast mode's to handle (src/fast-mode.ts), not an alert.
+// #1662 (Cara, 2026-11-22: "I need to be alerted when there is something actually wrong and then I need to be able to see
+// what it is and that it is being fixed"; her picks that day on the shared alerts-takes page, "Silent unless you're needed"):
+//   - nothing goes to Mandate while minions handle it: no quiet items (deliver only clears the ones an older build sent);
+//   - a red, a fix that didn't hold, a hung runner and the land gate wait (`held`: "After the wait, if nobody's on it", the
+//     wait "Keep 1 h"): their Taskmaster is woken at once, and they ring RED_FIX_MS after they opened if still open; a
+//     runner that's off with jobs waiting, a billing block and a fix's re-run only a person can start ring at once;
+//   - the one alert is sticky: a problem that rang stays in it, worded as who is fixing it, with no new ring, until it's
+//     green; new trouble rings again as a new item (Mandate pushes only new ones); it links Home's "Broken now" list.
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -54,10 +62,10 @@ import { pacific } from './pacific.ts';
 import { failuresIn, ghText } from './flake-evidence.ts';
 
 import type { LongJob } from './long-jobs.ts';
-import { humanText, VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, startedRed, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
+import { clock, humanText, VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, startedRed, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
 export { humanText, WAIT_MS, HUNG_MS, RED_FIX_MS, ORPHAN_MS, type Problem, type ProblemLink, type WakeAt, problemLink, itemText, clock, trackOffline, servers, stuckProblems, hungProblems, neverStarted, deadGroups, deadProblem, orphanRuns, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, computerOf, sharedHost, bundleTitle, ciPage, CI_SENDER, itemKey } from './ci-problems.ts';
-import { LAND_RING_STREAK, LAND_RING_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
-export { LAND_STREAK, LAND_SLOW_MS, LAND_RING_STREAK, LAND_RING_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
+import { type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
+export { LAND_STREAK, LAND_SLOW_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 import { type GhGet, ghGet, ghPost, RateLimited, GhError } from './gh-api.ts';
 export { type GhAnswer, type GhGet, ghGet, ghPost } from './gh-api.ts';
 const run = promisify(execFile);
@@ -282,6 +290,27 @@ interface LandWatch {
   sent?: Saved['sent'];
 }
 const LAND_WATCH = 'ci-health:land';
+/** A row of Home's "Broken now" (#1662). `who.kind`: a fix minion on it, its Taskmaster, or nobody (a person must act). */
+export interface BrokenRow {
+  scheme: string;
+  schemeId: number;
+  key: string;
+  what: string;
+  next?: string;
+  since: number | null;
+  ringing: boolean;
+  ringsAt?: number;
+  who: { kind: 'minion' | 'taskmaster' | 'person'; label: string; href: string };
+}
+/** The one alert (#1662): its key's generation, the problems it holds (`<scheme>:<key>`), the ones ringing at the last send, and each admin's item. */
+interface AlertState { gen: number; rung: string[]; loud: string[]; sent: Record<string, string> }
+const ALERT = 'ci-health:alert';
+const bundleKey = (gen: number) => (gen ? `${BUNDLE_ITEM}.${gen}` : BUNDLE_ITEM);
+/** Where the one alert opens (#1662, Cara's pick "A strip on Citadel's front page, opening the list"): Home, with "Broken now" open. */
+export const BROKEN_PAGE = '/c/#/home/broken';
+/** Each problem with when it opened (#1662's "since"): its own, else the last round's for its key, else now. */
+const opened = (problems: Problem[], before: Problem[] | undefined, now: number): Problem[] =>
+  problems.map((x) => ({ ...x, since: x.since ?? before?.find((b) => b.key === x.key)?.since ?? now }));
 
 export interface CiHealthDeps {
   /** The GitHub login to read a scheme's repo as: its owner's linked one, or undefined for the box's. */
@@ -399,12 +428,12 @@ export class CiHealth {
     }
   }
 
-  /** One scheme: what's wrong now, kept for the one alert, and its quiet items brought in line. A round that throws keeps the last. */
+  /** One scheme: what's wrong now, kept for the one alert, and the quiet items an older build sent cleared. A round that throws keeps the last. */
   async check(p: Project, slug: string, now: number) {
     const saved: Saved = { offline: {}, sent: {}, ...this.store.getSetting<Saved>(`ci-health:${p.id}`) };
-    saved.problems = await this.problems(p, slug, saved, now);
+    saved.problems = opened(await this.problems(p, slug, saved, now), saved.problems, now);
     await this.wakeFor(p, saved.problems, `ci-health:woke:${p.id}`, now);
-    await this.deliver(p, saved.problems.filter((x) => x.quiet), saved);
+    await this.deliver(p, [], saved);
     this.store.setSetting(`ci-health:${p.id}`, saved);
   }
 
@@ -413,10 +442,11 @@ export class CiHealth {
    * rings a person wakes the scheme's Taskmaster once, as it opens (a wake, so a cold one runs too), and again only
    * after it clears and comes back. A problem is recorded as woken once the send went through, so no Taskmaster waits untold.
    * Not overnight (#869's pick, 2-9 AM Pacific): the first poll after 9 sends it. Shared problems wait for wakeShared.
+   * A problem that waits (#1662, `held`) wakes it as it opens, an hour before anyone's phone.
    */
   private async wakeFor(p: Project, problems: Problem[], key: string, now: number) {
     if (!this.deps.tell) return;
-    const ringing = problems.filter((x) => !x.quiet && !x.shared);
+    const ringing = problems.filter((x) => (!x.quiet || x.held != null) && !x.shared);
     const woke = (this.store.getSetting<string[]>(key) ?? []).filter((k) => ringing.some((x) => x.key === k));
     if (quietUntil(now) === null) {
       for (const x of ringing.filter((x) => !woke.includes(x.key))) if (this.say(p, x.key, await this.wakeText(p, x), true, (e) => this.wokeAt(`${p.id}:${x.key}`, p.id, e))) woke.push(x.key);
@@ -465,7 +495,9 @@ export class CiHealth {
   private async wakeText(p: Project, x: Problem): Promise<string> {
     const run = x.key.startsWith('red:') ? x.title.match(/run (\d+)/)?.[1] : undefined;
     const facts = x.key === 'land:fallback' ? (await this.parts([{ scheme: p.name, problem: x, id: p.id }], this.store.getSetting<LandWatch>(LAND_WATCH)))[0]?.facts : undefined;
-    return `${p.name}: ${itemText(x)}${facts ? `\nRuns: ${facts}` : ''}\n${WAKE_STEPS.replace('name this problem in its brief', run ? `put run ${run} in its brief` : 'name this problem in its brief')} The CI page: ${ciPage(p.id)}`;
+    const steps = WAKE_STEPS.replace('name this problem in its brief', run ? `put run ${run} in its brief` : 'name this problem in its brief');
+    const rings = x.held != null ? steps.replace("People's phones ring for this.", `People's phones ring for this at ${clock(x.held)} if it's still open${x.key.startsWith('red:') ? ' and no minion names the run' : ''}.`) : steps;
+    return `${p.name}: ${itemText(x)}${facts ? `\nRuns: ${facts}` : ''}\n${rings} The CI page: ${ciPage(p.id)}`;
   }
 
   private admins() {
@@ -489,13 +521,11 @@ export class CiHealth {
     const w: LandWatch = { project: projectId, state: kept?.state ?? newLandState(), problems: [], sent: kept?.sent ?? {} };
     const before = JSON.stringify([kept?.state, kept?.sent]);
     landStep(w.state, seen, now);
-    w.problems = landProblems(w.state, now);
+    w.problems = opened(landProblems(w.state, now), kept?.problems, now);
     const changed = JSON.stringify([kept?.project, kept?.problems ?? []]) !== JSON.stringify([w.project, w.problems]);
     // Every call, not only on a change: a put Mandate refused is tried again on the next (sent entries make it a no-op).
     const p = this.store.getProject(projectId);
-    if (p) {
-      await this.deliver(p, w.problems.filter((x) => x.quiet), w as Required<LandWatch>);
-    }
+    if (p) await this.deliver(p, [], w as Required<LandWatch>);
     if (changed || before !== JSON.stringify([w.state, w.sent])) this.store.setSetting(LAND_WATCH, w);
     // After the save: the wake's text reads the fallen-back runs from it.
     if (p) await this.wakeFor(p, w.problems, 'ci-health:woke:land', now);
@@ -510,28 +540,51 @@ export class CiHealth {
     return next;
   }
 
+  /**
+   * #1662 (Cara's pick, 2026-11-22, "Silent unless you're needed"): the one alert holds the problems ringing now and the ones
+   * that rang and are still open, each saying who is on it ("#881 is fixing it"). Those words change in place, with no new
+   * ring, and its alarm mark goes once none rings; a problem that starts ringing (again) is new trouble, so the item is
+   * cleared and put under its next key, which Mandate pushes. Cleared, and the rung ones forgotten, once none is open.
+   */
   private async sendAlert() {
-    const open: { scheme: string; problem: Problem; id: number }[] = [];
+    const all: { scheme: string; problem: Problem; id: number; key: string }[] = [];
     const land = this.store.getSetting<LandWatch>(LAND_WATCH);
     for (const p of this.store.listProjects()) {
       if (!repoSlug(p.repo_url)) continue;
       const mine = [...(this.store.getSetting<Saved>(`ci-health:${p.id}`)?.problems ?? []), ...(land?.project === p.id ? land.problems : [])];
-      for (const x of mine) if (!x.quiet) open.push({ scheme: p.name, problem: { ...x, onIt: this.onIt(p, x) }, id: p.id });
+      for (const x of mine) all.push({ scheme: p.name, problem: { ...x, onIt: this.onIt(p, x) }, id: p.id, key: `${p.id}:${x.key}` });
     }
-    // User id → the title their item has.
-    const sent = this.store.getSetting<Record<string, string>>('ci-health:alert') ?? {};
-    const title = open.length ? bundleTitle(open) : null;
+    const loud = all.filter((x) => !x.problem.quiet).map((x) => x.key);
+    const kept = this.store.getSetting<AlertState | Record<string, string>>(ALERT) ?? {};
+    // A build before #1662 kept only user id → title: what rings now is what that item said, so it changes in place.
+    const s: AlertState = 'gen' in kept && typeof kept.gen === 'number' ? (kept as AlertState) : { gen: 0, rung: loud, loud, sent: kept as Record<string, string> };
+    const fresh = loud.some((k) => !s.loud.includes(k));
+    s.rung = [...new Set([...s.rung, ...loud])].filter((k) => all.some((x) => x.key === k));
+    s.loud = loud;
+    const shown = all.filter((x) => s.rung.includes(x.key));
+    if (fresh && Object.keys(s.sent).length) s.gen++;
+    const key = bundleKey(s.gen), quiet = !loud.length;
+    const title = shown.length ? bundleTitle(shown) : null;
+    // What a person's item is: its key, alarm or not, and its words; an older build's was the words alone, under BUNDLE_ITEM.
+    const sig = title && `${key}\n${quiet ? 'quiet' : 'alarm'}\n${title}`;
+    const keyOf = (had: string) => (had.includes('\n') ? had.split('\n')[0] : BUNDLE_ITEM);
     const admins = title ? this.admins() : [];
     const parts: AlertPart[] = []; // the Taskmaster is woken by wakeFor (#983), not by the alert
     for (const u of admins) {
-      if (sent[u.id] !== title && (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, title, false, ciPage(open[0].id), parts))) sent[u.id] = title!;
+      const had = s.sent[u.id];
+      if (had === sig) continue;
+      if (had && keyOf(had) !== key) {
+        if (!(await this.deps.mandate(CI_SENDER, u, keyOf(had), null))) continue;
+        delete s.sent[u.id];
+      }
+      if (await this.deps.mandate(CI_SENDER, u, key, title, quiet, BROKEN_PAGE, parts)) s.sent[u.id] = sig!;
     }
-    for (const uid of Object.keys(sent)) {
+    for (const [uid, had] of Object.entries(s.sent)) {
       if (admins.some((u) => String(u.id) === uid)) continue;
       const u = this.store.getUser(Number(uid));
-      if (!u || (await this.deps.mandate(CI_SENDER, u, BUNDLE_ITEM, null))) delete sent[uid];
+      if (!u || (await this.deps.mandate(CI_SENDER, u, keyOf(had), null))) delete s.sent[uid];
     }
-    this.store.setSetting('ci-health:alert', sent);
+    this.store.setSetting(ALERT, s);
   }
 
   /**
@@ -656,6 +709,24 @@ export class CiHealth {
       };
       return [{ id: p.id, name: p.name, view: shown, problems }];
     });
+  }
+
+  /**
+   * #1662 (Cara's pick, 2026-11-22: "A strip on Citadel's front page, opening the list"): every open problem in the schemes
+   * `canSee` allows, for Home's "Broken now": what is wrong in plain words, since when, and who is on it (the fix minion,
+   * else the Taskmaster's wake), or that it needs a person (it rings, and no fix minion is on it).
+   */
+  broken(canSee: (projectId: number) => boolean): BrokenRow[] {
+    return this.snapshot(canSee).flatMap((s) => s.problems.map((x) => {
+      const fixing = x.fixMinion && !x.fixMinion.closed;
+      const rerun = x.rerun && { running: 'shipped, re-running', failed: 'its re-run failed too', manual: 'shipped, needs a re-run by hand' }[x.rerun.state];
+      const who: BrokenRow['who'] = fixing ? { kind: 'minion', label: `#${x.fixMinion!.number} fixing${rerun ? ` · ${rerun}` : ''}`, href: x.link!.href }
+        : x.quiet ? { kind: 'taskmaster', label: 'Taskmaster looking', href: x.link!.href }
+          : { kind: 'person', label: 'Needs you', href: x.link!.href };
+      return { scheme: s.name, schemeId: s.id, key: x.key, what: x.plain?.what ?? x.title.replace(/^CI: /, ''), next: x.plain?.next, since: x.since ?? null,
+        // A red waiting on its first fix minion rings at noFix.ringsAt; every other quiet one at `held`.
+        ringing: !x.quiet, ...(x.quiet && (x.held ?? (x.noFix && !x.noFix.late ? x.noFix.ringsAt : null)) != null && { ringsAt: x.held ?? x.noFix!.ringsAt }), who };
+    }));
   }
 
   /**
@@ -1217,8 +1288,8 @@ ${text}`);
   }
 
   /**
-   * A scheme's own items, quiet ones only: every admin with Mandate on gets each, updated when its words change, and
-   * cleared once it's gone; an alarm item an older build put here is cleared, as the one alert stands for it now.
+   * A scheme's own items: every admin with Mandate on gets each, updated when its words change, and cleared once it's gone.
+   * Since #1662 nothing goes out quiet (Cara: "Silent unless you're needed"), so callers pass none and this clears what an older build sent.
    */
   async deliver(p: Project, problems: Problem[], saved: Pick<Saved, 'sent'>) {
     const admins = this.admins();

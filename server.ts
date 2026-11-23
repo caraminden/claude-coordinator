@@ -1364,8 +1364,8 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
   const c = store.getContraption('mandate');
   const identity = c && contraptions.signIdentity(c.name, person, { name: `scheme-${project.id}`, title: project.name });
   if (!c || !identity) return false;
-  // CI health wakes each problem's own Taskmaster itself, once, as it opens (#983), so its bundled item doesn't wake Citadel's too.
-  const wakes = title !== null && !quiet && what !== 'CI health';
+  // CI health wakes each problem's own Taskmaster itself, once, as it opens (#983), so its bundled item doesn't wake Citadel's too; timer alerts too (#1662), an hour before they ring.
+  const wakes = title !== null && !quiet && what !== 'CI health' && what !== 'Timer alerts';
   const scheme = wakes ? alertScheme(project.id) : 0;
   // A wake's item opens the Taskmaster's chat, but CI's keep their CI page (#968: what, why and the fix are there).
   if (scheme && store.getOverlord(scheme) && !link.endsWith('/ci')) link = `/c/#/p/${scheme}`;
@@ -1631,12 +1631,18 @@ if (!BOOT_CHECK) shipWatch.start();
 fallbacks.observe = (job, error) => deployWatch?.record('fallback', `${job}: ${error}`.replace(/\d+/g, '#'));
 fallbacks.alert = adminAlert(store, (project, person, key, title, link) => mandateAlert('In-server fallback', project, person, key, title, link));
 fallbacks.clear = adminClear(store, (project, person, key) => mandateAlert('In-server fallback', project, person, key, null));
-// Contraptions' timer jobs (#555): a failed run is one Mandate alert for every admin and the app's home-scheme owner,
-// cleared once a run of that job succeeds. Only a server that manages app services reads them.
+// Contraptions' timer jobs (#555): a failed run wakes its home scheme's Taskmaster, and still failing an hour later is
+// one Mandate alert for every admin and the app's home-scheme owner (#1662), cleared once a run of that job succeeds. Only a server that manages app services reads them.
 const timerAlerts = new TimerAlerts(store, {
   runs: (rows) => services.timerRuns(rows),
   journal: (unit) => services.journalTail(unit),
   mandate: (from, person, key, title, link) => mandateAlert('Timer alerts', from, person, key, title, link),
+  wake: (from, text) => {
+    const scheme = alertScheme(from.id);
+    if (!scheme || !store.getOverlord(scheme)) return false;
+    tellHome(scheme, text);
+    return true;
+  },
 });
 if (!BOOT_CHECK && !services.opts.off) timerAlerts.start();
 // Each app's DATA_DIR size for Settings and the app's own read (#847): du in the background, never on a request.

@@ -1,6 +1,6 @@
 {
   "ci-red": {
-    "hash": "3cef1219c10de918",
+    "hash": "b2067f02444741d4",
     "at": "2026-11-23",
     "days": 3,
     "inputs": "12 schemes' runs on main (gh, read-only) and their minions' chats",

@@ -4,16 +4,20 @@
 // (as the watchdog's down push goes, src/watchdog.ts), naming the app, the job, when it failed and its last journal
 // lines. It stays one item however many runs fail, and is cleared once a run of that job succeeds, or the job is
 // gone (#532: an alert goes when its problem does).
+// #1662 (Cara's pick, 2026-11-22: "After the wait, if nobody's on it", the wait "Keep 1 h"): the home scheme's Taskmaster
+// is woken as it fails (not 2-9 AM Pacific), and the item goes out only if it is still failing RED_FIX_MS later.
 import type { ContraptionRow, Project, Store, User } from './db.ts';
 import type { TimerRun } from './app-services.ts';
-import { clock } from './ci-health.ts';
+import { clock, RED_FIX_MS } from './ci-health.ts';
+import { quietUntil } from './alert-wakes.ts';
+import type { BrokenRow } from './ci-health.ts';
 import { every, type Job } from './every.ts';
 
 const POLL_MS = 5 * 60_000;
-/** Settings key: the alerts out, by unit → who the item came from, its key and title, and who has it. */
-const OUT = 'timer-alerts';
+/** Settings key: the failed jobs, by unit → who the item comes from, its key and title, who has it, when it failed (absent before #1662) and whether its Taskmaster heard. */
+export const OUT = 'timer-alerts';
 type Sender = Pick<Project, 'id' | 'name'>;
-type Out = Record<string, { from: Sender; key: string; title: string; link: string; users: number[] }>;
+export type Out = Record<string, { from: Sender; key: string; title: string; link: string; users: number[]; since?: number; woke?: boolean }>;
 
 export interface TimerAlertDeps {
   /** Every contraption's timer jobs' last runs; a throw skips the round, so nothing clears on a failed read. */
@@ -22,6 +26,8 @@ export interface TimerAlertDeps {
   journal: (unit: string) => Promise<string[]>;
   /** Put (with `title`) or clear (null) a person's Mandate alert item; true once Mandate has it settled. */
   mandate: (from: Sender, person: User, key: string, title: string | null, link?: string) => Promise<boolean>;
+  /** Wake the Taskmaster of `from`'s scheme (0: Citadel's) with `text`; false when there's none. */
+  wake?: (from: Sender, text: string) => boolean;
 }
 
 /** Blank out what looks like a secret in a journal line: key=value or key: value for secret-ish keys, bearer tokens, long opaque runs. */
@@ -91,7 +97,10 @@ export class TimerAlerts {
     }
   }
 
-  /** Put the item for everyone who should have it and doesn't yet: once for a new failure, then only retries and newcomers. */
+  /**
+   * A failed job: its Taskmaster hears first, then, still failing RED_FIX_MS later, the item goes to everyone who should have
+   * it and doesn't yet (once, then only retries and newcomers). One kept from before #1662 had gone out already.
+   */
   private async raise(run: TimerRun, out: Out, now: number) {
     const home = run.app.home_scheme === null ? undefined : this.store.getProject(run.app.home_scheme);
     // shortcut: an app with no home scheme sends as scheme 0, sharing CI health's switch in Mandate; give it its own sender if that bites.
@@ -101,7 +110,13 @@ export class TimerAlerts {
       title: alertTitle(run, await this.deps.journal(run.unit), now),
       link: home ? `/c/#/p/${home.id}` : '/c/',
       users: [],
+      since: now,
     });
+    const ringsAt = (o.since ?? now) + RED_FIX_MS;
+    if (!o.woke && o.since != null && now < ringsAt && quietUntil(now) === null && this.deps.wake) {
+      o.woke = this.deps.wake(o.from, `${o.title}\nStart a fix minion for it now, or ask people with a card if it needs a person. If it's still failing at ${clock(ringsAt)}, people's phones ring.`);
+    }
+    if (now < ringsAt) return;
     for (const u of this.recipients(run.app)) {
       if (!o.users.includes(u.id) && (await this.deps.mandate(o.from, u, o.key, o.title, o.link))) o.users.push(u.id);
     }
@@ -119,4 +134,16 @@ export class TimerAlerts {
     if (left.length) out[unit] = { ...o, users: left };
     else delete out[unit];
   }
+}
+
+/** Failed timer jobs as rows of Home's "Broken now" (#1662), for the schemes `canSee` allows (by the app's home scheme). */
+export function timerBroken(store: Store, canSee: (projectId: number) => boolean): BrokenRow[] {
+  const out = store.getSetting<Out>(OUT) ?? {};
+  // shortcut: an app with no home scheme (sender 0) is left out; give it a row for admins if one turns up.
+  return Object.entries(out).filter(([, o]) => o.from.id && canSee(o.from.id)).map(([unit, o]) => {
+    const ringing = o.since == null || Date.now() >= o.since + RED_FIX_MS;
+    return { scheme: o.from.name, schemeId: o.from.id, key: `timer:${unit}`, what: o.title.split(/\. (Last lines|Its journal)/)[0], since: o.since ?? null, ringing,
+      ...(!ringing && { ringsAt: o.since! + RED_FIX_MS }),
+      who: ringing ? { kind: 'person' as const, label: 'Needs you', href: `#/p/${o.from.id}` } : { kind: 'taskmaster' as const, label: 'Taskmaster looking', href: `#/p/${o.from.id}` } };
+  });
 }

@@ -18,7 +18,7 @@ import { byUrgency, mentions } from './threadstate.js';
 
 const CACHE = 'cc-home'; // the last /api/home answer, for the next first paint
 
-let data = null; // the last answer: { items, tickets, seen, schemes, since, days, me }, only ever drawn for the person it was fetched for
+let data = null; // the last answer: { items, tickets, seen, schemes, since, days, broken, me }, only ever drawn for the person it was fetched for
 try { data = JSON.parse(localStorage.getItem(CACHE)); } catch {}
 if (!Array.isArray(data?.days)) data = null; // an answer cached before the bars (#1217) can't draw them
 let failed = false; // the last fetch failed: the list says so, with a retry, rather than "Loading…" for good
@@ -28,6 +28,8 @@ let next = null; // the chat whose card you just answered, to move on from once 
 let timer = 0;
 let panel = null;
 let overview = null;
+let strip = null; // "Broken now" (#1662), drawn above everything else on the page
+let brokenOpen = false; // its list is open (#/home/broken, the address the alarm on people's phones links to)
 // Schemes folded shut on Home, by id, kept in this browser (their rows stay in the list; only the drawing folds).
 const FOLDED = 'cc-home-folded';
 const folded = new Set();
@@ -66,10 +68,14 @@ export function homePanel() {
  */
 export function homeOverview(list = null) {
   overview = h('div', { class: 'home-overview-body' });
+  strip = h('div', { class: 'home-broken-slot' });
   drawOverview();
   // On a phone the list sits here and the panel's summary (which says "Home" on a desktop) isn't shown, so the page says it.
-  return h('section', { class: 'home-overview', 'data-part': 'home-overview' }, list ? h('h2', { class: 'home-title' }, 'Home') : '', list, overview);
+  return h('section', { class: 'home-overview', 'data-part': 'home-overview' }, list ? h('h2', { class: 'home-title' }, 'Home') : '', strip, list, overview);
 }
+
+/** Open the "Broken now" list (core.js, for #/home/broken). */
+export function openBroken() { brokenOpen = true; }
 
 /** Fetch Home again (a burst of news fetches once). */
 export function refreshHomeSoon() {
@@ -183,6 +189,7 @@ function drawPanel() {
 function drawOverview() {
   if (!overview) return;
   own();
+  strip?.replaceChildren(brokenStrip(data?.broken ?? []));
   const schemes = data?.schemes ?? [];
   const sum = (k) => schemes.reduce((n, s) => n + s[k], 0);
   const days = data?.days ?? [];
@@ -195,6 +202,32 @@ function drawOverview() {
     h('h3', { class: 'settings-section', 'data-hue': 'accent' }, 'Your schemes', h('span', { class: 'home-days muted' }, `minions shipped each day, last ${days.length || 14} days`)),
     schemes.length ? h('div', { class: 'hue-rows' }, ...schemes.map((s) => schemeRow(s, days, top)))
       : emptyCard(data ? 'No schemes yet' : 'Loading', data ? 'The schemes you\'re in show here, with what\'s going on in each.' : 'Counting what\'s going on…', { mark: '·', hue: 'held' }));
+}
+
+/**
+ * "Broken now" (#1662): what's wrong in your schemes and who's on it, nothing when all is well. Cara, 2026-11-22: "I
+ * need to be alerted when there is something actually wrong and then I need to be able to see what it is and that it is
+ * being fixed"; she picked a strip on the front page that opens the list, red when something needs a person.
+ */
+function brokenStrip(rows) {
+  if (!rows.length) return '';
+  const needs = rows.filter((r) => r.who.kind === 'person').length;
+  const state = needs ? `${needs} need${needs === 1 ? 's' : ''} you` : rows.length === 1 ? 'being fixed' : 'all being fixed';
+  const box = h('details', { class: 'home-broken', 'data-hue': needs ? 'danger' : 'waiting', ontoggle: () => { brokenOpen = box.open; } },
+    h('summary', {}, h('span', { class: 'home-broken-mark', 'aria-hidden': 'true' }, '!'), h('b', {}, `${rows.length} broken`), h('span', {}, ` · ${state}`)),
+    h('div', { class: 'home-broken-rows' }, ...rows.map(brokenRow)));
+  box.open = brokenOpen;
+  return box;
+}
+
+/** One broken thing: its scheme and what's wrong, what's being done, since when, and who's on it (that opens it). */
+function brokenRow(r) {
+  const meta = [r.since ? `since ${when(r.since)}` : '', !r.ringing && r.ringsAt ? `rings ${when(r.ringsAt)} if still broken` : ''].filter(Boolean).join(' · ');
+  const tone = { person: 'danger', taskmaster: 'warn', minion: 'info' }[r.who.kind];
+  return h('div', { class: 'home-broken-row', 'data-cat': schemeHue(r.scheme) },
+    h('div', { class: 'home-broken-what' }, schemeTag(r.scheme), h('span', {}, r.what)),
+    r.next ? h('div', { class: 'home-broken-next muted' }, r.next) : '',
+    h('div', { class: 'home-broken-meta' }, h('a', { href: homeHash(r.who.href) }, toneChip(tone, r.who.label)), meta ? h('span', { class: 'muted' }, meta) : ''));
 }
 
 /** A scheme's line: its tag, what's going on in it as chips, and its last days' ships as bars; it opens the scheme. */

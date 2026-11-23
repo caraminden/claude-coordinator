@@ -6,12 +6,15 @@ import { after, test } from 'node:test';
 import type { TimerRun } from '../src/app-services.ts';
 import { Contraptions } from '../src/contraptions.ts';
 import { Store } from '../src/db.ts';
+import { RED_FIX_MS } from '../src/ci-health.ts';
 import { alertTitle, redact, TimerAlerts } from '../src/timer-alerts.ts';
 
 // A contraption's failed timer job is one Mandate alert, for admins and its home-scheme owner, cleared by a good run (#555).
+// Since #1662 its Taskmaster hears first, and the item goes out only if the job is still failing an hour (RED_FIX_MS) later.
 const root = mkdtempSync(join(tmpdir(), 'timer-alerts-'));
 after(() => rmSync(root, { recursive: true, force: true }));
-const AT = Date.UTC(2026, 10, 11, 11, 0);
+const AT = Date.UTC(2026, 10, 11, 19, 0); // 11 AM PST, outside the 2-9 AM quiet hours
+const H = RED_FIX_MS;
 
 test('one item per failing job, to admins and the home-scheme owner with Mandate on, retried, cleared by the next good run', async () => {
   const store = new Store(join(root, 'coordinator.db'));
@@ -31,7 +34,9 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   const calls: { who: string; key: string; title: string | null; from: string; link?: string }[] = [];
   let down = '';
   let journalReads = 0;
+  const wakes: { from: string; text: string }[] = [];
   const alerts = new TimerAlerts(store, {
+    wake: (from, text) => (wakes.push({ from: from.name, text }), true),
     runs: async () => runs,
     journal: async () => (journalReads++, ['Copying data for 3 people', 'copy failed for josh: EACCES token=abc123', 'Backup failed: 1 of 3 files']),
     mandate: async (from, person, key, title, link) => (calls.push({ who: person.name, key, title, from: from.name, link }), person.name !== down),
@@ -44,7 +49,13 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
   down = 'Josh';
   runs = [run('failed')];
   await alerts.tick(AT);
-  assert.deepEqual(calls.map((x) => x.who).sort(), ['Cara', 'Josh']);
+  assert.deepEqual(calls, [], 'no phone rings yet');
+  assert.deepEqual(wakes.map((x) => x.from), ['Mandate'], "the home scheme's Taskmaster is woken at once");
+  assert.match(wakes[0].text, /^Mandate's backup timer failed .*\nStart a fix minion for it now.*If it's still failing at Nov 11, \d\d:00 PST, people's phones ring\.$/s);
+  await alerts.tick(AT + H - 300_000);
+  assert.deepEqual([calls.length, wakes.length], [0, 1], 'woken once, and still quiet just short of the hour');
+  await alerts.tick(AT + H);
+  assert.deepEqual(calls.map((x) => x.who).sort(), ['Cara', 'Josh'], 'still failing an hour on: it rings');
   assert.equal(calls[0].from, 'Mandate', "from the app's home scheme");
   assert.equal(calls[0].link, `/c/#/p/${scheme.id}`);
   assert.equal(calls[0].key, 'timer.citadel-app-mandate-backup');
@@ -52,44 +63,76 @@ test('one item per failing job, to admins and the home-scheme owner with Mandate
 
   down = '';
   calls.length = 0;
-  await alerts.tick(AT + 300_000);
-  await alerts.tick(AT + 600_000);
+  await alerts.tick(AT + H + 300_000);
+  await alerts.tick(AT + H + 600_000);
   assert.deepEqual(calls.map((x) => x.who), ['Josh'], "still failing: only Josh, whose Mandate didn't answer, is tried again, once");
   assert.equal(journalReads, 1, 'the words are fixed at the first failure: one item, not one per run');
 
   calls.length = 0;
   runs = [run('activating')];
-  await alerts.tick(AT + 900_000);
+  await alerts.tick(AT + H + 900_000);
   assert.deepEqual(calls, [], 'a run in progress settles nothing');
 
   down = 'Cara';
   runs = [run('inactive')];
-  await alerts.tick(AT + 1_200_000);
+  await alerts.tick(AT + H + 1_200_000);
   assert.deepEqual(calls.map((x) => [x.who, x.title]).sort(), [['Cara', null], ['Josh', null]], 'a good run clears it for everyone who has it');
   down = '';
   calls.length = 0;
-  await alerts.tick(AT + 1_500_000);
+  await alerts.tick(AT + H + 1_500_000);
   assert.deepEqual(calls.map((x) => [x.who, x.title]), [['Cara', null]], "Cara's clear Mandate missed is tried again");
   calls.length = 0;
-  await alerts.tick(AT + 1_800_000);
+  await alerts.tick(AT + H + 1_800_000);
   assert.deepEqual(calls, [], 'then nothing is left');
 
   runs = [run('failed'), run('failed', 'citadel-app-mandate-prune.service', 'prune')];
-  await alerts.tick(AT + 2_100_000);
+  await alerts.tick(AT + H + 2_100_000);
+  await alerts.tick(AT + 2 * H + 2_100_000);
   assert.equal(new Set(calls.map((x) => x.key)).size, 2, 'each failing job is its own item');
   calls.length = 0;
   runs = [run('failed')];
-  await alerts.tick(AT + 2_400_000);
+  await alerts.tick(AT + 2 * H + 2_400_000);
   assert.deepEqual(calls.map((x) => [x.key, x.title]).sort(), [['timer.citadel-app-mandate-prune', null], ['timer.citadel-app-mandate-prune', null]], 'a job that is gone is cleared');
 
   calls.length = 0;
   runs = [run('unknown')];
-  await alerts.tick(AT + 2_550_000);
+  await alerts.tick(AT + 2 * H + 2_550_000);
   assert.deepEqual(calls, [], "a job whose state couldn't be read is neither raised nor cleared");
   calls.length = 0;
   alerts['deps'].runs = async () => { throw new Error('systemd is not answering'); };
-  await assert.rejects(alerts.tick(AT + 2_700_000));
+  await assert.rejects(alerts.tick(AT + 2 * H + 2_700_000));
   assert.deepEqual(calls, [], 'a round that cannot read the runs clears nothing');
+});
+
+test('a job fixed inside the hour rings no one, and 2-9 AM Pacific its Taskmaster is not woken (#1662)', async () => {
+  const store = new Store(join(root, 'quick.db'));
+  const cara = store.createUser({ name: 'Cara', login: 'cara', admin: true });
+  const scheme = store.createProject('Peek', null, cara.id);
+  const c = new Contraptions(store, 's'.repeat(40), join(root, 'keys2'));
+  const app = c.register({ name: 'peek', title: 'Peek', port: 9102, icon: '/icon.svg', home_scheme: scheme.id, open_paths: '[]', default_model: 'haiku', turn_cap: 200 });
+  const mandate = c.register({ name: 'mandate', title: 'Mandate', port: 9103, icon: '/icon.svg', home_scheme: null, open_paths: '[]', default_model: 'haiku', turn_cap: 200 });
+  store.setContraptionUser(mandate.id, cara.id, true, cara.id);
+  let active = 'failed';
+  const calls: string[] = [];
+  const wakes: string[] = [];
+  const alerts = new TimerAlerts(store, {
+    runs: async () => [{ app: store.getContraption('peek')!, job: 'sync', unit: 'citadel-app-peek-sync.service', active, result: active === 'failed' ? 'exit-code' : 'success', status: '1', exitAt: AT } as TimerRun],
+    journal: async () => ['sync failed'],
+    mandate: async (_from, _person, key, title) => (calls.push(`${key} ${title}`), true),
+    wake: (from) => (wakes.push(from.name), true),
+  });
+  await alerts.tick(AT);
+  active = 'inactive';
+  await alerts.tick(AT + H - 60_000);
+  assert.deepEqual([wakes, calls], [['Peek'], []], 'woken, fixed in time, and no item ever went out (nor a clear for it)');
+  assert.deepEqual(store.getSetting('timer-alerts') ?? {}, {});
+
+  const night = Date.UTC(2026, 10, 12, 12, 0); // 4 AM PST
+  active = 'failed';
+  await alerts.tick(night);
+  assert.deepEqual(wakes, ['Peek'], 'not woken in quiet hours');
+  await alerts.tick(night + H);
+  assert.equal(calls.length, 1, 'it still rings once the hour is up');
 });
 
 test('redact hides secret-looking values and the title keeps within 500 characters', () => {

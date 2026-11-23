@@ -9,7 +9,10 @@ import { LONG_MINUTES, type LongJob } from './long-jobs.ts';
 export const WAIT_MS = 10 * 60_000;
 /** A runner on one job this long is probably hung. */
 export const HUNG_MS = 2 * 3600_000;
-/** A red on main with no minion naming its run this long after the Taskmaster heard rings. */
+/**
+ * The wait (#1662, Cara 2026-11-22, "Keep 1 h"): a red on main with no minion naming its run this long after the Taskmaster
+ * heard rings, and so does every problem that waits (`held`) still open this long after it opened.
+ */
 export const RED_FIX_MS = 3600_000;
 // A land/** run still queued this long has no landing waiting on it (a gate gives up after minutes): GitHub lost it.
 export const ORPHAN_MS = 3600_000;
@@ -30,6 +33,13 @@ export interface Problem {
   onIt?: string;
   /** Informational: a plain item, never an alarm. */
   quiet?: boolean;
+  /**
+   * #1662 (Cara's pick, 2026-11-22: "After the wait, if nobody's on it"): quiet while its Taskmaster, woken at once, gets someone
+   * on it; it rings at this time if it is still open. Set only while it waits.
+   */
+  held?: number;
+  /** When it opened, for the "Broken now" list (#1662); kept across polls by ci-health. */
+  since?: number;
   /** What it's shared by (`host:<computer>`, or `billing`): a problem touching several schemes wakes Citadel's Taskmaster once; one scheme's alone wakes that scheme's (#983). */
   shared?: string;
   /** The fix minion on it, once one names the run (#992). */
@@ -68,6 +78,14 @@ export function problemLink(x: Problem, scheme: number, wakes: WakeAt, titleOf: 
 }
 
 export const WAKE_STEPS = "People's phones ring for this. Start a fix minion now and name this problem in its brief; if it needs a person (billing, a machine that's off, a runner), ask them with a card instead. If it's expected, add the workflow to the scheme's quiet CI workflows (set_project_settings quiet_workflows).";
+
+/** `x` waiting from `since` (#1662): quiet and `held` until RED_FIX_MS later, its next step saying when it rings; then as it was. */
+export function held(x: Problem, since: number, now: number): Problem {
+  const ringsAt = since + RED_FIX_MS;
+  if (now >= ringsAt) return { ...x, since: x.since ?? since };
+  const rings = `if it's still broken at ${clock(ringsAt)}, people's phones ring`;
+  return { ...x, since: x.since ?? since, quiet: true, held: ringsAt, plain: x.plain && { ...x.plain, next: `${x.plain.next.replace(/\.$/, '')}; ${rings}` } };
+}
 
 export const cap = (s: string, n = 500) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 /**
@@ -152,6 +170,7 @@ export function longDeadlineMs(l: Pick<LongJob, 'command'>): number {
 /**
  * Runners on one job HUNG_MS or more: no job here runs that long, so it is probably hung. A planned long job (citadel-heavy
  * --long, `longs`) that is running keeps to its own deadline instead: quiet inside it, a hung problem naming it past it.
+ * Either waits (#1662, `held`) from when it became hung: its Taskmaster first, people's phones RED_FIX_MS later.
  */
 export function hungProblems(jobs: Job[], now: number, longs: Pick<LongJob, 'run_id' | 'state' | 'command' | 'started_at'>[] = []): Problem[] {
   const out: Problem[] = [];
@@ -161,16 +180,16 @@ export function hungProblems(jobs: Job[], now: number, longs: Pick<LongJob, 'run
     const next = 'Cancel that run on GitHub (the CI page links it), then restart the runner if it stays busy';
     const base = { key: `hung:${j.runner_name}`, fix: `cancel run ${j.run_id} on GitHub, then restart the runner if it stays busy` };
     if (!long) {
-      out.push({ ...base, title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}) since ${clock(at(j.started_at))}`,
+      out.push(held({ ...base, title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}) since ${clock(at(j.started_at))}`,
         plain: { what: `runner ${j.runner_name} has been busy on one job (${j.name}) since ${clock(at(j.started_at))}, over 2 hours, so it is probably hung and jobs queued for it wait`, next },
-        why: 'over 2 h on one job is far past a normal run, so it is probably hung (a test waiting forever, or its PC asleep mid-job), and jobs queued for it wait' });
+        why: 'over 2 h on one job is far past a normal run, so it is probably hung (a test waiting forever, or its PC asleep mid-job), and jobs queued for it wait' }, at(j.started_at) + HUNG_MS, now));
       continue;
     }
     const limit = longDeadlineMs(long);
     if (now - (long.started_at ?? at(j.started_at)) < limit) continue;
-    out.push({ ...base, title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}), a long job, since ${clock(at(j.started_at))}, past its ${Math.round(limit / 60_000)} min deadline`,
+    out.push(held({ ...base, title: `CI: runner ${j.runner_name} has run ${j.name} (run ${j.run_id}), a long job, since ${clock(at(j.started_at))}, past its ${Math.round(limit / 60_000)} min deadline`,
       plain: { what: `runner ${j.runner_name} is still on a long job (${j.name}) past its ${Math.round(limit / 60_000)} minute deadline, so it is probably hung and jobs queued for it wait`, next },
-      why: `a long job (citadel-heavy --long) is allowed ${Math.round(limit / 60_000)} min, and this one is still running, so it is probably hung, and jobs queued for it wait` });
+      why: `a long job (citadel-heavy --long) is allowed ${Math.round(limit / 60_000)} min, and this one is still running, so it is probably hung, and jobs queued for it wait` }, (long.started_at ?? at(j.started_at)) + limit, now));
   }
   return out;
 }
@@ -272,12 +291,14 @@ export interface Fix {
 
 /**
  * A red on main (#968, Cara: "Quiet item, Taskmaster fixes"): a quiet item while a fix is on its way, ringing when none
- * started within RED_FIX_MS of the Taskmaster hearing, or the newest verdict, made after the fix minion closed, is still
- * red, or that minion closed RED_FIX_MS ago with no newer run. `newest` is the workflow's newest verdict there; green, and there is nothing to say.
+ * started within RED_FIX_MS of the Taskmaster hearing, the newest verdict, made after the fix minion closed, is still
+ * red RED_FIX_MS after it ended with no new minion on it (#1662), that minion closed RED_FIX_MS ago with no newer run, or the
+ * fix shipped and only a person can start its re-run (#1662: hosted runners cost Actions minutes). `newest` is the workflow's newest verdict there; green, and there is nothing to say.
  */
 export function redProblem(file: string, branch: string, mark: RedMark, newest: Run, fix: Fix | null, now: number, slug?: string): Problem | null {
-  const x = redProblemOf(file, branch, mark, newest, fix, now, slug);
-  if (!x) return x;
+  const red = redProblemOf(file, branch, mark, newest, fix, now, slug);
+  if (!red) return red;
+  const x = { ...red, since: at(mark.at) };
   if (!fix) { const ringsAt = (mark.told ?? now) + RED_FIX_MS; return { ...x, noFix: { ringsAt, late: now >= ringsAt } }; }
   const re = mark.rerun;
   const rerun = fix.closedAt == null && re?.ticket != null
@@ -302,8 +323,9 @@ export function redProblemOf(file: string, branch: string, mark: RedMark, newest
         why: `run ${re.run} on ${short(re.sha)}, which has fix minion ${n}'s fix, failed${url}`,
         fix: `${n} was woken to fix it again; Citadel re-runs ${file} on ${branch} once its next fix is live` };
     }
+    // #1662 (Cara's pick: "At once"): only a person can start it, so it rings.
     if (re.hosted || re.error) {
-      return { key, quiet: true, plain: { what: `${red}; #${fix.number}'s fix shipped but the tests need re-running by hand`, next: `${re.hosted ? 'They run on GitHub\'s own runners, which cost Actions minutes, so Citadel doesn\'t start them. ' : ''}Someone re-runs them on ${branch}; this clears when they pass` }, title: `${what}: fix minion ${n} shipped; re-run ${file} on ${branch} by hand`,
+      return { key, plain: { what: `${red}; #${fix.number}'s fix shipped but the tests need re-running by hand`, next: `${re.hosted ? 'They run on GitHub\'s own runners, which cost Actions minutes, so Citadel doesn\'t start them. ' : ''}Re-run them on ${branch} from the CI page; this clears when they pass` }, title: `${what}: fix minion ${n} shipped; re-run ${file} on ${branch} by hand`,
         why: re.hosted ? `${file} runs on GitHub's own runners, which cost Actions minutes, so Citadel doesn't start it` : `GitHub refused Citadel's re-run: ${re.error}`,
         fix: `a person re-runs ${file} on ${branch}${re.hosted ? ' (it costs Actions minutes)' : ''}; this clears when it's green, and ${n} closes then` };
     }
@@ -311,10 +333,11 @@ export function redProblemOf(file: string, branch: string, mark: RedMark, newest
       why: `${n}'s fix is on ${branch}, so ${re.dispatched ? `Citadel started ${file} there at ${clock(re.at)}` : `${file} runs on it`}${url || ' (the run shows here once GitHub lists it)'}`,
       fix: `this clears when that run is green, and ${n} closes then; if it's red, ${n} is woken` };
   }
+  // #1662 (Cara's pick: "After the wait, if nobody's on it"): its Taskmaster first; a new minion naming the run makes it the fix above.
   if (fix?.closedAt != null && at(newest.created_at) > fix.closedAt) {
-    return { key, plain: { what: `${red}, and still is after #${fix.number} closed, so its fix didn't hold`, next: `Reopen #${fix.number} or start another fix minion; ${quietIt}` }, title: `${what}, and is still red after fix minion #${fix.number} closed`,
+    return held({ key, plain: { what: `${red}, and still is after #${fix.number} closed, so its fix didn't hold`, next: `Reopen #${fix.number} or start another fix minion; ${quietIt}` }, title: `${what}, and is still red after fix minion #${fix.number} closed`,
       why: `run ${newest.id} on ${short(newest.head_sha)}, made after #${fix.number} closed at ${clock(fix.closedAt)}, failed too, so the fix didn't hold`,
-      fix: `reopen #${fix.number} or start another fix minion naming run ${newest.id}; if it's CI itself (a runner, GitHub), add ${file} to the scheme's quiet CI workflows` };
+      fix: `reopen #${fix.number} or start another fix minion naming run ${newest.id}; if it's CI itself (a runner, GitHub), add ${file} to the scheme's quiet CI workflows` }, at(newest.updated_at ?? newest.created_at), now);
   }
   // Closed an hour with no newer run: it landed nothing that ran CI, so main is still red with nobody on it.
   if (fix?.closedAt != null && now - fix.closedAt >= RED_FIX_MS) {

@@ -395,3 +395,18 @@
 /* A long press opens the menu sheet (#1664): the phone's own link callout would sit on top of it. */
 @media (pointer: coarse) { a.thread-row, .qcard, .msg a[href], .msg pre, a.file-card, a.file-chip, a.file-preview { -webkit-touch-callout: none; } }
 @media (pointer: coarse) { .msg pre { -webkit-user-select: none; user-select: none; } } /* the sheet's Copy code is the way to copy it */
+/* "Broken now" (#1662): a strip on top of Home when something's wrong in your schemes, red when one needs a person, else amber; it opens the list. */
+.home-broken { --h: var(--waiting); border: 1px solid color-mix(in srgb, var(--h) 45%, var(--line)); border-left: 4px solid var(--h); border-radius: 8px; background: color-mix(in srgb, var(--h) 8%, var(--panel)); margin: 0 0 0.75rem; max-width: 52rem; }
+.home-broken[data-hue=danger] { --h: var(--error); }
+.home-broken > summary { display: flex; align-items: center; gap: 0.4rem; padding: 0.55rem 0.75rem; cursor: pointer; color: var(--ink); list-style: none; }
+.home-broken > summary::-webkit-details-marker { display: none; }
+.home-broken > summary::after { content: '▸'; margin-left: auto; color: var(--muted); transition: transform 0.15s; }
+.home-broken[open] > summary::after { transform: rotate(90deg); }
+.home-broken-mark { display: inline-grid; place-items: center; width: 1.25rem; height: 1.25rem; border-radius: 999px; background: var(--h); color: var(--on-accent); font-weight: 700; font-size: 0.8rem; }
+.home-broken-rows { display: flex; flex-direction: column; border-top: 1px solid color-mix(in srgb, var(--h) 30%, var(--line)); }
+.home-broken-row { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.6rem 0.75rem; }
+.home-broken-row + .home-broken-row { border-top: 1px solid var(--line); }
+.home-broken-what { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-weight: 600; }
+.home-broken-next { font-size: 0.875rem; }
+.home-broken-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.6rem; font-size: 0.8rem; }
+.home-broken-meta > a { text-decoration: none; }

@@ -20,6 +20,7 @@ import { openDialog } from './ui/dialog.js';
 import { mountTips } from './ui/tip.js';
 import { toast } from './ui/status.js';
 import { optimistic } from './ui/optimistic.js';
+import { chainsHref } from './chains.js';
 
 // ---------- projects ----------
 
@@ -592,6 +593,8 @@ export function waitBody(id) {
   if (!rows) return null;
   const opening = waitOpening.get(id);
   waitOpening.delete(id);
+  // Any wait on another minion puts it in a chain (Cara picked "every wait on another minion", #1679): the popover leads there.
+  const t = rows.some((w) => w.link && w.state !== 'dropped' && w.state !== 'failed') && view.tickets?.get(id);
   return h('div', { class: 'why wait-lines' }, rows.map((w) => {
     const gone = w.state === 'dropped' || w.state === 'failed';
     const key = waitKey(w), open = waitOpen.get(id) === key;
@@ -602,7 +605,7 @@ export function waitBody(id) {
         h('span', { class: 'wait-line-chev', 'aria-hidden': 'true' }, '▸'),
         w.headline && w.line ? h('span', { class: 'wait-line-meta' }, w.line) : ''),
       open ? waitSummary(id, w, gone) : '');
-  }));
+  }), t?.number ? h('a', { class: 'wait-chain-link', href: chainsHref(t.project_id, t.number), onclick: () => waitTips.tips?.close() }, 'See the chain →') : '');
 }
 /** The open line per minion (by wait id), so a redraw keeps it open; and the one just clicked, which animates once. */
 const waitOpen = new Map(), waitOpening = new Map(), waitAll = new Set();

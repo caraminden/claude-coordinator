@@ -1064,6 +1064,7 @@ async function route() {
     else if ((m = hash.match(/^#\/p\/(\d+)\/machines\/([a-z0-9-]{1,30})$/))) await showProject(Number(m[1]), { kind: 'machines', machine: m[2] });
     else if ((m = hash.match(PAGE_ROUTE))) await showProject(Number(m[1]), { kind: m[2] }); // every Settings and Orders page in the table (settings-pages.js)
     else if ((m = hash.match(/^#\/p\/(\d+)\/schedules(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'schedules', schedule: Number(m[2]) || null });
+    else if ((m = hash.match(/^#\/p\/(\d+)\/chains(?:\/(\d+))?$/))) await showProject(Number(m[1]), { kind: 'chains', focus: Number(m[2]) || null });
     // Releases, CI and Status are one page's tabs (#1423): their old addresses open it on their tab. CI's All (Home's) opens the
     // last scheme's Overview beside every scheme's dot, since All has no one CI; Status's All lists every app.
     else if ((m = hash.match(/^#\/p\/(\d+)\/status(?:\/(all))?$/))) await showReleases(Number(m[1]), { scope: m[2] ? 'all' : Number(m[1]), tab: 'status' });

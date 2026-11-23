@@ -24,6 +24,8 @@ export function schemeSwitchHash(hash, id, isAdmin = false) {
   }
   // A schedule's page opens the other scheme's Schedules list: its schedules are its own.
   if (page === 'schedules') return `${home}/schedules`;
+  // A chain's highlight names a minion of this scheme: the other scheme opens on its own Chains page.
+  if (page === 'chains') return `${home}/chains`;
   // A page tied to one item (a memory file) opens the other scheme's list for that page.
   if (KEEP.has(page) && rest && ITEM_PAGES.has(page)) return `${home}/${page}`;
   if (page === 'orders' && !rest) return `${home}/orders`;

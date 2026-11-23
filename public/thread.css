@@ -26,6 +26,9 @@
 /* A minion's spend against its usual cost (#1114); amber past the ask mark. */
 .ticket-head .head-sub > .budget-chip { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; cursor: default; }
 .ticket-head .head-sub > .budget-chip.over { color: var(--ink); border-color: color-mix(in srgb, var(--waiting-tint) 70%, transparent); background: color-mix(in srgb, var(--waiting-tint) 13%, var(--panel)); }
+/* The chain it is in (#1679, chains.js): a chip that opens the Chains page with it highlighted. */
+.ticket-head .head-sub > .chain-link { flex: none; white-space: nowrap; text-decoration: none; color: var(--accent); cursor: pointer; }
+.ticket-head .head-sub > .chain-link:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
 .ticket-head > .row > .find-box { flex: none; }
 /* People's own note (#146): a dashed amber strip, so it never reads as the minion's words. */
 .ticket-head .pnote { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.9em; line-height: 1.4;

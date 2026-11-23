@@ -22,6 +22,7 @@ import * as skills from './skills.js';
 import { fetchInbox, forgetOtherSchemes, inboxStrip, refreshInbox, stripWaits, takeItems } from './inbox.js';
 import { refreshSchemes, renderHiddenNote, renderSchemesShelf } from './hidden.js';
 import { openSchedule, schedulesPage, schedulesPane } from './schedules.js';
+import { chainsPage } from './chains.js';
 import { replaceHash } from './navstack.js';
 import * as memory from './memory.js';
 import * as decisions from './decisions.js';
@@ -147,6 +148,7 @@ function renderCrumbs(main) {
       : pageRow(main.kind) && !pageRow(main.kind).own ? [projectLink, ' / ', settingsLink, ' / ', pageRow(main.kind).crumb ?? pageRow(main.kind).label]
       : main.kind === 'artifact' ? [projectLink, ' / ', filesLink('artifacts'), ' / ', main.artifact.name]
       : main.kind === 'releases' ? [projectLink, ' / ', 'Releases']
+      : main.kind === 'chains' ? [projectLink, ' / ', main.focus ? h('a', { href: `#/p/${project.id}/chains` }, 'Chains') : 'Chains']
       : main.kind === 'schedules' ? [projectLink, ' / ', settingsLink, ' / ', main.schedule ? h('a', { href: `#/p/${project.id}/schedules` }, 'Schedules') : 'Schedules']
       : main.kind === 'shared' ? [projectLink, ' / ', filesLink('shared'), ' / ', main.file.name]
         : view.id !== view.coordinator.id ? [projectLink, ' / ', `#${view.ticket.number ?? view.ticket.id}`]
@@ -309,6 +311,7 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
     : pageRow(main.kind) && !pageRow(main.kind).own ? pageFn(main.kind)(main)
     : main.kind === 'releases' ? releasesShell()
     : main.kind === 'schedules' ? schedulesPage(projectId, main.schedule)
+    : main.kind === 'chains' ? chainsPage(projectId, main.focus)
     : main.kind === 'artifact' ? artifactViewer(main.artifact)
       : main.kind === 'shared' ? sharedViewer(main.file)
         : chatSection(chatId, ticket);

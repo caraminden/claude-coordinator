@@ -46,6 +46,7 @@ import { postPlan } from '../plan-cards.ts';
 import { cardHref } from '../card-links.ts';
 import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
+import { chainsOf, type Chain as ChainView, type WaitLink } from '../chains.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { briefWarning, namedFiles } from '../brief-lint.ts';
 import { budgetKey, type BudgetState, expectedCost, money, START_CARD_USD, startCard, startHoldKey } from '../minion-budget.ts';
@@ -60,6 +61,8 @@ import { buildNumber, HttpError, json, oneOf, ownWrites, readJson, send, str, ti
 // The coordinator only reads and calls its MCP tools; the work happens in the tickets it creates.
 /** Home's 14-day ship buckets, the same for every person, kept a minute (#1217 review). */
 const homeBuckets = new HomeBucketCache();
+/** Each scheme's chains, kept 5 s: every chat open asks for them (#1679). */
+const chainCache = new Map<number, { at: number; chains: ChainView[] }>();
 
 const COORDINATOR_PERMISSION_MODE = 'acceptEdits';
 
@@ -1634,6 +1637,26 @@ export const projectRoutes: Route[] = [
   {
     method: 'GET', path: '/api/projects/:project/schedules', who: PEOPLE_AND_TASKMASTER,
     handler: ({ res, app, project }) => json(res, 200, { schedules: app.store.schedules.list(project.id).map((s) => scheduleView(app, s)) }),
+  },
+  // Who waits on whom (#1679), for the Chains page and the chat head's chain link: waits on another minion, claim queues,
+  // build feeders. Read from what the minions list already holds; cached a few seconds, as every chat open asks.
+  {
+    method: 'GET', path: '/api/projects/:project/chains', who: PEOPLE_AND_TASKMASTER,
+    handler: ({ res, app, project }) => {
+      const hit = chainCache.get(project.id);
+      if (hit && hit.at > Date.now() - 5000) return json(res, 200, { chains: hit.chains });
+      const { store } = app;
+      const chains = chainsOf({
+        tickets: store.listTickets(project.id),
+        waitsOf: (t) => app.runner.outboxWaits(t) as WaitLink[],
+        find: (p, n) => store.getTicketByNumber(p, n),
+        get: (id) => store.getTicket(id),
+        claims: store.claims.list(project.id).map((c) => ({ name: c.name, holder: c.holder, waiting: store.claims.waiting(project.id, c.name) })),
+        builds: (app.builds?.get(project.id) ?? []).map((b) => ({ build: b.build, owner: b.owner })),
+      });
+      chainCache.set(project.id, { at: Date.now(), chains });
+      return json(res, 200, { chains });
+    },
   },
   {
     method: 'GET', path: '/api/projects/:project/schedule-audits', who: PEOPLE_AND_TASKMASTER,

@@ -670,3 +670,68 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-cpu-table .num { text-align: right; white-space: nowrap; }
 .st-cpu-table tfoot td { font-weight: 600; }
 @media (max-width: 640px) { .st-cpu-table th:nth-child(2), .st-cpu-table td:nth-child(2), .st-cpu-table th:nth-child(5), .st-cpu-table td:nth-child(5) { display: none; } }
+
+/* The Chains page (#1679, chains.js): each chain a card, its minions in columns left to right with wires between them;
+   hover traces a node's line; a phone gets an indented list with no wires. */
+.chains-main { overflow-y: auto; }
+.chains-main > :not(.ticket-head) { margin: 0 1rem 0.85rem; max-width: 72rem; }
+.chains-main .chains-lede { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9em; max-width: 52rem; }
+.chain-legend { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; font-size: 0.8em; color: var(--muted); }
+.chain-legend-item { display: inline-flex; align-items: center; gap: 0.4rem; }
+.chain-legend-item i { width: 1.4rem; height: 0; border-top: 2px solid var(--k); }
+.chain-legend-item[data-kind=start_after] i { border-top-style: dashed; }
+:is(.chain-legend-item, .chain-wire, .chain-wire-end)[data-kind=claim] { --k: var(--waiting); }
+:is(.chain-legend-item, .chain-wire, .chain-wire-end)[data-kind=build] { --k: var(--cat-5); }
+:is(.chain-legend-item, .chain-wire, .chain-wire-end)[data-kind=start_after] { --k: var(--held); }
+:is(.chain-legend-item, .chain-wire, .chain-wire-end)[data-kind=wait] { --k: var(--running); }
+.chain-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; transition: box-shadow 0.25s, border-color 0.25s; }
+.chain-card.focus { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.chain-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--h) 6%, var(--panel)); }
+.chain-tile { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 6px; font-size: 0.85em; color: var(--h); background: color-mix(in srgb, var(--h) 16%, var(--panel)); }
+.chain-title { margin-right: 0.15rem; }
+.chain-count { margin-left: auto; color: var(--muted); font-size: 0.82em; font-variant-numeric: tabular-nums; }
+.chain-flow { position: relative; display: grid; grid-template-columns: repeat(var(--cols, 1), minmax(11rem, 14rem)); column-gap: 3.25rem; row-gap: 0.6rem;
+  align-items: center; padding: 0.9rem 0.9rem 1rem; overflow-x: auto; }
+.chain-wires { position: absolute; inset: 0 auto auto 0; pointer-events: none; overflow: visible; }
+.chain-wire { fill: none; stroke: color-mix(in srgb, var(--k) 55%, var(--line)); stroke-width: 1.75; transition: stroke 0.15s, opacity 0.15s, stroke-width 0.15s; }
+.chain-wire[data-kind=start_after] { stroke-dasharray: 5 4; }
+.chain-wire-end { fill: color-mix(in srgb, var(--k) 70%, var(--line)); transition: opacity 0.15s; }
+.chain-node { grid-column: var(--col); grid-row: var(--row); position: relative; display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; padding: 0.45rem 0.6rem 0.5rem;
+  border: 1px solid var(--line); border-left: 3px solid var(--c, var(--line)); border-radius: 8px; background: var(--panel); color: var(--ink); text-decoration: none;
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s, border-color 0.15s; }
+a.chain-node:is(:hover, :focus-visible) { transform: translateY(-1px); box-shadow: 0 3px 10px color-mix(in srgb, var(--ink) 12%, transparent); }
+.chain-node.here { box-shadow: 0 0 0 2px var(--accent); }
+.chain-node.gone { opacity: 0.7; }
+.chain-node-top { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.chain-node .num { color: var(--muted); font-weight: 650; font-variant-numeric: tabular-nums; }
+.chain-node .scheme-tag { font-size: 0.72em; }
+.chain-state { margin-left: auto; white-space: nowrap; font-size: 0.74em; font-weight: 650; line-height: 1.35; padding: 0.08rem 0.42rem; border-radius: 999px;
+  color: var(--c, var(--muted)); background: color-mix(in srgb, var(--t, var(--c, var(--muted))) 15%, var(--panel)); }
+.chain-state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
+.chain-node-title { font-size: 0.88em; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.chain-after { font-size: 0.74em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Tracing: the hovered node's line stays, the rest of its chain steps back. */
+.chain-flow.tracing .chain-node:not(.lit) { opacity: 0.38; }
+.chain-flow.tracing :is(.chain-wire, .chain-wire-end):not(.lit) { opacity: 0.15; }
+.chain-flow.tracing .chain-wire.lit { stroke: var(--k); stroke-width: 2.5; }
+.chain-flow.tracing .chain-wire-end.lit { fill: var(--k); }
+/* First open: the nodes come in column by column, then the wires draw. */
+.chains-main.enter .chain-node { animation: chain-in 0.32s ease-out both; animation-delay: calc((var(--col) - 1) * 70ms); }
+.chains-main.enter .chain-wire { stroke-dashoffset: 0; animation: chain-wire-in 0.5s ease-out both 0.15s; }
+@keyframes chain-in { from { opacity: 0; transform: translateX(-6px); } }
+@keyframes chain-wire-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .chains-main.enter :is(.chain-node, .chain-wire), .chain-state .pulse { animation: none; }
+  .chain-node, a.chain-node:is(:hover, :focus-visible) { transition: none; transform: none; }
+}
+/* A phone: an indented list, each minion under the one it comes after, no wires and no sideways scroll. */
+@media (max-width: 640px) {
+  .chains-main > :not(.ticket-head) { margin: 0 0.6rem 0.75rem; }
+  .chain-flow { display: flex; flex-direction: column; align-items: stretch; gap: 0.45rem; padding: 0.6rem; overflow-x: hidden; }
+  .chain-wires { display: none; }
+  .chain-node { margin-left: calc(min(var(--col) - 1, 4) * 0.9rem); }
+  .chain-node:not([data-col="0"])::before { content: ""; position: absolute; left: -0.6rem; top: 50%; width: 0.45rem; border-top: 1.5px solid var(--line); }
+  .chain-after { white-space: normal; }
+  .chain-count { margin-left: 0; }
+}

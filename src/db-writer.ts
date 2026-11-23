@@ -58,6 +58,8 @@ export const READ_WAIT_MS = 50;
 const DRAIN_MS = 30_000;
 /** A write here that waits this long for the queue goes in the health log, named (#1495): the stall stacks stop short of it. */
 export const SLOW_DRAIN_MS = 500;
+/** At most one stale-read row in the health log per this long. */
+const STALE_NOTE_MS = 10_000;
 
 const owner = (store: any, name: string) => {
   const dot = name.indexOf('.');
@@ -136,11 +138,21 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     }
     return true;
   };
-  const beforeRead = () => {
-    const target = seq;
-    if (!alive || applied() >= target) return;
-    if (stalled && applied() < stalled) return;
-    stalled = waitFor(target, readWaitMs) ? 0 : target;
+  // Reads that went on past queued writes go in the health log (#1656, Cara 2026-11-22, "Count them first"): one row
+  // per STALE_NOTE_MS at most, naming the read that gave up and counting the ones since the last row. An upper bound on
+  // wrong answers: a read is counted whether or not the writes it passed touch what it reads.
+  let staleAt = 0, staleMore = 0;
+  const beforeRead = (sql?: string) => {
+    const target = seq, behind = target - applied();
+    if (!alive || behind <= 0) return;
+    if (stalled && applied() < stalled) return void staleMore++;
+    if (waitFor(target, readWaitMs)) return void (stalled = 0);
+    stalled = target;
+    const now = Date.now();
+    if (now - staleAt < STALE_NOTE_MS || inline) return void staleMore++;
+    const text = `${sql ? `SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}` : 'a response'} on the server's thread waited ${readWaitMs} ms for ${behind} queued writes and read without them; ${staleMore} more reads passed queued writes since the last record`;
+    staleAt = now, staleMore = 0;
+    try { void store.addHealthEvent('db-read-stale', now, null, text); } catch { /* best effort */ }
   };
   const drain = (ms = drainMs, what = 'a drain') => {
     const t0 = Date.now(), target = seq, took = target - applied();
@@ -155,7 +167,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     return ok;
   };
   // After its own request's writes (landed, below), a response waits a moment for everyone else's, as a read does.
-  writes.settle = beforeRead;
+  writes.settle = () => beforeRead();
   // A response waits for its own request's writes, however long they take, but off the event loop: a client's next
   // request (an invite link right after making the person) or a client reading the file itself finds them (#1244).
   writes.landed = (everyone = false) => {
@@ -183,7 +195,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
   const prepare = db.prepare.bind(db);
   db.prepare = ((sql: string, ...rest: any[]) => {
     const st = prepare(sql, ...rest) as StatementSync;
-    const before = WRITE_SQL.test(sql) ? () => (openStep(), beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`)) : beforeRead;
+    const before = WRITE_SQL.test(sql) ? () => (openStep(), beforeWrite(`SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}`)) : () => beforeRead(sql);
     for (const m of ['run', 'get', 'all', 'iterate'] as const) {
       const f = (st as any)[m].bind(st);
       (st as any)[m] = (...a: any[]) => {

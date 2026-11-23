@@ -173,6 +173,22 @@ test('a write on the server\'s thread that waits long for the queue is named in 
   assert.match(rows[0].detail, /^createProject on the server's thread waited \d+ ms for 1 queued writes$/);
 });
 
+test('a read that gives up waiting for queued writes is in the health log, named, once per stall of many (#1656)', () => {
+  const { store, w } = open(READ_WAIT_MS * 3);
+  const t = ticket(store);
+  assert.ok(w.drain(5000));
+  store.updateTicket(t.id, { title: 'new' });
+  assert.equal(store.getTicket(t.id)!.title, 'a minion', 'the read went on without the write');
+  store.getTicket(t.id); // doesn't wait again: counted, no row of its own
+  assert.ok(w.drain(5000));
+  store.updateTicket(t.id, { title: 'newer' });
+  store.getTicket(t.id); // gives up again inside the same ten seconds: counted, no second row
+  assert.ok(w.drain(5000), 'the record, queued behind the writes, lands');
+  const rows = store.healthEventsSince(['db-read-stale'], 0);
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].detail, new RegExp(`^SQL SELECT .* on the server's thread waited ${READ_WAIT_MS} ms for 1 queued writes and read without them; 0 more reads`));
+});
+
 test('a void write returns a promise of its own write; a failed one rejects and is in the health log', async () => {
   const { store } = open();
   await store.setSetting('k', 1);

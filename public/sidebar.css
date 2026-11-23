@@ -394,3 +394,4 @@
 .thread-row.asleep .card-badge { --chip: var(--closed); }
 /* A long press opens the menu sheet (#1664): the phone's own link callout would sit on top of it. */
 @media (pointer: coarse) { a.thread-row, .qcard, .msg a[href], .msg pre, a.file-card, a.file-chip, a.file-preview { -webkit-touch-callout: none; } }
+@media (pointer: coarse) { .msg pre { -webkit-user-select: none; user-select: none; } } /* the sheet's Copy code is the way to copy it */

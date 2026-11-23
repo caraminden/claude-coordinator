@@ -240,7 +240,8 @@ export function mountMenus({ root = document, menuFor, longPress = false } = {})
   const SLOP = 10;
   let press = null;
   const sheetFor = (t) => {
-    if (t.closest('.cui-menu, .cui-menu-scrim') || t.closest(EDITABLE)) return null;
+    // A tipped thing (ui/tip.js) has its own 450 ms long press: leave that to it.
+    if (t.closest('.cui-menu, .cui-menu-scrim, [data-tip]') || t.closest(EDITABLE)) return null;
     const spec = menuFor(t, null);
     return spec && (typeof longPress === 'function' ? longPress(t, spec) : longPress) ? spec : null;
   };

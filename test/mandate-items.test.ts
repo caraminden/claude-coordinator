@@ -40,12 +40,15 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
 chmodSync(fakeClaude, 0o755);
 
 // The stand-in Mandate: a key ending in "off" is switched off; anything else is taken.
+// Only item calls are recorded: Citadel also GETs its page to read an app's manifest and icons (server.ts's
+// static-paths backfill, 20 s after boot), and that landed between a put and `seen.at(-1)` on a loaded box (#1660).
+const ITEMS = '/apps/mandate/app-api/items/';
 const seen: { method: string; path: string; headers: IncomingHttpHeaders; body: string }[] = [];
 const mandate = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
-    seen.push({ method: req.method!, path: req.url!, headers: req.headers, body });
+    if (req.url!.startsWith(ITEMS)) seen.push({ method: req.method!, path: req.url!, headers: req.headers, body });
     const key = req.url!.split('/').at(-1)!;
     if (key.endsWith('off')) return void res.writeHead(403, { 'Content-Type': 'application/json' }).end('{"error":"off","message":"She switched P off"}');
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(req.method === 'DELETE' ? { key, state: 'cleared' } : { key, state: 'open', mine: [] }));

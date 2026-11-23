@@ -19,6 +19,9 @@ count rises. Write the right-hand column instead.
 - To show nothing happens, do a second action and wait for it (the queue drained, the next event arrived),
   then check the first one stayed quiet. A fixed idle proves nothing and costs its whole length.
 - A real timer a test waits on gets a setting the test turns down; a sleep over 100 ms means the code needs a knob.
+- A stand-in service's request log holds Citadel's own background calls too (it GETs an app's page 20 s after boot
+  to read its manifest and icons), so an exact count or `seen.at(-1)` goes wrong on a loaded box (#1660): record only
+  the paths the test is about.
 - The one escape is `// timing-ok: <why>` on the row or the row above. It is counted in the baseline too.
 - A count above the baseline fails; a drop passes with a note. Lower the baseline after a fix: `FLAKE_BASELINE=write node test/one-until.test.ts`, then commit the JSON.
 - Don't edit the guard's patterns to get green; fix the test, or say why the pattern is wrong.

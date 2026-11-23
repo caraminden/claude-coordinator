@@ -76,6 +76,8 @@ export class AutoDeploy {
   private moved = new Map<string, { head: string; at: number; first: number }>();
   /** Targets whose start() hasn't settled (an APK downloading, say), so nothing starts them twice. */
   private starting = new Set<string>();
+  /** Per scheme, whether ships were waiting or landing at the last tick. */
+  private more = new Map<number, boolean>();
   constructor(d: AutoDeployDeps) {
     this.d = d;
   }
@@ -120,7 +122,7 @@ export class AutoDeploy {
     const can = deployer.waits(t, tv) && !this.starting.has(key);
     const auto = this.isOn(tv.target.projectId, tv.target.id);
     const m = this.moved.get(key);
-    const more = !!this.d.shipping?.(t.projectId);
+    const more = !!this.more.get(t.projectId); // as the last tick read it: info() runs on every poll, shipping() reads files
     const due = can && auto && m && this.saved().tried[key] !== m.head && !this.d.held?.pinned(t.projectId, t.id) ? (more ? m.first + MAX_WAIT_MS : m.at) : null;
     return { can, auto, due, more };
   }
@@ -211,6 +213,7 @@ export class AutoDeploy {
           .finally(() => this.starting.delete(key));
       }
     }
+    this.more = shipping;
     for (const key of this.moved.keys()) if (!waiting.has(key)) this.moved.delete(key);
   }
 }

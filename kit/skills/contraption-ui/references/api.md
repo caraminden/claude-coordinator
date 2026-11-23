@@ -966,7 +966,7 @@ your `migrations` ("Data snapshots", below).
 **Deploying.** An admin sets `repo`, `branch` and `folder` and installs the service once. After
 that your home scheme's Taskmaster and minions have `deploy_contraption`. A ship handed off
 with `hand_off_land` deploys it by itself and reports the outcome, and auto-deploy covers main
-5 minutes after it last moved, so the tool is for redeploys outside a ship. It deploys what is on
+right after it moves (it waits at most 10 minutes while more ships are coming), so the tool is for redeploys outside a ship. It deploys what is on
 GitHub, so push first. A deploy (tested):
 
 1. checks out the branch's new commit in the idle one of two checkouts, `~/apps/.<name>/a` and

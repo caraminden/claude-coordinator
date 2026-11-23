@@ -162,6 +162,9 @@ function card(c, people, replace) {
   form.onsubmit = (e) => {
     e.preventDefault();
     const v = Object.fromEntries(new FormData(form));
+    // Untouched, the risk fields stay out of the save: a Taskmaster's newer value isn't put back to the page's old one.
+    if (v.restart_risk === (c.restart_risk ?? 'unassessed')) delete v.restart_risk;
+    if (v.restart_note === (c.restart_note ?? '')) delete v.restart_note;
     optimistic({
       key: `contraption:${c.name}`,
       apply: () => { status.textContent = 'Saved.'; },

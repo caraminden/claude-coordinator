@@ -615,9 +615,11 @@ export const contraptionRoutes: Route[] = [
       if (!action) throw new HttpError(400, 'Action is required: install, start, stop or restart');
       const risk = c.restart_risk;
       const risky = action === 'stop' || action === 'restart';
-      // Typed name for "may lose data" (#1682): the tool passes `confirm` too, so this is the one check. Install, deploys and key rotation are not gated.
-      if (risky && risk === 'loses_data' && body.confirm !== c.name) {
-        throw new HttpError(409, `${c.name} ${action} is marked "may lose data"${c.restart_note ? `: ${c.restart_note}` : ''}. Send confirm: "${c.name}" to run it anyway.`);
+      // "May lose data" (#1682): only a person, typing the name; the Taskmaster's tool is refused. Install, deploys and key rotation are not gated.
+      if (risky && risk === 'loses_data') {
+        const why = `${c.name} ${action} is marked "may lose data"${c.restart_note ? `: ${c.restart_note}` : ''}.`;
+        if (!session.uid) throw new HttpError(409, `${why} A person runs it from Settings → Contraptions, typing its name; an agent doesn't.`);
+        if (body.confirm !== c.name) throw new HttpError(409, `${why} Send confirm: "${c.name}" to run it anyway.`);
       }
       const asker = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);
       const who = asker ? app.store.getUser(asker)?.login ?? `user ${asker}` : 'unknown';
@@ -625,15 +627,16 @@ export const contraptionRoutes: Route[] = [
       const log = (ok: boolean, said: string) => risky && app.store.addContraptionRun({ contraption_id: c.id, at: Date.now(), action, risk, by, ok: ok ? 1 : 0, said: said.slice(0, 500) });
       const said = await service(async () => {
         if (action === 'install') return app.services.install(c, { replace: body.replace === true, all: app.store.listContraptions() });
+        let done: string[];
         try {
           const { waited } = await app.services.act(c, action as 'start' | 'stop' | 'restart');
-          const done = [...(waited ? [waited] : []), `${{ start: 'Started', stop: 'Stopped', restart: 'Restarted' }[action]} ${app.services.unitOf(c)}.`];
-          log(true, done.join(' '));
-          return done;
+          done = [...(waited ? [waited] : []), `${{ start: 'Started', stop: 'Stopped', restart: 'Restarted' }[action]} ${app.services.unitOf(c)}.`];
         } catch (err: any) {
           log(false, String(err?.message ?? err));
           throw err;
         }
+        log(true, done.join(' '));
+        return done;
       });
       const note = risky ? [`Risk: ${RISK_WORDS[risk]}${c.restart_note ? ` (${c.restart_note})` : ''}.`] : [];
       return json(res, 200, { said: [...note, ...said], status: await service(() => app.services.status(c)), restart_risk: risk, restart_note: c.restart_note });

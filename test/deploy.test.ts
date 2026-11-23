@@ -3,7 +3,7 @@ import { execFile, execFileSync, spawnSync, type ChildProcess } from 'node:child
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import { after, before, test } from 'node:test';
@@ -230,8 +230,8 @@ test("deploy.sh tells a light change (tools/lanes, as the running commit has it)
 
 test('deploy.sh restarts nothing for a change to test/ alone, and judges test/ with the rest by the rest (#1416)', () => {
   // The running server never reads test/ (checked by grep 2026-11-22), so a test-only ship is a tests change (tested,
-  // but no boot check and no restart) and test/ next to public/ only reloads the front end. kit/ and tools/ still
-  // restart: every turn's pinned copies are made at boot.
+  // but no boot check and no restart) and test/ next to public/ only reloads the front end. kit/ and tools/ re-pin on
+  // SIGHUP (repin), except the files the server itself imports and keeps in memory.
   const g = join(root, 'tests-only');
   const git = (...args: string[]) => execFileSync('git', ['-C', g, ...args], { encoding: 'utf8' }).trim();
   mkdirSync(join(g, 'tools'), { recursive: true });
@@ -261,9 +261,14 @@ test('deploy.sh restarts nothing for a change to test/ alone, and judges test/ w
   assert.equal(kind(at('docs/a.md')), 'light', 'docs alone stay light');
   assert.equal(kind(at('test/a.test.ts', 'public/app.js')), 'frontend', 'tests and the front end: reload only');
   assert.equal(kind(at('test/a.test.ts', 'src/a.ts')), 'server', 'tests and server code: restart');
-  assert.equal(kind(at('test/a.test.ts', 'tools/x.sh')), 'server', 'tools/ is pinned into turns at boot: restart');
-  assert.equal(kind(at('tools/x.sh')), 'server', 'tools/ only: restart');
-  assert.equal(kind(at('kit/a.md')), 'server', 'kit/ only: restart (the kit lane is for tests, not for the deploy)');
+  assert.equal(kind(at('test/a.test.ts', 'tools/x.sh')), 'repin', 'tests and tools/: re-pin, no restart');
+  assert.equal(kind(at('tools/x.sh')), 'repin', 'tools/ only: re-pin');
+  assert.equal(kind(at('kit/a.md')), 'repin', 'kit/ only: re-pin (the kit lane is for tests, not for the deploy)');
+  assert.equal(kind(at('kit/a.md', 'public/app.js')), 'repin', 'kit/ and the front end: one SIGHUP does both');
+  assert.equal(kind(at('kit/a.md', 'src/a.ts')), 'server', 'kit/ with server code: restart');
+  assert.equal(kind(at('kit/a.md', 'docs/a.md')), 'server', 'kit/ with light files: restart, as front end with docs does');
+  assert.equal(kind(at('tools/heavy-ci.ts')), 'server', 'a tools/ file the server imports: restart');
+  assert.equal(kind(at('kit/skills/contraption-ui/new-app/new-app.ts', 'kit/a.md')), 'server', 'a kit/ file the server imports: restart');
   assert.equal(kind(at('test/a.test.ts', 'public/app.js', 'docs/a.md')), 'server', 'front end with docs restarts, as before');
   assert.equal(kind(at('src/test/a.ts')), 'server', 'only the top-level test/ folder');
   assert.equal(kind(at('test/a.test.ts'), ''), 'server', 'an unknown running commit still restarts');
@@ -272,6 +277,25 @@ test('deploy.sh restarts nothing for a change to test/ alone, and judges test/ w
   git('mv', 'src/a.ts', 'test/a.ts');
   git('commit', '-qm', 'rename');
   assert.equal(kind(git('rev-parse', 'HEAD')), 'server', 'a file moved into test/ counts where it came from too');
+});
+
+test("deploy.sh's SERVER_HELD names every kit/ and tools/ file the server imports itself (#1416)", () => {
+  const held = /^SERVER_HELD="([^"]*)"/m.exec(readFileSync(join(repo, 'tools', 'deploy.sh'), 'utf8'))![1].split(' ').sort();
+  const found = new Set<string>();
+  const scan = (dir: string) => {
+    for (const e of readdirSync(join(repo, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) scan(rel);
+      else if (/\.(ts|mjs|js)$/.test(e.name)) {
+        for (const [, p] of readFileSync(join(repo, rel), 'utf8').matchAll(/(?:from |import\()'((?:\.\.?\/)+(?:kit|tools)\/[^']+)'/g)) {
+          found.add(relative(repo, join(repo, dir, p)));
+        }
+      }
+    }
+  };
+  scan('src');
+  for (const [, p] of readFileSync(join(repo, 'server.ts'), 'utf8').matchAll(/(?:from |import\()'\.\/((?:kit|tools)\/[^']+)'/g)) found.add(p);
+  assert.deepEqual(held, [...found].sort(), 'a server-held kit/ or tools/ file must restart on change: add it to SERVER_HELD');
 });
 
 // A command on PATH that notes each call's arguments, then runs the real one: how a test sees which wait deploy.sh asked

@@ -75,6 +75,31 @@ test('importing the runner writes nothing; the pins are made by one call and swe
   }
 });
 
+test('a re-pin makes a new folder and spares for new turns, keeps the old one for running turns, and both go at exit (#1416)', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'pins-repin-'));
+  try {
+    const made = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { existsSync, readdirSync } from 'node:fs';
+      const { pinTurnFiles, turnPins } = await import('./src/turn-launch.ts');
+      const { fillPinSpares } = await import('./src/pin-spares.ts');
+      const first = pinTurnFiles(process.env.DATA_DIR);
+      await fillPinSpares();
+      const second = pinTurnFiles(process.env.DATA_DIR);
+      await fillPinSpares();
+      const spares = process.env.DATA_DIR + '/run/turns/.pin-spares';
+      console.log(JSON.stringify({ first: first.MCP_DIR, second: second.MCP_DIR, now: turnPins().MCP_DIR, kept: existsSync(first.TRIPWIRE), spares: readdirSync(spares).sort() }));`],
+      { cwd: join(import.meta.dirname, '..'), env: { ...process.env, HOME: scratch, DATA_DIR: join(scratch, 'data') }, encoding: 'utf8' }));
+    assert.notEqual(made.second, made.first);
+    assert.equal(made.now, made.second, 'turns that start now take the new pins');
+    assert.equal(made.kept, true, 'the old pins stay for turns already running');
+    assert.match(made.second, /mcp-\d+\.1$/);
+    assert.equal(made.spares.length, 2);
+    assert.deepEqual(readdirSync(join(scratch, 'data', 'run')), ['turns'], 'every pin folder goes when its process does');
+  } finally {
+    rmSync(scratch, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
+});
+
 test('a turn\'s pin copy links the files instead of copying their bytes, so a launch is not a 7 s stall', async () => {
   const { copyPinned } = await import('../src/turn-launch.ts');
   const { mkdirSync, mkdtempSync: mk, statSync, writeFileSync } = await import('node:fs');

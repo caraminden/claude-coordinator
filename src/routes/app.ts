@@ -86,7 +86,7 @@ export const appRoutes: Route[] = [
     // which minions' turns, by id only (#584): deploy.sh names them from the database. fallbacks: jobs
     // systemd-run couldn't put in a unit of their own since the server started, which ran in it instead (#519).
     // handover: whether it takes SIGUSR2 for a warm handover (#1170), or why it last refused one (src/handover.ts).
-    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', handover: handoverState(), interruptible: app.runner.interruptible(), interruptibleTurns: app.runner.interruptibleTurns(), fallbacks: fallbacks.count, preview: app.preview }),
+    handler: ({ res, app }) => json(res, 200, { ok: true, commit: app.liveCommit, version: app.assetVersion, reload: 'sighup', repin: true, handover: handoverState(), interruptible: app.runner.interruptible(), interruptibleTurns: app.runner.interruptibleTurns(), fallbacks: fallbacks.count, preview: app.preview }),
   },
   {
     // The front-end error beacon (public/error-beacon.js, #724): one uncaught error or rejection from a page, for the

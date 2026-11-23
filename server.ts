@@ -178,6 +178,8 @@ await mkdir(DATA_DIR, { recursive: true });
 // The copies of the server files turns run (src/turn-launch.ts): taken first, before a later deploy can move the
 // checkout under a server that is still starting, and before any turn starts or is picked up again.
 pinTurnFiles(DATA_DIR);
+// The commit those pins came from: a SIGHUP deploy that changed kit/ or tools/ since re-pins (#1416).
+let pinnedAt: string | null = checkoutHead();
 // Spare turn copies of them, made off the loop so a turn's start doesn't copy ~370 files there (#1414).
 void fillPinSpares();
 // The front end as it was when this server started, or last reloaded on SIGHUP. Serving this copy,
@@ -2166,14 +2168,31 @@ process.on('SIGUSR2', () => handOver({
   finish: () => closeDown('Handover'),
 }, { schema: SCHEMA_VERSION, onSocket, env: bootEnv }));
 
+// A kit/- or tools/-only deploy reaches turns that start from now on; running turns keep the pin they started with (#1416).
+async function repinIfChanged(head: string | null): Promise<void> {
+  if (!head || head === pinnedAt) return;
+  const changed = await new Promise<boolean>((done) =>
+    !pinnedAt ? done(true) : execFile('git', ['diff', '--name-only', pinnedAt, head, '--', 'kit/', 'tools/'], { cwd: import.meta.dirname }, (err, out) => done(!!err || out.trim() !== '')));
+  if (!changed) { pinnedAt = head; return; }
+  try {
+    pinTurnFiles(DATA_DIR);
+    pinnedAt = head;
+    void fillPinSpares();
+    console.log(`Re-pinned turn files on SIGHUP at ${head.slice(0, 9)}`);
+  } catch (err) {
+    console.error('Re-pinning turn files on SIGHUP failed; new turns keep the old pins:', err);
+  }
+}
+
 // A front-end-only deploy: re-read public/ and tell open tabs, which reload once nobody is typing.
 process.on('SIGHUP', () => {
   const before = ASSET_VERSION;
-  loadAssets().then(
+  // Re-pin first (#1416): deploy.sh calls a SIGHUP live once health shows the new commit or front end.
+  repinIfChanged(checkoutHead()).then(loadAssets).then(
     () => {
       console.log(`Reloaded public/ on SIGHUP: front end ${before} → ${ASSET_VERSION}`);
       if (ASSET_VERSION !== before) broadcast({ type: 'hello', version: ASSET_VERSION });
-      // tools/deploy.sh sends SIGHUP only for a change to public/ or light paths alone (tools/lanes), so the checkout's
+      // tools/deploy.sh sends SIGHUP only for a change to public/, light paths, test/ or (re-pinned) kit/ and tools/, so the checkout's
       // HEAD is now live; deploy.sh waits for /api/health to report it.
       app.liveCommit = checkoutHead();
       if (!BOOT_CHECK) liveOn(app.liveCommit);

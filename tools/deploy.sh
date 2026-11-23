@@ -80,6 +80,10 @@ retro_log() (
 ) >/dev/null 2>&1 || true
 
 # A field of the running server's /api/health, or nothing if it doesn't answer (or predates it).
+# kit/ and tools/ files the server process imports itself and keeps in memory, so a change to one still restarts (#1416);
+# test/deploy.test.ts checks this list against src/.
+SERVER_HELD="tools/heavy-ci.ts kit/skills/critique/scripts/ui-measure.mjs kit/skills/contraption-ui/new-app/new-app.ts"
+
 health() {
   curl -fsS --max-time "$HEALTH_TIMEOUT" "$URL/api/health" 2>/dev/null |
     node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[process.argv[1]]??"")}catch{}})' "$1" || true
@@ -89,7 +93,8 @@ health() {
 # is in tools/lanes' light lane as <from> has it (#753: no test or server code reads them), server otherwise (and
 # whenever the running commit is unknown). Files under test/ are judged apart (#1416): the running server never reads
 # them, so test/ next to public/ is frontend, and test/ alone or with light files is tests: no boot check and no
-# restart, but the tests run as for any change (land.sh doesn't always test the exact commit).
+# restart, but the tests run as for any change (land.sh doesn't always test the exact commit). repin: only kit/, tools/
+# (and public/) beyond those, none of them SERVER_HELD: tested and boot-checked, then a SIGHUP re-pins turn files.
 change_kind() {
   local dir=$1 from=$2 to=$3 files rest
   if [ -z "$from" ] || ! git -C "$dir" cat-file -e "$from^{commit}" 2>/dev/null; then echo server; return; fi
@@ -98,8 +103,9 @@ change_kind() {
   rest=$(grep -v '^test/' <<<"$files" || true)
   if [ -z "$rest" ] || { [ -x "$dir/tools/lane.sh" ] && [ "$(cd "$dir" && tools/lane.sh "$from" <<<"$rest" | cut -d' ' -f1)" = light ]; }; then
     if [ "$rest" = "$files" ]; then echo light; else echo tests; fi
-  elif grep -qv '^public/' <<<"$rest"; then echo server
-  else echo frontend; fi
+  elif ! grep -qv '^public/' <<<"$rest"; then echo frontend
+  elif ! grep -qvE '^(public|kit|tools)/' <<<"$rest" && ! grep -qxF -f <(printf '%s\n' $SERVER_HELD) <<<"$rest"; then echo repin
+  else echo server; fi
 }
 
 STATE=""
@@ -669,7 +675,8 @@ deploy() {
   # SIGHUP for light and tests too: it re-reads an unchanged public/ and takes the checkout's HEAD as live, so no restart.
   local same= # the front end is unchanged
   [ "$kind" = frontend ] || same=1
-  if { [ "$kind" = frontend ] || [ "$kind" = light ] || [ "$kind" = tests ]; } && [ "$(health reload)" = sighup ]; then
+  # repin (#1416): only kit/ and tools/ (and public/) changed; the server re-pins on SIGHUP, so turns that start from now take them.
+  if { [ "$kind" = frontend ] || [ "$kind" = light ] || [ "$kind" = tests ] || { [ "$kind" = repin ] && [ "$(health repin)" = true ]; }; } && [ "$(health reload)" = sighup ]; then
     systemctl --user kill -s HUP --kill-whom=main "$SERVICE"
     mark queued
     for _ in $(seq 10); do
@@ -680,6 +687,7 @@ deploy() {
         git_live tag -f last-good "$new" >/dev/null
         local what="docs and config only, nothing to reload" pushed
         [ "$kind" != tests ] || what="tests, docs and config only, nothing to reload"
+        [ "$kind" != repin ] || what="the server re-pinned kit/ and tools/ for turns that start from now; running turns keep theirs"
         [ -n "$same" ] || what="the server reloaded the front end ($version); open tabs reload when idle"
         say "live now: $what. No restart."
         if [ -n "$TO" ]; then

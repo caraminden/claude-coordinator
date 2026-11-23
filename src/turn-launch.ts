@@ -71,6 +71,7 @@ export interface TurnPins {
   POOL_VERSION: string;
 }
 let pins: TurnPins | null = null;
+let repins = 0;
 
 /**
  * Make this server process's pinned copies under `dataDir`/run/mcp-<pid>, sweeping the folders of
@@ -78,11 +79,13 @@ let pins: TurnPins | null = null;
  * this module writes nothing.
  */
 export function pinTurnFiles(dataDir: string): TurnPins {
+  // A re-pin (a kit/ or tools/ deploy on SIGHUP, #1416) makes a new folder and keeps the old one till exit: running turns, the supervisor and the pool still use it.
+  const gen = pins?.dataDir === dataDir ? ++repins : 0;
   const RUN_DIR = join(dataDir, 'run');
-  const MCP_DIR = join(RUN_DIR, `mcp-${process.pid}`);
+  const MCP_DIR = join(RUN_DIR, gen ? `mcp-${process.pid}.${gen}` : `mcp-${process.pid}`);
   mkdirSync(RUN_DIR, { recursive: true });
   for (const name of readdirSync(RUN_DIR)) {
-    const pid = Number(/^mcp-(\d+)$/.exec(name)?.[1]);
+    const pid = Number(/^mcp-(\d+)(?:\.\d+)?$/.exec(name)?.[1]);
     if (pid && pid !== process.pid && !alive(pid)) rmSync(join(RUN_DIR, name), { recursive: true, force: true });
   }
   rmSync(MCP_DIR, { recursive: true, force: true });
@@ -175,8 +178,8 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   // Spare turn copies of these files (src/pin-spares.ts), swept like the copies themselves when their process is gone.
   const SPARES_DIR = join(RUN_DIR, 'turns', '.pin-spares');
   mkdirSync(SPARES_DIR, { recursive: true });
-  for (const name of readdirSync(SPARES_DIR)) if (Number(name) !== process.pid && !alive(Number(name))) rmSync(join(SPARES_DIR, name), { recursive: true, force: true });
-  pinSparesAt(join(SPARES_DIR, String(process.pid)), MCP_DIR);
+  for (const name of readdirSync(SPARES_DIR)) if (parseInt(name) !== process.pid && !alive(parseInt(name))) rmSync(join(SPARES_DIR, name), { recursive: true, force: true });
+  pinSparesAt(join(SPARES_DIR, gen ? `${process.pid}.${gen}` : String(process.pid)), MCP_DIR);
   return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, HOOK_RUN, TURN_WRAPPER, SUPERVISOR, SUPERVISOR_VERSION, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN, POOL, POOL_VERSION });
 }
 

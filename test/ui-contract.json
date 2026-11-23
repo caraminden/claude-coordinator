@@ -41,6 +41,13 @@
       "mountDialogs",
       "openDialog"
     ],
+    "menu.js": [
+      "closeMenu",
+      "menuOpen",
+      "mountMenus",
+      "openMenu",
+      "placeMenu"
+    ],
     "state.js": [
       "emptyState",
       "failedLine",
@@ -127,6 +134,19 @@
       "cui-icon",
       "cui-input",
       "cui-loading",
+      "cui-menu",
+      "cui-menu-danger",
+      "cui-menu-foot",
+      "cui-menu-from",
+      "cui-menu-head",
+      "cui-menu-icon",
+      "cui-menu-item",
+      "cui-menu-keys",
+      "cui-menu-kind",
+      "cui-menu-label",
+      "cui-menu-name",
+      "cui-menu-point",
+      "cui-menu-sep",
       "cui-notice",
       "cui-primary",
       "cui-rec",

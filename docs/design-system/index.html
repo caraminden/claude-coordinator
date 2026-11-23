@@ -431,6 +431,7 @@ window.COLOURS = [
         <tr><td><code>ui/chat.js</code></td><td>Your message, the reply, tool-run rows, Grunt rows, suggested replies, the working line, fed the turn API's events as they come. Citadel's own action, phase and Grunt rows draw their marks with it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/composer.js</code></td><td>The message box: autogrow, Enter rules, IME-safe, list continuation, a failed send back in the box, Send that turns into Stop, drafts. Citadel's own composer is built on it.</td><td>ES module; brings its own constructed stylesheet; needs base.css</td></tr>
         <tr><td><code>ui/tip.js</code></td><td>Tooltips: <code>data-tip</code> on anything, one <code>mountTips()</code> call. Hover, keyboard focus, a tap or a long press opens it; it sits below or above the thing, never over it; a slow body shows skeleton lines. Ported from Theory of Crafting (#296).</td><td>ES module; its look is <code>.cui-tip</code> in base.css</td></tr>
+        <tr><td><code>ui/menu.js</code></td><td>The right-click menu (#1663): a header naming what was clicked (a hued kind chip and its name), then its actions, the Point pair first. Opens at the cursor and flips at the edges; arrows, Home, End, Enter and Escape; scroll, resize or a press elsewhere closes it. <code>mountMenus({ menuFor })</code> wires right-click and Shift+F10; text boxes and Shift+right-click keep the browser's own menu.</td><td>ES module; its look is <code>.cui-menu</code> in base.css</td></tr>
         <tr><td><code>ui/status.js</code></td><td>A steady status line (<code>statusSlot</code>: always drawn, 22px, one line cut off with an ellipsis and whole in a tooltip, a working spinner, a tone), steady labels (<code>steadyLabel</code>: a button as wide as its widest label), a <code>toast</code> in the top layer, and the same markup as HTML strings (<code>statusSlotHtml</code> and the like). A status change moves nothing (#298).</td><td>ES module; its look is <code>.cui-status</code> and <code>.cui-steady</code> in base.css</td></tr>
         <tr><td><code>ui/state.js</code></td><td>The four states a page draws: <code>loadingLine</code> (spinner and words), <code>failedLine</code> (the failure with a Retry), <code>emptyState</code> (a mark, what it is, what would fill it) and <code>tabs</code> (a tablist with arrow keys).</td><td>ES module; its look is <code>.cui-loading</code>, <code>.cui-failed</code>, <code>.cui-empty</code>, <code>.cui-tabs</code> in base.css</td></tr>
         <tr><td><code>ui/optimistic.js</code></td><td><code>optimistic({ key, sets, apply, send, undo, label })</code>: a click shows its result at once and sends behind it; one key sends in click order, other keys side by side; a failure rolls back that item alone (with <code>sets</code>, clicks that set one thing end on what the server last took, #399) with a "Couldn't &lt;label&gt;: &lt;error&gt;" toast and Retry; its promise settles once, Retries included (rule 23, #388).</td><td>ES module; its toast is status.js's</td></tr>
@@ -691,6 +692,28 @@ background: var(--citadel-warn-tint);</code></pre></div>
         <p>Use tooltips to give extra detail on hover (Cara, 2026-11-04: "add useful additional details ... when things are moused over throughout the app, tooltips are great!"). A number, a stat, a short label or an icon button gets the line or breakdown behind it, so the screen stays short and the detail is one hover away.</p>
         <p>Opens on hover after 250ms (60ms from one tip to the next), at once on keyboard focus, on a tap for things that don't act, and on a 450ms long press for buttons and links. Below the thing, or above when there's no room, never over it. A card on the surface in the top layer; a slow body shows skeleton lines first (the second box). Escape, a press outside or a scroll closes it.</p>
         <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/tip.js</code> (<code>mountTips</code>) · <code>[data-tip]</code> on the thing · <code>.cui-tip</code> in <code>ui/base.css</code></p>
+      </div>
+    </div>
+
+    <h3>Right-click menu</h3>
+    <div class="mk-specimen">
+      <div class="mk-show doc-col">
+        <div class="cui-menu doc-menu-static" role="menu" aria-label="Minion actions">
+          <div class="cui-menu-head"><span class="cui-chip cui-menu-kind" data-tone="info">Minion</span><span class="cui-menu-name">#1663 Right-click menu</span></div>
+          <button type="button" class="cui-menu-item cui-menu-point" role="menuitem"><span class="cui-menu-icon" aria-hidden="true">🎯</span><span class="cui-menu-label">Point at this</span><span class="cui-menu-keys">Alt+Shift+P</span></button>
+          <button type="button" class="cui-menu-item cui-menu-point" role="menuitem"><span class="cui-menu-icon" aria-hidden="true">✎</span><span class="cui-menu-label">Point and draw…</span></button>
+          <hr class="cui-menu-sep">
+          <button type="button" class="cui-menu-item" role="menuitem"><span class="cui-menu-icon" aria-hidden="true">↗</span><span class="cui-menu-label">Open in a new tab</span></button>
+          <button type="button" class="cui-menu-item" role="menuitem"><span class="cui-menu-icon" aria-hidden="true">🔗</span><span class="cui-menu-label">Copy link</span></button>
+          <button type="button" class="cui-menu-item" role="menuitem" aria-disabled="true"><span class="cui-menu-icon" aria-hidden="true">⏹</span><span class="cui-menu-label">Stop turn · reconnecting…</span></button>
+          <button type="button" class="cui-menu-item cui-menu-danger" role="menuitem"><span class="cui-menu-icon" aria-hidden="true">✕</span><span class="cui-menu-label">Dismiss minion</span></button>
+          <div class="cui-menu-foot">Shift+right-click: the browser's own menu</div>
+        </div>
+      </div>
+      <div class="mk-about">
+        <p>Citadel's own right-click menu (Cara, 2026-11-22, on #1661: "B · Citadel's own menu"). Right-click anything on Citadel's pages: the header says what you clicked, the Point pair comes first in the accent, then that thing's own actions; a red item asks first, and a greyed one says why it can't run.</p>
+        <p>Opens at the cursor in the top layer and flips at the window's edges. Arrows, Home and End move, Enter picks, Escape closes and puts focus back; a scroll, a resize, a press elsewhere or the window losing focus closes it. Text boxes and Shift+right-click keep the browser's own menu.</p>
+        <p class="mk-lives">Lives in: <code>/apps/_citadel/ui/menu.js</code> (<code>openMenu</code>, <code>mountMenus</code>) · <code>.cui-menu</code> in <code>ui/base.css</code> · Citadel's menus in <code>public/context-menu.js</code></p>
       </div>
     </div>
 
@@ -1126,6 +1149,20 @@ row.innerHTML =
 .cui-scope .cui-tip-text { white-space: pre-line; }
 .cui-scope .cui-tip-skel { display: flex; flex-direction: column; gap: 6px; width: 240px; max-width: 100%; padding: 2px 0; }
 .cui-scope .cui-tip-skel > .cui-skeleton { height: 0.8em; padding: 0; }
+/* Right-click menu (ui/menu.js): drawn in place rather than in the top layer. */
+.cui-scope .cui-menu { box-sizing: border-box; width: 268px; max-width: 100%; padding: 5px; font: var(--citadel-size-small)/1.3 var(--citadel-font); color: var(--citadel-text); background: var(--citadel-surface); border: 1px solid var(--citadel-border); border-radius: 11px; box-shadow: 0 10px 30px rgb(0 0 0 / 0.18), 0 2px 6px rgb(0 0 0 / 0.08); }
+.cui-scope .cui-menu-head { display: flex; align-items: center; gap: var(--citadel-space-2); min-width: 0; padding: 4px 6px 7px; margin-bottom: 4px; border-bottom: 1px solid var(--citadel-border); }
+.cui-scope .cui-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--citadel-muted); font-size: var(--citadel-size-meta); }
+.cui-scope .cui-menu-item { display: flex; align-items: center; gap: var(--citadel-space-2); box-sizing: border-box; width: 100%; min-height: 30px; padding: 0 8px; margin: 0; border: 0; border-radius: 7px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cui-scope .cui-menu-item:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--citadel-accent) 9%, transparent); }
+.cui-scope .cui-menu-icon { flex: none; width: 18px; text-align: center; }
+.cui-scope .cui-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cui-scope .cui-menu-keys { flex: none; color: var(--citadel-muted); font: 11px/1 ui-monospace, "SF Mono", Menlo, monospace; }
+.cui-scope .cui-menu-point { color: var(--citadel-accent); font-weight: 600; }
+.cui-scope .cui-menu-danger { color: var(--citadel-danger); }
+.cui-scope .cui-menu-item[aria-disabled="true"] { opacity: 0.45; cursor: default; }
+.cui-scope .cui-menu-sep { height: 0; margin: 4px 6px; border: 0; border-top: 1px solid var(--citadel-border); }
+.cui-scope .cui-menu-foot { padding: 6px 8px 3px; margin-top: 4px; border-top: 1px solid var(--citadel-border); color: var(--citadel-muted); font-size: var(--citadel-size-meta); }
 .cui-scope .doc-tip-demo { margin: 0; }
 .cui-scope .doc-tip-thing { border-bottom: 1px dotted var(--citadel-muted); }
 /* Big upload (ui/upload.js, base.css's cui-upload). */

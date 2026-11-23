@@ -3,7 +3,8 @@
 // Docs: kit/skills/contraption-ui/references/menu.md.
 //
 // Every file in public/ui/ is standalone, because apps load it from outside Citadel's pages: no imports from
-// outside ui/, nothing it writes carries style="" or <style>, and its exports are an API apps depend on
+// outside ui/, nothing it writes carries style="" or <style> (its left, top, max-height and chip hue are CSSOM writes,
+// which CSP allows and placement needs), and its exports are an API apps depend on
 // (test/ui-contract.test.ts). Add, never rename.
 //
 // openMenu() draws one menu at a time: a header naming what was clicked (a hued kind chip and its name), then

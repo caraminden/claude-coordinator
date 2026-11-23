@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { after, test } from 'node:test';
 import { copyDb } from '../src/db-copy.ts';
+import { until } from './helpers.ts';
 import { eventsSchema } from '../src/events-db.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'db-copy-events-'));
@@ -70,12 +71,22 @@ test('a copy waits for a writer that holds events.db, not "database is locked"',
     const { DatabaseSync } = require('node:sqlite');
     const d = new DatabaseSync(process.argv[1]);
     d.exec('BEGIN EXCLUSIVE'); console.log('locked');
-    setTimeout(() => { d.exec('COMMIT'); process.exit(0); }, 400);`, evFile], { stdio: ['ignore', 'pipe', 'inherit'] });
+    setTimeout(() => { d.exec('COMMIT'); console.log('released ' + Date.now()); process.exit(0); }, 1000);`, evFile], { stdio: ['ignore', 'pipe', 'inherit'] });
+  let outText = '';
+  holder.stdout.on('data', (c) => { outText += c; });
   try {
     await new Promise((res) => holder.stdout.once('data', res));
     const out = join(root, 'd-out');
     mkdirSync(out);
+    // The copy's busy wait blocks this process, so the holder frees the lock on its own timer and reports when.
+    const started = Date.now();
     await copyDb(join(src, 'coordinator.db'), join(out, 'coordinator.db'), { events: 'open' });
+    const finished = Date.now();
+    await until('the holder reports its release', () => /released \d+/.test(outText));
+    const released = Number(/released (\d+)/.exec(outText)![1]);
+    // Without these the test could pass on a slow box having waited on nothing: the copy began while the lock was held, and ended only after it let go.
+    assert.ok(started < released - 300, `the copy started ${released - started} ms before the release: too late to have met the lock`);
+    assert.ok(finished >= released - 5, `the copy finished ${released - finished} ms before the lock was released`);
     assert.deepEqual(rows(join(out, 'events.db')).r, ['1:1', '1:3']);
   } finally {
     holder.kill();

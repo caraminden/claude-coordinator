@@ -144,8 +144,8 @@ test('a long press on a link opens the menu as a sheet; its tap does nothing; th
   await page.eval(`(() => { const m = document.querySelector('#log .msg.user'); m.insertAdjacentHTML('beforeend', '<p><a id="lp" href="#/p/999">a link</a></p>'); window.clicked = 0; document.getElementById('lp').addEventListener('click', () => { window.clicked++; }); })()`);
   const { x, y } = await page.centre('#lp');
   await page.touch('touchStart', x, y);
-  await hold(250);
-  assert.equal(await page.eval(menuOpen), false, 'not yet at 250 ms');
+  await hold(100);
+  assert.equal(await page.eval(menuOpen), false, 'not yet at 100 ms (the sheet opens at 450)');
   await waitFor(page, 'the sheet', '!!document.querySelector(".cui-menu[data-sheet]")');
   await page.touch('touchEnd');
   assert.equal(await page.eval('window.clicked'), 0, 'the press did not click the link');

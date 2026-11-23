@@ -170,11 +170,20 @@ test('a reader never sees half of one main step: two writes in one run of the ma
   };
   await until('a reader answers for the minion', async () => (await title()).reader);
   const step = fetch(`${srv.base}/api/test/half-step?ticket=${STEPS.id}&ms=1500`);
+  const before = (await title()).title;
   const seen: string[] = [];
+  let byReader = 0;
   const t0 = Date.now();
   // timing-ok: reads spread over the step's 1.5 s pause, which the first write has long run within
-  while (Date.now() - t0 < 1200) seen.push((await title()).title);
+  while (Date.now() - t0 < 1200) {
+    const t = await title();
+    seen.push(t.title);
+    if (t.reader) byReader++;
+  }
   assert.equal((await step).status, 200);
+  // The claim is about reads that landed inside the pause: readers must have answered during it, with the title from before the step.
+  assert.ok(byReader >= 2, `readers answered ${byReader} of ${seen.length} reads during the pause`);
+  assert.deepEqual([...new Set(seen)], [before], 'every read in the pause is the title from before the step');
   assert.ok(!seen.includes('half'), `a read saw half the step: ${[...new Set(seen)].join(', ')}`);
   // Once the step is whole, readers answer again, with all of it.
   await until('a reader answers with the whole step', async () => {

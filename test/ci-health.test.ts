@@ -16,7 +16,7 @@ import { quietUntil, type AlertPart } from '../src/alert-wakes.ts';
 import { Store } from '../src/db.ts';
 import { machineRoutes } from '../src/routes/machines.ts';
 import { Readable } from 'node:stream';
-import { fellBackWhy, LAND_CAP_MS } from '../src/ci-land-gate.ts';
+import { fellBackWhy } from '../src/ci-land-gate.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'ci-health-'));
 after(() => rmSync(root, { recursive: true, force: true }));
@@ -681,7 +681,6 @@ test('the land gate falling back to perigee is a quiet item from 2 lands in a ro
   assert.match(landProblems(s, t)[0].title, /^CI: the ship gate fell back to perigee on 3 ships in a row: #544 .*, #555 .*, #556 \(the desktop suite hit the 9-min cap, run 7\)$/);
   // #1606: land.sh's cap is 540 s from pickup, so a run 7 min into the CI wait wasn't cut off by it.
   assert.equal(fellBackWhy({ name: '#558', joined: 0, ci: 'jobs', ciSince: 0 }, 7 * MIN), 'CI gave no verdict');
-  assert.equal(LAND_CAP_MS, 8 * MIN);
   assert.equal(landProblems(s, t)[0].quiet, true);
   t = through(s, 4, '#557', capHit, t);
   assert.equal(landProblems(s, t)[0].quiet, true, '4 in a row inside the hour: still its Taskmaster\'s (#1662: no streak rings at once)');

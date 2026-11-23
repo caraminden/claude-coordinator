@@ -138,7 +138,8 @@ and the branch's tests, and judges each new or changed case:
   already does. Make it go red on the base by asserting what the change should do, or keep it
   and say why in the report: a refactor's safety net, or a regression guard for behaviour that
   already worked. It doesn't raise the label by itself.
-- `skipped: <why>`: not checked (a stack it can't run, a missing tool, a timeout). Say so in
+- `skipped: <why>`: not checked (a stack it can't run, a missing tool, a timeout, a case the
+  run's output never names, a new Rust test module). Say so in
   the report; a skip is no pass.
 
 Leave it out for docs-only changes, UI changes the scheme proves by screenshot, and diffs that

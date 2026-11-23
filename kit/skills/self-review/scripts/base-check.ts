@@ -11,13 +11,17 @@
 //   red             failed on the base, or the file didn't load or build there (a new file that can't compile
 //                   without the change counts as red)
 //   skipped         not checked, and why: a stack it doesn't know, a missing tool, a timeout, no changed case
-//                   found in a changed file. All files together stop within 540 s (inside a 600 s Bash call).
+//                   found in a changed file, a case the run's output never names (it may never have run: never
+//                   read as a pass), a new Rust test module the base can't compile in. All files together stop
+//                   within 540 s (inside a 600 s Bash call).
 // Runners, picked per test file: node --test (the package.json test script's launcher and flags kept), vitest,
-// cargo test (one crate's test target, through citadel-heavy when it is on PATH, sharing the worktree's target/
+// cargo test (one crate's test target, a module under tests/<target>/ running that target, through citadel-heavy when it is on PATH, sharing the worktree's target/
 // so only workspace crates rebuild), pytest (the worktree's .venv when there is one; a module that resolves into the branch's checkout is skipped, not run),
 // shell tests (tools/*-test.sh: run with bash, the exit status decides). --cmd overrides the
 // runner with a shell command run through sh -c from the scratch tree's root ({file} is the file's absolute path there); its output is read with
-// every parser, and with none matching, its exit status decides for the whole file.
+// every parser (citadel-test's too, though it names failures only), and with none matching, a failing exit fails
+// the whole file while a 0 passes no case. node --test runs with the package script's own flags: --test-force-exit
+// only when the script has it, since it ends a file whose top-level await follows a test before its later tests exist.
 // Exit: 0 nothing passes on the base, 1 something does, 2 a usage or setup error. Never the full suite.
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';

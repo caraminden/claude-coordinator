@@ -30,7 +30,7 @@ import { existsSync, opendirSync, readFileSync, realpathSync, statSync } from 'n
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hard, under, type TripwireConfig, type Verdict, type Word } from './tripwire-base.ts';
-import { gitHabitReason } from './tripwire-git.ts';
+import { gitHabitReason, writeSaves, type Save } from './tripwire-git.ts';
 
 export type { TripwireConfig, Verdict } from './tripwire-base.ts';
 
@@ -631,7 +631,8 @@ function mktempPath(src: string, home: string): string | null {
 
 interface Segment { words: Word[]; redirects: { op: string; target: Word }[] }
 /** What the command has done so far: its folder, and the variables it set, with the values they can take where known (a loop variable takes several). */
-interface State { cwd: string | null; vars: Set<string>; values: Map<string, string[]>; committed?: boolean; moved?: boolean; maybe?: boolean }
+// saves: the diffs the hook writes before the call runs, when the whole call passes (#1716).
+interface State { cwd: string | null; vars: Set<string>; values: Map<string, string[]>; committed?: boolean; moved?: boolean; maybe?: boolean; saves?: Save[] }
 
 // Only these commands count as writes. Anything else is taken as a read, so an interpreter or tool
 // that names a protected path (`node -e … coordinator.db`, `curl`) goes through: few false alarms,
@@ -1026,7 +1027,7 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
   if (sub === 'commit') st.committed = true;
   // A reset after a rebase or merge in the same call runs on a HEAD the check can't see yet (not after an abort).
   if (['rebase', 'merge', 'pull'].includes(sub) && !rest.some((t) => /^--(abort|quit|skip)$/.test(t))) st.moved = true;
-  return gitHabitReason(sub, args.slice(j + 1), dir, cfg, committed, moved);
+  return gitHabitReason(sub, args.slice(j + 1), dir, cfg, committed, moved, st.saves);
 }
 
 function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | null {
@@ -1155,7 +1156,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
         // Its $1…$9 are its own words, not those of a function it sits in.
         const values = new Map(st.values);
         if (name !== 'eval') for (let n = 1; n <= 9; n++) values.delete(`__${n}`);
-        const why = commandReason(inner, { cwd: st.cwd, vars: new Set([...vars, '__unknown', ...(name === 'eval' ? [] : ['__1', '__2', '__3', '__4', '__5', '__6', '__7', '__8', '__9'])]), values }, cfg);
+        const why = commandReason(inner, { cwd: st.cwd, vars: new Set([...vars, '__unknown', ...(name === 'eval' ? [] : ['__1', '__2', '__3', '__4', '__5', '__6', '__7', '__8', '__9'])]), values, saves: st.saves }, cfg);
         if (why) return why;
       }
       return null;
@@ -1543,12 +1544,12 @@ export function commandReason(command: string, st: State, cfg: TripwireConfig): 
  * call in a turn that can show cards may ask, and only with a description that explains it: the
  * card shows the description as the minion's reason.
  */
-export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
+export function tripwire(input: any, cfg: TripwireConfig, saves?: Save[]): Verdict | null {
   const tool = String(input?.tool_name ?? '');
   const ti = input?.tool_input ?? {};
   const cwd = typeof input?.cwd === 'string' ? input.cwd : null;
   if (tool === 'Bash') {
-    const v = typeof ti.command === 'string' ? commandReason(ti.command, { cwd, vars: new Set(), values: new Map() }, cfg) : null;
+    const v = typeof ti.command === 'string' ? commandReason(ti.command, { cwd, vars: new Set(), values: new Map(), saves }, cfg) : null;
     if (!v?.ask) return v;
     if (!cfg.ask) return hard(v.reason);
     if (explanation(ti)) return v;
@@ -1589,9 +1590,12 @@ export function explanation(toolInput: any): string | null {
 export function tripwireResult(stdin: string, cfgArg: string): { stdout?: string; stderr?: string; code?: number } {
   // Fails open: a broken config or input lets the call through rather than wedging every turn.
   let v: Verdict | null = null;
+  let cfg: TripwireConfig;
+  // A file checkout or restore over uncommitted edits passes once its diff is saved (#1716): queued here, written below.
+  const saves: Save[] = [];
   try {
-    const cfg = JSON.parse(cfgArg) as TripwireConfig;
-    v = tripwire(JSON.parse(stdin), cfg);
+    cfg = JSON.parse(cfgArg) as TripwireConfig;
+    v = tripwire(JSON.parse(stdin), cfg, saves);
   } catch (err: any) {
     return { stderr: `[tripwire] skipped: ${err.message}\n` };
   }
@@ -1600,7 +1604,13 @@ export function tripwireResult(stdin: string, cfgArg: string): { stdout?: string
     return { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: `[tripwire] ${v.reason}` } }) };
   }
   if (v) return { stderr: `[tripwire] ${v.reason}\n[tripwire] This guard stops known accidents in Citadel (src/tripwire.ts). ${ASK}\n`, code: 2 };
-  return {};
+  if (!saves.length) return {};
+  // Fails closed: a diff it couldn't save would be lost, so the call waits for a WIP commit.
+  try {
+    return { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: writeSaves(saves, cfg) } }) };
+  } catch (err: any) {
+    return { stderr: `[tripwire] This call would throw away uncommitted edits, and ${err.message}. Commit first (a WIP commit is fine).\n`, code: 2 };
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

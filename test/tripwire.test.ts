@@ -698,12 +698,11 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
     mkdirSync(join(wt, 'sub'), { recursive: true });
     sh('git init -q -b ticket/9 && echo a > a.txt && echo c > sub/c.txt && git add a.txt sub/c.txt && git commit -qm a');
     sh('git branch other');
-    const at = (command: string, cwd: string | null = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
+    const at = (command: string, cwd: string | null = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c, [])?.reason ?? null;
 
-    // A clean tree moves freely; a name that isn't a branch or commit is a path.
-    for (const ok of ['git checkout other', 'git merge other', 'git reset --hard', 'git rebase other', 'git checkout -f']) assert.equal(at(ok), null, ok);
-    assert.match(at('git checkout a.txt')!, /names a path.*git show HEAD:path/);
-    assert.match(at("git checkout 'sub/*.txt'")!, /names a path/);
+    // A clean tree moves freely; a name that isn't a branch or commit is a path: one file passes (#1716), a pattern doesn't.
+    for (const ok of ['git checkout other', 'git merge other', 'git reset --hard', 'git rebase other', 'git checkout -f', 'git checkout a.txt']) assert.equal(at(ok), null, ok);
+    assert.match(at("git checkout 'sub/*.txt'")!, /names a path.*git show <ref>:path/);
     // A name that is neither (a branch on some remote for git to set up, a typo) is left to git.
     assert.equal(at('git checkout feature-on-upstream'), null);
 
@@ -714,9 +713,9 @@ test('git habits: path checkouts and moves over uncommitted changes, read from t
     for (const move of ['git checkout other', 'git switch other', 'git merge other', 'git reset --hard HEAD', 'git rebase other', 'git pull', 'git cherry-pick other', 'cd sub && git merge other']) {
       assert.match(at(move) ?? '', /^Commit first: .* 1 uncommitted tracked file\(s\) \(a\.txt\)/, move);
     }
-    // A path checkout's refusal names the way to put one file back, and that way is allowed (Mandate #86's logs).
-    assert.match(at('git checkout -- a.txt')!, /`git show HEAD:\.\/path > path`/);
-    assert.match(at('git restore a.txt')!, /`git show HEAD:\.\/path > path`/);
+    // A folder checkout's refusal names the file-by-file way, which saves first (#1716); writing a file over from HEAD passes too (Mandate #86's logs).
+    assert.match(at('git checkout -- .')!, /`git checkout -- path`.*saves their diff/);
+    assert.match(at('git restore sub')!, /`git restore path`/);
     for (const ok of ['git show HEAD:./a.txt > a.txt', `git show HEAD:./a.txt > ${wt}/a.txt`, `git -C ${wt} show HEAD:./a.txt > ${wt}/a.txt`]) assert.equal(at(ok), null, ok);
     sh('git show HEAD:./a.txt > a.txt');
     // `./` reads the path from the folder it runs in, so it is right from a subfolder too.
@@ -1075,9 +1074,9 @@ test('git: --ours and --theirs mid-merge, and any checkout in a clone under the 
     assert.match(at('git checkout --ours a.txt') ?? '', /names a path/);
     sh('git merge other || true');
     for (const ok of ['git checkout --ours a.txt', 'git checkout --theirs -- a.txt', `git checkout --ours -- ${wt}/a.txt`]) assert.equal(at(ok), null, ok);
-    // Without --ours or --theirs, mid-merge or not, it stays refused; so does --ours on a file with no open conflict, or on a folder or glob.
+    // --ours on a file with no open conflict, or on a folder or glob, stays refused; so does a folder without it.
     writeFileSync(join(wt, 'b.txt'), 'changed');
-    for (const no of ['git checkout -- a.txt', 'git checkout HEAD a.txt', 'git restore a.txt', 'git checkout --ours b.txt', 'git checkout --ours -- a.txt b.txt', 'git checkout --ours -- .', "git checkout --theirs '*.txt'", 'git checkout --ours "$F"'])
+    for (const no of ['git checkout -- .', 'git restore .', 'git checkout --ours b.txt', 'git checkout --ours -- a.txt b.txt', 'git checkout --ours -- .', "git checkout --theirs '*.txt'", 'git checkout --ours "$F"'])
       assert.ok(at(no), no);
     sh('git checkout -q -- b.txt');
     sh('git merge --abort');
@@ -1089,11 +1088,12 @@ test('git: --ours and --theirs mid-merge, and any checkout in a clone under the 
     for (const ok of [`git -C ${clone} checkout -- a.txt`, `cd ${clone} && git checkout -- a.txt`, 'cd "$TMPDIR/clone" && git checkout HEAD~1 a.txt', `git -C ${clone} checkout other`, `git -C ${clone} restore a.txt`]) assert.equal(at(ok), null, ok);
     // The worktree itself stays refused, from inside or by -C from the clone, and so does a clone outside the turn's TMPDIR.
     writeFileSync(join(wt, 'a.txt'), 'changed');
-    for (const no of ['git checkout -- a.txt', 'git restore a.txt', 'git checkout other']) assert.ok(at(no), no);
-    assert.ok(at(`git -C ${wt} checkout -- a.txt`, clone));
+    for (const no of ['git checkout -- .', 'git restore .', 'git checkout other']) assert.ok(at(no), no);
+    assert.ok(at(`git -C ${wt} checkout -- .`, clone));
     const other = join(tmp, 'elsewhere');
     sh(`git clone -q ${wt} ${other}`);
-    assert.ok(at('git checkout -- a.txt', other));
+    writeFileSync(join(other, 'a.txt'), 'changed');
+    assert.ok(at('git checkout -- .', other));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

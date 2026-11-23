@@ -1,11 +1,11 @@
 // The git habits every scheme shares: the tripwire's git rules, which gitReason in src/tripwire.ts runs for each `git` call.
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { hard, under, type TripwireConfig, type Verdict, type Word } from './tripwire-base.ts';
 
 // CLAUDE.md's "commit before you move", ported from Delve's git guard (tools/mods/delve/hooks, judgeGit).
-const NEVER_PATH = 'Never check out, restore or stash a path to look at it: that throws away uncommitted work. To see the old version, use `git show HEAD:path` or `git diff`. To put one file back as it was at HEAD on purpose, dropping its uncommitted edits, write it over: `git show HEAD:./path > path` (the `./` reads the path from the folder you are in) (commit first, a WIP commit is fine, if you might want those edits back).';
+const NEVER_PATH = 'A folder, a pattern or another commit\'s version checked out or restored over uncommitted work throws it away. Files named one by one, from HEAD or the index (`git checkout -- path`, `git checkout HEAD -- path`, `git restore path`), pass: the tripwire saves their diff under $TMPDIR first. To see an old version, use `git show <ref>:path` or `git diff`; to take files from another commit or a whole folder back, commit first (a WIP commit is fine).';
 const STASH_WHY = 'The stash stack is shared by every worktree of the repo, so another session can pop your entry, or you theirs. Commit work in progress instead (a WIP commit is fine), and use `git show HEAD:path` or `git diff` to see the old version.';
 const PROTECTED = /^(main|master)$/;
 const MAIN_WHY = "main changes only through the scheme's own route (tools/land.sh and tools/deploy.sh, or a merged pull request), never a push from a minion's worktree. Push your minion branch.";
@@ -47,11 +47,12 @@ function conflicted(dir: string, paths: Word[]): boolean {
 }
 
 /**
- * The git habits every scheme shares: no path checkout, restore or stash; no checkout, merge, rebase or
- * reset over uncommitted tracked changes; from a minion's worktree, no push to main and no plain force.
- * With the folder unknown it checks only what the words alone show.
+ * The git habits every scheme shares: no stash; a file checked out or restored from HEAD or the index only once
+ * its diff is saved (pushed onto `saves`, which the hook writes once the whole call passes), and no folder or other
+ * commit's version; no checkout, merge, rebase or reset over uncommitted tracked changes; from a minion's worktree,
+ * no push to main and no plain force. With the folder unknown it checks only what the words alone show.
  */
-export function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: TripwireConfig, committed = false, moved = false): Verdict | null {
+export function gitHabitReason(sub: string, args: Word[], dir: string | null, cfg: TripwireConfig, committed = false, moved = false, saves?: Save[]): Verdict | null {
   const words = args.map((w) => w.text);
   const has = (...flags: string[]) => words.some((a) => flags.includes(a));
   const plain = args.filter((w) => !w.text.startsWith('-'));
@@ -59,16 +60,47 @@ export function gitHabitReason(sub: string, args: Word[], dir: string | null, cf
   switch (sub) {
     case 'stash':
       return ['list', 'show'].includes(words[0]) ? null : hard(`\`git stash\` is blocked. ${STASH_WHY}`);
-    case 'restore':
+    case 'restore': {
       if (dir && scratchClone(dir, cfg)) return null;
-      return has('--staged', '-S') && !has('--worktree', '-W') ? null : hard(`\`git restore\` is blocked. ${NEVER_PATH}`);
+      const staged = has('--staged', '-S');
+      if (staged && !has('--worktree', '-W')) return null;
+      // Files from HEAD or the index, saved first (#1716); any other source or flag (-p, --ours) stays refused.
+      const refused = hard(`\`git restore ${words.join(' ')}\` is blocked. ${NEVER_PATH}`);
+      let fromHead = staged;
+      const paths: Word[] = [];
+      for (let k = 0; k < args.length; k++) {
+        const t = args[k].text;
+        if (t === '--') {
+          paths.push(...args.slice(k + 1));
+          break;
+        }
+        if (t === '-s' || t === '--source') {
+          if (args[++k]?.text !== 'HEAD') return refused;
+          fromHead = true;
+        } else if (t === '--source=HEAD') fromHead = true;
+        else if (t.startsWith('-')) {
+          if (!/^(-q|--quiet|-W|--worktree|-S|--staged)$/.test(t)) return refused;
+        } else paths.push(args[k]);
+      }
+      return savePaths(`git restore ${words.join(' ')}`, paths, fromHead, dir, cfg, saves);
+    }
     case 'checkout': {
       // A clone under the turn's TMPDIR is scratch; --ours and --theirs pick a side of an open conflict (#485).
       if (dir && (scratchClone(dir, cfg) || (has('--ours', '--theirs') && midMerge(dir) && conflicted(dir, plain)))) return null;
-      if (has('--')) return hard(`\`git checkout -- <path>\` is blocked. ${NEVER_PATH}`);
+      const dd = words.indexOf('--');
+      const quiet = (ws: string[]) => ws.every((a) => !a.startsWith('-') || a === '-q' || a === '--quiet');
+      if (dd >= 0) {
+        // Files from the index or HEAD, named one by one: saved first (#1716). Any other ref or flag stays refused.
+        const ref = plain.filter((w) => args.indexOf(w) < dd).map((w) => w.text);
+        if (quiet(words.slice(0, dd)) && (ref.length === 0 || (ref.length === 1 && ref[0] === 'HEAD'))) return savePaths(`git checkout ${words.join(' ')}`, args.slice(dd + 1), ref.length === 1, dir, cfg, saves);
+        return hard(`\`git checkout ${words.join(' ')}\` is blocked. ${NEVER_PATH}`);
+      }
       // A new branch keeps the working tree as it is.
       if (has('-b', '-B', '--orphan') && !has('-f', '--force')) return null;
-      if (plain.length > 1) return hard(`\`git checkout <ref> <path>\` is blocked. ${NEVER_PATH}`);
+      if (plain.length > 1) {
+        if (plain[0].text === 'HEAD' && quiet(words)) return savePaths(`git checkout ${words.join(' ')}`, plain.slice(1), true, dir, cfg, saves);
+        return hard(`\`git checkout <ref> <path>\` is blocked. ${NEVER_PATH}`);
+      }
       if (plain.length === 0) {
         if (has('-')) move = 'git checkout -';
         // With no branch, -f still resets the working tree to HEAD (#468 S01-3).
@@ -80,7 +112,10 @@ export function gitHabitReason(sub: string, args: Word[], dir: string | null, cf
       // git takes a commit's name as a switch, and a file or glob as a path; any other name (a remote
       // branch to set up, a typo) it sorts out itself. Exit 1 is "not a commit"; other codes can't tell.
       const isRef = git(dir, 'rev-parse', '--verify', '--quiet', `${target.text}^{commit}`)?.status !== 1;
-      if (!target.unknown && !isRef && (/[*?[]/.test(target.text) || existsSync(resolve(dir, target.text)))) return hard(`\`git checkout ${target.text}\` names a path, not a branch or commit. ${NEVER_PATH}`);
+      if (!target.unknown && !isRef && (/[*?[]/.test(target.text) || existsSync(resolve(dir, target.text)))) {
+        if (quiet(words) && !/[*?[]/.test(target.text)) return savePaths(`git checkout ${words.join(' ')}`, [target], false, dir, cfg, saves);
+        return hard(`\`git checkout ${target.text}\` names a path, not a branch or commit. ${NEVER_PATH}`);
+      }
       move = `git checkout ${target.text}`;
       break;
     }
@@ -112,6 +147,44 @@ export function gitHabitReason(sub: string, args: Word[], dir: string | null, cf
   const dirty = st?.status === 0 ? st.out.split('\n').map((l) => l.slice(3)).filter(Boolean) : [];
   if (!dirty.length) return null;
   return hard(`Commit first: \`${move}\` with ${dirty.length} uncommitted tracked file(s) (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? ', …' : ''}) can lose them. Commit (a WIP commit is fine) before any checkout, merge, rebase or reset; to see another version of a file, use \`git show <ref>:path\`.`);
+}
+
+/** A diff the hook saves under the turn's TMPDIR before a checkout or restore throws it away (#1716): `git diff [HEAD] -- paths` in dir. */
+export interface Save { dir: string; head: boolean; paths: string[] }
+
+/**
+ * A checkout or restore of files named one by one, from HEAD (`head`) or the index: through, once their uncommitted diff
+ * is queued on `saves` (nothing queued when they are clean). A folder, a pattern, a path it can't read, or nowhere to
+ * save (no TMPDIR, no saves list, a folder that isn't a repo) keeps the old refusal.
+ */
+function savePaths(cmd: string, paths: Word[], head: boolean, dir: string | null, cfg: TripwireConfig, saves?: Save[]): Verdict | null {
+  const refused = hard(`\`${cmd}\` is blocked. ${NEVER_PATH}`);
+  if (!dir || !saves || !(cfg.env ?? process.env).TMPDIR) return refused;
+  // A pathspec's magic (`:/`, `:(glob)`) or a pattern can reach more than the file it names; so can a folder (a trailing / exists only for one).
+  if (paths.some((w) => w.unknown || /[*?[]/.test(w.text) || w.text.startsWith(':') || existsSync(resolve(dir, w.text) + '/'))) return refused;
+  if (!paths.length) return null;
+  const texts = paths.map((w) => w.text);
+  const d = git(dir, 'diff', '--quiet', ...(head ? ['HEAD'] : []), '--', ...texts);
+  if (d?.status === 0) return null;
+  if (d?.status !== 1) return refused;
+  saves.push({ dir, head, paths: texts });
+  return null;
+}
+
+/** Writes each queued diff to a patch under $TMPDIR/tripwire-saves: the note for the turn, or throws when one can't be saved. */
+export function writeSaves(saves: Save[], cfg: TripwireConfig): string {
+  const folder = join((cfg.env ?? process.env).TMPDIR!, 'tripwire-saves');
+  mkdirSync(folder, { recursive: true });
+  return saves
+    .map((s, k) => {
+      const name = basename(s.paths[0]).replace(/[^\w.-]/g, '_') + (s.paths.length > 1 ? `-and-${s.paths.length - 1}-more` : '');
+      const file = join(folder, `${Date.now()}-${k}-${name}.patch`);
+      if (git(s.dir, 'diff', '--binary', `--output=${file}`, ...(s.head ? ['HEAD'] : []), '--', ...s.paths)?.status !== 0) throw new Error(`couldn't save the uncommitted diff of ${s.paths.join(', ')}`);
+      // The patch names paths from the repo's top, so it applies from there.
+      const top = git(s.dir, 'rev-parse', '--show-toplevel')?.out.trim() || s.dir;
+      return `[tripwire] Saved the uncommitted ${s.head ? 'changes (staged too)' : 'unstaged changes'} of ${s.paths.join(', ')} to ${file} before this call throws them away; \`git -C ${top} apply ${file}\` puts them back.`;
+    })
+    .join('\n');
 }
 
 /**

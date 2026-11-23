@@ -320,7 +320,8 @@ export class Approvals {
    * turn gets no more. Anything else gets a card only in a project with approval rules, as before.
    */
   ask(ticketId: number, tool: string, input: object, cwd: string, cfg: TripwireConfig, rules: boolean, merge?: object, target?: MergeTarget | null, retry?: { target: MergeTarget; command: string } | null): { id: string } | { refused: string } {
-    const verdict = tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true });
+    // A throwaway saves list: the hook already saved what a file checkout throws away (#1716), so it passes here too.
+    const verdict = tripwire({ tool_name: tool, tool_input: input, cwd }, { ...cfg, ask: true }, []);
     if (verdict && !verdict.ask) return { refused: `The tripwire blocks this. ${verdict.reason}` };
     if (!verdict) {
       if (!rules) return { refused: 'Nobody can answer a permission prompt in this turn, so this was not run.' };

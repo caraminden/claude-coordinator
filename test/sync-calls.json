@@ -97,7 +97,7 @@
  "src/supervisor-client.ts": 12,
  "src/taskmaster-files.ts": 8,
  "src/tmp-sweep.ts": 5,
- "src/tripwire-git.ts": 3,
+ "src/tripwire-git.ts": 5,
  "src/tripwire.ts": 12,
  "src/turn-launch.ts": 46,
  "src/turn-tmp.ts": 6,

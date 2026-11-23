@@ -1065,7 +1065,7 @@ test('git: --ours and --theirs mid-merge, and any checkout in a clone under the 
   const clone = join(tmp, 'projects/2/tmp/9/clone');
   const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
   const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env });
-  const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
+  const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c, [])?.reason ?? null;
   try {
     mkdirSync(wt, { recursive: true });
     sh('git init -q -b ticket/9 && echo a > a.txt && echo b > b.txt && git add a.txt b.txt && git commit -qm a');
@@ -1279,17 +1279,20 @@ test('a dirty file checked out or restored: its diff is saved under the turn\'s 
   const wt = join(tmp, 'projects/2/tickets/9');
   const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
   const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env }).toString();
-  const run = (command: string, cwd = wt) => tripwireResult(JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd }), JSON.stringify(c));
-  const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
-  /** The note's patch path, after checking the call was let through with it. */
-  const saved = (command: string, cwd = wt) => {
+  const run = (command: string, cwd = wt, ask = false) => tripwireResult(JSON.stringify({ tool_name: 'Bash', tool_input: { command, description: WHY }, cwd }), JSON.stringify({ ...c, ask }));
+  // With a saves list, as the hook runs it: a refusal here isn't just saving being off.
+  const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c, [])?.reason ?? null;
+  /** The note's patches (staged, then unstaged), after checking the call was let through with them. */
+  const notePatches = (note: string) => [...note.matchAll(/apply (?:--index )?(\S+\.patch)/g)].map((m) => m[1]);
+  const savedAll = (command: string, cwd = wt) => {
     const r = run(command, cwd);
     assert.equal(r.code, undefined, `${command}: ${r.stderr}`);
     const note: string = JSON.parse(r.stdout ?? '{}').hookSpecificOutput?.additionalContext ?? '';
-    const patch = note.match(/\/\S+\.patch/)?.[0] ?? '';
-    assert.ok(patch.startsWith(`${turnTmp}/`), `${command}: the note names a patch in TMPDIR: ${note}`);
-    return patch;
+    const found = notePatches(note);
+    assert.ok(found.length && found.every((f) => f.startsWith(`${turnTmp}/`)), `${command}: the note names patches in TMPDIR: ${note}`);
+    return found;
   };
+  const saved = (command: string, cwd = wt) => savedAll(command, cwd)[0];
   const patches = () => readdirSync(join(turnTmp, 'tripwire-saves')).length;
   try {
     mkdirSync(join(wt, 'sub'), { recursive: true });
@@ -1310,14 +1313,36 @@ test('a dirty file checked out or restored: its diff is saved under the turn\'s 
     writeFileSync(join(wt, 'sub/c.txt'), 'mine\n');
     assert.match(readFileSync(saved('git checkout -- c.txt', join(wt, 'sub')), 'utf8'), /^\+mine$/m);
 
-    // From HEAD, staged edits go too, so that patch is against HEAD; from the index, only the unstaged part goes.
+    // From HEAD, staged edits go too: a staged patch, then an unstaged one, which put both back as they were.
     sh('git add a.txt');
     writeFileSync(join(wt, 'a.txt'), 'mine again\n');
-    const head = readFileSync(saved('git checkout HEAD -- a.txt'), 'utf8');
-    assert.match(head, /^-a$/m);
-    assert.match(head, /^\+mine again$/m);
-    assert.match(readFileSync(saved('git checkout -- a.txt'), 'utf8'), /^-mine\n\+mine again$/m);
+    const [staged, unstaged] = savedAll('git checkout HEAD -- a.txt');
+    assert.match(readFileSync(staged, 'utf8'), /^-a\n\+mine$/m);
+    assert.match(readFileSync(unstaged, 'utf8'), /^-mine\n\+mine again$/m);
+    sh('git checkout HEAD -- a.txt');
+    sh(`git apply --index ${staged} && git apply ${unstaged}`);
+    assert.equal(sh('git diff --cached --name-only'), 'a.txt\n');
+    assert.equal(readFileSync(join(wt, 'a.txt'), 'utf8'), 'mine again\n');
+    // From the index, only the unstaged part goes.
+    assert.deepEqual(savedAll('git checkout -- a.txt').map((f) => readFileSync(f, 'utf8')).join(''), readFileSync(unstaged, 'utf8'));
+    // A staged edit whose file is back at HEAD in the worktree: `git diff HEAD` is empty, the staged patch isn't.
+    writeFileSync(join(wt, 'a.txt'), 'a\n');
+    const [only] = savedAll('git checkout HEAD -- a.txt');
+    assert.match(only, /\.staged\.patch$/);
+    assert.match(readFileSync(only, 'utf8'), /^\+mine$/m);
     sh('git reset -q a.txt');
+    // A diff config that would make an unappliable patch (a textconv, no prefixes, colour) is ignored.
+    sh("git config diff.noprefix true && git config color.diff always && printf 'a.txt diff=up\\n' > .git/info/attributes && git config diff.up.textconv 'tr a-z A-Z <'");
+    writeFileSync(join(wt, 'a.txt'), 'mine\n');
+    const raw = saved('git checkout -- a.txt');
+    sh('git checkout -- a.txt');
+    sh(`git apply ${raw}`);
+    assert.equal(readFileSync(join(wt, 'a.txt'), 'utf8'), 'mine\n');
+    sh('git config --unset diff.noprefix && git config --unset color.diff && rm .git/info/attributes');
+    // A call that waits for a person's card saves first too: the card lets the checkout run.
+    const asked = run('systemctl --user enable cc-backup.timer && git checkout -- a.txt', wt, true);
+    assert.equal(JSON.parse(asked.stdout ?? '{}').hookSpecificOutput?.permissionDecision, 'ask');
+    assert.ok(readdirSync(join(turnTmp, 'tripwire-saves')).some((f) => readFileSync(join(turnTmp, 'tripwire-saves', f), 'utf8').includes('+mine')));
 
     // A clean file has nothing to save: through, with no patch.
     const before = patches();
@@ -1325,13 +1350,16 @@ test('a dirty file checked out or restored: its diff is saved under the turn\'s 
     assert.equal(patches(), before);
 
     // Still refused: a folder, a pattern, an unknown path, another commit's version, -f, a branch switch over the edit, stash, reset --hard.
-    for (const no of ['git checkout -- .', 'git checkout .', 'git checkout -- sub', 'git restore sub', 'git restore .', "git checkout -- '*.txt'", 'git checkout -- "$F"', 'git checkout -- :/a.txt', 'git checkout other -- a.txt', 'git checkout other a.txt', 'git restore --source=other a.txt', 'git checkout -f -- a.txt', 'git checkout -p -- a.txt', 'git checkout other', 'git stash', 'git reset --hard'])
+    for (const no of ['git checkout -- .', 'git checkout .', 'git checkout -- sub', 'git restore sub', 'git restore .', "git checkout -- '*.txt'", 'git checkout -- "$F"', 'git checkout -- {a,b}.txt', 'git checkout -- :/a.txt', 'git checkout other -- a.txt', 'git checkout other a.txt', 'git restore --source=other a.txt', 'git checkout -f -- a.txt', 'git checkout -p -- a.txt', 'git checkout other', 'git stash', 'git reset --hard'])
       assert.ok(at(no), no);
     // A refusal later in the same call writes no patch.
     assert.equal(run('git checkout -- a.txt && git stash').code, 2);
     assert.equal(patches(), before);
-    // With no TMPDIR to save into, it stays refused.
-    assert.ok(tripwire({ tool_name: 'Bash', tool_input: { command: 'git checkout -- a.txt' }, cwd: wt }, { ...c, env: {} }));
+    // With no TMPDIR to save into, or no saves list (Codex turns' hook), it stays refused, and says to commit first.
+    assert.match(tripwire({ tool_name: 'Bash', tool_input: { command: 'git checkout -- a.txt' }, cwd: wt }, { ...c, env: {} }, [])?.reason ?? '', /can't save.*WIP commit/);
+    assert.match(tripwire({ tool_name: 'Bash', tool_input: { command: 'git checkout -- a.txt' }, cwd: wt }, c)?.reason ?? '', /can't save/);
+    // Chained -C folders: the second is inside the first, as git reads them.
+    saved(`git -C ${tmp} -C projects/2/tickets/9 checkout -- a.txt`);
   } finally {
     rmSync(tmp, { recursive: true, force: true }); // timing-ok: own temp dir
   }

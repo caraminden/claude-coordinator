@@ -149,40 +149,51 @@ export function gitHabitReason(sub: string, args: Word[], dir: string | null, cf
   return hard(`Commit first: \`${move}\` with ${dirty.length} uncommitted tracked file(s) (${dirty.slice(0, 5).join(', ')}${dirty.length > 5 ? ', …' : ''}) can lose them. Commit (a WIP commit is fine) before any checkout, merge, rebase or reset; to see another version of a file, use \`git show <ref>:path\`.`);
 }
 
-/** A diff the hook saves under the turn's TMPDIR before a checkout or restore throws it away (#1716): `git diff [HEAD] -- paths` in dir. */
+/** Files whose uncommitted changes the hook saves under the turn's TMPDIR before a checkout or restore throws them away (#1716); `head`: from HEAD, so staged changes go too. */
 export interface Save { dir: string; head: boolean; paths: string[] }
 
+// Raw and from the repo's top whatever the config: a textconv, an external diff, colour, noprefix or diff.relative would make a patch `git apply` can't take.
+const RAW = ['--binary', '--no-color', '--no-ext-diff', '--no-textconv', '--no-relative', '--src-prefix=a/', '--dst-prefix=b/'];
+/** What a checkout or restore from HEAD throws away (staged, then unstaged), or from the index (unstaged only). */
+const parts = (head: boolean) => (head ? [['staged', '--cached'], ['unstaged']] : [['unstaged']]);
+
 /**
- * A checkout or restore of files named one by one, from HEAD (`head`) or the index: through, once their uncommitted diff
- * is queued on `saves` (nothing queued when they are clean). A folder, a pattern, a path it can't read, or nowhere to
- * save (no TMPDIR, no saves list, a folder that isn't a repo) keeps the old refusal.
+ * A checkout or restore of files named one by one, from HEAD (`head`) or the index: through, once their uncommitted
+ * changes are queued on `saves` (nothing queued when they are clean). A folder, a pattern, a path it can't read, or
+ * nowhere to save (no TMPDIR, no saves list, a folder that isn't a repo) is refused.
  */
 function savePaths(cmd: string, paths: Word[], head: boolean, dir: string | null, cfg: TripwireConfig, saves?: Save[]): Verdict | null {
   const refused = hard(`\`${cmd}\` is blocked. ${NEVER_PATH}`);
-  if (!dir || !saves || !(cfg.env ?? process.env).TMPDIR) return refused;
-  // A pathspec's magic (`:/`, `:(glob)`) or a pattern can reach more than the file it names; so can a folder (a trailing / exists only for one).
-  if (paths.some((w) => w.unknown || /[*?[]/.test(w.text) || w.text.startsWith(':') || existsSync(resolve(dir, w.text) + '/'))) return refused;
+  // Codex turns' hook has no saves list: there the old way still holds.
+  if (!dir || !saves || !(cfg.env ?? process.env).TMPDIR) return hard(`\`${cmd}\` is blocked: this turn can't save the file's uncommitted changes first. Commit first (a WIP commit is fine), or write it over from HEAD on purpose: \`git show HEAD:./path > path\`.`);
+  // A pathspec's magic (`:/`, `:(glob)`), a pattern or a brace list (bash expands `{a,b}.txt` to two files) can reach
+  // more than the word it names; so can a folder (a trailing / exists only for one).
+  if (paths.some((w) => w.unknown || /[*?[{}]/.test(w.text) || w.text.startsWith(':') || existsSync(resolve(dir, w.text) + '/'))) return refused;
   if (!paths.length) return null;
   const texts = paths.map((w) => w.text);
-  const d = git(dir, 'diff', '--quiet', ...(head ? ['HEAD'] : []), '--', ...texts);
-  if (d?.status === 0) return null;
-  if (d?.status !== 1) return refused;
-  saves.push({ dir, head, paths: texts });
+  const quiet = parts(head).map(([, ...flags]) => git(dir, 'diff', '--quiet', ...flags, '--', ...texts)?.status);
+  if (quiet.some((q) => q !== 0 && q !== 1)) return refused;
+  if (quiet.includes(1)) saves.push({ dir, head, paths: texts });
   return null;
 }
 
-/** Writes each queued diff to a patch under $TMPDIR/tripwire-saves: the note for the turn, or throws when one can't be saved. */
+/** Writes each queued save's patches under $TMPDIR/tripwire-saves: the note for the turn, or throws when one can't be saved. */
 export function writeSaves(saves: Save[], cfg: TripwireConfig): string {
   const folder = join((cfg.env ?? process.env).TMPDIR!, 'tripwire-saves');
   mkdirSync(folder, { recursive: true });
   return saves
     .map((s, k) => {
-      const name = basename(s.paths[0]).replace(/[^\w.-]/g, '_') + (s.paths.length > 1 ? `-and-${s.paths.length - 1}-more` : '');
-      const file = join(folder, `${Date.now()}-${k}-${name}.patch`);
-      if (git(s.dir, 'diff', '--binary', `--output=${file}`, ...(s.head ? ['HEAD'] : []), '--', ...s.paths)?.status !== 0) throw new Error(`couldn't save the uncommitted diff of ${s.paths.join(', ')}`);
-      // The patch names paths from the repo's top, so it applies from there.
+      const name = `${Date.now()}-${k}-${basename(s.paths[0]).replace(/[^\w.-]/g, '_')}${s.paths.length > 1 ? `-and-${s.paths.length - 1}-more` : ''}`;
+      // Patches name paths from the repo's top, so they apply from there.
       const top = git(s.dir, 'rev-parse', '--show-toplevel')?.out.trim() || s.dir;
-      return `[tripwire] Saved the uncommitted ${s.head ? 'changes (staged too)' : 'unstaged changes'} of ${s.paths.join(', ')} to ${file} before this call throws them away; \`git -C ${top} apply ${file}\` puts them back.`;
+      const steps: string[] = [];
+      for (const [kind, ...flags] of parts(s.head)) {
+        if (git(s.dir, 'diff', '--quiet', ...flags, '--', ...s.paths)?.status === 0) continue;
+        const file = join(folder, `${name}.${kind}.patch`);
+        if (git(s.dir, 'diff', ...RAW, `--output=${file}`, ...flags, '--', ...s.paths)?.status !== 0) throw new Error(`couldn't save the ${kind} changes of ${s.paths.join(', ')}`);
+        steps.push(`\`git -C ${top} apply${kind === 'staged' ? ' --index' : ''} ${file}\``);
+      }
+      return `[tripwire] Saved the uncommitted changes of ${s.paths.join(', ')} before this call throws them away: ${steps.join(', then ')} puts them back.`;
     })
     .join('\n');
 }

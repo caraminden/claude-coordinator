@@ -986,7 +986,8 @@ function gitReason(args: Word[], st: State, cfg: TripwireConfig): Verdict | null
     const t = args[j].text;
     if (t === '-C') {
       const p = args[j + 1];
-      dir = p ? (pathsOf(p, st, cfg)[0] ?? null) : null;
+      // git applies each -C in turn, a relative one inside the last.
+      dir = p && dir ? (pathsOf(p, { ...st, cwd: dir }, cfg)[0] ?? null) : null;
       j++;
     } else if (t === '-c' || t === '--git-dir' || t === '--work-tree' || t === '--namespace') j++;
     else if (!t.startsWith('-')) break;
@@ -1599,18 +1600,22 @@ export function tripwireResult(stdin: string, cfgArg: string): { stdout?: string
   } catch (err: any) {
     return { stderr: `[tripwire] skipped: ${err.message}\n` };
   }
+  // Fails closed: a file checkout or restore over uncommitted edits passes only once its patches are written (#1716),
+  // before an ask too, since approvals' card lets the same call through.
+  let note = '';
+  if (!v?.reason || v.ask) {
+    try {
+      if (saves.length) note = writeSaves(saves, cfg);
+    } catch (err: any) {
+      return { stderr: `[tripwire] This call would throw away uncommitted edits, and ${err.message}. Commit first (a WIP commit is fine).\n`, code: 2 };
+    }
+  }
   if (v?.ask) {
     // Claude Code sends this call to the turn's permission-prompt tool, which shows the card.
     return { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: `[tripwire] ${v.reason}` } }) };
   }
   if (v) return { stderr: `[tripwire] ${v.reason}\n[tripwire] This guard stops known accidents in Citadel (src/tripwire.ts). ${ASK}\n`, code: 2 };
-  if (!saves.length) return {};
-  // Fails closed: a diff it couldn't save would be lost, so the call waits for a WIP commit.
-  try {
-    return { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: writeSaves(saves, cfg) } }) };
-  } catch (err: any) {
-    return { stderr: `[tripwire] This call would throw away uncommitted edits, and ${err.message}. Commit first (a WIP commit is fine).\n`, code: 2 };
-  }
+  return note ? { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: note } }) } : {};
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

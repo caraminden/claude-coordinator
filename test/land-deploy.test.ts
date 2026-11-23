@@ -1,7 +1,7 @@
 // tools/land.sh with the real tools/deploy.sh.
 import assert from 'node:assert/strict';
 import { execFile, spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -42,7 +42,7 @@ test('a light land runs no tests and no boot check, and goes live without a rest
     assert.match(res.stderr, /lane: light \(tools\/lanes; the path that decided it: docs\/a\.md\)/);
     assert.match(res.stderr, /no tests and no CI/);
     assert.doesNotMatch(res.stderr, /CI FALLBACK|running the tests|boot check: the new code/);
-    assert.match(res.stderr, /live now: docs, config and tests only, nothing to reload\. No restart\./);
+    assert.match(res.stderr, /live now: docs and config only, nothing to reload\. No restart\./);
     assert.deepEqual(runs(), [], 'no test ran anywhere');
     assert.equal(readFileSync(join(r.dir, 'sighups'), 'utf8').trim().split('\n').length, 1);
     assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
@@ -56,9 +56,33 @@ test("a light land whose SIGHUP the server doesn't take queues a restart rather 
     lightLand(r);
     const res = await run(land, r.wt);
     assert.match(res.stderr, /the server did not pick up the new commit on SIGHUP; queuing a restart instead/);
-    assert.doesNotMatch(res.stderr, /live now: docs, config and tests only/);
+    assert.doesNotMatch(res.stderr, /live now: docs and config only/);
     assert.match(res.stderr, /live now: the server restarted on/);
   }, () => ({ reload: 'sighup', version: 'v1', ...(running && { commit: running }) })));
+
+// A land touching only test/ (#1416) is a full land, tested as ever, and the real deploy.sh skips the boot check and
+// goes live by SIGHUP with no restart. Run by hand, with no DEPLOY_TESTED, the deploy still runs the tests.
+test('a test-only land is tested but needs no boot check and no restart; deploy.sh by hand still tests it (#1416)', () =>
+  withRealDeploy(async (r, run, runs) => {
+    lightLand(r);
+    git(r.wt, 'reset', '-q', '--hard', 'main');
+    r.commit(r.wt, 'test/a.test.ts', '// mine\n');
+    const res = await run(land, r.wt);
+    assert.match(res.stderr, /deploy: deploying \w+ .*\(tests change\)/);
+    assert.doesNotMatch(res.stderr, /boot check: the new code/);
+    assert.match(res.stderr, /live now: tests, docs and config only, nothing to reload\. No restart\./);
+    assert.deepEqual(runs(), [r.wt], 'the suite ran once, in the worktree');
+    assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
+    running = git(r.live, 'rev-parse', 'HEAD'); // the server runs the land's commit, until the next SIGHUP
+    rmSync(join(r.dir, 'sighups'));
+    mkdirSync(join(r.source, 'test'), { recursive: true });
+    r.commit(r.source, 'test/b.test.ts', '// by hand\n');
+    const byHand = await run(join(import.meta.dirname, '..', 'tools', 'deploy.sh'), r.source);
+    assert.match(byHand.stderr, /running the tests/);
+    assert.doesNotMatch(byHand.stderr, /boot check: the new code/);
+    assert.match(byHand.stderr, /No restart\./);
+    assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
+  }, (hup) => ({ reload: 'sighup', version: 'v1', ...(running && !hup && { commit: running }) })));
 
 // A killed deploy must not leave its test run or boot check holding the lock (ultra review A4), and the boot check
 // runs under a name ananicy's node rule doesn't match (A5b).

@@ -87,18 +87,18 @@ health() {
 
 # frontend if every file changed between two commits is under public/, none if nothing changed, light if every one
 # is in tools/lanes' light lane as <from> has it (#753: no test or server code reads them), server otherwise (and
-# whenever the running commit is unknown). Files under test/ are left out first (#1416): the running server never
-# reads them, so tests alone are light and tests with public/ only reload. They stay out of tools/lanes' light lane,
-# which would land them untested.
+# whenever the running commit is unknown). Files under test/ are judged apart (#1416): the running server never reads
+# them, so test/ next to public/ is frontend, and test/ alone or with light files is tests: no boot check and no
+# restart, but the tests run as for any change (land.sh doesn't always test the exact commit).
 change_kind() {
-  local dir=$1 from=$2 to=$3 files
+  local dir=$1 from=$2 to=$3 files rest
   if [ -z "$from" ] || ! git -C "$dir" cat-file -e "$from^{commit}" 2>/dev/null; then echo server; return; fi
   files=$(git -C "$dir" diff --no-renames --name-only "$from" "$to")
   if [ -z "$files" ]; then echo none; return; fi
-  files=$(grep -v '^test/' <<<"$files" || true)
-  if [ -z "$files" ]; then echo light
-  elif [ -x "$dir/tools/lane.sh" ] && [ "$(cd "$dir" && tools/lane.sh "$from" <<<"$files" | cut -d' ' -f1)" = light ]; then echo light
-  elif grep -qv '^public/' <<<"$files"; then echo server
+  rest=$(grep -v '^test/' <<<"$files" || true)
+  if [ -z "$rest" ] || { [ -x "$dir/tools/lane.sh" ] && [ "$(cd "$dir" && tools/lane.sh "$from" <<<"$rest" | cut -d' ' -f1)" = light ]; }; then
+    if [ "$rest" = "$files" ]; then echo light; else echo tests; fi
+  elif grep -qv '^public/' <<<"$rest"; then echo server
   else echo frontend; fi
 }
 
@@ -611,7 +611,7 @@ deploy() {
   # DEPLOY_TESTED: the commit tools/land.sh just tested, so the same commit isn't tested twice under the lock;
   # a stray file here (an untracked test) wasn't in that run, so then it tests again.
   if [ "$kind" = light ]; then
-    say "skipping the tests and the boot check: nothing changed but docs, config and tests, which the server never reads"
+    say "skipping the tests and the boot check: nothing changed but docs and config no test or server code reads"
   elif [ -n "$TO" ]; then
     say "skipping the tests: $(short "$new") is last green, so CI passed the full suite on it"
   elif [ "${DEPLOY_TESTED:-}" = "$new" ] && [ -z "$(git_live status --porcelain --ignored)" ]; then
@@ -630,8 +630,8 @@ deploy() {
       false
     fi
   fi
-  # A light change has no server code to check, and leaves a refusing deploy's note where it is.
-  if [ "$kind" != light ]; then
+  # A light or tests change has no server code to check, and leaves a refusing deploy's note where it is.
+  if [ "$kind" != light ] && [ "$kind" != tests ]; then
     queue_phase "deploying: boot check since $(date +%H:%M)"
     say "boot check: the new code on a spare port with a copy of the database"
     # A limit from outside (#553): boot-check.ts's own is a timer, which a blocking call in the new code defeats, and a
@@ -666,18 +666,21 @@ deploy() {
   [ -n "$TO" ] || kit_land_drift "$prev" "$new" || true
 
   queue_phase "deploying: going live"
-  # SIGHUP for light too: it re-reads an unchanged public/ and takes the checkout's HEAD as live, so no restart.
-  if { [ "$kind" = frontend ] || [ "$kind" = light ]; } && [ "$(health reload)" = sighup ]; then
+  # SIGHUP for light and tests too: it re-reads an unchanged public/ and takes the checkout's HEAD as live, so no restart.
+  local same= # the front end is unchanged
+  [ "$kind" = frontend ] || same=1
+  if { [ "$kind" = frontend ] || [ "$kind" = light ] || [ "$kind" = tests ]; } && [ "$(health reload)" = sighup ]; then
     systemctl --user kill -s HUP --kill-whom=main "$SERVICE"
     mark queued
     for _ in $(seq 10); do
       sleep 1
-      # Light: the front end is unchanged, so only the server's live commit says the reload took.
-      if { [ "$kind" = light ] && [ "$(health commit)" = "$new" ]; } || { [ "$kind" != light ] && [ "$(health version)" = "$version" ]; }; then
+      # Light and tests: the front end is unchanged, so only the server's live commit says the reload took.
+      if { [ -n "$same" ] && [ "$(health commit)" = "$new" ]; } || { [ -z "$same" ] && [ "$(health version)" = "$version" ]; }; then
         mark live
         git_live tag -f last-good "$new" >/dev/null
-        local what="docs, config and tests only, nothing to reload" pushed
-        [ "$kind" = light ] || what="the server reloaded the front end ($version); open tabs reload when idle"
+        local what="docs and config only, nothing to reload" pushed
+        [ "$kind" != tests ] || what="tests, docs and config only, nothing to reload"
+        [ -n "$same" ] || what="the server reloaded the front end ($version); open tabs reload when idle"
         say "live now: $what. No restart."
         if [ -n "$TO" ]; then
           echo "$prev $new $(date +%s) $prev rollback" >"$STATE/bad" # the hold until the fix (#1016)
@@ -691,7 +694,7 @@ deploy() {
         return 0
       fi
     done
-    say "the server did not pick up the new $([ "$kind" = light ] && echo commit || echo 'front end') on SIGHUP; queuing a restart instead"
+    say "the server did not pick up the new $([ -n "$same" ] && echo commit || echo 'front end') on SIGHUP; queuing a restart instead"
   fi
 
   # The restart runs after this turn ends, so remember who to tell how it went, and which commit was this deploy's.

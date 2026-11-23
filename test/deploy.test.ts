@@ -229,8 +229,9 @@ test("deploy.sh tells a light change (tools/lanes, as the running commit has it)
 });
 
 test('deploy.sh restarts nothing for a change to test/ alone, and judges test/ with the rest by the rest (#1416)', () => {
-  // The running server never reads test/ (checked by grep 2026-11-22), so a test-only ship is light and test/ next to
-  // public/ only reloads the front end. kit/ and tools/ still restart: every turn's pinned copies are made at boot.
+  // The running server never reads test/ (checked by grep 2026-11-22), so a test-only ship is a tests change (tested,
+  // but no boot check and no restart) and test/ next to public/ only reloads the front end. kit/ and tools/ still
+  // restart: every turn's pinned copies are made at boot.
   const g = join(root, 'tests-only');
   const git = (...args: string[]) => execFileSync('git', ['-C', g, ...args], { encoding: 'utf8' }).trim();
   mkdirSync(join(g, 'tools'), { recursive: true });
@@ -255,8 +256,9 @@ test('deploy.sh restarts nothing for a change to test/ alone, and judges test/ w
     git('checkout', '-q', '--detach', base);
     return commit(...files);
   };
-  assert.equal(kind(at('test/a.test.ts', 'test/b.ts')), 'light', 'tests only: no restart, no tests or boot check under the lock');
-  assert.equal(kind(at('test/a.test.ts', 'docs/a.md')), 'light', 'tests and docs: light');
+  assert.equal(kind(at('test/a.test.ts', 'test/b.ts')), 'tests', 'tests only: no restart, no boot check');
+  assert.equal(kind(at('test/a.test.ts', 'docs/a.md')), 'tests', 'tests and docs: still tested');
+  assert.equal(kind(at('docs/a.md')), 'light', 'docs alone stay light');
   assert.equal(kind(at('test/a.test.ts', 'public/app.js')), 'frontend', 'tests and the front end: reload only');
   assert.equal(kind(at('test/a.test.ts', 'src/a.ts')), 'server', 'tests and server code: restart');
   assert.equal(kind(at('test/a.test.ts', 'tools/x.sh')), 'server', 'tools/ is pinned into turns at boot: restart');

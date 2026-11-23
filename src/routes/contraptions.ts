@@ -97,7 +97,7 @@ function fields(app: App, body: any, creating: boolean) {
     out.default_model = m || null;
   }
   // What Restart and Stop risk (#1682): any scheme's contraption, set by whoever manages contraptions.
-  if (body.restart_risk !== undefined) out.restart_risk = oneOf(body.restart_risk, RISKS, 'Restart risk') as ContraptionRow['restart_risk'];
+  if (body.restart_risk !== undefined) out.restart_risk = (oneOf(body.restart_risk, RISKS, 'Restart risk') ?? 'unassessed') as ContraptionRow['restart_risk']; // null or '' clears it
   if (body.restart_note !== undefined) {
     const note = typeof body.restart_note === 'string' ? body.restart_note.replace(/[\x00-\x1f\x7f]/g, ' ').trim() : null;
     if (note === null || note.length > 300) throw new HttpError(400, 'Restart note must be text of at most 300 characters');
@@ -619,7 +619,9 @@ export const contraptionRoutes: Route[] = [
       if (risky && risk === 'loses_data' && body.confirm !== c.name) {
         throw new HttpError(409, `${c.name} ${action} is marked "may lose data"${c.restart_note ? `: ${c.restart_note}` : ''}. Send confirm: "${c.name}" to run it anyway.`);
       }
-      const by = session.uid ? app.store.getUser(session.uid)?.login ?? `user ${session.uid}` : caller ? `${caller.kind} of scheme ${caller.project_id}` : 'unknown';
+      const asker = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);
+      const who = asker ? app.store.getUser(asker)?.login ?? `user ${asker}` : 'unknown';
+      const by = session.uid || !caller ? who : `Taskmaster for ${who}`;
       const log = (ok: boolean, said: string) => risky && app.store.addContraptionRun({ contraption_id: c.id, at: Date.now(), action, risk, by, ok: ok ? 1 : 0, said: said.slice(0, 500) });
       const said = await service(async () => {
         if (action === 'install') return app.services.install(c, { replace: body.replace === true, all: app.store.listContraptions() });

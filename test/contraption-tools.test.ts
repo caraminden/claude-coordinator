@@ -233,6 +233,9 @@ test('restart and stop carry a risk (#1682): shown first, a typed name for "may 
   assert.equal((await srv.call('/api/contraptions/twin', { restart_note: 'x'.repeat(301) }, 'PATCH')).status, 400);
   assert.equal((await srv.call('/api/contraptions/twin', { home_scheme: Delve.id, restart_risk: 'interrupts', restart_note: 'drops open chats' }, 'PATCH')).status, 200);
   assert.equal(twin().home_scheme, Delve.id);
+  assert.equal((await srv.call('/api/contraptions/twin', { restart_risk: '' }, 'PATCH')).status, 200);
+  assert.equal(twin().restart_risk, 'unassessed', 'empty clears it, never NULL');
+  await srv.call('/api/contraptions/twin', { restart_risk: 'interrupts' }, 'PATCH');
   let r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'status' });
   assert.match(r.text, /restart and stop risk: interrupts users \(drops open chats\)/);
   r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'restart' });
@@ -253,7 +256,7 @@ test('restart and stop carry a risk (#1682): shown first, a typed name for "may 
 
   const runs = store.contraptionRuns(twin().id);
   assert.deepEqual(runs.slice(0, 2).map((x) => [x.action, x.risk, x.ok]), [['stop', 'loses_data', 1], ['restart', 'interrupts', 1]]);
-  assert.match(runs[0].by, /^coordinator of scheme \d+$/);
+  assert.match(runs[0].by, /^Taskmaster for cara$/);
   const viewed = await srv.call('/api/contraptions');
   assert.equal(viewed.data.find((c: any) => c.name === 'twin').runs.length, 3, 'with the unassessed stop from the test before');
   assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'start' })).status, 200, 'start has no risk gate');

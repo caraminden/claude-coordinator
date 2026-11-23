@@ -16,7 +16,7 @@ export async function readTail(file: string, n: number): Promise<string[]> {
     if (lines.at(-1) === '') lines.pop();
     // A read that began mid-file starts mid-line: its first piece isn't a whole line.
     if (size > len && lines.length > 1) lines.shift();
-    return lines.slice(-n).map((l) => redact(l.slice(-LINE)));
+    return lines.slice(-n).map((l) => redact(l).slice(-LINE));
   } catch {
     return [];
   } finally {

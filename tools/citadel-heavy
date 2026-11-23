@@ -438,8 +438,9 @@ elif [ -n "$forced" ]; then say "the box is still busy ($(load_text)) after $(du
 # A Node test suite run through tools/citadel-node keeps slot-N.progress up to date with its file counts (#545),
 # which Citadel shows as the holder's wait; another command leaves it alone, and shows elapsed time only.
 progress="$dir/slot-$slot.progress"
-# What the command prints is also teed into slot-N.out, whose end Citadel shows under the minion's wait (#1681).
-# shortcut: the file grows with the run's output (a suite's is under 1 MB) and is truncated per run and removed when it ends; cap it if a run ever prints GBs.
+# What the command prints is also teed into slot-N.out, whose end Citadel shows under the minion's wait (#1681). Not on a
+# terminal: stdout and stderr go through their own tees, which would turn a tty into a pipe (colour, progress bars).
+# shortcut: no size cap (GNU head -c holds its output back, so it can't cap a live tee); the file is a run's whole output, truncated per run and removed when it ends. Cap it if a run ever prints GBs.
 out="$dir/slot-$slot.out"
 rm -f "$progress" "$progress.tmp" 2>/dev/null
 : >"$out" 2>/dev/null || out=/dev/null
@@ -453,8 +454,14 @@ t1=$(us) c0=$(cpu_ticks)
 nicer=()
 [ -n "$first" ] || { nicer=(nice -n 19); ! command -v ionice >/dev/null || nicer+=(ionice -c 3); }
 # The tees close fd 8 too: they must not hold the slot's lock past the command.
-"${nicer[@]}" "$@" 8>&- > >(tee -a "$out" 8>&-) 2> >(tee -a "$out" 8>&- >&2)
-status=$?
+if [ "$out" != /dev/null ] && [ ! -t 1 ] && [ ! -t 2 ]; then
+  "${nicer[@]}" "$@" 8>&- > >(tee -a "$out" 8>&-) 2> >(tee -a "$out" 8>&- >&2)
+  status=$?
+  # The tees are not waited for: a caller reading the pipe to its end still gets every line, but a last line can arrive just after this script's own messages.
+else
+  "${nicer[@]}" "$@" 8>&-
+  status=$?
+fi
 # Free the slot before the history work, so a slow or stuck write can't hold up the line. The holder's files go
 # first: once the lock is free the next holder writes its own, which a later clean-up here would delete.
 rm -f "$dir/slot-$slot.who" "$waitfile" "$waitfile.tmp" "$progress" "$progress.tmp" "$dir/slot-$slot.out" 2>/dev/null

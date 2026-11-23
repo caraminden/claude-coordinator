@@ -16,7 +16,9 @@
 //    nothing else records a reopen). Counts minions, not messages.
 //  - failed ships: Citadel's "land didn't go through" message to the minion, counted per message.
 //  - strikes: strike events in the minion's chat (text a person struck out of its words), counted per strike.
-//  - step-ups: minions whose turns ran on more than one model (a tier change mid-way).
+//  - step-ups / person changes: the "<who> set this minion to <model|effort>" notes (one per change, so a model and
+//    an effort change are two), split into a Taskmaster's and a person's. Grunts and the advisor billing other models
+//    are not changes (#1720). A minion's own change ("Claude set") counts in neither.
 // Not here yet: which step-up reasons held up (A4's reasons are not stored), and Grunts' own spend.
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -44,10 +46,15 @@ export const COLUMNS: Column[] = [
   { name: 'strikes', note: 'struck-out text',
     sql: `SELECT e.ticket_id AS ticket, count(*) AS n FROM events e JOIN tickets k ON k.id = e.ticket_id
           WHERE k.created_at >= :since AND e.kind = 'strike' GROUP BY e.ticket_id` },
-  { name: 'step-ups', note: 'ran on more than one model',
-    sql: `SELECT t.ticket_id AS ticket, 1 AS n FROM turns t JOIN turn_models m ON m.turn_id = t.id
-          JOIN tickets k ON k.id = t.ticket_id WHERE k.created_at >= :since
-          GROUP BY t.ticket_id HAVING count(DISTINCT m.model) > 1` },
+  { name: 'step-ups', note: 'a Taskmaster set its model or effort',
+    sql: `SELECT e.ticket_id AS ticket, count(*) AS n FROM events e JOIN tickets k ON k.id = e.ticket_id
+          WHERE k.created_at >= :since AND e.kind = 'note' AND e.data LIKE '%"text":"Taskmaster set this minion to %'
+          GROUP BY e.ticket_id` },
+  { name: 'person changes', note: 'a person set its model or effort',
+    sql: `SELECT e.ticket_id AS ticket, count(*) AS n FROM events e JOIN tickets k ON k.id = e.ticket_id
+          WHERE k.created_at >= :since AND e.kind = 'note' AND e.data LIKE '%"text":"% set this minion to %'
+            AND e.data NOT LIKE '%"text":"Taskmaster set this minion to %' AND e.data NOT LIKE '%"text":"Claude set this minion to %'
+          GROUP BY e.ticket_id` },
 ];
 
 /** One row per minion created since :since: its type and tier. */

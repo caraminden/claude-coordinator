@@ -979,6 +979,7 @@ export const ticketRoutes: Route[] = [
       if (data.startCost) {
         const pick = answers[0]?.selected[0];
         if (pick !== START && pick !== SPLIT) throw new HttpError(400, "Pick one of the card's options");
+        if (ticket.status === 'closed') throw new HttpError(409, `#${ticket.number} is dismissed: reopen it instead`);
         store.deleteSetting(startHoldKey(id));
         const added = answers[0].other ? ` They added: ${answers[0].other}` : '';
         runner.recordAnswer(id, session.name, `My answer to your start card: ${pick}.${added}`, { answer: { questionId: body.questionId, answers } });

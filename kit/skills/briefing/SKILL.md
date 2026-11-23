@@ -40,8 +40,8 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    model (the budget part of list_tickets' lines, or the Budget line at the top of your own turns) times
    how many minions' worth of work the brief holds; a port, a migration or many files weighs more, a
    one-line fix less. create_ticket reads the line (or takes `expected_cost`), and the minion's budget
-   alarms count from it. Over $30 is a sign the work splits: split it if it can, and if it can't, say why
-   in the brief. A brief over $30 waits for a person's start card (Start, or Split first) before it runs.
+   alarms count from it. A brief over $30 waits for a person's start card (Start, or Split first) before it
+   runs: give the honest number, and say in the brief where the work could split, so the person can pick.
    The tiers, read from the table when this skill loaded (a scheme with Fable off gets them without
    Fable):
 

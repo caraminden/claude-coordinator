@@ -1258,11 +1258,13 @@ export const projectRoutes: Route[] = [
       let model = oneOf(body.model ?? null, MODELS, 'Model');
       let effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
       const workflow = body.workflow == null ? 0 : workflowSwitch(body.workflow);
-      // Its expected cost (#1674): create_ticket's expected_cost, else the brief's (or its handoff's) "Expected cost: $N" line.
+      // Its expected cost (#1674): the larger of create_ticket's expected_cost and the brief's (or its handoff's) "Expected cost: $N" line,
+      // so a low param can't slip a big brief past its start card.
       const briefText = `${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`;
       const givenCost = body.expected_cost == null ? null : Number(body.expected_cost);
       if (givenCost != null && !(Number.isFinite(givenCost) && givenCost > 0 && givenCost <= 100_000)) throw new HttpError(400, 'expected_cost must be dollars, more than 0');
-      const estimate = givenCost ?? expectedCost(briefText);
+      const lineCost = expectedCost(briefText);
+      const estimate = givenCost == null || lineCost == null ? givenCost ?? lineCost : Math.max(givenCost, lineCost);
       let plugins = '';
       try {
         plugins = cleanPluginPicks(body.plugin_dirs, project.optional_plugin_dirs);

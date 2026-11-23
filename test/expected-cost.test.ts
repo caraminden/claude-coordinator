@@ -89,9 +89,18 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     const none = await create('None', 'Fix it.');
     assert.notEqual(none.data.state, 'parked');
     assert.match(none.data.notes.join('\n'), /no "Expected cost: \$N" line/);
-    // The param wins over the line.
+    // The larger of the param and the line counts, so a low param can't slip a big brief past its card.
     const param = await create('Param', 'Fix it.\nExpected cost: $5', { expected_cost: 40 });
     assert.equal(param.data.state, 'parked');
+    const lowParam = await create('Low param', 'Do it all.\nExpected cost: ~$80', { expected_cost: 5 });
+    assert.equal(lowParam.data.state, 'parked');
+
+    // Dismissed another way, its start card can't start it.
+    const gone = await create('Gone', 'Do it all.\nExpected cost: $50');
+    const goneCard = await card(gone.data.id);
+    assert.equal((await s.call(`/api/tickets/${gone.data.id}/status`, { status: 'closed' })).status, 200);
+    const late = await s.call(`/api/tickets/${gone.data.id}/answer`, { questionId: goneCard!.d.id, answers: [{ selected: ['Start'] }] });
+    assert.equal(late.status, 409, JSON.stringify(late.data));
 
     // A person starting their own minion is their OK.
     const own = await s.call(`/api/projects/${p.id}/tickets`, { title: 'Mine', message: `Huge.\nExpected cost: $${START_CARD_USD * 3}` });

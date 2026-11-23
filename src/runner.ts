@@ -1156,6 +1156,8 @@ export class Runner {
     this.resumes.cancelNetWait(ticketId);
     this.resumes.cancelKillWait(ticketId);
     this.store.deleteSetting(closeCancelledKey(ticketId));
+    // Nor wait on its start card (#1674): a person's reopen is its start.
+    this.store.deleteSetting(startHoldKey(ticketId));
     // A reopened minion shouldn't offer the go-ahead it had when dismissed.
     if (this.store.getTicket(ticketId)?.replies) this.store.updateTicket(ticketId, { replies: null });
     this.setStatus(ticketId, 'closed');

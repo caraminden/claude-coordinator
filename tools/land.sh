@@ -2326,7 +2326,7 @@ else
   left=$((QUIET_LIMIT - $(busy_waited)))
   # The line behind gives up on a phase unchanged for DEPLOY_QUEUE_STALL (15 min), but the wait for a slot (up to the
   # busy limit's rest, plus citadel-heavy's load and memory waits) and then the suite can take longer: so the phase moves
-  # on every LAND_PHASE_EVERY s meanwhile. Gone with land.sh: it looks for it at each tick.
+  # on every LAND_PHASE_EVERY s meanwhile, until the reruns take it. Gone with land.sh: it looks for it at each tick.
   (
     exec 9>&- 7>&- 6>&-
     trap 'exit 0' TERM
@@ -2334,6 +2334,9 @@ else
     while :; do
       read -rt "${LAND_PHASE_EVERY:-300}" <> <(:) || [ $? -gt 128 ] || exit 0 # a sleep with no child left behind: only a timeout ticks
       kill -0 $$ 2>/dev/null || exit 0
+      # Once run-tests.sh's reruns (or anything else) set the phase, it is theirs: waits.ts reads their counts from it.
+      mapfile -t l 2>/dev/null <"${DEPLOY_QUEUE_TICKET:-/dev/null}" || exit 0
+      [[ ${l[3]:-} == "running the tests since $started"* ]] || exit 0
       queue_phase "running the tests since $started, $(((SECONDS - t0) / 60)) min so far"
     done
   ) &

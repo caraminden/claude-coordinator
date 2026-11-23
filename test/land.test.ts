@@ -935,6 +935,30 @@ test('a CI fallback moves its phase on while it waits for a heavy slot and runs,
   assert.ok(during.some((p) => / min so far/.test(p)), `the phase moved on while it waited: ${[...phases].join(' | ')}`);
 });
 
+test("a CI fallback's phase ticker leaves the reruns' phase alone once they start, so the line behind reads their counts", async () => {
+  const r = setup();
+  const c = ci(r);
+  // Fails in the full run; alone, it takes a few ticks and passes, so the reruns' phase has to outlast them.
+  r.commit(r.wt, 'test/slow-flake.test.mjs', flaky + "if (Number(readFileSync(f, 'utf8')) > 1) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);\n");
+  const queue = join(r.live, '.git', 'cc-deploy', 'queue');
+  const seen: string[] = [];
+  const look = setInterval(() => {
+    for (const f of tickets(join(r.live, '.git', 'cc-deploy'))) try {
+      const p = readFileSync(join(queue, f), 'utf8').split('\n')[3];
+      if (p && p !== seen.at(-1)) seen.push(p);
+    } catch {}
+  }, 50);
+  try {
+    const res = await c.runAsync({ LAND_CI: '0', LAND_SMOKE: '0', FLAKY_COUNT: join(r.dir, 'count'), FLAKY_FAIL: '1', LAND_PHASE_EVERY: '0.3' }, () => {});
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /slow-flake\.test\.mjs: failed in the full run, passed alone/);
+  } finally { clearInterval(look); }
+  const rerun = seen.findIndex((p) => p.startsWith('rerunning 1 failed test file since'));
+  assert.ok(rerun >= 0, `the reruns set their phase: ${seen.join(' | ')}`);
+  // What follows is the land's own next step (a flake goes again from the rebase), never the ticker's count.
+  assert.doesNotMatch(seen[rerun + 1] ?? '', /^running the tests since/, `the ticker wrote over the reruns' phase: ${seen.join(' | ')}`);
+});
+
 test('a perigee red with a real failure beside a flake refuses at once, with no retry (#1360)', () => {
   const r = setup();
   const c = ci(r);

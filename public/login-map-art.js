@@ -20,7 +20,8 @@
   globalThis.citadelMap = { draw };
 
   // The splash on every cold open (Cara, 2026-11-21: "Hold at least 1 s", "Every cold open"): it stays until the app has
-  // drawn something and at least 1 s has passed, then fades. Here and not in app.js, so it also lifts when app.js fails
+  // drawn something and at least 1 s has passed since the load began (Ctrl+R included), then fades: the 1 s plays while
+  // the app loads under it, never on top (Cara, 2026-11-23, #1697: "1 s, then fade"). Here and not in app.js, so it also lifts when app.js fails
   // to load and boot-guard.js says so; after 10 s it lifts anyway, so the top bar's ↻ is never out of reach.
   const splash = document.getElementById('splash');
   if (!splash) return;
@@ -41,7 +42,6 @@
       if (m.content === top(m)) m.content = m.dataset.plain;
     }
   };
-  const shown = performance.now();
   let lifting = false;
   const lift = () => {
     if (lifting) return;
@@ -50,7 +50,7 @@
       untint();
       splash.classList.add('gone');
       setTimeout(() => splash.remove(), still.matches ? 0 : 600);
-    }, Math.max(0, shown + 1000 - performance.now()));
+    }, Math.max(0, 1000 - performance.now())); // performance.now() counts from the navigation's start
   };
   setTimeout(lift, 10_000);
   addEventListener('DOMContentLoaded', () => {

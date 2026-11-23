@@ -71,7 +71,7 @@ REMINDER: read-only, 3-line return.
 - Grunts over-call "weak" on table-driven files and on source-grep lints, and under-call "redundant" across
   batches. Re-read every whole-file WEAK and every cross-file REDUNDANT call yourself.
 - **Check a suspect by mutation.** Flip one line in the code, run that one test file, then put the file back with
-  `git show HEAD:./path > path`. The tripwire refuses checkout and stash over uncommitted work. Where running is
+  `git checkout -- path` (the tripwire saves its diff under $TMPDIR first; stash stays refused). Where running is
   costly, reasoning it through from the code is enough. Say which you did.
 - **Look before calling these weak:**
   - a test that only shells out to a script's self-test may be the only thing that runs it;

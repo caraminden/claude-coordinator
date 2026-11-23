@@ -4,7 +4,7 @@
 // the app's services; reading SSH keys, the Claude, Codex or GitHub login, the service's env file or any
 // process's environment, or printing the turn's own; state.db opened writable and the credentials
 // table; other people's homes and Claude runners; signing Claude in; running server.ts against the
-// live data) and the git habits every scheme shares (src/tripwire-git.ts: no path checkout, restore or stash; no checkout,
+// live data) and the git habits every scheme shares (src/tripwire-git.ts: no stash; a file checkout or restore only once its diff is saved, no folder or other ref; no checkout,
 // merge or reset over uncommitted changes, outside a scratch clone in $TMPDIR and --ours/--theirs mid-merge;
 // no soft or mixed reset onto commits the branch lacks, a squash that reverts them; no push to main or plain force push from a minion's
 // worktree), and says why and what to do instead.

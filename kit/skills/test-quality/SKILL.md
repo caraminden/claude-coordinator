@@ -127,8 +127,8 @@ Grunts per batch, your own re-check, then a report and a card.
 ## Check before calling it done
 
 1. **Mutate by hand.** Flip two or three risky lines of the diff (a comparison, a boundary, a
-   branch, a guard), run that test file, confirm a test goes red each time, then undo the flip by hand (the tripwire refuses
-   `git checkout -- <path>` and `git stash` over uncommitted work). A
+   branch, a guard), run that test file, confirm a test goes red each time, then undo the flip with `git checkout -- <path>`
+   (the tripwire saves its diff under $TMPDIR first; `git stash` stays refused). A
    survivor is a gap, or a change that can't alter behaviour: decide which, and say. Reviewing
    read-only, name the line you would flip and the test that should catch it instead.
 2. **Run the full check commands.**

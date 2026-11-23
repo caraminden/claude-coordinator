@@ -5,6 +5,7 @@
 # added them, their fixed versions failed 0 of 60, and the same ten runs one after another caught 0 or 1.
 #
 #   tools/burn-in.sh <test file> [copies]   one file, its copies at once (tools/flake-proof.sh's batches: the same shape)
+#                                           (outside CI: at most 4, queued as one heavy job, niced: below)
 #   tools/burn-in.sh --ship <base>          a ship's CI run (tests.yml): the test files it adds or changes since <base>,
 #                                           then up to BURN_IN_MAPPED (3) tests tools/affected-map.txt maps its changed
 #                                           source files to or that import them (in turns), one file after another, within
@@ -107,7 +108,17 @@ fi
 if [ "${1:-}" != --ship ]; then
   file=${1:?usage: burn-in.sh <test file> [copies] | burn-in.sh --ship <base>}
   [ -f "$file" ] || { echo "burn-in: no such file: $file"; exit 1; }
-  burn_one "$file" "${2:-$copies}" "${BURN_IN_FILE_LIMIT:-600}" && exit 0
+  n=${2:-$copies}
+  # Outside CI (a turn chasing a flake on perigee), the whole run is one queued heavy job: a slot and the load gate
+  # (CITADEL_HEAVY_JUDGE=0: the light-job path would skip both), nice 19, at most 4 copies (#1725; 10 at once, seven
+  # times over, stalled the server on Nov 23). --here: the CI hand-off doesn't carry BURN_IN_QUEUED, and a CI re-run is
+  # the way to 10. shortcut: other scripts that call a heavy tool by its absolute path still dodge tools/heavy-shim.
+  if [ -z "${RUNNER_TEMP:-}${CI:-}${GITHUB_ACTIONS:-}${BURN_IN_QUEUED:-}" ]; then
+    [ "$n" -le 4 ] 2>/dev/null || { echo "burn-in: $n copies at once is CI's; here it runs 4, queued for a heavy slot (re-run CI for $n)"; n=4; }
+    BURN_IN_QUEUED=1 BURN_IN_NICE=${BURN_IN_NICE:-nice -n 19} CITADEL_HEAVY_JUDGE=0 CITADEL_HEAVY_WHAT="burn-in $file x$n" \
+      exec "$tools/citadel-heavy" --here bash "$tools/burn-in.sh" "$file" "$n"
+  fi
+  burn_one "$file" "$n" "${BURN_IN_FILE_LIMIT:-600}" && exit 0
   exit 1
 fi
 

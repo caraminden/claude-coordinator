@@ -3,7 +3,7 @@
 // failing 1 copy in 10 is refused, a clean file passes, and a change with no test in it starts no copy. Since #1456 a
 // changed source file also burns in the tests that import it, directly or through one more file, nearest first.
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -141,4 +141,41 @@ test("#795's change picks its importers on the real repo, and can't reach fresh-
   assert.equal(picks[0], 'test/db-writer.test.ts', 'the importer named like the changed file comes first');
   assert.ok(picks.includes('test/own-writes.test.ts'), r.stdout);
   assert.ok(!picks.includes('test/fresh-session.test.ts'), r.stdout);
+});
+
+// #1725: a burn-in run by hand on perigee (no CI env) is one queued heavy job: citadel-heavy with its slot and load
+// gate forced, each copy nice 19, at most 4 copies. On CI (tests.yml, the flake proof) it runs as before.
+const NO_CI = { RUNNER_TEMP: '', CI: '', GITHUB_ACTIONS: '', BURN_IN_QUEUED: '', BURN_IN_NICE: '', CITADEL_HEAVY_HELD: '' };
+function single(env: Record<string, string>) {
+  const dir = repo({ 'test/clean.test.ts': CLEAN });
+  // A fake citadel-heavy beside the script logs how it was called, then runs the command; a fake nice logs each copy.
+  writeFileSync(join(dir, 'tools/citadel-heavy'), `#!/usr/bin/env bash\necho "heavy JUDGE=$CITADEL_HEAVY_JUDGE $*" >>${dir}/log\nshift\nexec "$@"\n`);
+  writeFileSync(join(dir, 'nice'), `#!/usr/bin/env bash\necho "nice $1 $2" >>${dir}/log\nshift 2\nexec "$@"\n`);
+  for (const f of ['tools/citadel-heavy', 'nice']) chmodSync(join(dir, f), 0o755);
+  const r = spawnSync('bash', ['tools/burn-in.sh', 'test/clean.test.ts'], { cwd: dir, encoding: 'utf8', env: { ...process.env, TMPDIR: join(dir, '..'), PATH: `${dir}:${process.env.PATH}`, ...env } });
+  return { r, log: existsSync(join(dir, 'log')) ? readFileSync(join(dir, 'log'), 'utf8') : '' };
+}
+
+test('outside CI, a burn-in queues as one heavy job, clamps 10 copies to 4 and nices each copy (#1725)', () => {
+  const { r, log } = single({ ...NO_CI, BURN_IN_COPIES: '10' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: 10 copies at once is CI's; here it runs 4, queued for a heavy slot/m);
+  assert.match(log, /^heavy JUDGE=0 --here bash .*\/tools\/burn-in\.sh test\/clean\.test\.ts 4$/m, 'one citadel-heavy job, the slot forced');
+  assert.equal(log.match(/^heavy /gm)?.length, 1, 'the queued run does not queue again');
+  assert.equal(log.match(/^nice -n 19$/gm)?.length, 4, 'four copies, each nice 19');
+  assert.match(r.stdout, /^burn-in: test\/clean\.test\.ts: 4 of 4 copies at once passed/m);
+});
+
+test('outside CI, 4 copies or fewer run as asked, still queued', () => {
+  const { r, log } = single({ ...NO_CI, BURN_IN_COPIES: '2' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.doesNotMatch(r.stdout, /CI's; here it runs/);
+  assert.match(log, /^heavy JUDGE=0 --here bash .* test\/clean\.test\.ts 2$/m);
+});
+
+test('on CI a burn-in runs as before: no citadel-heavy, no clamp, no nice of its own', () => {
+  const { r, log } = single({ ...NO_CI, GITHUB_ACTIONS: 'true', BURN_IN_COPIES: '6' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(log, '', 'neither citadel-heavy nor nice was called');
+  assert.match(r.stdout, /^burn-in: test\/clean\.test\.ts: 6 of 6 copies at once passed/m);
 });

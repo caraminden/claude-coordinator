@@ -71,6 +71,9 @@ The goal is not a clean repro but a **higher reproduction rate**. Loop the trigg
 runs and flake hunts run on a CI or desktop runner (the scheme's stress or flake workflow;
 `citadel:run-on-windows` for Windows), because perigee carries every agent and the Citadel
 server: a Peek minion's 100-run loop there helped push its load to 88.
+A CI burn-in that failed (copies of one test file at once) is reproduced with one copy on perigee, one
+local `tools/burn-in.sh <file>` (4 copies, queued as a heavy job), or a CI re-run; never 10 copies at
+once by hand or in a loop (#1702's seven 10-copy rounds stalled Citadel, Nov 23).
 
 **On perigee, starve the test, not the box** (Josh, 2026-11-12, "Cap it: quota mode"). When a stress
 run does run there, in a window a person picked, it runs one suite at a time, off-hours. Load comes from a

@@ -12,11 +12,12 @@ const script = readFileSync(join(root, 'tools/flake-proof.sh'), 'utf8');
 const yml = readFileSync(join(root, '.github/workflows/flake-proof.yml'), 'utf8');
 
 test('burners and test runs start under nice -n 19', () => {
+  // CITADEL_HEAVY_HELD: off CI the burn-in queues for a heavy slot (#1725); here it runs as if already holding one.
   const dir = mkdtempSync(join(tmpdir(), 'fp-nice-'));
   writeFileSync(join(dir, 'nice'), `#!/usr/bin/env bash\necho "nice $*" >>${dir}/log\nshift 2\nexec "$@"\n`);
   chmodSync(join(dir, 'nice'), 0o755);
   writeFileSync(join(dir, 'x.test.ts'), "import { test } from 'node:test'; test('ok', () => {});\n");
-  const r = spawnSync('bash', [join(root, 'tools/flake-proof.sh'), join(dir, 'x.test.ts'), '1', '1'], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_TOKEN: '' }, encoding: 'utf8' });
+  const r = spawnSync('bash', [join(root, 'tools/flake-proof.sh'), join(dir, 'x.test.ts'), '1', '1'], { env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GH_TOKEN: '', CITADEL_HEAVY_HELD: '1' }, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const lines = readFileSync(join(dir, 'log'), 'utf8').trim().split('\n');
   assert.ok(lines.some((l) => l.startsWith('nice -n 19 bash -c')), 'the burner is niced');

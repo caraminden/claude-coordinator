@@ -201,7 +201,7 @@ export class ContraptionReader implements Reader {
       } else if (s?.ahead) {
         // Say what sends it out (#629's Deploy button and auto-deploy) rather than "a deploy call" (Cara, 2026-11-12: "What does 'waiting for a deploy call' mean?").
         const what = s.ahead === 1 ? '1 change on main isn\'t' : `${s.ahead} changes on main aren't`;
-        const text = `${what} live yet: they go out with the next deploy, from the Deploy button or by auto-deploy once main sits still for 5 minutes`;
+        const text = `${what} live yet: they go out with the next deploy, from the Deploy button or by auto-deploy, at once unless more ships are coming`;
         lead = { stage: 'call', since: s.oldest ?? (this.d.now ?? Date.now)(), usual: null, waitingOn: text, text };
       }
       const changes: Change[] = lead ? (s?.changes ?? []).map((c) => ({ ...c, ...lead })) : [];
@@ -900,11 +900,11 @@ export class ApkReader implements Reader {
         const name = main.name ?? `Release ${main.code}`;
         if (moving) lead = signing(moving);
         else if (signed) {
-          const text = `${name} is signed: it goes out with the Deploy button, or by auto-deploy within 5 minutes`;
+          const text = `${name} is signed: it goes out with the Deploy button, or by auto-deploy, at once unless more ships are coming`;
           lead = { stage: 'publish', since: span(signed).end ?? now, usual: null, waitingOn: text, text };
           tryIt = file(signed);
         } else {
-          const text = `${name} is on main, but its release run hasn't started: the Deploy button starts it, or auto-deploy once main sits still for 5 minutes`;
+          const text = `${name} is on main, but its release run hasn't started: the Deploy button starts it, or auto-deploy, at once unless more ships are coming`;
           lead = { stage: 'sign', since: feed.at, usual: null, waitingOn: text, text };
         }
       } else if (ahead?.commits.size) {

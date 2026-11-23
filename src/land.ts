@@ -764,7 +764,7 @@ export class LandHandoffs {
     const held = r.kind === 'restart' ? /^deploy: not live yet: .*the box is starved \(([^)]*)\).*?(live by about \d\d?:\d\d [A-Z]{3,4})/m.exec(run.output) : null;
     const where = r.kind === 'live' ? 'Live now.' : held ? `Waiting for the restart, held while the box is starved (${held[1]}): ${held[2]} at the latest.` : r.kind === 'restart' ? 'Waiting for the restart.' : into ? `Merged into ${into}, not live until the build ships.` : 'Shipped.';
     const strip = (s: string) => s.trim().replace(/[.\s]+$/, '');
-    // On main, the scheme's apps go out now rather than at auto-deploy's next quiet spell (#712), and the line says how.
+    // On main, the scheme's apps go out now rather than at auto-deploy's next tick (#712), and the line says how.
     const apps = !into && h.deploy !== false && this.d.deployOps ? (this.d.apps?.(id) ?? []) : [];
     if (apps.length) {
       store.updateTicket(id, { note: `shipped: deploying ${apps.join(', ')}` });

@@ -197,11 +197,12 @@ export class AutoDeploy {
         if (!head) continue;
         waiting.add(key);
         const m = this.moved.get(key);
+        if (!shipping.has(t.projectId)) shipping.set(t.projectId, !!this.d.shipping?.(t.projectId));
         if (!m || m.head !== head) {
-          this.moved.set(key, { head, at: now, first: m?.first ?? now });
+          // A head that was tried (failed, rolled back, pinned) spent its cap: the next one's counts from its own move.
+          this.moved.set(key, { head, at: now, first: m && this.saved().tried[key] !== m.head ? m.first : now });
           continue;
         }
-        if (!shipping.has(t.projectId)) shipping.set(t.projectId, !!this.d.shipping?.(t.projectId));
         if ((shipping.get(t.projectId) && now - m.first < MAX_WAIT_MS) || !this.isOn(t.projectId, t.id) || this.saved().tried[key] === head || this.starting.has(key) || this.d.held?.pinned(t.projectId, t.id)) continue;
         this.mark(key, head);
         this.moved.delete(key); // the next head starts a fresh cap

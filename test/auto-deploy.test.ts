@@ -206,3 +206,16 @@ test('a target rolled back to last green is left alone by auto-deploy and minion
   assert.deepEqual(w.started, ['app:peek by Josh at aaa']);
   assert.equal(w.held.pinned(3, 'app:peek'), null, "a person's deploy let go of the pin");
 });
+
+test('a tried head spends its cap: the next ship moving a failed target waits afresh while another is in line (#1736)', async () => {
+  const w = world();
+  await w.auto.tick();
+  await w.auto.tick(); // deployed at aaa, which then rolled back
+  w.set({ shipping: true });
+  w.pass(MAX_WAIT_MS * 2);
+  w.set({ head: 'bbb' });
+  await w.auto.tick();
+  await w.auto.tick();
+  assert.equal(w.started.length, 1, 'ship bbb landed with another behind it: waits');
+  assert.equal(w.auto.info(w.app)?.due, w.now() + MAX_WAIT_MS);
+});

@@ -1207,10 +1207,10 @@ const autoDeploy = new AutoDeploy({
   store, targets: () => targetFinder.list(), view: () => releases.view(() => true), held: lastGreen,
   failed: (t, why) => tellHome(t.projectId, `Auto-deploy of ${t.name} couldn't start: ${why}`),
   enabled: () => !services.opts.off,
-  // More is coming (#1736): a ship in the scheme's line, or a hand-off's land still running.
+  // More is coming (#1736): a ship in the scheme's line, or a hand-off not reported yet (its land running, or its own deploy about to start).
   shipping: (id) => {
     const at = lineFor(app, id);
-    return (!!at && readQueue(at.q, at.orderAt).length > 0) || landings.handoffs().some((t) => store.getTicket(t)?.project_id === id && landings.get(t)?.code === null);
+    return (!!at && readQueue(at.q, at.orderAt).length > 0) || landings.handoffs().some((t) => store.getTicket(t)?.project_id === id);
   },
   deployers: {
     contraption: {

@@ -264,7 +264,7 @@ test('the contraption reader: the deployed commit, main ahead waiting on a deplo
   await reader.refresh();
   [v] = reader.read();
   assert.equal(v.next?.stage, 'call');
-  assert.equal(v.next?.waitingOn, "2 changes on main aren't live yet: they go out with the next deploy, from the Deploy button or by auto-deploy once main sits still for 5 minutes");
+  assert.equal(v.next?.waitingOn, "2 changes on main aren't live yet: they go out with the next deploy, from the Deploy button or by auto-deploy, at once unless more ships are coming");
   assert.equal(v.next?.number, 2);
   assert.equal(v.next?.eta, null);
   assert.deepEqual(v.next?.stages.map((s) => s.name), ['call', 'build', 'drain', 'restart', 'live']);
@@ -501,7 +501,7 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   git(repo, 'commit', '-q', '-am', 'v6');
   await reader.refresh();
   [v] = reader.read();
-  const notStarted = "1.5 is on main, but its release run hasn't started: the Deploy button starts it, or auto-deploy once main sits still for 5 minutes";
+  const notStarted = "1.5 is on main, but its release run hasn't started: the Deploy button starts it, or auto-deploy, at once unless more ships are coming";
   assert.deepEqual([v.next?.stage, v.next?.waitingOn, v.next?.eta, v.next?.number], ['sign', notStarted, null, 6]);
   const bumped = git(repo, 'rev-parse', 'HEAD').toString().trim();
   assert.deepEqual(reader.pending(t), { step: 'dispatch', head: bumped }, 'runs signed before latest.json was written are not this release');
@@ -522,7 +522,7 @@ test('the APK reader: what latest.json serves is the release; a bump on main wai
   runs[0] = run(8, 'completed', 'success', now - 2 * m, now);
   await reader.refresh();
   [v] = reader.read();
-  assert.deepEqual([v.next?.stage, v.next?.waitingOn], ['publish', '1.5 is signed: it goes out with the Deploy button, or by auto-deploy within 5 minutes']);
+  assert.deepEqual([v.next?.stage, v.next?.waitingOn], ['publish', '1.5 is signed: it goes out with the Deploy button, or by auto-deploy, at once unless more ships are coming']);
   assert.deepEqual(reader.pending(t), { step: 'publish', run: runs[0], current: 5, main: { code: 6, name: '1.5' } });
   reader.tooOld(8);
   assert.deepEqual(reader.pending(t), { step: 'dispatch', head: bumped }, 'a run signed before the bump waits for a new run');

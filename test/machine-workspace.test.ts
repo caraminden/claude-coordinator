@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { until } from './wait.ts';
 // @ts-ignore: a plain .mjs the agent's computers download
-import { WorkspaceHost, expand, loadConfig, screenLine, screenState, workspaceReply } from '../public/machine-agent.mjs';
+import { WorkspaceHost, expand, joinScreenLine, leaveScreenLine, loadConfig, screenLine, screenState, workspaceReply } from '../public/machine-agent.mjs';
 import { JOB_WORDS } from '../src/machines.ts';
 
 // The agent's workspace tools against a real clone with a real origin, as on a laptop.
@@ -311,21 +311,25 @@ test('the screen\'s line (#1422): behind a live holder a screen task gets a plac
   assert.deepEqual(readdirSync(lineDir), [], 'and out of the line');
 });
 
-test('the screen\'s line serves CI jobs and minion tasks in arrival order', async () => {
+test('the screen\'s line serves CI jobs before minion tasks, each kind in arrival order', async () => {
   const ci = ciWaiter(process.ppid, Date.now() - 1000);
-  const queued = await boxCall('run_task', { workspace: 'peek', task: 'shell', wait: 0.2 });
-  assert.match(queued.text, /nobody has the screen this moment; 1 ahead of it, 2 in line/, 'the screen is free, but the CI job came first');
-  const id = jobId(queued.text);
-  // The CI job takes the screen and leaves the line, as screen-lock.ps1 does; the task is next.
+  const first = await boxCall('run_task', { workspace: 'peek', task: 'shell', wait: 0.2 });
+  assert.match(first.text, /nobody has the screen this moment; 1 ahead of it, 2 in line/, 'the screen is free, but the CI job came first');
+  const id = jobId(first.text);
+  // A second CI job that arrives after the task still goes ahead of it; a second task stays behind the first.
+  const later = ciWaiter(process.ppid, Date.now() + 5, 'ci-later');
+  const second = joinScreenLine(lockFile, 'a screenshot', 'someone');
+  const order = screenLine(lockFile).map((w: any) => w.what);
+  assert.deepEqual(order.slice(0, 2), ['desktop CI job ci-' + process.ppid, 'desktop CI job ci-later']);
+  assert.deepEqual(order.slice(2).map((w) => w.replace(/ in peek$/, '').replace(/^task shell.*/, 'task')), ['task', 'a screenshot']);
+  // Both CI jobs take the screen in turn and leave; the first task is then next, and a running task isn't pre-empted.
   holdLock(process.ppid, { what: 'desktop CI job ci-1', who: 'GitHub Actions (caraminden/peek-auras)' });
   rmSync(ci);
-  // A second CI job that arrives now queues behind the task.
-  const later = ciWaiter(process.ppid, Date.now() + 5, 'ci-later');
-  assert.match((await boxCall('job', { id, wait: 0.2 })).text, /desktop CI job ci-1 for GitHub Actions \(caraminden\/peek-auras\) has the screen.*; it is next, 2 in line/);
+  rmSync(later);
+  leaveScreenLine(second);
+  assert.match((await boxCall('job', { id, wait: 0.2 })).text, /desktop CI job ci-1 for GitHub Actions \(caraminden\/peek-auras\) has the screen.*; it is next, 1 in line/);
   rmSync(lockFile);
   assert.match((await boxCall('job', { id, wait: 10 })).text, /succeeded/);
-  assert.deepEqual(screenLine(lockFile).map((w: any) => w.token), ['ci-later'], 'the later CI job is still waiting, now first');
-  rmSync(later);
 });
 
 test('the screen\'s line drops waiters that died or went quiet, and keeps a fresh one it can\'t read yet', () => {

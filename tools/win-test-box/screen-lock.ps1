@@ -13,6 +13,9 @@
 # by when it arrived, and touches it every few seconds while it waits; only the first live one takes the lock,
 # so CI jobs and minions are served in arrival order. A waiter whose process is gone or whose file is a minute
 # old is dropped by whoever reads the line next (screenLine in machine-agent.mjs does the same).
+# CI goes first (#1669): every reader serves the first name of an ordinal sort, a CI job's name is <ms, 15 digits>-ci-<pid>
+# and a minion task's is t-<ms, 15 digits>-<token>, so CI jobs go ahead of every minion task and each kind keeps arrival
+# order. Nothing running is pre-empted. The sort is the whole rule, so an older agent or hook agrees with a newer one.
 # Works in Windows PowerShell 5.1 and PowerShell 7, whichever the runner picks.
 param([switch]$Install, [switch]$Take, [switch]$Release)
 $ErrorActionPreference = 'Stop'
@@ -137,6 +140,8 @@ if ($Take) {
   [IO.File]::WriteAllText($place, $mine, $utf8)
   $deadline = (Get-Date).AddMinutes(40)
   $told = ''
+  $toldAt = Get-Date
+  $began = Get-Date
   try {
     while ($true) {
       # Touch its place so the others see it is alive; put it back if it was dropped while this was slow.
@@ -148,8 +153,13 @@ if ($Take) {
       if (($ahead -eq 0 -or $late) -and (Take-Lock $late)) { Write-Host 'Took the screen lock.'; exit 0 }
       $held = Read-Lock
       $has = if ($held) { "$($held.what) for $($held.who) has it" } else { 'nobody has it this moment' }
-      $msg = "Waiting for the screen: $has; $(if ($ahead) { "$ahead ahead of this job" } else { 'this job is next' }), $($waiters.Count) in line."
-      if ($msg -ne $told) { Write-Host $msg; $told = $msg }
+      $msg = "Waiting for the Windows test box: $(if ($ahead) { "$ahead ahead" } else { 'this job is next' }), $has ($($waiters.Count) in line)."
+      # On a change, and again every minute so a long wait keeps showing in the job log.
+      if ($msg -ne $told -or ((Get-Date) - $toldAt).TotalSeconds -ge 60) {
+        Write-Host "$msg Waited $([int]((Get-Date) - $began).TotalMinutes) min so far."
+        if (-not $told) { Write-Host "::notice title=Waiting for the Windows test box::$msg" }
+        $told = $msg; $toldAt = Get-Date
+      }
       Start-Sleep -Seconds 2
     }
   } finally {

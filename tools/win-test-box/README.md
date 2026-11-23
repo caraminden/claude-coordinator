@@ -9,7 +9,7 @@ A Hyper-V VM on Cara's gaming PC (DESKTOP-G248IJ8) for native-app schemes (#369)
   - **CI:** each scheme's GitHub **desktop runner** (the `<slug>-desktop` label) runs its desktop jobs here.
   - **Minions:** Citadel's **machine agent** lends them the box's tools, so they can sync a branch, run a command, launch the app, take a screenshot and stop it (the `citadel:run-on-windows` skill).
 
-  Whoever comes second waits in **one line**, `C:\citadel-box\screen-line` (#1422): CI jobs and minion tasks are served in the order they arrived. A CI job waits up to 40 minutes. A minion's `run_task` gets its place in line and a job id, and starts once its turn comes. Both see who has the screen and how many wait, as does the box's entry on the Machines page. **One box serves every native-app scheme** (Cara's pick, 2026-11-07).
+  Whoever comes second waits in **one line**, `C:\citadel-box\screen-line` (#1422): **CI jobs go first** (#1669): a waiting CI job is served before any waiting minion task, whatever order they arrived in. CI jobs keep arrival order among themselves, and so do minion tasks. Nothing running is pre-empted: CI only goes first among those waiting. A CI job waits up to 40 minutes. While it waits, its log says "Waiting for the Windows test box: N ahead, <who> has it" at the start and again every minute. The hook runs inside the runner's "Set up job" step, so that is where the lines show; a job hook can't open a step of its own. A minion's `run_task` gets its place in line and a job id, and starts once its turn comes. Both see who has the screen and how many wait, as does the box's entry on the Machines page. **One box serves every native-app scheme** (Cara's pick, 2026-11-07).
 
 ## What it costs her PC
 
@@ -180,10 +180,10 @@ Stop-VM citadel-test-box; Remove-VMGpuPartitionAdapter -VMName citadel-test-box;
 The machine agent's side of the lock and the line is `tryScreenLock`, `screenLine` and `screenTurn` in `public/machine-agent.mjs`. It follows the same rules as `screen-lock.ps1`:
 - the lock file holds JSON `{pid, what, who, since, token}`, with `since` the time the screen was taken;
 - the lock is broken when its pid is gone, when it's over 2 hours old, or when it can't be read and is over a minute old;
-- the line is a folder beside the lock, with one file per waiter named `<arrival ms, 15 digits>-<token>.json`. The file holds the same JSON. Files sort by name, which is arrival order;
+- the line is a folder beside the lock, with one file per waiter named `<arrival ms, 15 digits>-<token>.json` for a CI job and `t-<arrival ms, 15 digits>-<token>.json` for a minion task. The file holds the same JSON. Every reader serves the first name of an ordinal sort, and `t` sorts after every digit, so CI jobs go first and each kind keeps arrival order;
 - each waiter touches its file every 2 s. A reader drops a waiter whose pid is gone, or whose file is over a minute old. It skips an unreadable file under a minute old, since that one may be mid-write;
 - only the first live waiter takes the lock (create-new), then removes its file. A CI job past 40 minutes takes it without waiting its turn.
 
-An older agent or hook that predates the line ignores it, and only the lock still keeps two users off the screen at once.
+An older agent or hook that predates the line ignores it, and only the lock still keeps two users off the screen at once. One that predates CI-first still follows the same name sort: an old agent's minion files have no `t-`, so they sort among CI jobs by arrival until the agent updates (that agent is the only thing out of order). The hook's log lines need the new `screen-lock.ps1` copied into `C:\citadel-box`; the ordering itself needs only the new agent.
 
 Change both together.

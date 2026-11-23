@@ -421,8 +421,11 @@ export function tryScreenLock(file, mine) {
 
 /**
  * The screen's one waiting line (#1422), shared with the CI job hooks: a folder beside the lock with a file per
- * waiter, named by when it arrived, so both sides serve it in arrival order. Each waiter touches its file while it
- * waits; one whose pid is gone or whose file is a minute old is dropped by whoever reads the line next.
+ * waiter, named by when it arrived, and every reader serves the first name in an ordinal sort. CI jobs go first
+ * (Cara, 2026-11-22: "CI goes first"): theirs is `<ms, 15 digits>-<token>`, a minion's `t-<ms, 15 digits>-<token>`,
+ * and "t" sorts after every digit, so any version of the agent or the hook agrees without comparing notes. Each
+ * waiter touches its file while it waits; one whose pid is gone or whose file is a minute old is dropped by
+ * whoever reads the line next. A waiting task is never pre-empted: a running holder keeps the lock.
  */
 export const screenLineDir = (file) => join(dirname(file), 'screen-line');
 
@@ -431,7 +434,7 @@ export function joinScreenLine(file, what, who) {
   const dir = screenLineDir(file);
   mkdirSync(dir, { recursive: true });
   const mine = { pid: process.pid, what, who, since: Date.now(), token: randomBytes(6).toString('hex') };
-  const place = join(dir, `${String(mine.since).padStart(15, '0')}-${mine.token}.json`);
+  const place = join(dir, `t-${String(mine.since).padStart(15, '0')}-${mine.token}.json`);
   writeFileSync(place, JSON.stringify(mine));
   return { mine, place };
 }

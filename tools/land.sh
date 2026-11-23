@@ -620,6 +620,10 @@ prep_check() {
   say "prep: $branch will conflict with ${cause:-a ship} once $fb's ship train ships; conflicted files: ${files:-none named}; record the fix against $top from $base to $head"
   return 0
 }
+# Every gh call of any landing is counted in $state/gh-calls (epoch seconds, the landing's branch and the endpoint, no tokens), so
+# the next time the 5,000 an hour run out, `cut -d" " -f2 "$state/gh-calls" | sort | uniq -c` says which landing asked how often (#1655).
+# At the top level: hub() and own-check.sh's own_hub call it in every copy, the rebased one and --into too.
+gh_count() { [ "$1" != gh ] || printf '%s %s %s\n' "$(date +%s)" "${branch:-?}" "${2:-} ${3:-}" >>"$state/gh-calls" 2>/dev/null || true; }
 # The rebased copy is the same process, so the ticket it was started with (none, from a land.sh older than the
 # line) still names it, and it holds both locks already (an exec keeps its fds); only the trap that removes the
 # ticket at the end has to be set again.
@@ -638,9 +642,6 @@ if [ -z "$resumed" ]; then
       early_check main "waiting in line"
     }
     # A ship's own check (#1567): with others in line and the check runner free, its CI runs first on that runner.
-    # Every gh call of any landing is counted in $state/gh-calls (epoch seconds, the landing's branch and the endpoint, no tokens), so
-    # the next time the 5,000 an hour run out, `cut -d" " -f2 "$state/gh-calls" | sort | uniq -c` says which landing asked how often (#1655).
-    gh_count() { [ "$1" != gh ] || printf '%s %s %s\n' "$(date +%s)" "${branch:-?}" "${2:-} ${3:-}" >>"$state/gh-calls" 2>/dev/null || true; }
     [ "$mode" != land ] || [ ! -f "$tools/own-check.sh" ] || { . "$tools/own-check.sh"; own_check; }
     queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
     unset -f queue_wait_check
@@ -727,7 +728,7 @@ esac
 # Bash goes on reading the file it started from, so a rebase that replaced land.sh would land with the old one (#500):
 # go on in the rebased one instead. It keeps the lock on fd 9 (and the build's on fd 6), and its own rebase finds
 # nothing to do. Not --into: that holds no deploy lock for the copy to find, and only tests and moves a branch.
-[ "$mode" = into ] || [ -n "$quiet" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} LAND_BUILD=$build LAND_PRE=$pre exec bash "$tools/land.sh" "${args[@]}"
+[ "$mode" = into ] || [ -n "$quiet" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} LAND_BUILD=$build LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}"
 
 # ADR numbers at ship time (#1221): a docs/adr/NNNN-*.md this branch adds whose number main (a feeder: the build) took
 # while it waited goes to the next free number, with its links and the branch's own "ADR NNNN" lines, in one commit.
@@ -2310,7 +2311,8 @@ else
   say "=========================================================================="
   retro_log "ci fallback · $branch · $why"
   say "running the tests"
-  queue_phase "running the tests since $(date +%H:%M)"
+  started=$(date +%H:%M)
+  queue_phase "running the tests since $started"
   land_mark fallback fallback
   # A file the tests saw that isn't in the commit (never git-added, or ignored) means deploy.sh tests it again.
   [ -z "$(git status --porcelain --ignored)" ] && tested=$tip || tested=
@@ -2324,7 +2326,23 @@ else
   left=$((QUIET_LIMIT - $(busy_waited)))
   CITADEL_HEAVY_WHAT="land.sh's suite for $branch (CI fallback)" CITADEL_HEAVY_MAX_WAIT=${LAND_HEAVY_MAX_WAIT:-$((left > 60 ? left : 60))} \
     CITADEL_TEST_CONCURRENCY=${CITADEL_TEST_CONCURRENCY:-$half} DEPLOY_TEST_CPU_WEIGHT=${DEPLOY_TEST_CPU_WEIGHT-20} \
+  # The line behind gives up on a phase unchanged for DEPLOY_QUEUE_STALL (15 min), but the wait for a slot (up to the
+  # busy limit's rest, plus citadel-heavy's load and memory waits) and then the suite can take longer: so the phase moves
+  # on every LAND_PHASE_EVERY s meanwhile. Gone with land.sh: it looks for it at each tick.
+  (
+    exec 9>&- 7>&- 6>&-
+    trap 'exit 0' TERM
+    t0=$SECONDS
+    while :; do
+      read -rt "${LAND_PHASE_EVERY:-300}" <> <(:) || [ $? -gt 128 ] || exit 0 # a sleep with no child left behind: only a timeout ticks
+      kill -0 $$ 2>/dev/null || exit 0
+      queue_phase "running the tests since $started, $(((SECONDS - t0) / 60)) min so far"
+    done
+  ) &
+  ticker=$!
     "$tools/citadel-heavy" --here --heavy "$tools/run-tests.sh" "$log" 9>&- 6>&- || trc=$? # without the lock's fd: a run that outlives a killed land.sh must not hold it
+  kill "$ticker" 2>/dev/null || true
+  wait "$ticker" 2>/dev/null || true
   [ "$trc" != 75 ] || retry_in_place "perigee's heavy slot was taken"
   [ "$trc" != 75 ] || refuse "CI and perigee both busy, try again: CI: $why; perigee's heavy slot was taken just before the suite could start, and stayed taken (citadel-heavy's lines above), so no test ran. So $untouched"
   [ "$trc" != 3 ] || refuse "no test ran: the test run could not write its files (the run-tests line above says which), so $untouched"
@@ -2369,7 +2387,7 @@ if [ "$(git -C "$SOURCE" rev-parse main)" != "$old" ]; then
   train_drop
   flock -u 7
   exec 7>&-
-  LAND_REBASED=1 LAND_REDO=1 LAND_BUILD=$build exec bash "$tools/land.sh" "${args[@]}"
+  LAND_REBASED=1 LAND_REDO=1 LAND_BUILD=$build LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}"
 fi
 
 # A rider that left the line while the train was tested (its minion was stopped) doesn't ship: the train ships up to

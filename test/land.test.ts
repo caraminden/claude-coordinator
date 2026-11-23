@@ -856,6 +856,85 @@ test('a perigee red of flakes only goes again once: green lands, red again refus
   }
 });
 
+// Ultra review of the ship scripts, 2026-11-23 (#1693): the copy of land.sh a rebase hands over to (#500), or that
+// starts over after main moved under the restart ahead, is the same hand-off. It counts its gh calls as the first copy
+// does, and keeps the hand-off's one retry in place and its flake keeps rather than starting them over.
+// newerLandOnMain: the worktree runs its own tools/land.sh, as a minion does, and main has a newer one its rebase brings in.
+function newerLandOnMain(r: ReturnType<typeof setup>) {
+  for (const f of readdirSync(join(repo, 'tools'), { withFileTypes: true })) if (f.isFile() && f.name !== 'deploy.sh') copyFileSync(join(repo, 'tools', f.name), join(r.source, 'tools', f.name));
+  git(r.source, 'add', '-A');
+  git(r.source, 'commit', '-qm', 'real tools');
+  git(r.wt, 'rebase', '-q', 'main');
+  const script = join(r.source, 'tools', 'land.sh');
+  writeFileSync(script, readFileSync(script, 'utf8') + '# newer\n');
+  git(r.source, 'commit', '-qam', 'newer land.sh');
+  return (extra: Record<string, string>) => spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), PATH: `${join(r.dir, 'bin')}:${process.env.PATH}`, LAND_CI: '1', LAND_CI_POLL: '0.1', TEST_RUNS: join(r.dir, 'test-runs'), ...extra } });
+}
+
+test('the copy a rebase hands over to counts its gh calls and keeps the flake keeps the hand-off has used', () => {
+  const r = setup();
+  ci(r);
+  const run = newerLandOnMain(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = run({ FAKE_CI: 'red', FAKE_LOG: 'flakes', LAND_FLAKE_KEPT: '2', COORDINATOR_SHARED_DIR: join(r.dir, 'shared') });
+  assert.equal(res.status, 1, res.stderr);
+  const state = join(r.live, '.git', 'cc-deploy');
+  assert.match(readFileSync(join(state, 'gh-calls'), 'utf8'), /^\d+ ticket\/1-x api repos\/\S+\/actions\/runs\?head_sha=/m, "the rebased copy's CI asks are counted (#1655)");
+  assert.doesNotMatch(res.stderr + (existsSync(join(state, 'ci.err')) ? readFileSync(join(state, 'ci.err'), 'utf8') : ''), /command not found/);
+  assert.match(res.stderr, /only flakes failed again \(test\/busy\.test\.ts, test\/slow\.test\.ts\), but it has kept its place 2 times already, so it is refused this time/);
+  assert.doesNotMatch(res.stderr, /keeping its place in line/, 'the rebased copy counts the 2 keeps the first copy was handed');
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+});
+
+test('the copy a rebase hands over to keeps the one retry in place the hand-off has used', () => {
+  const r = setup();
+  ci(r);
+  const run = newerLandOnMain(r);
+  r.commit(r.wt, 'test/flaky.test.mjs', flaky);
+  const main = git(r.source, 'rev-parse', 'main');
+  const res = run({ LAND_CI: '0', LAND_SMOKE: '0', FLAKY_COUNT: join(r.dir, 'count'), FLAKY_FAIL: '1', LAND_RETRIED: 'an earlier refusal', COORDINATOR_SHARED_DIR: join(r.dir, 'shared') });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /refused by the pipeline again \(failed in the full run but passed alone on perigee: test\/flaky\.test\.mjs\), after its one retry in place \(an earlier refusal\)/);
+  assert.equal(git(r.source, 'rev-parse', 'main'), main);
+});
+
+test('the copy that starts over after main moved under the restart ahead keeps the one retry in place the hand-off has used', () => {
+  const r = setup();
+  ci(r);
+  newerLandOnMain(r);
+  // Its first run moves main on (as a restart ahead rolled back does), so the gate's commit is stale and land.sh starts
+  // over from the rebase; its second full run fails on a flake, which passes alone.
+  r.commit(r.wt, 'test/move.test.mjs', "import { execFileSync } from 'node:child_process';\nimport { readFileSync, writeFileSync } from 'node:fs';\nconst f = process.env.MOVE_COUNT;\nif (f) {\n  let n = 0;\n  try { n = Number(readFileSync(f, 'utf8')); } catch {}\n  writeFileSync(f, String(++n));\n  if (n === 1) execFileSync('git', ['-C', process.env.MOVE_MAIN, 'commit', '-q', '--allow-empty', '-m', 'someone else']);\n  if (n === 2) throw new Error('flaky');\n}\n");
+  const res = spawnSync('bash', [join(r.wt, 'tools', 'land.sh')], { cwd: r.wt, encoding: 'utf8', timeout: 90_000, env: { ...env, DEPLOY_LIVE: r.live, DEPLOY_SOURCE: r.source, DEPLOY_NOTE: join(r.dir, 'note'), LAND_CI: '0', LAND_SMOKE: '0', MOVE_COUNT: join(r.dir, 'count'), MOVE_MAIN: r.source, LAND_RETRIED: 'an earlier refusal', COORDINATOR_SHARED_DIR: join(r.dir, 'shared') } });
+  assert.equal(res.status, 1, res.stderr);
+  assert.match(res.stderr, /while this waited \(the restart ahead was rolled back\): rebasing ticket\/1-x onto it and testing again/);
+  assert.match(res.stderr, /refused by the pipeline again \(failed in the full run but passed alone on perigee: test\/move\.test\.mjs\), after its one retry in place \(an earlier refusal\)/);
+});
+
+// A CI fallback's suite first waits for perigee's heavy slot, up to the busy limit and citadel-heavy's load and memory
+// waits, longer than the 15 min the line behind waits on an unchanged phase: so the phase moves on meanwhile.
+test('a CI fallback moves its phase on while it waits for a heavy slot and runs, so the line behind sees progress', async () => {
+  const r = setup();
+  const c = ci(r);
+  r.commit(r.wt, 'b.txt', 'mine\n');
+  mkdirSync(join(r.dir, 'heavy'));
+  const queue = join(r.live, '.git', 'cc-deploy', 'queue');
+  const phases = new Set<string>();
+  const look = setInterval(() => {
+    for (const f of tickets(join(r.live, '.git', 'cc-deploy'))) try { phases.add(readFileSync(join(queue, f), 'utf8').split('\n')[3]); } catch {}
+  }, 50);
+  try {
+    // A box citadel-heavy calls busy (any pressure at all), for 3 s before it starts anyway.
+    // Its own slot folder: with no past runs to judge by, the suite takes a slot rather than run at once.
+    const res = await c.runAsync({ LAND_CI: '0', LAND_SMOKE: '0', CITADEL_HEAVY_DIR: join(r.dir, 'heavy'), CITADEL_HEAVY_MAX_PRESSURE: '0', CITADEL_HEAVY_LOAD_WAIT: '3', CITADEL_HEAVY_POLL: '0.2', LAND_PHASE_EVERY: '0.5' }, () => {});
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /the box is busy/);
+  } finally { clearInterval(look); }
+  const during = [...phases].filter((p) => p.startsWith('running the tests since'));
+  assert.ok(during.some((p) => / min so far/.test(p)), `the phase moved on while it waited: ${[...phases].join(' | ')}`);
+});
+
 test('a perigee red with a real failure beside a flake refuses at once, with no retry (#1360)', () => {
   const r = setup();
   const c = ci(r);

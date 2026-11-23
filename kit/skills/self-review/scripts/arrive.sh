@@ -5,16 +5,27 @@ cap() { head -n "$1"; }
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "not in a git repo: run the commands in section 1 by hand"; exit 0; }
 cd "$root" || exit 0
 # The base is the first argument, else the build branch this one grew from (a feeder: build/<n>, the newest
-# local one that is an ancestor of HEAD and not yet in main), else main.
+# local one not yet in main that shares a commit with HEAD that main lacks; a feeder behind its build's tip
+# still counts), else main.
 base=${1:-}
 if [ -z "$base" ]; then
   for b in $(git for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/heads/build/*'); do
-    if git merge-base --is-ancestor "$b" HEAD 2>/dev/null && ! git merge-base --is-ancestor "$b" main 2>/dev/null; then base=$b; break; fi
+    git merge-base --is-ancestor "$b" main 2>/dev/null && continue
+    mb=$(git merge-base "$b" HEAD 2>/dev/null) || continue
+    git merge-base --is-ancestor "$mb" main 2>/dev/null || { base=$b; break; }
   done
 fi
 [ -n "$base" ] || base=main
 git rev-parse --verify -q "$base" >/dev/null || { echo "no local branch '$base': run the commands in section 1 by hand"; exit 0; }
 echo "branch: $(git rev-parse --abbrev-ref HEAD)  head: $(git rev-parse --short HEAD)  base: $base $(git rev-parse --short $base)"
+# A feeder's reviewers read the build's tip (section 2, "A feeder"): say what other feeders merged since it started.
+case $base in build/*)
+  behind=$(git rev-list --count HEAD.."$base")
+  if [ "$behind" != 0 ]; then
+    echo "BEHIND: $base has $behind commits this branch lacks (other feeders' merges). Rebase onto it before the review (section 2, \"A feeder\"); newest first, at most 15:"
+    git log --oneline --no-merges HEAD.."$base" | cap 15
+  fi ;;
+esac
 dirty=$(git status --porcelain | wc -l | tr -d ' ')
 [ "$dirty" != 0 ] && echo "UNCOMMITTED: $dirty paths; the stat below leaves them out. Commit, then re-run the commands in section 1"
 echo "--- git diff --stat $base...HEAD (last 40 lines)"

@@ -40,3 +40,30 @@ test('a feeder branch from build/7 is sized against build/7, not main', () => {
   out = arrive(dir);
   assert.match(out, /base: main /);
 });
+
+test('a feeder behind its build still gets build/7 as its base, and is told what merged since', () => {
+  const dir = join(root, 'behind');
+  spawnSync('git', ['init', '-q', '-b', 'main', dir]);
+  commit(dir, 'a.txt');
+  git(dir, 'switch', '-q', '-c', 'build/7');
+  commit(dir, 'build-claims.md');
+  git(dir, 'switch', '-q', '-c', 'ticket/3-mine');
+  commit(dir, 'mine.txt');
+  let out = arrive(dir);
+  assert.doesNotMatch(out, /BEHIND/, 'level with the build: nothing to say');
+  // Another feeder merges into build/7 after this one started.
+  git(dir, 'switch', '-q', 'build/7');
+  commit(dir, 'other-feeder.txt');
+  git(dir, 'switch', '-q', 'ticket/3-mine');
+  out = arrive(dir);
+  assert.match(out, /base: build\/7 /);
+  assert.match(out, /BEHIND: build\/7 has 1 commits/);
+  assert.match(out, /other-feeder\.txt/, 'the merge it lacks is listed');
+  assert.match(out, /mine\.txt/);
+  // A plain branch from main shares no build commit, so it stays on main.
+  git(dir, 'switch', '-q', '-c', 'ticket/4-plain', 'main');
+  commit(dir, 'plain.txt');
+  out = arrive(dir);
+  assert.match(out, /base: main /);
+  assert.doesNotMatch(out, /BEHIND/);
+});

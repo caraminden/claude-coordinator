@@ -77,6 +77,25 @@ quoted whole from your system prompt) plus:
 loaded): the Grunt can't resolve it itself. Name lenses instead of "by the diff" only to add one
 the triggers miss. Give it the code, not your view of it: no summary of what you think is fine.
 
+**A feeder** (your base is `build/<n>`) is reviewed on the build's tip, not on the commit it started
+from: bugs where feeders meet only show beside the other feeders' merged code (Peek Auras' Build 4
+found 2 Must fix and 5 Should fix at those seams in the whole-build review, too late, after four
+feeders had closed). Right before starting the review Grunts:
+
+1. Save `git merge-base HEAD build/<n>`, run `git rebase build/<n>`, and when that brought commits in
+   (the facts' `BEHIND:` line lists them), re-run the tests you touched.
+2. Every reviewer's brief gets the same two lines: the kit's reviewer and each of the scheme's own
+   reviewing agents your diff triggers (Project facts or the "Kit reviewers" line names them, with
+   their trigger paths). The lines are: the change is `git diff build/<n>...HEAD`, and "Other
+   feeders merged into the build since this one started: `git log --oneline <saved>..build/<n>`;
+   check where this change meets their code."
+3. Fix real findings in your branch (section 3) before you merge in. A finding in another feeder's code
+   goes to the build minion (`message_minion`).
+
+If `build/<n>` takes another feeder's merge before yours and that merge changes a file your diff
+changes, rebase and run the scheme's own reviewing agents again on the new tip; not the rest. The
+build minion's whole-build review at the end stays as it is.
+
 **Deep only:** start a `citadel:finding-checker` Grunt, again with `run_in_background: false` (its pinned Opus at medium; on a high-risk change set `model: fable`, `effort: medium` on the call: dropping a
 real finding in risky code is the expensive miss), briefed with the Grunt line, the same branch
 and worktree, and the numbered Must and Should findings, without the reviewer's reasoning (and

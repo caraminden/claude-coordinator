@@ -3,11 +3,24 @@
 // element's computed style written inline, wrapped in an SVG <foreignObject> and drawn onto a canvas. An SVG drawn as
 // an image loads nothing from outside, so <img> sources are inlined first; what still can't be drawn (another site's
 // picture, a <canvas>, a browser that refuses to read the canvas back) leaves the crop out, and the named reference
-// still goes. Resolves to a PNG blob, or null.
+// still goes. Resolves to a PNG blob, or null. The desktop app takes an exact screenshot of cropBox() instead (#1665).
+// Served to apps beside rail.js too (app-menu.js), so it stays standalone: no imports.
 
 const MARGIN = 16; // px of what's around the part, so the crop shows where it sits
 const MAX_SIDE = 1600; // px on the longer side, before devicePixelRatio
 const MAX_NODES = 4000; // a pick of a whole page copies too much: no crop
+
+// What a click snaps to: the nearest named part (#1122) or control, row or heading, not the bare text inside it.
+export const PICKABLE = '[data-part], button, a[href], input, select, textarea, summary, label, [role=button], [role=tab], [role=menuitem], [role=option], [role=row], li, tr, h1, h2, h3, h4, .msg, .thread-row';
+
+/** The part plus its margin, kept inside the window, in the window's CSS pixels; null when there's too little or too much of it. */
+export function cropBox(target) {
+  const box = target.getBoundingClientRect();
+  const x0 = Math.max(box.left - MARGIN, 0), y0 = Math.max(box.top - MARGIN, 0);
+  const x1 = Math.min(box.right + MARGIN, innerWidth), y1 = Math.min(box.bottom + MARGIN, innerHeight);
+  const w = Math.round(x1 - x0), h = Math.round(y1 - y0);
+  return w < 4 || h < 4 || w > MAX_SIDE * 2 || h > MAX_SIDE * 2 ? null : { left: Math.round(x0), top: Math.round(y0), width: w, height: h };
+}
 
 export async function cropPart(target) {
   try {
@@ -161,4 +174,41 @@ async function inlineImage(img) {
   } catch {
     return null;
   }
+}
+
+/**
+ * The chip's short label and the text a message carries for a pointed-at `el`: what it is, the page (`page`, at
+ * `where`), the window's size and the theme. Citadel's pages (pick.js) and apps (app-menu.js) both name parts this way.
+ */
+export function describePart(el, page, where) {
+  const part = el.dataset?.part;
+  const within = el.parentElement?.closest('[data-part]')?.dataset.part;
+  const name = shorten(el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || el.getAttribute('alt') || el.innerText || buttonValue(el) || '');
+  const kind = kindOf(el);
+  const size = `${innerWidth}×${innerHeight}`;
+  const theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  const what = name ? `${kind} "${name}"` : kind;
+  const label = [name || part || kind, page, `${size} ${theme}`].join(' · ');
+  const text = [
+    `📍 Pointed at: ${what}${part ? ` (part ${part})` : ''}${within ? `, inside part ${within}` : ''}`,
+    `On: ${page} (${where}) · window ${size} · ${theme} theme`,
+  ].join('\n');
+  return { label, text };
+}
+
+// A field's typed value never goes in the message (it could be a password or a token, and sent past looksSecret): only
+// a button input's value, which is its label.
+const buttonValue = (el) => (el instanceof HTMLInputElement && /^(button|submit|reset)$/.test(el.type) ? el.value : '');
+
+const shorten = (t) => {
+  const s = String(t).replace(/\s+/g, ' ').trim();
+  return s.length > 60 ? `${s.slice(0, 59)}…` : s;
+};
+
+function kindOf(el) {
+  const role = el.getAttribute('role');
+  if (role) return role;
+  const tag = el.tagName.toLowerCase();
+  return { a: 'link', button: 'button', input: 'field', textarea: 'text box', select: 'dropdown', summary: 'section toggle', li: 'list item', tr: 'table row', label: 'label' }[tag]
+    ?? (/^h\d$/.test(tag) ? 'heading' : el.classList.contains('thread-row') ? 'minion row' : el.classList.contains('msg') ? 'message' : tag);
 }

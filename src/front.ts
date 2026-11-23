@@ -70,7 +70,7 @@ export function ownPath(url: string): { redirect: string } | { url: string } | n
 }
 
 /** Citadel UI's files, which contraptions load from /apps/_citadel/ (on their own hosts too), each with an ETag. */
-export const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|extlinks\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
+export const KIT_FILE = /^\/apps\/_citadel\/((rail|drawers)\.(js|d\.ts)|appswitch\.js|reorder\.js|extlinks\.js|app-menu\.js|pick-crop\.js|theme\.css|ui\/[a-z][a-z0-9-]*\.(js|css|d\.ts))$/;
 /** Bodies smaller than this go out as they are: gzip isn't worth it. */
 export const MIN_GZIP_BYTES = 1400;
 

@@ -3,14 +3,16 @@
 // size and the theme, whose text goes with the message. Started by the 🎯 beside Attach (composer.js), the overview
 // drawer's line on a phone (project.js) or Alt+Shift+P anywhere. From a page with no chat, it goes to the scheme's
 // Taskmaster (Josh, Q2). The right-click menu's "Point at this" and "Point and draw…" (context-menu.js, #1663) skip the
-// dim and point at what was right-clicked, through pointAtElement().
+// dim and point at what was right-clicked, through pointAtElement(). An app in Citadel's frame points through its own
+// menu (app-menu.js, #1665), which sends what it pointed at here. In the desktop app the crop is a screenshot of the
+// window (desktop/main.cjs capturePage), exact even inside an app's frame.
 import { h, taskmasterName, threadHref, view } from './base.js';
 import { toast } from './ui/status.js';
-import { cropPart } from './pick-crop.js';
+import { PICKABLE, cropBox, cropPart, describePart } from './pick-crop.js';
 import { pointAt } from './composer.js';
+import { FRAME } from './rail.js';
 
-// What a click snaps to: the nearest named part (#1122) or control, row or heading, not the bare text inside it.
-export const PICKABLE = '[data-part], button, a[href], input, select, textarea, summary, label, [role=button], [role=tab], [role=menuitem], [role=option], [role=row], li, tr, h1, h2, h3, h4, .msg, .thread-row';
+export { PICKABLE };
 
 let active = null;
 
@@ -18,7 +20,8 @@ let active = null;
 function target() {
   const chatId = view?.main === 'chat' ? view.id : view?.coordinator?.id;
   if (!chatId) { toast('Open a scheme first: what you point at goes to one of its chats', { tone: 'warn' }); return null; }
-  return { chatId, coordinator: chatId === view.coordinator?.id ? view.coordinator : null };
+  const coordinator = chatId === view.coordinator?.id ? view.coordinator : null;
+  return { chatId, coordinator, ticket: coordinator ?? view.ticket };
 }
 
 /** Point at `el` with no dim step (the right-click menu, #1663); `draw` opens its crop in the drawing tools. */
@@ -67,7 +70,9 @@ export function startPick() {
     const el = under(e.clientX, e.clientY);
     if (!el) return;
     show(el);
-    // The dim stays a moment to take the click that follows a tap, so it can't reach what's under it.
+    // The dim stays a moment to take the click that follows a tap, so it can't reach what's under it. A screenshot
+    // (the desktop app) would catch it and the box: they go see-through.
+    if (capture) { dim.style.setProperty('background', 'transparent'); box.hidden = true; }
     hint.remove();
     removeEventListener('keydown', onKey, true);
     setTimeout(stop, 300);
@@ -98,48 +103,36 @@ export function startPick() {
 }
 
 async function deliver(el, chatId, coordinator, draw = false) {
-  // The note is in the message box at once; the crop (a screenshot of the part, which takes a moment) joins it when ready.
-  const cropping = cropPart(el); // started before anything moves, so it sees the page as it was picked
+  // The note is in the message box at once; the crop (a picture of the part, which takes a moment) joins it when ready.
+  // It starts before anything moves, so it sees the page as it was picked; a screenshot is taken before anything moves.
+  const cropping = capture ? captureBox(cropBox(el)) : cropPart(el);
+  if (capture) await cropping;
   pointAt(chatId, null, describe(el));
   if (coordinator && !(view?.main === 'chat' && view.id === chatId)) location.hash = threadHref(coordinator);
   const crop = await cropping;
   if (crop) pointAt(chatId, crop, null, { draw });
 }
 
+/** The desktop app's screenshot of the window (preload.cjs), or null in a browser. */
+const capture = window.citadelDesktop?.capture ?? null;
+
+/**
+ * A PNG of `box` (the window's CSS pixels) from the desktop app, once the page has drawn without what just closed (the
+ * menu); null if there's no box or it fails.
+ */
+async function captureBox(box) {
+  if (!box) return null;
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  try {
+    const png = await capture(box);
+    return png?.byteLength ? new Blob([png], { type: 'image/png' }) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The chip's short label and the text the message carries: page, part, screen size, theme. */
-export function describe(el) {
-  const part = el.dataset?.part;
-  const within = el.parentElement?.closest('[data-part]')?.dataset.part;
-  const name = shorten(el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder') || el.getAttribute('alt') || el.innerText || buttonValue(el) || '');
-  const kind = kindOf(el);
-  const size = `${innerWidth}×${innerHeight}`;
-  const theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-  const page = pageName();
-  const what = name ? `${kind} "${name}"` : kind;
-  const label = [name || part || kind, page, `${size} ${theme}`].join(' · ');
-  const text = [
-    `📍 Pointed at: ${what}${part ? ` (part ${part})` : ''}${within ? `, inside part ${within}` : ''}`,
-    `On: ${page} (${location.hash || '#/'}) · window ${size} · ${theme} theme`,
-  ].join('\n');
-  return { label, text };
-}
-
-// A field's typed value never goes in the message (it could be a password or a token, and sent past looksSecret): only
-// a button input's value, which is its label.
-const buttonValue = (el) => (el instanceof HTMLInputElement && /^(button|submit|reset)$/.test(el.type) ? el.value : '');
-
-const shorten = (t) => {
-  const s = String(t).replace(/\s+/g, ' ').trim();
-  return s.length > 60 ? `${s.slice(0, 59)}…` : s;
-};
-
-function kindOf(el) {
-  const role = el.getAttribute('role');
-  if (role) return role;
-  const tag = el.tagName.toLowerCase();
-  return { a: 'link', button: 'button', input: 'field', textarea: 'text box', select: 'dropdown', summary: 'section toggle', li: 'list item', tr: 'table row', label: 'label' }[tag]
-    ?? (/^h\d$/.test(tag) ? 'heading' : el.classList.contains('thread-row') ? 'minion row' : el.classList.contains('msg') ? 'message' : tag);
-}
+export const describe = (el) => describePart(el, pageName(), location.hash || '#/');
 
 export function pageName() {
   if (!view) return 'Citadel';
@@ -147,6 +140,30 @@ export function pageName() {
   const main = typeof view.main === 'string' ? view.main : view.kind;
   return `${String(main ?? 'Citadel').replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase())} page`;
 }
+
+/**
+ * A framed app's menu (app-menu.js): `point` { note: { label, text }, draw, crop?: Blob, rect? }, with the app's own crop or,
+ * in the desktop app, the part's place in the frame to screenshot; `inspect` { x, y } opens DevTools there (desktop app).
+ * The chip goes to the chat under the frame (or the Taskmaster), which then shows.
+ */
+const frameRect = (r) => (r && ['left', 'top', 'width', 'height'].every((k) => Number.isFinite(r[k])) ? r : null);
+addEventListener('message', async (e) => {
+  const frame = [...document.querySelectorAll('#frames iframe')].find((f) => f.contentWindow === e.source);
+  const d = e.data;
+  if (!frame || d?.protocol !== FRAME) return;
+  const at = frame.getBoundingClientRect();
+  if (d.type === 'inspect' && Number.isFinite(d.x) && Number.isFinite(d.y)) window.citadelDesktop?.inspect?.(at.left + d.x, at.top + d.y);
+  if (d.type !== 'point' || typeof d.note?.label !== 'string' || typeof d.note?.text !== 'string') return;
+  const to = target();
+  if (!to) return;
+  const note = { label: d.note.label.slice(0, 200), text: d.note.text.slice(0, 2000) };
+  const r = frameRect(d.rect);
+  const crop = d.crop instanceof Blob && d.crop.type === 'image/png' ? d.crop
+    : capture && r ? await captureBox({ left: at.left + r.left, top: at.top + r.top, width: r.width, height: r.height }) : null;
+  pointAt(to.chatId, null, note);
+  if (to.ticket) location.hash = threadHref(to.ticket);
+  if (crop) pointAt(to.chatId, crop, null, { draw: !!d.draw });
+});
 
 // Alt+Shift+P anywhere starts it on a desktop; the drawer line and the 🎯 do on a phone.
 addEventListener('keydown', (e) => {

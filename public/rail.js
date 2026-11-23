@@ -14,6 +14,10 @@
 import { dragReorder, inOrder, moved } from './reorder.js';
 import { optimistic } from './ui/optimistic.js';
 import { appHash, appLink, classifyLink, mountLinkHandler } from './extlinks.js';
+import { menu, mountAppMenu } from './app-menu.js';
+
+/** An app's own right-click items (app-menu.js, #1665), also on `window.citadel.menu`. */
+export { menu };
 
 const NARROW = '(max-width: 800px)'; // drawers.js's breakpoint
 const EDGE = 44; // px from the left edge a contraption's swipe has to start in, as in drawers.js
@@ -26,7 +30,8 @@ let root = new URL(inContraption ? '../../c/' : './', import.meta.url);
  * Citadel and a contraption's page may be on different origins (src/apps.ts, APPS_DOMAIN), so they talk only by
  * postMessage, each checking the other window is the one it framed or was framed by. Contraption → Citadel: hello
  * { installed }, rail { open }, bar (its .cui-topbar, frames.js), key and blur (Alt+`, appswitch.js). Citadel →
- * contraption: state { hasRail, narrow, own, apps, domain }, strip { vars }. A contraption's installed window → Citadel's page in its
+ * contraption: state { hasRail, narrow, own, apps, domain, title, desktop }, strip { vars }. Its right-click menu (app-menu.js) to
+ * Citadel: point { note, draw, crop | rect }, inspect { x, y } (pick.js). A contraption's installed window → Citadel's page in its
  * layer: layer { app }, go { app }; and back: layer-close. Nothing secret goes in one, so the target is '*'.
  */
 export const FRAME = 'citadel-frame-1';
@@ -35,7 +40,7 @@ const post = (win, type, data = {}) => win?.postMessage({ protocol: FRAME, type,
 const framedIn = typeof window === 'object' && window.parent !== window ? window.parent : null;
 
 // Inside Citadel's frame (frames.js): Citadel's rail is the rail, and this page's switcher opens it. Its state comes from Citadel.
-let hostState = { hasRail: false, own: [], apps: {}, domain: null };
+let hostState = { hasRail: false, own: [], apps: {}, domain: null, title: null, desktop: false };
 const host = inContraption && framedIn ? {
   openRail: () => post(framedIn, 'rail', { open: true }),
   closeRail: () => post(framedIn, 'rail', { open: false }),
@@ -145,7 +150,11 @@ export const hasRail = () => (host ? host.hasRail() && narrow.matches : !!nav);
 const frameWindows = () => [...document.querySelectorAll('#frames iframe')].map((f) => f.contentWindow);
 function tellFrames(to = frameWindows()) {
   if (inContraption) return;
-  for (const w of to) post(w, 'state', { hasRail: !!nav, narrow: !!narrow?.matches, own: ownHosts(), apps: appHosts(), domain: appsDomain() });
+  const desktop = !!window.citadelDesktop; // the desktop app (desktop/preload.cjs), whose preload a frame doesn't get
+  for (const w of to) {
+    const name = [...document.querySelectorAll('#frames iframe')].find((f) => f.contentWindow === w)?.dataset.app;
+    post(w, 'state', { hasRail: !!nav, narrow: !!narrow?.matches, own: ownHosts(), apps: appHosts(), domain: appsDomain(), title: titles.get(name) ?? null, desktop });
+  }
 }
 
 /** The hosts that are Citadel's own: its page, and each contraption's own host (#827). Links to them stay in Citadel. */
@@ -391,6 +400,7 @@ const atCitadel = () => root.origin === location.origin;
 
 /** Each app's own address, https://<name>.<domain>/, from `mine` when Citadel serves apps on their own hosts (APPS_DOMAIN, #827). */
 const shortUrls = new Map();
+const titles = new Map(); // each app's name to its title, for its menu's "From <app>" line
 
 /**
  * The rail's entries, or null when Citadel didn't answer (no answer, or a 5xx from it or its proxy while it restarts).
@@ -409,6 +419,7 @@ const fetchItems = async () => {
       mine = mine?.apps ?? [];
     }
     shortUrls.clear();
+    for (const c of mine ?? []) if (typeof c?.title === 'string') titles.set(c.name, c.title);
     for (const c of mine ?? []) if (c?.url) shortUrls.set(c.name, c.url);
     if (!inContraption) tellFrames(); // a frame that loaded before this answer has no app hosts yet
     // A drop still saving: the rail keeps it, though this answer may predate it.
@@ -635,7 +646,7 @@ if (typeof document !== 'undefined') {
       }
     } else if (host && isMessage(e, framedIn) && d.type === 'state') {
       // A framed contraption: Citadel's rail and window, as Citadel says.
-      hostState = { hasRail: !!d.hasRail, own: Array.isArray(d.own) ? d.own.filter((x) => typeof x === 'string') : [], apps: d.apps && typeof d.apps === 'object' ? d.apps : {}, domain: typeof d.domain === 'string' ? d.domain : null };
+      hostState = { hasRail: !!d.hasRail, own: Array.isArray(d.own) ? d.own.filter((x) => typeof x === 'string') : [], apps: d.apps && typeof d.apps === 'object' ? d.apps : {}, domain: typeof d.domain === 'string' ? d.domain : null, title: typeof d.title === 'string' ? d.title : null, desktop: !!d.desktop };
       if (narrow.matches !== !!d.narrow) {
         narrow.matches = !!d.narrow;
         narrow.dispatchEvent(new Event('change'));
@@ -818,6 +829,16 @@ if (typeof document !== 'undefined' && host) {
   forwardKeys();
   // Leaving the page: the next one may have no bar (or no rail.js to say so).
   addEventListener('pagehide', () => post(framedIn, 'bar', { title: '', bar: null, controls: [], color: null }));
+}
+
+// The right-click menu on an app's page (app-menu.js): Point goes up to Citadel's chat box when it frames the page.
+if (typeof document !== 'undefined' && inContraption) {
+  mountAppMenu({
+    framed: !!host,
+    title: () => hostState.title ?? titles.get(showing()) ?? (document.title || 'this app'),
+    desktop: () => !!host && hostState.desktop,
+    post: (type, data) => post(framedIn, type, data),
+  });
 }
 
 // Last, so the styles above are defined when a framed page draws its handle straight away.

@@ -272,15 +272,30 @@ test('--into: a merge of only build-claims.md, or of only light paths, runs no c
   assert.deepEqual(b.ranFiles(), [], 'no check ran');
   git(b.wts[0], 'reset', '-q', '--hard', 'build/1');
   b.commit(b.wts[0], 'docs/a.md', 'docs\n');
-  const docs = b.run(1, '--into', 'build/1', 'docs/a.md');
+  const docs = b.run(1, '--into', 'build/1');
   assert.equal(docs.status, 0, docs.stderr);
   assert.match(docs.stderr, /changes only light paths \(docs\/a\.md\), so no check ran/);
-  assert.deepEqual(b.ranFiles(), [], 'not even the named file');
+  assert.deepEqual(b.ranFiles(), []);
+  // The build minion's claims and a doc in one merge: still light.
+  git(b.wts[2], 'merge', '-q', '--ff-only', 'build/1');
+  b.commit(b.wts[2], 'docs/retro.md', 'retro\n');
+  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt docs/ f3.txt\n');
+  const both = b.run(3, '--into', 'build/1');
+  assert.equal(both.status, 0, both.stderr);
+  assert.match(both.stderr, /changes only light paths \(docs\/retro\.md\), so no check ran/);
+  assert.deepEqual(b.ranFiles(), []);
+  // A test file named runs, light paths or not.
+  git(b.wts[0], 'rebase', '-q', 'build/1');
+  b.commit(b.wts[0], 'docs/b.md', 'docs\n');
+  const named = b.run(1, '--into', 'build/1', 'docs/b.md');
+  assert.equal(named.status, 0, named.stderr);
+  assert.doesNotMatch(named.stderr, /no check ran/);
+  assert.deepEqual(b.ranFiles(), ['docs/b.md'], 'a named test file still runs');
   b.commit(b.wts[0], 'f1.txt', 'code\n');
   const code = b.run(1, '--into', 'build/1', 'f1.txt');
   assert.equal(code.status, 0, code.stderr);
   assert.doesNotMatch(code.stderr, /no check ran/);
-  assert.deepEqual(b.ranFiles(), ['f1.txt'], "a feeder's code change still runs its check");
+  assert.deepEqual(b.ranFiles(), ['docs/b.md', 'f1.txt'], "a feeder's code change still runs its check");
 });
 
 test('--into: with no lanes map, only a build-claims.md-only merge skips the check; docs still run it', () => {

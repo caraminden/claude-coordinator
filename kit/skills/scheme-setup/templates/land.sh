@@ -23,7 +23,7 @@
 #       is already under the branch), runs the named test files through CHECK_FILE_CMD (with none named, or no
 #       CHECK_FILE_CMD: CHECK_LIGHT, else CHECK), and moves build/<n> by compare-and-swap. No CI, no line, no push:
 #       it waits only for other runs on the same build (a lock per build). A merge of light paths alone (build-claims.md,
-#       or what the LANES map marks light) runs no check (#1684).
+#       and what the LANES map marks light) that names no test files runs no check (#1684).
 #   tools/land.sh --into build/<n> --full           the build minion's merge of $BRANCH: build/<n> must already be
 #       under its branch (it ran git merge build/<n>; no rebase, which would flatten the build's merges), then the
 #       full CHECK and CI on land/<branch>, as --verify runs them, then the same compare-and-swap. Out of the line.
@@ -455,8 +455,8 @@ land_git() {
     -c "merge.land-ship.driver=bash '$merge_dir/land.sh' --merge $side %O %A %B %P" "$@"
 }
 
-# Lanes (the header at LANES). lane_of <base> <commit> <map's revision>: prints "<lane> <the path that decided it>"
-# for the paths <commit> changes since it forked from <base>, by the map as that revision has it.
+# Lanes (the header at LANES). lane_of <base> <commit> <map's revision> [<path to leave out>]: prints "<lane> <the path
+# that decided it>" for the paths <commit> changes since it forked from <base>, by the map as that revision has it.
 # The pipeline's paths, one pattern a line (the header at PIPELINE_FILES), its list as of <revision>: they never ride a
 # batch, keep fast mode's full gate, and take the full lane.
 pipeline_pats() {
@@ -477,7 +477,7 @@ lane_of() {
   done < <(git show "$3:$LANES" 2>/dev/null)
   mapfile -t pipe < <(pipeline_pats "$3")
   while IFS= read -r f; do
-    [ -n "$f" ] || continue
+    [ -n "$f" ] && [ "$f" != "${4:-}" ] || continue
     for p in "${pipe[@]}"; do case $f in $p) echo "full $f"; return 0 ;; esac; done
     l=full
     for i in "${!pats[@]}"; do
@@ -1307,8 +1307,9 @@ case $mode in
     # This run changes the claims: its mark, until it ends (claims_inflight).
     if [ "$mode" = into ] && ! git diff --quiet "$(git merge-base "refs/heads/$build" HEAD)" HEAD -- build-claims.md; then
       claims_flag=$(claims_mark).$$
-      queue_proc $$ >"$claims_flag"
-      trap 'rm -f "$claims_flag"' EXIT
+      trap 'rm -f "$claims_flag" "$claims_flag-new"' EXIT
+      # Written whole, then moved into place: a feeder reading it half-written would take it for a dead one's.
+      queue_proc $$ >"$claims_flag-new" && mv -f "$claims_flag-new" "$claims_flag"
     fi
     ;;
 esac
@@ -2469,14 +2470,16 @@ if [ "$mode" = into ] || [ "$mode" = full ]; then
   tip=$(git rev-parse HEAD)
   if [ "$mode" = into ]; then
     # A feeder runs only what it touched: its test files through CHECK_FILE_CMD, else the light check, else CHECK.
-    # A merge of light paths alone runs none (#1684): build-claims.md, the build minion's plan that never ships, or
-    # what the lanes map marks light (docs).
+    # A merge of light paths alone that names no test files runs none (#1684): build-claims.md, the build minion's
+    # plan that never ships, and what the lanes map marks light (docs).
     chk=${CHECK_LIGHT:-$CHECK} light=''
-    if [ -z "$(git diff --no-renames --name-only "$bbase" "$tip" -- . ':!build-claims.md')" ]; then
-      git diff --quiet "$bbase" "$tip" -- build-claims.md || light=build-claims.md
-    elif [ -n "$LANES" ]; then
-      read -r into_lane light < <(lane_of "$bbase" "$tip" "refs/heads/$BRANCH")
-      [ "$into_lane" = light ] || light=''
+    if [ ${#files[@]} -eq 0 ]; then
+      if [ -z "$(git diff --no-renames --name-only "$bbase" "$tip" -- . ':!build-claims.md')" ]; then
+        git diff --quiet "$bbase" "$tip" -- build-claims.md || light=build-claims.md
+      elif [ -n "$LANES" ]; then
+        read -r into_lane light < <(lane_of "$bbase" "$tip" "refs/heads/$BRANCH" build-claims.md)
+        [ "$into_lane" = light ] || light=''
+      fi
     fi
     if [ -n "$light" ]; then
       chk=''

@@ -1,5 +1,6 @@
 // Select text in a message to act on it (#1133): Reply to this (a quote in the chat box), Ask on the side (/btw with the
 // quote) and Copy link (to that exact message). A plain click does nothing new; the menu is fixed, so it never moves the chat.
+// The right-click menu offers the same list (selectionActions, #1663).
 import { h, jumpHref, view } from './base.js';
 import { toast } from './ui/status.js';
 
@@ -31,47 +32,50 @@ export function readSelection(log) {
   return { text, first, last, rect, single: first === last };
 }
 
-export function selectActions(log, form) {
+/**
+ * What can be done with a selection `s` (readSelection's) in a chat whose composer is `form`: one list that the select
+ * bar and the right-click menu (context-menu.js, #1663) both draw, so neither has its own copy. Each is
+ * { id, label, short (the bar's word), title, icon, run }.
+ */
+export function selectionActions(s, form) {
   const textarea = form.querySelector('textarea');
+  const done = () => getSelection()?.removeAllRanges();
+  const put = (value) => {
+    textarea.value = value;
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    done();
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  };
+  const id = idOf(s.first);
+  return [
+    { id: 'reply', label: 'Reply to this', short: 'Reply', title: 'Quote this in the chat box', icon: '❝', run: () => {
+      const q = quoteOf(s.text);
+      put(textarea.value.trim() ? `${textarea.value.replace(/\s+$/, '')}\n\n${q}` : q);
+    } },
+    // Aside is the composer's own (minions only); a selection across two messages offers only Reply.
+    s.single && form.querySelector('.side-ask') && { id: 'aside', label: 'Ask on the side', title: 'Start a side question with this quote', icon: '💬', run: () => put(`/btw ${quoteOf(s.text)}`) },
+    s.single && id && { id: 'link', label: 'Copy link', title: 'Copy a link to this message', icon: '🔗', run: () => {
+      const url = new URL(jumpHref(view.ticket, id), location.href).href;
+      navigator.clipboard?.writeText(url).then(() => toast('Link to this message copied'), () => toast('Could not copy the link'));
+      done();
+    } },
+  ].filter(Boolean);
+}
+
+export function selectActions(log, form) {
   const menu = h('div', { class: 'select-menu', role: 'toolbar', 'aria-label': 'Actions for the selected text', hidden: true });
   document.body.append(menu);
   let current = null;
   // The menu must not take the selection away when it is pressed.
   menu.addEventListener('mousedown', (e) => e.preventDefault());
   menu.addEventListener('pointerdown', (e) => e.preventDefault());
-  const done = () => { getSelection()?.removeAllRanges(); hide(); };
-  const reply = () => {
-    const q = quoteOf(current.text);
-    textarea.value = textarea.value.trim() ? `${textarea.value.replace(/\s+$/, '')}\n\n${q}` : q;
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    done();
-    textarea.focus();
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-  };
-  const aside = () => {
-    textarea.value = `/btw ${quoteOf(current.text)}`;
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-    done();
-    textarea.focus();
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-  };
-  const link = () => {
-    const url = new URL(jumpHref(view.ticket, idOf(current.first)), location.href).href;
-    navigator.clipboard?.writeText(url).then(() => toast('Link to this message copied'), () => toast('Could not copy the link'));
-    done();
-  };
   const hide = () => { menu.hidden = true; current = null; };
-  const btn = (label, title, fn) => h('button', { type: 'button', class: 'small secondary', title, onclick: fn }, label);
   const show = () => {
     const s = readSelection(log);
     if (!s) return hide();
     current = s;
-    const id = idOf(s.first);
-    const buttons = [btn('Reply', 'Quote this in the chat box', reply)];
-    // Aside is the composer's own (minions only); a selection across two messages offers only Reply.
-    if (s.single && form.querySelector('.side-ask')) buttons.push(btn('Ask on the side', 'Start a side question with this quote', aside));
-    if (s.single && id) buttons.push(btn('Copy link', 'Copy a link to this message', link));
-    menu.replaceChildren(...buttons);
+    menu.replaceChildren(...selectionActions(s, form).map((a) => h('button', { type: 'button', class: 'small secondary', title: a.title, onclick: () => { a.run(); hide(); } }, a.short ?? a.label)));
     menu.hidden = false;
     const narrow = matchMedia('(max-width: 800px)').matches;
     menu.classList.toggle('bar', narrow);

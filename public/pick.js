@@ -2,23 +2,37 @@
 // they mean, and the chat's message box gets a crop of it (pick-crop.js) and a chip naming the page, the part, the screen
 // size and the theme, whose text goes with the message. Started by the 🎯 beside Attach (composer.js), the overview
 // drawer's line on a phone (project.js) or Alt+Shift+P anywhere. From a page with no chat, it goes to the scheme's
-// Taskmaster (Josh, Q2).
+// Taskmaster (Josh, Q2). The right-click menu's "Point at this" and "Point and draw…" (context-menu.js, #1663) skip the
+// dim and point at what was right-clicked, through pointAtElement().
 import { h, taskmasterName, threadHref, view } from './base.js';
 import { toast } from './ui/status.js';
 import { cropPart } from './pick-crop.js';
 import { pointAt } from './composer.js';
 
 // What a click snaps to: the nearest named part (#1122) or control, row or heading, not the bare text inside it.
-const PICKABLE = '[data-part], button, a[href], input, select, textarea, summary, label, [role=button], [role=tab], [role=menuitem], [role=option], [role=row], li, tr, h1, h2, h3, h4, .msg, .thread-row';
+export const PICKABLE = '[data-part], button, a[href], input, select, textarea, summary, label, [role=button], [role=tab], [role=menuitem], [role=option], [role=row], li, tr, h1, h2, h3, h4, .msg, .thread-row';
 
 let active = null;
+
+/** The chat a pick goes to, now: this chat, or the scheme's Taskmaster from a page with no chat. Null (and a toast) with neither. */
+function target() {
+  const chatId = view?.main === 'chat' ? view.id : view?.coordinator?.id;
+  if (!chatId) { toast('Open a scheme first: what you point at goes to one of its chats', { tone: 'warn' }); return null; }
+  return { chatId, coordinator: chatId === view.coordinator?.id ? view.coordinator : null };
+}
+
+/** Point at `el` with no dim step (the right-click menu, #1663); `draw` opens its crop in the drawing tools. */
+export function pointAtElement(el, { draw = false } = {}) {
+  const to = target();
+  if (to) deliver(el, to.chatId, to.coordinator, draw);
+}
 
 export function startPick() {
   if (active) return;
   // Where it goes is settled now, so a pick on a page that changes underneath still lands in the chat it began from.
-  const chatId = view?.main === 'chat' ? view.id : view?.coordinator?.id;
-  if (!chatId) return toast('Open a scheme first: what you point at goes to one of its chats', { tone: 'warn' });
-  const coordinator = chatId === view.coordinator?.id ? view.coordinator : null;
+  const to = target();
+  if (!to) return;
+  const { chatId, coordinator } = to;
   const box = h('div', { class: 'pick-box', hidden: true });
   const hint = h('div', { class: 'pick-hint', role: 'status' },
     h('span', {}, matchMedia('(hover: hover)').matches ? 'Click the thing you mean' : 'Tap the thing you mean'),
@@ -48,6 +62,9 @@ export function startPick() {
   };
   const onUp = (e) => {
     if (e.button !== 0) return;
+    pick(e);
+  };
+  const pick = (e) => {
     e.preventDefault();
     const el = under(e.clientX, e.clientY);
     if (!el) return;
@@ -76,17 +93,19 @@ export function startPick() {
   // The press that picks mustn't focus or click what's under the dim either.
   dim.addEventListener('pointerdown', (e) => e.preventDefault());
   dim.addEventListener('click', (e) => e.preventDefault());
+  // A right-click while picking picks too (#1663), rather than opening a menu over the dim.
+  dim.addEventListener('contextmenu', (e) => { e.stopPropagation(); pick(e); });
   addEventListener('keydown', onKey, true);
   active = { stop };
 }
 
-async function deliver(el, chatId, coordinator) {
+async function deliver(el, chatId, coordinator, draw = false) {
   // The note is in the message box at once; the crop (a screenshot of the part, which takes a moment) joins it when ready.
   const cropping = cropPart(el); // started before anything moves, so it sees the page as it was picked
   pointAt(chatId, null, describe(el));
   if (coordinator && !(view?.main === 'chat' && view.id === chatId)) location.hash = threadHref(coordinator);
   const crop = await cropping;
-  if (crop) pointAt(chatId, crop, null);
+  if (crop) pointAt(chatId, crop, null, { draw });
 }
 
 /** The chip's short label and the text the message carries: page, part, screen size, theme. */
@@ -124,7 +143,7 @@ function kindOf(el) {
     ?? (/^h\d$/.test(tag) ? 'heading' : el.classList.contains('thread-row') ? 'minion row' : el.classList.contains('msg') ? 'message' : tag);
 }
 
-function pageName() {
+export function pageName() {
   if (!view) return 'Citadel';
   if (view.main === 'chat') return view.id === view.coordinator?.id ? `${taskmasterName()}'s chat` : `#${view.ticket?.number ?? view.id}'s chat`;
   const main = typeof view.main === 'string' ? view.main : view.kind;

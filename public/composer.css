@@ -193,3 +193,9 @@ dialog.secret-ask .row { gap: 0.5rem; flex-wrap: wrap; }
   .composer .slash-item { flex-direction: column; align-items: stretch; gap: 0.1rem; padding: 0.5rem 0.55rem; }
   .composer .slash-desc { white-space: normal; }
 }
+
+/* On a mouse, right-click points (#1663; Cara, 2026-11-22: the 🎯 button "Goes" on a mouse): the menu's Point at this
+   and Alt+Shift+P replace it. Touch screens keep it. */
+@media (hover: hover) and (pointer: fine) {
+  .composer button[data-part="point-at"] { display: none; }
+}

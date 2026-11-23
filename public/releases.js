@@ -152,8 +152,9 @@ const releaseDetail = (r) => (r.version ? (isSha(r.version) ? `commit ${r.versio
 
 /** A release by its number, linked to the release itself (the live site, its file) when it has one: a new tab, as it may leave Citadel. */
 function versionLink(r, cls = 'rel-ver', short = false) {
-  return r.link ? h('a', { class: cls, href: r.link, target: '_blank', rel: 'noopener', onclick: (e) => e.stopPropagation() }, releaseName(r, short))
-    : h('span', { class: cls }, releaseName(r, short));
+  // data-version: what the right-click menu's Copy version copies (#1663).
+  return r.link ? h('a', { class: cls, href: r.link, target: '_blank', rel: 'noopener', 'data-version': releaseName(r), onclick: (e) => e.stopPropagation() }, releaseName(r, short))
+    : h('span', { class: cls, 'data-version': releaseName(r) }, releaseName(r, short));
 }
 
 // ---------- the Schemes list ----------

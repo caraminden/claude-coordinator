@@ -491,7 +491,7 @@ export function unpark(t) {
 }
 
 /** Dismiss (closed) or reopen (idle) a minion: shown at once in its head and the list, put back if the server says no. */
-function setStatus(t, status) {
+export function setStatus(t, status) {
   const was = t.status;
   const show = (s) => {
     for (const x of new Set([t, view?.tickets?.get(t.id), view?.ticket?.id === t.id && view.ticket])) if (x) x.status = s;

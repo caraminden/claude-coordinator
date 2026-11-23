@@ -6,6 +6,7 @@ import { renderSidebar } from './sidebar.js';
 import { initDrawers } from './drawers.js';
 import { mountDialogs } from './ui/dialog.js';
 import { wcoHint } from './wco-hint.js';
+import './context-menu.js'; // Citadel's right-click menu (#1663)
 
 // ---------- boot ----------
 

@@ -519,13 +519,14 @@ export function questionCard(ticketId, card, opts = {}) {
   if (!cardPictures.has(card.id)) cardPictures.set(card.id, cardAttachments(ticketId, () => cardPictures.get(card.id)?.onChange?.()));
   const atts = cardPictures.get(card.id);
   atts.onChange = () => refresh();
-  const sendBtn = h('button', { type: 'button', class: 'small', disabled: true }, single ? 'Send' : 'Send answers');
+  const sendBtn = h('button', { type: 'button', class: 'small qsend', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });
   // How far the picks are, on a card with more than one question: Send stays off until every one has an answer, and
   // the later ones can be below the fold (a merged 8-question card).
   const progress = h('span', { class: 'muted progress', 'aria-live': 'polite' });
   // A machine job's go card: the job's card in the chat links here (#859).
-  const el = h('div', { class: 'qcard', ...(card.job ? { 'data-go-job': card.job } : {}) });
+  // data-single: one pick-one question with no pictures, which the right-click menu can answer (#1663).
+  const el = h('div', { class: 'qcard', ...(card.job ? { 'data-go-job': card.job } : {}), ...(single && !pictures ? { 'data-single': '' } : {}) });
   let answered = false;
 
   // A picture attached counts as the answer for any question left blank (Cara, 2026-11-18).

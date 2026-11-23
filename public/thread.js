@@ -564,7 +564,9 @@ function drawEvent(event, scroll) {
     if (bubble) showTakenBack(bubble, data.by, false);
   } else if (event.kind === 'question') {
     if (replyShows(data)) nodes.push(cardReply(data.reply, event.ticket_id));
-    nodes.push(stamped(questionCard(event.ticket_id, data, { at: event.created_at }), event));
+    const qcard = stamped(questionCard(event.ticket_id, data, { at: event.created_at }), event);
+    qcard.dataset.cardEvent = event.id; // the right-click menu's Copy link to card (#1663)
+    nodes.push(qcard);
   } else if (event.kind === 'job') {
     // The card follows the bottom of the chat (Cara's pick, 2026-11-17): each time the job starts, pauses or ends
     // it comes down here, and where it was keeps a one-line note.

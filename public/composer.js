@@ -347,6 +347,7 @@ export function composer(chatId, ticket) {
       h('span', { 'aria-hidden': 'true' }, '🎯'), h('span', { class: 'wide-only' }, ' Point')),
     h('span', { class: 'spacer' }),
     modelPicker(chatId), sideBtn || '', sendGroup);
+  pointTip();
   const pasteFiles = (e) => {
     const files = pastedFiles(e.clipboardData);
     if (!files.length) return false;
@@ -676,12 +677,29 @@ export const cardAttachments = (chatId, onChange) => createAttachments(chatId, o
 /** Put a marked picture (#946: drawn on a chat image) in a chat's message box, as if pasted. */
 export const attachImage = (chatId, blob) => chatAttachments(chatId).add([new File([blob], 'marked.png', { type: blob.type })], true);
 
-/** What a person pointed at (#1141, pick.js): its chip, then its crop if there is one, in the chat's message box. */
-export function pointAt(chatId, crop, note) {
+/** On a mouse the 🎯 is hidden (composer.css) and right-click points instead (#1663): said once, the first time a chat box shows. */
+function pointTip() {
+  if (!matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  try {
+    if (localStorage.getItem('citadel.pointTip')) return;
+    localStorage.setItem('citadel.pointTip', '1');
+  } catch { return; }
+  setTimeout(() => toast('Right-click anything to point at it', { ms: 8000 }), 1200);
+}
+
+/**
+ * What a person pointed at (#1141, pick.js): its chip, then its crop if there is one, in the chat's message box. With
+ * `draw` (the right-click menu's "Point and draw…", #1663), the crop opens in the drawing tools (#960) once it's added.
+ */
+export async function pointAt(chatId, crop, note, { draw = false } = {}) {
   const attachments = chatAttachments(chatId);
   if (note) attachments.addNote(note);
-  if (crop) attachments.add([new File([crop], 'pointed.png', { type: crop.type })], true);
   if (chatOpen(chatId)) document.querySelector('.composer textarea')?.focus();
+  if (!crop) return;
+  const before = new Set(attachments.items);
+  await attachments.add([new File([crop], 'pointed.png', { type: crop.type })], true);
+  const added = attachments.items.find((i) => i.data && !before.has(i));
+  if (draw && added) attachments.drawOn(added);
 }
 
 /** Whether any chat has a file uploading or an image being prepared; a reload now would lose it. */
@@ -826,6 +844,7 @@ function createAttachments(chatId, onChange) {
       }),
     });
   };
+  state.drawOn = drawOn;
   return state;
 }
 

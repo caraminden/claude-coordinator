@@ -114,8 +114,8 @@ body {
 a { color: inherit; }
 /* These not inside Citadel UI's media parts (ui/media.js, #833) or a marked picture's bar (#960), nor on its buttons (.cui-btn, the dialog's ✕,
    #872), which draw their own controls as they do in apps: :not(:where(…)) adds no weight, so every rule that outranked them still does. */
-:is(button, input, select):not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *, .cui-btn)), textarea { font: inherit; color: inherit; }
-button:not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *, .cui-btn, .cui-marks-bar *)) {
+:is(button, input, select):not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *, .cui-btn, .cui-menu *)), textarea { font: inherit; color: inherit; }
+button:not(:where(.cui-scrubber *, .cui-panner *, .cui-lb *, .cui-btn, .cui-marks-bar *, .cui-menu *)) {
   background: var(--accent);
   color: var(--on-accent);
   border: 0;
@@ -143,7 +143,7 @@ code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0
    min-height, so it holds over a part's own height; a summary grows by padding, so its marker stays. */
 summary { --tap-pad: max(0px, (24px - 1lh) / 2); padding-block: var(--tap-pad); }
 @media (max-width: 800px) {
-  button, a.button, select, textarea, input:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color]) { min-height: var(--control-h); }
+  button:not(.cui-menu-item), a.button, select, textarea, input:not([type=checkbox], [type=radio], [type=range], [type=file], [type=color]) { min-height: var(--control-h); }
   a.button { display: inline-flex; align-items: center; justify-content: center; }
   .cui-md .cui-copy { min-height: 0; } /* its tap area is a ::after, so it fits the header bar of a command block (#944) */
   summary { --tap-pad: max(0px, (var(--control-h) - 1lh) / 2); }

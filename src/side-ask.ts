@@ -194,7 +194,7 @@ export class SideAsks {
     if (cost !== null && t.forkId) {
       const turn: Turn = this.store.recordTurn(t.ticketId, {
         event_id: ev.id, session_id: t.forkId, ended_at: ev.created_at, session_cost_usd: cost, duration_ms: result.duration_ms,
-        usage: result.usage, payer: this.runner.payerOf(t.asker), account: t.account, modelUsage: result.modelUsage, side: true,
+        usage: result.usage, payer: this.runner.payerOf(t.asker), account: t.account, modelUsage: result.modelUsage, side: true, fork_of: minion,
       });
       this.broadcast({ type: 'turn', turn, projectId: this.store.getTicket(t.ticketId)?.project_id });
     }

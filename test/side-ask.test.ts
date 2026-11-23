@@ -54,7 +54,13 @@ require('node:readline').createInterface({ input: process.stdin }).once('line', 
   appendFileSync(join(dir, id + '.jsonl'), prompt + '\\n');
   console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: id }));
   const done = () => {
-    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'answer to ' + JSON.parse(prompt).message.content[0].text.slice(-20), session_id: id, total_cost_usd: 0.25, duration_ms: 5 }));
+    // As Claude Code counts: a session's running total, a fork starting from its parent's total. A minion's first turn costs $100.
+    const costs = ${JSON.stringify(join(root, 'costs.json'))};
+    const all = existsSync(costs) ? JSON.parse(readFileSync(costs, 'utf8')) : {};
+    const total = (resume ? all[resume] ?? 100 : 100) + (resume ? 0.25 : 0);
+    all[id] = total;
+    require('node:fs').writeFileSync(costs, JSON.stringify(all));
+    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'answer to ' + JSON.parse(prompt).message.content[0].text.slice(-20), session_id: id, total_cost_usd: total, duration_ms: 5 }));
     process.exit(0);
   };
   if (!prompt.includes('WAIT')) return done();

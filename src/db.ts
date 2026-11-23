@@ -570,6 +570,8 @@ export interface TurnResult {
   keepalive?: boolean;
   /** A side question's fork (#932): its cost is the session's total less the fork's own previous total, never a turn's. */
   side?: boolean;
+  /** A side question's first turn: the minion's session it forked. The fork's total starts from that session's, so its cost is the total less the parent's latest. */
+  fork_of?: string | null;
   account?: number | null;
   /** The result's `modelUsage`: each model's running session cost, Grunts' models included (#905). */
   modelUsage?: any;
@@ -3413,10 +3415,12 @@ export class Store {
    * whole total is this turn's.
    */
   recordTurn(ticketId: number, r: TurnResult): Turn {
-    const prev = this.db
-      .prepare('SELECT id, session_id, session_cost_usd FROM turns WHERE ticket_id = ? AND side IS ? ORDER BY id DESC LIMIT 1')
-      .get(ticketId, r.side ? 1 : null) as { id: number; session_id: string | null; session_cost_usd: number } | undefined;
-    const sameSession = prev && (prev.session_id ?? null) === (r.session_id ?? null);
+    const last = (side: boolean, session?: string | null) => this.db
+      .prepare(`SELECT id, session_id, session_cost_usd FROM turns WHERE ticket_id = ? AND side IS ?${session ? ' AND session_id = ?' : ''} ORDER BY id DESC LIMIT 1`)
+      .get(ticketId, side ? 1 : null, ...(session ? [session] : [])) as { id: number; session_id: string | null; session_cost_usd: number } | undefined;
+    // A side thread's turns follow its own fork's (threads interleave); the fork's first starts from its parent's total.
+    const prev = r.side && r.session_id ? last(true, r.session_id) ?? (r.fork_of ? last(false, r.fork_of) : undefined) : last(!!r.side);
+    const sameSession = prev && (prev.session_id ?? null) === (r.session_id ?? null) || (r.side && !!r.fork_of && prev?.session_id === r.fork_of);
     const base = sameSession && prev.session_cost_usd <= r.session_cost_usd ? prev.session_cost_usd : 0;
     const u = r.usage ?? null;
     const n = (v: unknown) => (typeof v === 'number' ? v : null);

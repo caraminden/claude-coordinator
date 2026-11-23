@@ -211,11 +211,16 @@ function wire(flow) {
     return [p, dot];
   }).filter(Boolean).flat();
   svg.replaceChildren(...paths);
+  fade(flow);
   if (!flow.watching) {
+    flow.addEventListener('scroll', () => fade(flow), { passive: true });
     flow.watching = new ResizeObserver(() => (flow.isConnected ? wire(flow) : flow.watching.disconnect()));
     flow.watching.observe(flow);
   }
 }
+
+/** A chain wider than its card fades at the edge it scrolls on, until it's scrolled to the end. */
+const fade = (flow) => flow.classList.toggle('more', flow.scrollLeft + flow.clientWidth < flow.scrollWidth - 4);
 
 /** Light what a node waits on, all the way back, and what waits on it, all the way on; dim the rest of its chain. */
 function trace(el) {

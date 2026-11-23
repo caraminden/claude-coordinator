@@ -3,16 +3,18 @@
 // (the ship scripts' ultra review, 2026-11-23, fix C).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { readQueue } from '../src/waits.ts';
 import { scriptEnv } from './script-env.ts';
 
 const env = { ...scriptEnv(), GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t', GIT_CONFIG_GLOBAL: '/dev/null' };
 
 const repo = join(import.meta.dirname, '..');
+const root = mkdtempSync(join(tmpdir(), 'ship-core-parity-'));
+after(() => rmSync(root, { recursive: true, force: true })); // timing-ok: own temp dir
 const template = join(repo, 'kit', 'skills', 'scheme-setup', 'templates', 'land.sh');
 const deployQueue = join(repo, 'tools', 'deploy-queue.sh');
 const fn = (file: string, name: string) => {
@@ -33,7 +35,7 @@ const coreTicket = (label: string) => ['123 456', '0', label, 'waiting', '-', '-
 const oldTicket = (label: string) => ['123 456', '0', label, 'waiting'].join('\n') + '\n';
 
 test('the kit core, deploy-queue.sh and the server put a line of deploy.sh, core and old tickets in the same order', () => {
-  const q = mkdtempSync(join(tmpdir(), 'queue-parity-'));
+  const q = mkdtempSync(join(root, 'queue-parity-'));
   const tickets: [string, string][] = [
     ['0000000001', deployTicket('deploy-a')],
     ['0000000002', coreTicket('core-b')],
@@ -62,7 +64,7 @@ test('the kit core, deploy-queue.sh and the server put a line of deploy.sh, core
 });
 
 test("land.local.sh's land_deploy hands deploy.sh the core's place in line", () => {
-  const dir = mkdtempSync(join(tmpdir(), 'land-deploy-ticket-'));
+  const dir = mkdtempSync(join(root, 'land-deploy-ticket-'));
   const tools = join(dir, 'tools');
   const main = join(dir, 'main');
   mkdirSync(tools);

@@ -4,27 +4,28 @@
 // An app missing either is flagged to its home scheme's Taskmaster as held mail, once per app per set of gaps: the
 // last flagged set is kept in settings, so a restart or the next day says nothing, and a changed set says it again.
 // Reads files only; it changes no app and no backup. Any scheme's app is checked: the Taskmaster is its home scheme's.
-import { readdirSync, statSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pacificDay } from './pacific.ts';
 
 export const FLAG_KEY = 'backup-flag';
 const DB_FILE = /\.(db|sqlite|sqlite3)$/i;
 
-/** Whether `dir` holds a non-empty SQLite file within two levels, skipping backups/ (a copy isn't the app's own). */
-export function hasDatabase(dir: string, depth = 2): boolean {
-  let names: string[];
+/** Whether `dir` holds a non-empty SQLite file within two levels, skipping backups/ (a copy isn't the app's own).
+ *  Async, and it stats only names that look like a database: a data folder can hold thousands of files (#1735). */
+export async function hasDatabase(dir: string, depth = 2): Promise<boolean> {
+  let entries;
   try {
-    names = readdirSync(dir);
+    entries = await readdir(dir, { withFileTypes: true });
   } catch {
     return false;
   }
-  for (const n of names) {
-    if (depth === 2 && n === 'backups') continue;
-    const p = join(dir, n);
+  for (const e of entries) {
+    if (depth === 2 && e.name === 'backups') continue;
+    const p = join(dir, e.name);
     try {
-      const s = statSync(p);
-      if (s.isFile() && DB_FILE.test(n) && s.size > 0) return true;
-      if (s.isDirectory() && depth > 1 && hasDatabase(p, depth - 1)) return true;
+      if (e.isDirectory()) { if (depth > 1 && await hasDatabase(p, depth - 1)) return true; continue; }
+      if (DB_FILE.test(e.name)) { const st = await stat(p); if (st.isFile() && st.size > 0) return true; }
     } catch {} // gone between the listing and the stat
   }
   return false;
@@ -51,14 +52,21 @@ export interface FlagDeps<A extends FlagApp = FlagApp> {
   setState(s: Record<string, string>): void;
 }
 
-/** One round: the gaps of every app with a database, flagged where they're new. Returns the apps flagged now. */
-export async function flagUnbacked<A extends FlagApp>(d: FlagDeps<A>): Promise<{ app: string; gaps: string[] }[]> {
+/** The setting's key for the Pacific day of the last round (not an app name: it has a space). */
+export const RAN_KEY = ' ran';
+
+/** One round: the gaps of every app with a database, flagged where they're new. Returns the apps flagged now.
+ *  `oncePerDay`: skip when a round already ran this Pacific day, so restarts don't repeat it. Rows saved before
+ *  this have no day and run once. */
+export async function flagUnbacked<A extends FlagApp>(d: FlagDeps<A>, opts: { oncePerDay?: boolean; now?: number } = {}): Promise<{ app: string; gaps: string[] }[]> {
   const state = { ...d.getState() };
+  const today = pacificDay(opts.now ?? Date.now());
+  if (opts.oncePerDay && state[RAN_KEY] === today) return [];
   const flagged: { app: string; gaps: string[] }[] = [];
   for (const app of d.apps()) {
     let gaps: string[] = [];
     try {
-      gaps = backupGaps(hasDatabase(d.dataDir(app)), await d.manifest(app));
+      gaps = backupGaps(await hasDatabase(d.dataDir(app)), await d.manifest(app));
     } catch {
       continue; // no readable manifest: not this check's to say
     }
@@ -71,6 +79,7 @@ export async function flagUnbacked<A extends FlagApp>(d: FlagDeps<A>): Promise<{
     state[app.name] = sig;
     flagged.push({ app: app.name, gaps });
   }
+  state[RAN_KEY] = today;
   d.setState(state);
   return flagged;
 }

@@ -7,7 +7,6 @@
  "src/approvals.ts": 1,
  "src/artifact-data.ts": 2,
  "src/artifact-scan.ts": 1,
- "src/backup-flag.ts": 2,
  "src/backup-freshness.ts": 5,
  "src/brief-lint.ts": 4,
  "src/build-cache.ts": 5,

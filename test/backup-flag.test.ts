@@ -22,12 +22,12 @@ const manifests: Record<string, { timers: Record<string, unknown>; disk_warn_gb:
   bare: { timers: {}, disk_warn_gb: null }, nodb: { timers: {}, disk_warn_gb: null }, ok: full, onlycopy: { timers: {}, disk_warn_gb: null },
 };
 
-test('a database is found in the data dir, but a backup copy is not one', () => {
-  assert.equal(hasDatabase(join(root, 'bare')), true);
-  assert.equal(hasDatabase(join(root, 'ok')), true);
-  assert.equal(hasDatabase(join(root, 'nodb')), false);
-  assert.equal(hasDatabase(join(root, 'onlycopy')), false);
-  assert.equal(hasDatabase(join(root, 'missing')), false);
+test('a database is found in the data dir, but a backup copy is not one', async () => {
+  assert.equal(await hasDatabase(join(root, 'bare')), true);
+  assert.equal(await hasDatabase(join(root, 'ok')), true);
+  assert.equal(await hasDatabase(join(root, 'nodb')), false);
+  assert.equal(await hasDatabase(join(root, 'onlycopy')), false);
+  assert.equal(await hasDatabase(join(root, 'missing')), false);
 });
 
 test('gaps name what is missing', () => {
@@ -56,7 +56,7 @@ test('flags once per app and gap set, per its own scheme, and again after a chan
   assert.equal((await flagUnbacked(deps)).length, 1, 'a changed set flags again');
   manifests.bare = full;
   assert.deepEqual(await flagUnbacked(deps), []);
-  assert.deepEqual(state, {}, 'a fixed app is forgotten');
+  assert.deepEqual(Object.keys(state), [' ran'], 'a fixed app is forgotten');
 });
 
 test('an app whose scheme has no Taskmaster is tried again next round', async () => {
@@ -71,4 +71,22 @@ test('an app whose scheme has no Taskmaster is tried again next round', async ()
   tm = 9;
   assert.equal((await flagUnbacked(deps)).length, 1);
   assert.deepEqual(mails, [9]);
+});
+
+test('a restart skips the round when one ran today, and an old row without a day runs once (#1735)', async () => {
+  let state: Record<string, string> = {};
+  let rounds = 0;
+  const deps = {
+    apps: () => { rounds++; return []; }, dataDir: () => root, manifest: async () => full,
+    taskmaster: () => 1, mail: () => {}, getState: () => state, setState: (s: Record<string, string>) => { state = s; },
+  };
+  const noon = Date.UTC(2026, 10, 23, 20);
+  await flagUnbacked(deps, { oncePerDay: true, now: noon });
+  assert.equal(rounds, 1, 'a saved row without a day runs once');
+  await flagUnbacked(deps, { oncePerDay: true, now: noon + 3_600_000 });
+  assert.equal(rounds, 1, 'same Pacific day: skipped');
+  await flagUnbacked(deps, { now: noon + 3_600_000 });
+  assert.equal(rounds, 2, 'the daily timer always runs');
+  await flagUnbacked(deps, { oncePerDay: true, now: noon + 24 * 3_600_000 });
+  assert.equal(rounds, 3, 'next day: runs');
 });

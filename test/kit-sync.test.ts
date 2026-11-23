@@ -31,6 +31,16 @@ function commit(dir: string, files: Record<string, string>, msg: string): string
 const lines = (n: number, tag = '') => Array.from({ length: n }, (_, i) => `line ${i}${tag}`).join('\n') + '\n';
 const edit = (text: string, i: number, to: string) => text.split('\n').map((l, j) => (j === i ? to : l)).join('\n');
 
+/**
+ * A round's temp root holds the schemes' worktrees and the jobs' folders, and a check or ship job writes there until its
+ * process exits (its output.log and exit code land last), so teardown waits for the jobs: deleting the tree under a live
+ * one made this file fail with ENOTEMPTY in loaded runs (#1687).
+ */
+async function tidy(jobs: { running(): number }, root: string) {
+  await until('the sync jobs to end', () => jobs.running() === 0);
+  rmSync(root, { recursive: true, force: true });
+}
+
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'kit-sync-test-'));
   const kit = repo(root, 'kit');
@@ -148,6 +158,7 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
   const { HostJobs } = await import('../src/host-job.ts');
   const { KitSync, SHIP } = await import('../src/kit-sync.ts');
   const root = mkdtempSync(join(tmpdir(), 'kit-sync-round-'));
+  const jobs = new HostJobs(() => false);
   try {
     const kit = repo(root, 'kit');
     // The fake land.sh records what it was asked to ship, as whom.
@@ -168,7 +179,7 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     const mails: [number, string][] = [];
     const notes: [number, string][] = [];
     const ks = new KitSync({
-      kitDir: kit, projectsDir, runDir: join(root, 'run'), jobs: new HostJobs(() => false),
+      kitDir: kit, projectsDir, runDir: join(root, 'run'), jobs,
       load: () => saved && JSON.parse(JSON.stringify(saved)), save: (s) => (saved = s),
       projects: () => [{ id: 2, name: 'Citadel' }, { id: 3, name: 'Green' }, { id: 4, name: 'Red' }, { id: 5, name: 'Elsewhere' }],
       home: () => 2, chat: async (p) => 100 + p,
@@ -201,7 +212,7 @@ test('a round: one Citadel card, a failure note in the red scheme, a ship as the
     assert.ok(notes.some(([t, text]) => t === 102 && /Green shipped/.test(text)));
     await assert.rejects(ks.decide({ ticket: 102, question: 'q1' }, SHIP, { id: 7, name: 'josh' }), /no longer waiting/);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await tidy(jobs, root);
   }
 });
 
@@ -209,6 +220,7 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
   const { HostJobs } = await import('../src/host-job.ts');
   const { KitSync } = await import('../src/kit-sync.ts');
   const root = mkdtempSync(join(tmpdir(), 'kit-sync-wait-'));
+  const jobs = new HostJobs(() => false);
   try {
     const kit = repo(root, 'kit');
     const land1 = "#!/usr/bin/env bash\n# v1\nCHECK='echo the default check ran; exit 4'\n";
@@ -223,7 +235,7 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
     const cards: any[] = [];
     const mails: [number, string][] = [];
     const ks = new KitSync({
-      kitDir: kit, projectsDir, runDir: join(root, 'run'), jobs: new HostJobs(() => false),
+      kitDir: kit, projectsDir, runDir: join(root, 'run'), jobs,
       load: () => saved && JSON.parse(JSON.stringify(saved)), save: (s) => (saved = s),
       projects: () => [{ id: 3, name: 'Gated' }, { id: 4, name: 'Bare' }],
       home: () => 2, chat: async (p) => 100 + p, env: () => ({ PATH: process.env.PATH!, HOME: process.env.HOME! }),
@@ -231,6 +243,7 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
       settle: () => {}, note: () => {}, mail: (t, text) => mails.push([t, text]),
     });
     const states = () => Object.fromEntries(saved.round.schemes.map((x: any) => [x.name, x.state]));
+    const polled = (what: string, ok: () => boolean) => until(what, async () => (await ks.poll(), ok()));
 
     mkdirSync(join(kit, '.git', 'cc-deploy'));
     writeFileSync(join(kit, '.git', 'cc-deploy', 'unchecked'), 'prev\n');
@@ -240,26 +253,20 @@ test("a round waits out a deploy's unchecked window, a running check keeps its r
 
     await ks.poll();
     assert.equal(saved.round.kit, v2);
-    for (let i = 0; i < 200 && states().Bare === 'checking'; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-      await ks.poll();
-    }
+    await polled("the bare scheme's check to end", () => states().Bare !== 'checking');
     assert.equal(states().Bare, 'red');
     assert.match(mails.find(([t]) => t === 104)![1], /exit 4[\s\S]*the default check ran/);
 
-    commit(kit, { [LAND.template]: land1.replace('# v1', '# v3') }, 'v3');
+    const v3 = commit(kit, { [LAND.template]: land1.replace('# v1', '# v3') }, 'v3');
     await ks.poll();
     assert.equal(saved.round.kit, v2, 'a newer kit change waits for the running check');
     assert.equal(states().Gated, 'checking');
 
     writeFileSync(gate, '');
-    for (let i = 0; i < 200 && saved.round.kit === v2; i++) {
-      await new Promise((r) => setTimeout(r, 50));
-      await ks.poll();
-    }
-    assert.notEqual(saved.round.kit, v2, 'once the check ended, the newer change starts its own round');
+    await polled('the gated scheme\'s check to end', () => saved.round.kit !== v2);
+    assert.equal(saved.round.kit, v3, 'once the check ended, the newer change starts its own round');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await tidy(jobs, root);
   }
 });
 

@@ -406,7 +406,7 @@ function budgetChip(t) {
   const usd = (n) => `$${n >= 10 ? Math.round(n) : n.toFixed(2)}`;
   const cost = t.cost ?? 0;
   return h('span', { class: `tag-chip budget-chip${cost >= b.ask ? ' over' : ''}`,
-    title: `${b.basis} has usually cost about ${usd(b.usd)} (median of ${b.n} minions, last 4 weeks). Past ${usd(b.ask)} the minion is asked to say why or split the work; past ${usd(b.wake)} its Taskmaster hears, and again at each doubling; past ${usd(b.card)} its owner gets a card to carry on, split or stop. Never a stop by itself.` },
+    title: `${b.basis} has usually cost about ${usd(b.usd)} (median of ${b.n} minions, last 4 weeks). Past ${usd(b.ask)} the minion is asked to say why or split the work; past ${usd(b.wake)} its Taskmaster hears, and again at ${usd(b.wake * 2)} and each doubling after; past ${usd(b.card)} its owner gets a card to carry on, split or stop. Nothing stops it unless its owner picks Stop.` },
   `${usd(cost)} of about ${usd(b.usd)}`);
 }
 

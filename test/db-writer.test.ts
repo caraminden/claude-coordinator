@@ -23,11 +23,11 @@ after(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 let n = 0;
-const open = (delayMs = 0, drainMs?: number, readWaitMs?: number) => {
+const open = (delayMs = 0, drainMs?: number, readWaitMs?: number, staleNoteMs?: number) => {
   const dir = join(root, String(++n));
   execFileSync('mkdir', ['-p', dir]);
   const store = new Store(join(dir, 'coordinator.db'));
-  const w = writeOffThread(store, { delayMs, drainMs, readWaitMs })!;
+  const w = writeOffThread(store, { delayMs, drainMs, readWaitMs, staleNoteMs })!;
   writers.push(w);
   return { store, w };
 };
@@ -173,20 +173,26 @@ test('a write on the server\'s thread that waits long for the queue is named in 
   assert.match(rows[0].detail, /^createProject on the server's thread waited \d+ ms for 1 queued writes$/);
 });
 
-test('a read that gives up waiting for queued writes is in the health log, named, once per stall of many (#1656)', () => {
-  const { store, w } = open(READ_WAIT_MS * 3);
-  const t = ticket(store);
-  assert.ok(w.drain(5000));
-  store.updateTicket(t.id, { title: 'new' });
-  assert.equal(store.getTicket(t.id)!.title, 'a minion', 'the read went on without the write');
-  store.getTicket(t.id); // doesn't wait again: counted, no row of its own
-  assert.ok(w.drain(5000));
-  store.updateTicket(t.id, { title: 'newer' });
-  store.getTicket(t.id); // gives up again inside the same ten seconds: counted, no second row
-  assert.ok(w.drain(5000), 'the record, queued behind the writes, lands');
-  const rows = store.healthEventsSince(['db-read-stale'], 0);
-  assert.equal(rows.length, 1);
-  assert.match(rows[0].detail, new RegExp(`^SQL SELECT .* on the server's thread waited ${READ_WAIT_MS} ms for 1 queued writes and read without them; 0 more reads`));
+test('a read that gives up waiting for queued writes is in the health log, named, with the reads since the last row; one row per minute at most (#1656)', () => {
+  // The write takes a second and the read waits 1 ms: only a second's hold of this thread inside that wait could let it see the write.
+  const rows = (staleNoteMs?: number) => {
+    const { store, w } = open(1000, undefined, 1, staleNoteMs);
+    const t = ticket(store);
+    assert.ok(w.drain());
+    store.updateTicket(t.id, { title: 'new' });
+    assert.equal(store.getTicket(t.id)!.title, 'a minion', 'the read went on without the write');
+    store.getTicket(t.id); // doesn't wait again: counted, no row of its own
+    assert.ok(w.drain());
+    store.updateTicket(t.id, { title: 'newer' });
+    store.getTicket(t.id); // gives up again
+    assert.ok(w.drain(), 'the records, queued behind the writes, land');
+    return store.healthEventsSince(['db-read-stale'], 0).map((r) => r.detail);
+  };
+  const each = rows(0);
+  assert.equal(each.length, 2);
+  assert.match(each[0], /^SQL SELECT .* on the server's thread waited 1 ms for 1 queued writes and read without them; 0 more reads passed queued writes since the last record$/);
+  assert.match(each[1], /; 1 more reads passed queued writes since the last record$/);
+  assert.equal(rows().length, 1, 'a second give-up inside the minute is counted, not recorded');
 });
 
 test('a void write returns a promise of its own write; a failed one rejects and is in the health log', async () => {

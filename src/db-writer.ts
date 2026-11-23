@@ -58,8 +58,8 @@ export const READ_WAIT_MS = 50;
 const DRAIN_MS = 30_000;
 /** A write here that waits this long for the queue goes in the health log, named (#1495): the stall stacks stop short of it. */
 export const SLOW_DRAIN_MS = 500;
-/** At most one stale-read row in the health log per this long. */
-const STALE_NOTE_MS = 10_000;
+/** At most one stale-read row in the health log per this long: a day-long stall stays far under the log's row cap. */
+const STALE_NOTE_MS = 60_000;
 
 const owner = (store: any, name: string) => {
   const dot = name.indexOf('.');
@@ -84,9 +84,9 @@ export type Writer = {
  * for writes still queued; writes there (VALUE_WRITES, and SQL run directly) wait for all of them. If the worker can't
  * start or stops, writes run on the store's connection again. Null for an in-memory store. `delayMs` holds every
  * write that long on the worker, for tests of a stalled disk; `drainMs` is how long a write here waits for the queue,
- * and `readWaitMs` how long a read does (a test of what a read sees when the disk isn't stalled sets its "it hung" deadline: a loaded box takes over 50 ms now and then, #1656).
+ * `readWaitMs` how long a read does, `staleNoteMs` how often a stale read is recorded (a test of what a read sees when the disk isn't stalled sets its "it hung" deadline: a loaded box takes over 50 ms now and then, #1656).
  */
-export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, drainMs = DRAIN_MS, readWaitMs = READ_WAIT_MS } = {}): Writer | null {
+export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, drainMs = DRAIN_MS, readWaitMs = READ_WAIT_MS, staleNoteMs = STALE_NOTE_MS } = {}): Writer | null {
   if (!store.statePath) return null;
   const db = store.db;
   // [0]: the last write run, [1]: 1 once the worker is ready, -1 once it is gone, [2]: the last write sent,
@@ -139,7 +139,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     return true;
   };
   // Reads that went on past queued writes go in the health log (#1656, Cara 2026-11-22, "Count them first"): one row
-  // per STALE_NOTE_MS at most, naming the read that gave up and counting the ones since the last row. An upper bound on
+  // per `staleNoteMs` at most, naming the read that gave up and counting the ones since the last row. An upper bound on
   // wrong answers: a read is counted whether or not the writes it passed touch what it reads.
   let staleAt = 0, staleMore = 0;
   const beforeRead = (sql?: string) => {
@@ -149,7 +149,7 @@ export function writeOffThread(store: Store, { delayMs = 0, readyMs = 30_000, dr
     if (waitFor(target, readWaitMs)) return void (stalled = 0);
     stalled = target;
     const now = Date.now();
-    if (now - staleAt < STALE_NOTE_MS || inline) return void staleMore++;
+    if (now - staleAt < staleNoteMs || inline || db.isTransaction) return void staleMore++;
     const text = `${sql ? `SQL ${sql.trim().replace(/\s+/g, ' ').slice(0, 60)}` : 'a response'} on the server's thread waited ${readWaitMs} ms for ${behind} queued writes and read without them; ${staleMore} more reads passed queued writes since the last record`;
     staleAt = now, staleMore = 0;
     try { void store.addHealthEvent('db-read-stale', now, null, text); } catch { /* best effort */ }

@@ -2324,8 +2324,6 @@ else
   # --heavy: the suite is CPU work for minutes, so with no past runs to judge by it still takes the slot (#1629).
   half=$(( ( ($(nproc 2>/dev/null || echo 2) + 1) / 2 + 1) / 2 ))
   left=$((QUIET_LIMIT - $(busy_waited)))
-  CITADEL_HEAVY_WHAT="land.sh's suite for $branch (CI fallback)" CITADEL_HEAVY_MAX_WAIT=${LAND_HEAVY_MAX_WAIT:-$((left > 60 ? left : 60))} \
-    CITADEL_TEST_CONCURRENCY=${CITADEL_TEST_CONCURRENCY:-$half} DEPLOY_TEST_CPU_WEIGHT=${DEPLOY_TEST_CPU_WEIGHT-20} \
   # The line behind gives up on a phase unchanged for DEPLOY_QUEUE_STALL (15 min), but the wait for a slot (up to the
   # busy limit's rest, plus citadel-heavy's load and memory waits) and then the suite can take longer: so the phase moves
   # on every LAND_PHASE_EVERY s meanwhile. Gone with land.sh: it looks for it at each tick.
@@ -2340,6 +2338,8 @@ else
     done
   ) &
   ticker=$!
+  CITADEL_HEAVY_WHAT="land.sh's suite for $branch (CI fallback)" CITADEL_HEAVY_MAX_WAIT=${LAND_HEAVY_MAX_WAIT:-$((left > 60 ? left : 60))} \
+    CITADEL_TEST_CONCURRENCY=${CITADEL_TEST_CONCURRENCY:-$half} DEPLOY_TEST_CPU_WEIGHT=${DEPLOY_TEST_CPU_WEIGHT-20} \
     "$tools/citadel-heavy" --here --heavy "$tools/run-tests.sh" "$log" 9>&- 6>&- || trc=$? # without the lock's fd: a run that outlives a killed land.sh must not hold it
   kill "$ticker" 2>/dev/null || true
   wait "$ticker" 2>/dev/null || true

@@ -1,12 +1,12 @@
 {
   "ci-red": {
-    "hash": "4768730a8a85dde2",
-    "at": "2026-11-21",
+    "hash": "3cef1219c10de918",
+    "at": "2026-11-23",
     "days": 3,
-    "inputs": "10 schemes' runs on main (gh, read-only) and their minions' chats",
-    "hits": 21,
-    "real": 27,
-    "summary": "20 as before, 1 new, 7 gone"
+    "inputs": "12 schemes' runs on main (gh, read-only) and their minions' chats",
+    "hits": 28,
+    "real": 30,
+    "summary": "26 as before, 2 new, 4 gone"
   },
   "deploy-watch": {
     "hash": "13628e2c16779b4e",

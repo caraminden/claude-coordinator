@@ -3,7 +3,8 @@
 // name to temp first, so the judge's reads and writes of those tables stay in memory; a write anywhere else fails.
 import { DatabaseSync } from 'node:sqlite';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { Store, type Ticket } from '../../src/db.ts';
 
 export const LIVE_DB = join(process.env.DATA_DIR ?? join(homedir(), '.local/share/claude-coordinator'), 'coordinator.db');
@@ -12,6 +13,11 @@ export const LIVE_DB = join(process.env.DATA_DIR ?? join(homedir(), '.local/shar
 export function replayStore(path: string, shadow: string[], seed: Record<string, string> = {}): Store {
   const db = new DatabaseSync(path, { readOnly: true });
   db.exec('PRAGMA query_only = 0; PRAGMA temp_store = MEMORY;');
+  // The chat log and the state live in their own files beside the main one (#1169): attach them read-only, as the app does.
+  for (const [name, file] of [['state', 'state.db'], ['chat', 'events.db']]) {
+    const other = join(dirname(path), file);
+    if (existsSync(other)) db.prepare('ATTACH DATABASE ? AS ' + name).run(`file:${other}?mode=ro`);
+  }
   for (const table of shadow) {
     const row = db.prepare("SELECT sql FROM main.sqlite_master WHERE type = 'table' AND name = ?").get(table) as { sql: string } | undefined;
     if (!row) throw new Error(`replayStore: no table ${table} in ${path}`);

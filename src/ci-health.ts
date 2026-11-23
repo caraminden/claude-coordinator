@@ -54,8 +54,8 @@ import { pacific } from './pacific.ts';
 import { failuresIn, ghText } from './flake-evidence.ts';
 
 import type { LongJob } from './long-jobs.ts';
-import { VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, startedRed, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
-export { WAIT_MS, HUNG_MS, RED_FIX_MS, ORPHAN_MS, type Problem, type ProblemLink, type WakeAt, problemLink, itemText, clock, trackOffline, servers, stuckProblems, hungProblems, neverStarted, deadGroups, deadProblem, orphanRuns, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, computerOf, sharedHost, bundleTitle, ciPage, CI_SENDER, itemKey } from './ci-problems.ts';
+import { humanText, VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, startedRed, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
+export { humanText, WAIT_MS, HUNG_MS, RED_FIX_MS, ORPHAN_MS, type Problem, type ProblemLink, type WakeAt, problemLink, itemText, clock, trackOffline, servers, stuckProblems, hungProblems, neverStarted, deadGroups, deadProblem, orphanRuns, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, computerOf, sharedHost, bundleTitle, ciPage, CI_SENDER, itemKey } from './ci-problems.ts';
 import { LAND_RING_STREAK, LAND_RING_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 export { LAND_STREAK, LAND_SLOW_MS, LAND_RING_STREAK, LAND_RING_MS, type LandSeen, type LandState, newLandState, landStep, landProblems } from './ci-land-gate.ts';
 import { type GhGet, ghGet, ghPost, RateLimited, GhError } from './gh-api.ts';
@@ -542,7 +542,7 @@ export class CiHealth {
     if (x.fixMinion && !x.fixMinion.closed) return `#${x.fixMinion.number} is fixing it`;
     const woke = (k: string) => this.store.getSetting<string[]>(`ci-health:woke:${k}`) ?? [];
     // Only a wake that went out counts: none overnight or with nobody to tell.
-    const own = woke(String(p.id)).includes(x.key) || woke('land').includes(x.key);
+    const own = (x.key.startsWith('red:') && x.quiet) || woke(String(p.id)).includes(x.key) || woke('land').includes(x.key);
     const poss = (n: string) => (n.endsWith('s') ? `${n}'` : `${n}'s`);
     if (own) return `${poss(p.name)} Taskmaster has been woken`;
     const home = this.deps.home?.();
@@ -1224,7 +1224,7 @@ ${text}`);
     const admins = this.admins();
     const open = new Map(problems.map((x) => [x.key, x]));
     for (const [key, x] of open) {
-      const title = itemText(x), quiet = x.quiet;
+      const title = humanText(p.name, { ...x, onIt: this.onIt(p, x) }), quiet = x.quiet;
       const sent = (saved.sent[key] ??= {});
       for (const u of admins) {
         if (sent[u.id] === title) continue;

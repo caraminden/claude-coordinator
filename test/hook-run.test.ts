@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { hookCommand, hookRunHooks, schemeRefsHooks, sideGuardHook, wordingHooks } from '../src/turn-launch.ts';
 import { BIG_READ_MATCHER, TRIPWIRE_MATCHER } from '../src/hook-matchers.ts';
@@ -16,8 +16,9 @@ const pins = testPins();
 const root = mkdtempSync(join(tmpdir(), 'hook-run-'));
 process.on('exit', () => rmSync(root, { recursive: true, force: true }));
 
-// The real home, so the tripwire reads the scratch files as this user's; the data paths are only ever checked, never touched.
-const home = homedir();
+// A home that holds nothing, so the tripwire reads the scratch files as this user's wherever TMPDIR is: with the real
+// home, a temp folder beside it (a CI runner's, in the burn-in) read as another person's. Its paths are only ever checked.
+const home = '/hook-run-test-homes/me';
 const data = `${home}/.local/share/claude-coordinator`;
 const worktree = `${data}/projects/2/tickets/9`;
 const otherShared = `${data}/projects/3/shared/project`;

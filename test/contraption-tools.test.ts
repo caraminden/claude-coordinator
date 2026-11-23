@@ -247,18 +247,17 @@ test('restart and stop carry a risk (#1682): shown first, a typed name for "may 
   const calls = fake.calls().length;
   r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'stop' });
   assert.equal(r.isError, true);
-  assert.match(r.text, /"may lose data": its queue is in memory\. A person runs it/);
-  assert.equal((await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'stop', confirm: 'twin' })).isError, true, 'an agent cannot type the name');
+  assert.match(r.text, /"may lose data": its queue is in memory\. Send confirm: "twin"/);
   assert.match((await srv.call('/api/contraptions/twin/service', { action: 'restart' })).data.error, /Send confirm: "twin"/);
   assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'restart', confirm: 'tw' })).status, 409);
   assert.equal(fake.calls().length, calls, 'a refused run never reaches systemd');
   assert.equal(store.contraptionRuns(twin().id).filter((x) => x.risk === 'loses_data').length, 0, 'a refusal is not a run');
-  assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'stop', confirm: 'twin' })).status, 200);
+  r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'stop', confirm: 'twin' });
+  assert.equal(r.isError, false, r.text);
 
   const runs = store.contraptionRuns(twin().id);
   assert.deepEqual(runs.slice(0, 2).map((x) => [x.action, x.risk, x.ok]), [['stop', 'loses_data', 1], ['restart', 'interrupts', 1]]);
-  assert.equal(runs[0].by, 'cara');
-  assert.equal(runs.find((x) => x.action === 'restart')!.by, 'Taskmaster for cara');
+  assert.equal(runs[0].by, 'Taskmaster for cara');
   const viewed = await srv.call('/api/contraptions');
   assert.equal(viewed.data.find((c: any) => c.name === 'twin').runs.length, 3, 'with the unassessed stop from the test before');
   assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'start' })).status, 200, 'start has no risk gate');

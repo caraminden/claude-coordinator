@@ -615,10 +615,9 @@ export const contraptionRoutes: Route[] = [
       if (!action) throw new HttpError(400, 'Action is required: install, start, stop or restart');
       const risk = c.restart_risk;
       const risky = action === 'stop' || action === 'restart';
-      // "May lose data" (#1682): only a person, typing the name; the Taskmaster's tool is refused. Install, deploys and key rotation are not gated.
+      // "May lose data" (#1682): whoever acts types the name; the Taskmaster passes `confirm` after a person gives it. Install, deploys and key rotation are not gated.
       if (risky && risk === 'loses_data') {
         const why = `${c.name} ${action} is marked "may lose data"${c.restart_note ? `: ${c.restart_note}` : ''}.`;
-        if (!session.uid) throw new HttpError(409, `${why} A person runs it from Settings → Contraptions, typing its name; an agent doesn't.`);
         if (body.confirm !== c.name) throw new HttpError(409, `${why} Send confirm: "${c.name}" to run it anyway.`);
       }
       const asker = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);

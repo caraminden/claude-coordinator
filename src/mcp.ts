@@ -1069,7 +1069,7 @@ const CONTRAPTION_TOOLS = [
         action: { type: 'string', enum: ['status', 'install', 'start', 'stop', 'restart', 'logs'] },
         replace: { type: 'boolean', description: 'install only: stop and disable hand-installed units for it first.' },
         lines: { type: 'integer', description: 'logs only: how many lines, default 100, at most 1000.' },
-        confirm: { type: 'string', description: 'no use for agents: a "may lose data" contraption can only be stopped or restarted by a person in Settings → Contraptions (status shows the risk).' },
+        confirm: { type: 'string', description: 'stop and restart only: the contraption\'s name, required when its risk is "may lose data". Ask the person to type the name first; never fill it in yourself.' },
       },
       required: ['name', 'action'],
     },

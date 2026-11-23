@@ -259,6 +259,6 @@ export function chainLink(t, redraw) {
   if (!c || (!c.loading && Date.now() - c.at > STALE_MS)) read(t.project_id, () => { if (!!find() !== !!had || find()?.nodes.length !== had?.nodes.length) redraw?.(); });
   if (!had) return '';
   const n = had.nodes.length;
-  return h('a', { class: 'tag-chip chain-link', href: chainsHref(t.project_id, t.number), title: `${had.title}: see who waits on whom` },
+  return h('a', { class: 'tag-chip chain-link', href: chainsHref(t.project_id, t.number), title: `${minions(n)} in ${had.title}: see who waits on whom` },
     h('span', { 'aria-hidden': 'true' }, '⛓ '), `Chain · ${n}`);
 }

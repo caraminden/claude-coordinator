@@ -707,11 +707,11 @@ a.chain-node:is(:hover, :focus-visible) { transform: translateY(-1px); box-shado
 .chain-node-top { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
 .chain-node .num { color: var(--muted); font-weight: 650; font-variant-numeric: tabular-nums; }
 .chain-node .scheme-tag { font-size: 0.72em; }
-.chain-state { margin-left: auto; white-space: nowrap; font-size: 0.74em; font-weight: 650; line-height: 1.35; padding: 0.08rem 0.42rem; border-radius: 999px;
+.chain-state { margin-left: auto; display: inline-flex; align-items: center; white-space: nowrap; font-size: 0.74em; font-weight: 650; line-height: 1.2; padding: 0.15rem 0.45rem; border-radius: 999px;
   color: var(--c, var(--muted)); background: color-mix(in srgb, var(--t, var(--c, var(--muted))) 15%, var(--panel)); }
-.chain-state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; vertical-align: 1px; animation: pulse 1.6s ease-in-out infinite; }
+.chain-state .pulse { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 4px; animation: pulse 1.6s ease-in-out infinite; }
 .chain-node-title { font-size: 0.88em; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
-.chain-after { font-size: 0.74em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chain-after { font-size: 0.74em; color: var(--muted); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 /* Tracing: the hovered node's line stays, the rest of its chain steps back. */
 .chain-flow.tracing .chain-node:not(.lit) { opacity: 0.38; }
 .chain-flow.tracing :is(.chain-wire, .chain-wire-end):not(.lit) { opacity: 0.15; }

@@ -8,19 +8,21 @@ Status: accepted as a trial, 2026-11-23. Minion #1741, fix 4 of the rework deep 
   later if there was an issue".
 - **Why:** 48 of the deep dive's rework pairs were a change that passed every test and broke only once live; each was
   found by a person, hours or days later, and fixed by a fresh minion with none of the builder's context.
+- **Baseline to beat** (the handoff's measure): 22 live-only defects found by a person from Nov 7 to 21, and a median of
+  17 h from a faulty ship to its fix minion.
 
 ## The rule
 
 A `hand_off_land` to main whose branch changes 600 lines or more (added plus removed, `git diff --numstat main...HEAD`)
 carries `probe`: one check from a fixed list, or `{kind:"none", reason}`. The route refuses it without one, and its
-refusal lists the shapes (`src/live-probe.ts`, `PROBE_HELP`):
+refusal lists the shapes (`src/live-probe.ts`, `PROBE_HELP`). The count is against a branch named `main`; a scheme
+whose trunk has another name counts 0 and is never asked (a `shortcut:` in `changedLines`).
 
 | kind | what the server does | pass |
 |---|---|---|
-| `http` | GET a path on this server, signed in as the minion's person | the status (200 by default), and the text if named |
-| `timing` | three GETs of a path | the median is within `ms` |
-| `sql` | one SELECT through `src/db-view.ts` (read-only, secrets masked) | the first column of the first row is within `min`/`max`; only a number is ever shown |
-| `page` | `tools/ui-shot.ts` at 1440 px, light | the page draws (and `wait` appears) |
+| `http` | GET a path on this server, signed in as the minion's person (an app's path on the app's own host) | the status (200 by default), and the text if named; only the status and whether the text was there reach the chat, never the body |
+| `timing` | three GETs of a path, signed in the same way | the median is within `ms` |
+| `sql` | one SELECT through `src/db-view.ts --first` (read-only, secrets masked) | the first row's first value is a number within `min`/`max`; only that number is ever shown |
 
 No free-form commands: a probe is data the server interprets, each kind read-only, and none restarts anything. The
 server runs it once the change is live, with no model turn. A pass is one line in the minion's chat. A fail sets the
@@ -39,10 +41,17 @@ answer, a timeout, a 401 with no login to use, no headless browser) says so in o
 - **A merge into a build:** not live, so no probe; the build's own ship to main names one.
 - **Schemes that ship by pull request:** no `hand_off_land`, so no probe.
 
+## Not taken: a shot of a live page
+
+The handoff listed "a ui-measure shot of a live page". Every Citadel page needs a login, and opening the front end
+signed in as a person isn't read-only: it marks the minion it shows seen (which can close one) and the inbox's items
+read. Without a login it only ever shows the sign-in screen. So the trial has no `page` kind: an `http` probe on the
+route a page reads covers most of what a shot would, and the refusal for `page` says so.
+
 ## Fit, on 10 pairs from the deep dive
 
-About 6 of 10 fit a kind: #1079, #1251 and #1210 (timing), #1272 and #730 (sql), #479 (http or page), #1077 in part
-(page). Three didn't: #738 (a paid image call, not read-only), #885 (the heavy queue starves only under load, hours
+About 5 of 10 fit a kind: #1079, #1251 and #1210 (timing), #1272 and #730 (sql), #479 (http). #1077 in part needed a
+page shot, which the trial doesn't have (above). Three didn't: #738 (a paid image call, not read-only), #885 (the heavy queue starves only under load, hours
 later), #667 (another platform: the installed app's title bar).
 
 ## Not taken: "tried on Windows or a phone" as a kind
@@ -51,7 +60,7 @@ The handoff's idea of a probe that tries the change on the Windows test box or a
 model: it needs a person or a model turn on the test box. `stay_open` with `waiting_on` ("Cara testing on her phone")
 already covers a person trying it.
 
-## The stop rule (review on or after 2026-12-07)
+## The stop rule (review on or after 2026-12-07; the Taskmaster schedules it)
 
 Every probe writes one row to `$DATA_DIR/live-probes.jsonl` (`none`, pass, fail, can't). After two weeks, read it with
 the woken minions' ends: a fail followed by a shipped fix is a real defect; one closed with "probe was wrong" is a wrong

@@ -528,7 +528,7 @@ function liveOn(head: string | null) {
   void (async () => {
     await waiters.check(head);
     for (const id of await waiters.pendingLive()) runner.deployLive(id);
-    await liveProbes.sweep(); // #1741: a kept probe whose ship this head has (a stay_open restart)
+    void liveProbes.sweep().catch((err) => console.error(`The live probe sweep failed: ${err?.message ?? err}`)); // #1741: a kept probe whose ship this head has; never holds up what follows
     // Last, so nothing above waits on it; after waiters.check, which moves the head that says whose code is live.
     await citadelServer.live(head);
     releases.poll();
@@ -1500,9 +1500,14 @@ const liveProbes = new LiveProbes({
   run: (id, p) => {
     const t = store.getTicket(id);
     const person = t?.person_id != null ? store.getUser(t.person_id) : null;
-    // Signed in as the minion's own person, in this process only: the cookie goes to this server's loopback and the shot's browser, nowhere else.
-    const cookie = person && !person.disabled_at ? auth.issueCookie(person, false).split(';')[0] : null;
-    return runProbe(p, { base: `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`, cookie, dbPath: join(DATA_DIR, 'coordinator.db'), outDir: join(DATA_DIR, 'live-probes', String(id)) });
+    // GETs signed in as the minion's own person, from this process to its own loopback only; what they answer never reaches the chat.
+    // An app's path goes to the app's own host when apps have one (src/apps.ts moves them off Citadel's host).
+    const headers = (path: string) => {
+      if (!person || person.disabled_at) return null;
+      const app = APPS_DOMAIN ? /^\/apps\/([^/?#]+)/.exec(path)?.[1] : undefined;
+      return app ? { 'x-forwarded-host': `${app}.${APPS_DOMAIN}`, cookie: auth.issueAppCookie(app, person, false).split(';')[0] } : { cookie: auth.issueCookie(person, false).split(';')[0] };
+    };
+    return runProbe(p, { base: `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`, headers, dbPath: join(DATA_DIR, 'coordinator.db') });
   },
   isLive: async (id, commit) => {
     const dir = store.getProject(store.getTicket(id)?.project_id ?? 0)?.repo_dir;

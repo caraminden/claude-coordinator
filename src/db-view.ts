@@ -72,7 +72,13 @@ if (import.meta.main) {
   const chunks: Buffer[] = [];
   for await (const c of process.stdin) chunks.push(c as Buffer);
   try {
-    process.stdout.write(query(openMasked(process.argv[2]), Buffer.concat(chunks).toString()) + '\n');
+    const db = openMasked(process.argv[2]), sql = Buffer.concat(chunks).toString();
+    // --first (the live probe, src/live-probe.ts): the first row's first value as JSON, its type kept, or "no rows".
+    if (process.argv[3] === '--first') {
+      const row = db.prepare(sql).get() as Record<string, unknown> | undefined;
+      const v = row ? Object.values(row)[0] : 'no rows';
+      process.stdout.write(`${JSON.stringify(v instanceof Uint8Array ? 'blob' : v ?? null)}\n`);
+    } else process.stdout.write(query(db, sql) + '\n');
   } catch (err: any) {
     process.stderr.write(`${err.message}\n`);
     process.exitCode = 1;

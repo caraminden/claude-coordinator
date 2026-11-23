@@ -148,9 +148,11 @@ radius** is a word or two for how far a slip reaches (`page`, `route`, `server`,
 - **Alongside the ship:** the steps are in `references/ship.md`, "Alongside the ship".
 - **A live probe** (`hand_off_land` to main, 600+ changed lines; #1741): pick the one check that would show
   this change broken once live, e.g. `{kind:"timing", path:"/api/x", ms:800}` for a speed fix, `{kind:"sql",
-  query:"SELECT count(*) FROM ...", min:1}` for a new writer, `{kind:"http", path, text}` or `{kind:"page", route}`
-  for a route or a screen. Nothing live can show it (a prompt, a PC build)? `{kind:"none", reason}`. Its refusal
-  lists the shapes; a fail wakes you after the ship (docs/adr/0030-live-probe-trial.md).
+  query:"SELECT count(*) FROM ...", min:1}` for a new writer, `{kind:"http", path, text}` for a route or the data
+  a screen reads (an app's paths are `/apps/<name>/...`). Nothing live can show it (a prompt, a PC build)?
+  `{kind:"none", reason}`. It's asked only when something of the scheme is served by Citadel (Citadel itself, or a
+  scheme whose apps it deploys), and `sql` reads Citadel's own database, so only Citadel's ships use it. Its refusal
+  lists the shapes; a fail wakes you after the ship.
 - **The go threshold:** the Shipping line in your prompt says which labels wait for a person's go
   (with no Shipping line: high only; "No change waits": none). Below it, the label ships by itself;
   at or above it, it takes the High route (`references/ship.md`), whatever the label, unless the line says the

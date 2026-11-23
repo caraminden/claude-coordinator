@@ -768,7 +768,7 @@ test('the hand-off route makes a 600-line ship name a probe, refuses one that is
     const none = await handOff(body);
     assert.equal(none.status, 400);
     assert.match(none.error, /^Not handed off: this change is 600 lines \(600 or more\), so it names one check .* probe is one of: /);
-    assert.match((await handOff({ ...body, probe: { kind: 'shell', cmd: 'rm -rf /' } })).error, /^probe\.kind must be http, timing, sql, page or none\. probe is one of/);
+    assert.match((await handOff({ ...body, probe: { kind: 'shell', cmd: 'rm -rf /' } })).error, /^probe\.kind must be http, timing, sql or none\. probe is one of/);
     assert.match((await handOff({ ...body, probe: { kind: 'http', path: '//elsewhere.example/' } })).error, /not a valid path/);
     assert.match((await handOff({ ...body, into: 'build/2', files: ['test/a.test.ts'], probe: { kind: 'none', reason: 'x' } })).error, /goes with a ship to main/);
     assert.equal(store.getTicket(minion.id)!.state, null, 'nothing was handed off');
@@ -778,6 +778,33 @@ test('the hand-off route makes a 600-line ship name a probe, refuses one that is
     const said = store.listEvents(minion.id).map((e) => String(e.data));
     assert.ok(said.some((d) => d.includes('Live probe passed: GET /api/health answers 200 with \\"ok\\"')), said.join('\n'));
     assert.match(readFileSync(join(srv.data, 'live-probes.jsonl'), 'utf8'), /"kind":"http","result":"pass"/, "the trial's log has the row");
+
+    // Another scheme (its repo doesn't hold the code this server runs): asked only while it has an app this ship deploys.
+    const other = join(srv.root, 'other');
+    mkdirSync(join(other, 'tools'), { recursive: true });
+    writeFileSync(join(other, 'tools', 'land.sh'), `[ "$1" = --check ] && exit 0\nprintf '%b' ${JSON.stringify(LIVE)}\n`);
+    git(other, 'init', '-q', '-b', 'main');
+    git(other, 'add', '.');
+    git(other, 'commit', '-qm', 'init');
+    git(other, 'checkout', '-q', '-b', 'ticket/2-big');
+    writeFileSync(join(other, 'big.txt'), Array.from({ length: 600 }, (_, i) => `line ${i}`).join('\n') + '\n');
+    git(other, 'add', '.');
+    git(other, 'commit', '-qm', 'big');
+    const scheme = store.createProject('Other', null);
+    store.db.prepare('UPDATE projects SET repo_dir = ? WHERE id = ?').run(other, scheme.id);
+    const theirs = store.createTicket({ project_id: scheme.id, title: 'M2', permission_mode: 'default', created_by: 'Cara' });
+    store.setTicketDir(theirs.id, other, null);
+    const theirToken = agentToken(srv.data, theirs.id);
+    const theirHandOff = async (b: object) => {
+      const res = await fetch(`${srv.base}/api/tickets/${theirs.id}/land/handoff`, { method: 'POST', headers: { Authorization: `Bearer ${theirToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+      return { status: res.status, error: res.status === 202 ? '' : String((await res.json()).error) };
+    };
+    assert.match((await theirHandOff({ ...body, probe: { kind: 'sql', query: 'SELECT count(*) FROM tickets', min: 1 } })).error, /reads this server's own database/);
+    store.createContraption({ name: 'voice', title: 'Voice', icon: null, port: 9, home_scheme: scheme.id, open_paths: '[]', relay_paths: '[]', repo: other, branch: 'main', folder: null, default_model: null, turn_cap: null, identity_public: 'x', identity_private: 'x', key_hash: 'h', keys_at: 0 });
+    assert.match((await theirHandOff(body)).error, /^Not handed off: this change is 600 lines/, 'an app this ship deploys is served here');
+    store.updateContraption('voice', { branch: 'dev' });
+    assert.equal((await theirHandOff(body)).status, 202, 'an app on another branch is not deployed by this ship: nothing served, not asked');
+    await until('their land is reported', () => store.getTicket(theirs.id)!.status === 'closed');
   } finally {
     await srv.stop();
   }

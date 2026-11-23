@@ -18,6 +18,7 @@ before(async () => {
   srv = createServer((req, res) => {
     if (req.url === '/ok') return res.end('all good here');
     if (req.url === '/me') return req.headers.cookie === 'cc_session=abc' ? res.end('hello Cara') : (res.statusCode = 401, res.end('sign in'));
+    if (req.url === '/apps/voice/') return req.headers['x-forwarded-host'] === 'voice.apps.test' ? res.end('voice app') : (res.statusCode = 404, res.end('moved'));
     if (req.url === '/slow') return void setTimeout(() => res.end('late'), 120);
     if (req.url === '/hang') return; // never answers
     res.statusCode = 500;
@@ -27,7 +28,9 @@ before(async () => {
   const db = new DatabaseSync(join(root, 'c.db'));
   db.exec("CREATE TABLE tickets (id INTEGER, title TEXT); INSERT INTO tickets VALUES (1, 'secret plans'), (2, 'more');");
   db.close();
-  env = { base: `http://127.0.0.1:${(srv.address() as any).port}`, cookie: 'cc_session=abc', dbPath: join(root, 'c.db'), outDir: join(root, 'out'), timeoutMs: 1000 };
+  // As server.ts signs a GET in: an app's path goes to the app's own host.
+  const headers = (path: string) => (path.startsWith('/apps/voice/') ? { 'x-forwarded-host': 'voice.apps.test', cookie: 'cc_app=abc' } : { cookie: 'cc_session=abc' });
+  env = { base: `http://127.0.0.1:${(srv.address() as any).port}`, headers, dbPath: join(root, 'c.db'), timeoutMs: 1000 };
 });
 after(() => {
   srv.closeAllConnections();
@@ -36,11 +39,10 @@ after(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test('parseProbe takes the five kinds and refuses anything that is not plain data for them', () => {
+test('parseProbe takes the four kinds and refuses anything that is not plain data for them', () => {
   assert.deepEqual(parseProbe({ kind: 'http', path: '/api/skills' }), { kind: 'http', path: '/api/skills', status: 200 });
   assert.deepEqual(parseProbe({ kind: 'timing', path: '/api/x?y=1', ms: 800 }), { kind: 'timing', path: '/api/x?y=1', ms: 800 });
   assert.deepEqual(parseProbe({ kind: 'sql', query: 'SELECT count(*) FROM tickets;', min: 1 }), { kind: 'sql', query: 'SELECT count(*) FROM tickets', min: 1 });
-  assert.deepEqual(parseProbe({ kind: 'page', route: '#/p/2/skills', wait: '.skill-row' }), { kind: 'page', route: '#/p/2/skills', wait: '.skill-row' });
   assert.deepEqual(parseProbe({ kind: 'none', reason: 'a prompt change' }), { kind: 'none', reason: 'a prompt change' });
 
   const refuses = (x: unknown, re: RegExp) => assert.throws(() => parseProbe(x), re, JSON.stringify(x));
@@ -55,7 +57,7 @@ test('parseProbe takes the five kinds and refuses anything that is not plain dat
   refuses({ kind: 'sql', query: 'SELECT 1; DELETE FROM tickets', max: 0 }, /one SELECT/);
   refuses({ kind: 'sql', query: 'SELECT 1' }, /needs min, max or both/);
   refuses({ kind: 'sql', query: 'SELECT 1', min: 3, max: 1 }, /min is over/);
-  refuses({ kind: 'page', route: 'javascript:alert(1)' }, /not a valid route/);
+  refuses({ kind: 'page', route: '#/p/2/skills' }, /page isn't offered: opening the front end as a person marks things seen/);
   refuses({ kind: 'none', reason: ' ' }, /reason is required/);
   assert.equal(describeProbe(parseProbe({ kind: 'sql', query: 'SELECT 1', min: 0, max: 0 })), 'SELECT 1 is 0');
 });
@@ -64,9 +66,11 @@ test('an http probe passes on its status and text, fails with what it saw, and a
   const run = (p: object, e: Partial<ProbeEnv> = {}) => runProbe(parseProbe(p), { ...env, ...e });
   assert.equal((await run({ kind: 'http', path: '/ok', text: 'good' })).result, 'pass');
   assert.equal((await run({ kind: 'http', path: '/me', text: 'Cara' })).result, 'pass', 'signed in as the minion\'s person');
-  assert.deepEqual(await run({ kind: 'http', path: '/nope' }), { result: 'fail', saw: '500, not 200: boom: it broke' });
-  assert.deepEqual(await run({ kind: 'http', path: '/ok', text: 'usage bar' }), { result: 'fail', saw: '200, but the body has no "usage bar": all good here' });
-  assert.deepEqual(await run({ kind: 'http', path: '/me' }, { cookie: null }), { result: 'cant', saw: '401: the page needs a login and the minion has no person to sign in as' });
+  assert.equal((await run({ kind: 'http', path: '/apps/voice/', text: 'voice app' })).result, 'pass', "an app's path on its own host");
+  // What a GET answered is read as a person; only the status and whether the text was there reach the chat.
+  assert.deepEqual(await run({ kind: 'http', path: '/nope' }), { result: 'fail', saw: '500, not 200' });
+  assert.deepEqual(await run({ kind: 'http', path: '/ok', text: 'usage bar' }), { result: 'fail', saw: '200, but the body has no "usage bar"' });
+  assert.deepEqual(await run({ kind: 'http', path: '/me' }, { headers: () => null }), { result: 'cant', saw: '401: it needs a login and the minion has no person to sign in as' });
   assert.deepEqual(await run({ kind: 'http', path: '/hang' }, { timeoutMs: 200 }), { result: 'cant', saw: 'no answer within the time limit' });
   assert.equal((await run({ kind: 'http', path: '/ok' }, { base: 'http://127.0.0.1:1' })).result, 'cant', 'nothing listening');
 });
@@ -76,7 +80,7 @@ test('a timing probe compares the median of three GETs with its bound, and an er
   assert.equal(fast.result, 'pass');
   assert.match(fast.saw, /^median \d+ ms of 3 \(\d+, \d+, \d+ ms\), bound 5000 ms$/);
   assert.equal((await runProbe(parseProbe({ kind: 'timing', path: '/slow', ms: 50 }), env)).result, 'fail');
-  assert.equal((await runProbe(parseProbe({ kind: 'timing', path: '/nope', ms: 5000 }), env)).result, 'fail');
+  assert.deepEqual(await runProbe(parseProbe({ kind: 'timing', path: '/nope', ms: 5000 }), env), { result: 'fail', saw: '500, not a 2xx' });
 });
 
 test('a sql probe reads a number through the masked read-only reader and never shows anything else', async () => {
@@ -85,6 +89,8 @@ test('a sql probe reads a number through the masked read-only reader and never s
   assert.deepEqual(await run({ kind: 'sql', query: 'SELECT count(*) FROM tickets', max: 0 }), { result: 'fail', saw: '2' });
   const text = await run({ kind: 'sql', query: 'SELECT title FROM tickets', min: 1 });
   assert.deepEqual(text, { result: 'fail', saw: 'its first column is not a number' }, 'a row\'s text stays out of the chat');
+  assert.deepEqual(await run({ kind: 'sql', query: "SELECT '12|pending'", min: 1 }), { result: 'fail', saw: 'its first column is not a number' }, 'text that starts with a number is still text');
+  assert.deepEqual(await run({ kind: 'sql', query: "SELECT '7'", min: 1 }), { result: 'fail', saw: 'its first column is not a number' });
   assert.deepEqual(await run({ kind: 'sql', query: 'SELECT id FROM tickets WHERE id > 5', min: 1 }), { result: 'fail', saw: 'no rows' });
   assert.equal((await run({ kind: 'sql', query: 'SELECT count(*) FROM missing', min: 1 })).result, 'fail');
   const writes = await run({ kind: 'sql', query: "WITH x AS (SELECT 1) SELECT count(*) FROM x", min: 1 });
@@ -217,6 +223,32 @@ test('a restart already live runs the probe at once; the sweep runs a kept probe
   await stale.lp.sweep();
   assert.ok(!stale.settings.has(probeKey(3)));
   assert.deepEqual(stale.logged.map((r) => r.saw), ['never went live']);
+});
+
+test('a hold and a restart ship that both reach the same kept probe run it once', async () => {
+  // The ship reads its restart already live while the restart's own live holds the dismissal: one run, one wake.
+  const s = probes('fail');
+  let live!: (v: boolean) => void;
+  s.deps.isLive = () => new Promise((done) => { live = done; });
+  const ship = s.lp.shipped(1, HTTP, 'def5678', 'later');
+  assert.equal(s.lp.hold(1), true);
+  live(true);
+  assert.equal(await ship, false, 'the hold ran it, so the ship does not count its fail');
+  await until('the held run is done', () => !s.settings.has(probeKey(1)));
+  assert.equal(s.ran.length, 1);
+  assert.equal(s.sent.length, 1, 'one wake');
+
+  // The ship's run started first, and the hold came while it ran: the pass still dismisses the held minion.
+  let answer!: (o: Outcome) => void;
+  const t = probes(() => ({ result: 'pass', saw: 'unused' }), { live: true });
+  t.deps.run = async (_id, p) => { t.ran.push(p); return new Promise((done) => { answer = done; }); };
+  const ship2 = t.lp.shipped(1, HTTP, 'def5678', 'later');
+  await until('the ship runs it', () => t.ran.length === 1);
+  assert.equal(t.lp.hold(1), true, 'still kept while it runs, so the restart holds the dismissal');
+  answer({ result: 'pass', saw: '200 in 4 ms' });
+  assert.equal(await ship2, false);
+  assert.equal(t.ran.length, 1);
+  assert.deepEqual(t.closed, ['The deploy is live and its live probe passed, so it dismissed this minion.']);
 });
 
 test('changedLines counts added and removed lines against main, binary files left out', async () => {

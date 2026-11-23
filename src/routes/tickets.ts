@@ -1447,9 +1447,10 @@ export const ticketRoutes: Route[] = [
         } catch (err: any) {
           throw new HttpError(400, `${err.message}. ${PROBE_HELP}`);
         }
-        if (h.probe.kind === 'sql' && (await app.waiters.elsewhere(ticket.id))) throw new HttpError(400, "A sql probe reads this server's own database, so only the scheme it runs uses one: pick http, timing or page");
+        if (h.probe.kind === 'sql' && (await app.waiters.elsewhere(ticket.id))) throw new HttpError(400, "A sql probe reads this server's own database, so only the scheme it runs uses one: pick http or timing");
       } else if (body.into === undefined) {
-        const served = !(await app.waiters.elsewhere(ticket.id)) || (body.deploy !== false && app.store.listContraptions().some((c) => c.home_scheme === ticket.project_id && !!c.repo));
+        // As the ship's own app deploys pick them (server.ts, LandHandoffs' apps): a home app on main.
+        const served = !(await app.waiters.elsewhere(ticket.id)) || (body.deploy !== false && app.store.listContraptions().some((c) => c.home_scheme === ticket.project_id && !!c.repo && (c.branch ?? 'main') === 'main'));
         const lines = served ? await changedLines(ticket.cwd) : 0;
         if (lines >= PROBE_LINES) throw new HttpError(400, `Not handed off: this change is ${lines} lines (${PROBE_LINES} or more), so it names one check the server runs once it's live, with no model: a pass is a line in your chat, a fail wakes you. Pick what would show it broken live. ${PROBE_HELP}`);
       }

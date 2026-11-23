@@ -1,10 +1,10 @@
 // The live probe (#1741, rework fix 4): a ship of PROBE_LINES or more names one read-only check of itself, and the
 // server runs it once the change is live, with no model turn. A pass is one line in the minion's chat; a fail keeps
 // the minion open and wakes it with what the probe saw, so its builder fixes it with the context it still has.
-// A probe that can't run (no answer, a timeout, a page that needs a login it couldn't get) says so and isn't a fail.
+// A probe that can't run (no answer, a timeout, a login it couldn't get) says so and isn't a fail.
 // Probes are data this file interprets, never commands: GET requests to this server, a SELECT through the masked
-// read-only reader (src/db-view.ts), a timing bound, a page shot through tools/ui-shot.ts. The trial and its stop
-// rule: docs/adr/0030-live-probe-trial.md.
+// read-only reader (src/db-view.ts), a timing bound. What a GET answers never reaches the chat: only its status and
+// whether the text was there. The trial and its stop rule: docs/adr/0030-live-probe-trial.md.
 import { execFile, spawn } from 'node:child_process';
 import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -31,7 +31,6 @@ export type Probe =
   | { kind: 'http'; path: string; status: number; text?: string }
   | { kind: 'timing'; path: string; ms: number }
   | { kind: 'sql'; query: string; min?: number; max?: number }
-  | { kind: 'page'; route: string; wait?: string }
   | { kind: 'none'; reason: string };
 
 export interface Outcome {
@@ -41,7 +40,7 @@ export interface Outcome {
 }
 
 /** The kinds, for a refusal that teaches them. */
-export const PROBE_HELP = 'probe is one of: {kind:"http", path:"/api/...", status?:200, text?:"expected text"}, {kind:"timing", path:"/api/...", ms:800} (median of 3 GETs), {kind:"sql", query:"SELECT count(*) FROM ...", min?:1, max?:5} (read-only, secrets masked; first column of the first row), {kind:"page", route:"#/p/2/skills", wait?:"css selector"} (a 1440 px shot of the live page), or {kind:"none", reason:"why nothing live can show it"}. Paths are on this server, as the minion\'s own person sees them';
+export const PROBE_HELP = 'probe is one of: {kind:"http", path:"/api/...", status?:200, text?:"expected text"}, {kind:"timing", path:"/api/...", ms:800} (median of 3 GETs), {kind:"sql", query:"SELECT count(*) FROM ...", min?:1, max?:5} (read-only, secrets masked; the first value of the first row, a number), or {kind:"none", reason:"why nothing live can show it"}. Paths are on this server (an app\'s are /apps/<name>/...), read as the minion\'s own person sees them';
 
 const str = (v: unknown, name: string, max: number, re?: RegExp): string => {
   if (typeof v !== 'string' || !v.trim()) throw new Error(`probe.${name} is required`);
@@ -84,15 +83,10 @@ export function parseProbe(x: unknown): Probe {
       if (p.max === undefined) delete p.max;
       return p;
     }
-    case 'page': {
-      const p: Probe = { kind: 'page', route: str(o.route, 'route', 300, /^[#/][^\s]*$/) };
-      if (o.wait !== undefined) p.wait = str(o.wait, 'wait', 200, /^[^\n\r]+$/);
-      return p;
-    }
     case 'none':
       return { kind: 'none', reason: str(o.reason, 'reason', 300) };
     default:
-      throw new Error('probe.kind must be http, timing, sql, page or none');
+      throw new Error(o.kind === 'page' ? "probe.kind page isn't offered: opening the front end as a person marks things seen, which isn't read-only. Use http on the route the page reads" : 'probe.kind must be http, timing, sql or none');
   }
 }
 
@@ -102,7 +96,6 @@ export function describeProbe(p: Probe): string {
     case 'http': return `GET ${p.path} answers ${p.status}${p.text ? ` with "${p.text}"` : ''}`;
     case 'timing': return `GET ${p.path} in ${p.ms} ms or less`;
     case 'sql': return `${p.query} is ${p.min === p.max ? p.min : p.max === undefined ? `at least ${p.min}` : p.min === undefined ? `at most ${p.max}` : `${p.min} to ${p.max}`}`;
-    case 'page': return `the live page ${p.route} draws${p.wait ? ` with ${p.wait}` : ''}`;
     case 'none': return `none: ${p.reason}`;
   }
 }
@@ -110,12 +103,10 @@ export function describeProbe(p: Probe): string {
 export interface ProbeEnv {
   /** This server, e.g. http://127.0.0.1:8573. */
   base: string;
-  /** `cc_session=...` for the minion's person, or null (a page that needs a login then can't run). */
-  cookie: string | null;
+  /** The headers that sign a GET of `path` in as the minion's person (an app's path goes to its own host), or null: no one to sign in as. */
+  headers(path: string): Record<string, string> | null;
   /** The live database, for sql. */
   dbPath: string;
-  /** Where a page probe's shot goes. */
-  outDir: string;
   /** Per request; tests shorten it. */
   timeoutMs?: number;
 }
@@ -128,13 +119,13 @@ const clip = (s: string, n = 300) => {
 
 async function get(env: ProbeEnv, path: string): Promise<{ status: number; body: string; ms: number }> {
   const t0 = performance.now();
-  const res = await fetch(new URL(path, env.base), { headers: env.cookie ? { cookie: env.cookie } : {}, redirect: 'manual', signal: AbortSignal.timeout(env.timeoutMs ?? 30_000) });
+  const res = await fetch(new URL(path, env.base), { headers: env.headers(path) ?? {}, redirect: 'manual', signal: AbortSignal.timeout(env.timeoutMs ?? 30_000) });
   const body = await res.text();
   return { status: res.status, body, ms: Math.round(performance.now() - t0) };
 }
 
 const noAnswer = (err: any): Outcome => ({ result: 'cant', saw: err?.name === 'TimeoutError' ? 'no answer within the time limit' : `no answer: ${clip(String(err?.cause?.code ?? err?.message ?? err), 120)}` });
-const login = (env: ProbeEnv): Outcome => ({ result: 'cant', saw: `401: the page needs a login${env.cookie ? ' the minion\'s person doesn\'t have' : ' and the minion has no person to sign in as'}` });
+const login = (env: ProbeEnv, path: string): Outcome => ({ result: 'cant', saw: `401: it needs a login${env.headers(path) ? ' the minion\'s person doesn\'t have' : ' and the minion has no person to sign in as'}` });
 
 /** Run one probe against the live server. Never throws: a probe that can't run says so. */
 export async function runProbe(p: Probe, env: ProbeEnv): Promise<Outcome> {
@@ -144,9 +135,10 @@ export async function runProbe(p: Probe, env: ProbeEnv): Promise<Outcome> {
       case 'http': {
         let r;
         try { r = await get(env, p.path); } catch (err) { return noAnswer(err); }
-        if (r.status === 401 && p.status !== 401) return login(env);
-        if (r.status !== p.status) return { result: 'fail', saw: `${r.status}, not ${p.status}: ${clip(r.body)}` };
-        if (p.text && !r.body.includes(p.text)) return { result: 'fail', saw: `${r.status}, but the body has no "${p.text}": ${clip(r.body)}` };
+        if (r.status === 401 && p.status !== 401) return login(env, p.path);
+        // The body stays out of the chat: it's read as a person, and the minion's chat is seen by more people than that.
+        if (r.status !== p.status) return { result: 'fail', saw: `${r.status}, not ${p.status}` };
+        if (p.text && !r.body.includes(p.text)) return { result: 'fail', saw: `${r.status}, but the body has no "${p.text}"` };
         return { result: 'pass', saw: `${r.status}${p.text ? ` with "${p.text}"` : ''} in ${r.ms} ms` };
       }
       case 'timing': {
@@ -154,33 +146,23 @@ export async function runProbe(p: Probe, env: ProbeEnv): Promise<Outcome> {
         for (let i = 0; i < 3; i++) {
           let r;
           try { r = await get(env, p.path); } catch (err) { return noAnswer(err); }
-          if (r.status === 401) return login(env);
-          if (r.status < 200 || r.status > 299) return { result: 'fail', saw: `${r.status}: ${clip(r.body)}` };
+          if (r.status === 401) return login(env, p.path);
+          if (r.status < 200 || r.status > 299) return { result: 'fail', saw: `${r.status}, not a 2xx` };
           times.push(r.ms);
         }
         const median = [...times].sort((a, b) => a - b)[1];
         return { result: median <= p.ms ? 'pass' : 'fail', saw: `median ${median} ms of 3 (${times.join(', ')} ms), bound ${p.ms} ms` };
       }
       case 'sql': {
-        const r = await child([join(ROOT, 'src', 'db-view.ts'), env.dbPath], p.query, env.timeoutMs ?? 30_000);
+        const r = await child([join(ROOT, 'src', 'db-view.ts'), env.dbPath, '--first'], p.query, env.timeoutMs ?? 30_000);
         if (r.timedOut) return { result: 'cant', saw: 'the query ran past the time limit' };
         if (r.code !== 0) return { result: 'fail', saw: `the query failed: ${clip(r.err, 200)}` };
-        const lines = r.out.trim().split('\n');
-        if (lines.length < 2) return { result: 'fail', saw: 'no rows' };
-        const v = Number(lines[1].split('|')[0]);
+        const v = JSON.parse(r.out);
+        if (v === 'no rows') return { result: 'fail', saw: 'no rows' };
         // Only a number is ever shown: whatever else the first column holds stays out of the chat.
-        if (lines[1].split('|')[0] === '' || !Number.isFinite(v)) return { result: 'fail', saw: 'its first column is not a number' };
+        if (typeof v !== 'number') return { result: 'fail', saw: 'its first column is not a number' };
         const ok = (p.min === undefined || v >= p.min) && (p.max === undefined || v <= p.max);
         return { result: ok ? 'pass' : 'fail', saw: `${v}` };
-      }
-      case 'page': {
-        const args = [join(ROOT, 'tools', 'ui-shot.ts'), p.route, '--widths', '1440', '--themes', 'light', '--timeout', '30', '--out', env.outDir, ...(p.wait ? ['--wait', p.wait] : [])];
-        const r = await child(args, null, 150_000, { DEV_URL: env.base, DEV_COOKIE: env.cookie ?? '', TMPDIR: env.outDir });
-        if (r.timedOut) return { result: 'cant', saw: 'the page shot ran past 150 s' };
-        const said = `${r.out}\n${r.err}`;
-        if (/no browser/.test(said)) return { result: 'cant', saw: 'no headless browser on this server' };
-        if (r.code !== 0) return { result: 'fail', saw: clip(said.split('\n').filter((l) => /FAILED|hang|error/i.test(l)).join(' ') || said.slice(-400), 400) };
-        return { result: 'pass', saw: `it drew (shots in ${env.outDir})` };
       }
     }
   } catch (err: any) {
@@ -188,17 +170,17 @@ export async function runProbe(p: Probe, env: ProbeEnv): Promise<Outcome> {
   }
 }
 
-/** Run node with `args`, off the event loop, with an optional stdin and a time limit. */
-function child(args: string[], input: string | null, ms: number, env: Record<string, string> = {}): Promise<{ code: number | null; out: string; err: string; timedOut: boolean }> {
+/** Run node with `args`, off the event loop, with a stdin and a time limit. */
+function child(args: string[], input: string, ms: number): Promise<{ code: number | null; out: string; err: string; timedOut: boolean }> {
   return new Promise((done) => {
-    const c = spawn(process.execPath, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const c = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '', err = '', timedOut = false;
     const timer = setTimeout(() => { timedOut = true; c.kill('SIGKILL'); }, ms);
     c.stdout.on('data', (d) => { if (out.length < 64_000) out += d; });
     c.stderr.on('data', (d) => { if (err.length < 64_000) err += d; });
     c.on('error', (e) => { err += e.message; });
     c.on('close', (code) => { clearTimeout(timer); done({ code, out, err, timedOut }); });
-    c.stdin.end(input ?? '');
+    c.stdin.end(input);
   });
 }
 
@@ -275,7 +257,8 @@ export class LiveProbes {
       this.d.store.setSetting(probeKey(id), { probe, commit, at: Date.now() } satisfies Stored);
       // Its restart may have gone live before land.sh's end was read: then no live will come for it.
       if (!(await this.d.isLive(id, commit).catch(() => false))) return false;
-      this.d.store.deleteSetting(probeKey(id));
+      // Through the one claim (stored), so a hold or sweep that got there first runs it and this doesn't.
+      return (await this.stored(id)) === 'fail';
     }
     return (await this.once(id, probe, commit)) === 'fail';
   }
@@ -285,7 +268,7 @@ export class LiveProbes {
     if (!this.d.store.getSetting<Stored>(probeKey(id))) return false;
     this.d.store.updateTicket(id, { state: 'outside', note: HOLD_NOTE });
     this.d.runner.broadcastTicket(id);
-    void this.stored(id, true);
+    void this.stored(id);
     return true;
   }
 
@@ -300,24 +283,27 @@ export class LiveProbes {
         await this.d.log({ ticket: id, commit: s.commit, kind: s.probe.kind, result: 'cant', saw: 'never went live' });
         continue;
       }
-      if (await this.d.isLive(id, s.commit).catch(() => false)) await this.stored(id, this.d.store.getTicket(id)?.note === HOLD_NOTE);
+      if (await this.d.isLive(id, s.commit).catch(() => false)) await this.stored(id);
     }
   }
 
-  private async stored(id: number, closeOnPass: boolean) {
+  /** The one claim on a kept probe: runs it unless it's gone or already running, then dismisses a minion its hold kept open. */
+  private async stored(id: number): Promise<Outcome['result'] | null> {
     const s = this.d.store.getSetting<Stored>(probeKey(id));
-    if (!s || this.running.has(id)) return;
+    if (!s || this.running.has(id)) return null;
     try {
       const result = await this.once(id, s.probe, s.commit);
       this.d.store.deleteSetting(probeKey(id));
       const t = this.d.store.getTicket(id);
-      // Only a dismissal this held: a person who wrote, a turn or another state since then keeps it open.
-      if (result !== 'fail' && closeOnPass && t && t.status !== 'closed' && t.state === 'outside' && t.note === HOLD_NOTE && !this.d.runner.isRunning(id) && !this.d.runner.queued(id)) {
+      // Only a dismissal a hold kept: a person who wrote, a turn or another state since then keeps it open.
+      if (result !== 'fail' && t && t.status !== 'closed' && t.state === 'outside' && t.note === HOLD_NOTE && !this.d.runner.isRunning(id) && !this.d.runner.queued(id)) {
         this.d.store.updateTicket(id, { state: null, note: null });
         await this.d.runner.close(id, `The deploy is live and its live probe ${result === 'pass' ? 'passed' : "couldn't run"}, so it dismissed this minion.`);
       }
+      return result;
     } catch (err: any) {
       console.error(`Minion ${id}'s live probe failed to report: ${err?.message ?? err}`);
+      return null;
     }
   }
 

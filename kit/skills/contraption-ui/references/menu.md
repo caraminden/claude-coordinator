@@ -63,6 +63,8 @@ contenteditable) and Shift+right-click to the browser, so spelling and Paste sti
 CSP: placement and the chip's hue are CSSOM writes (`el.style.left`, `setProperty`), which the CSP allows;
 never `style=""`. Keep a menu short: the thing's few real actions, the commonest first.
 
+**Phones, in an app (#1670):** a long press on something an app matched with `citadel.menu.add` or on a link opens the same sheet, with Point and the app's items under "From <app>"; plain text keeps the phone's own selection. Add `-webkit-touch-callout: none` to your own matched elements if iPhone's callout shows.
+
 **Phones:** `mountMenus({ menuFor, longPress: true })` (or `longPress(target, spec) => boolean` to pick) opens the
 same menu as a bottom sheet after a 450 ms touch hold: a grab bar, the kind chip and name, rows 48 px tall, the page
 dimmed. A move past 10 px cancels it, the tap that ends it does nothing, a tap on the dim or a swipe down on the

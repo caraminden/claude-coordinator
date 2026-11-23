@@ -65,7 +65,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
     tell('handle', r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null);
   }, 50);
   // Links to click from the test (a clickLink message): what the page's handler did with each, reported back.
-  document.body.insertAdjacentHTML('beforeend', '<a id="same" href="/apps/peek/ingest">a</a><a id="other" href="http://voice.test/apps/voice/rate/">b</a><a id="out" href="https://example.com/x">c</a><a id="zip" target="_blank" href="https://docs.citadel.zip/">d</a>');
+  document.body.insertAdjacentHTML('beforeend', '<p id="plain">just some words</p><a id="same" href="/apps/peek/ingest">a</a><a id="other" href="http://voice.test/apps/voice/rate/">b</a><a id="out" href="https://example.com/x">c</a><a id="zip" target="_blank" href="https://docs.citadel.zip/">d</a>');
   // Its own right-click item (#1665), and what its menu shows, told up for the test (a menu message): the labels, or picks one.
   window.citadel.menu.add('header button', () => [{ label: 'Mark done', icon: '✓', run: () => tell('marked', true) }], { name: (el) => el.textContent });
   addEventListener('message', (e) => {
@@ -260,6 +260,39 @@ test("a framed app's own links stay in it; another app and Citadel's domain go u
   assert.equal(await click('out'), false, 'an outside link is the browser\'s');
   assert.equal(await click('zip'), true);
   assert.deepEqual(await page.eval(`window.upward`), ['app http://voice.test/apps/voice/rate/', 'go-url https://docs.citadel.zip/']);
+});
+
+test("on a phone, a long press on an app's item opens the sheet with Point and the app's items, and on plain text it doesn't (#1670)", { skip }, async () => {
+  const page = await framer({ width: 400, height: 800, touch: true });
+  await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
+  const ask = (data: object) => page.eval(`document.querySelector('#frames iframe').contentWindow.postMessage(${JSON.stringify(data)}, '*')`);
+  const pressAt = async (where: string) => {
+    await page.eval(`delete window.echo.where`);
+    await ask({ where });
+    await waitFor(page, 'the place in the frame', `!!window.echo.where`);
+    const at = await page.eval<{ x: number; y: number }>(`(() => { const f = document.querySelector('#frames iframe').getBoundingClientRect(); return { x: f.left + window.echo.where.x, y: f.top + window.echo.where.y }; })()`);
+    await page.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] });
+    await new Promise((r) => setTimeout(r, 800)); // timing-ok: a long press is a held finger
+    await page.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  const told = async () => {
+    await page.eval(`delete window.echo.menu`);
+    await ask({ menu: '' });
+    await waitFor(page, 'the menu told', `'menu' in window.echo`);
+    return page.eval<string | null>(`window.echo.menu`);
+  };
+  // Citadel's state, with the app's title, has to reach the frame before the menu can name it.
+  await until('a sheet naming Peek', async () => {
+    await pressAt('header button');
+    return /From Peek/.test(String(await told()));
+  }, 10_000);
+  assert.equal(await told(), 'Peek item | Menu | Point at this | Point and draw… | - | From Peek | Mark done | - | Copy text');
+  assert.equal(await page.eval(`document.querySelector('#frames iframe').contentDocument`), null);
+  await ask({ menu: 'Mark done' });
+  await waitFor(page, "the app's own item run", `window.echo.marked === true`);
+  // Plain text keeps the phone's own selection: no sheet.
+  await pressAt('#plain');
+  assert.equal(await told(), null);
 });
 
 test("right-click in a framed app gets Citadel's menu with the app's own items under its name, and Point goes up to Citadel (#1665)", { skip }, async () => {

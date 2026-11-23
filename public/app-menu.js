@@ -2,8 +2,8 @@
 // rail.js mounts it on every app page that loads /apps/_citadel/rail.js: right-click (or Shift+F10 / the Menu key) gets
 // Citadel UI's menu (ui/menu.js) with Point at this and Point and draw… (inside Citadel's frame, where a chat is to point
 // into), then the app's own items for what was clicked, added with citadel.menu.add() and shown under "From <app>", then
-// Copy. In the desktop app it ends with Inspect. Text boxes, Shift+right-click and a phone's long press keep the
-// browser's own. Point and Inspect go up to Citadel's page (pick.js), which owns the chat box and the desktop app's
+// Copy. In the desktop app it ends with Inspect. Text boxes and Shift+right-click keep the browser's own; on a phone a long press opens it as a
+// sheet on an app's own items and links only (#1670), and plain text keeps the phone's selection. Point and Inspect go up to Citadel's page (pick.js), which owns the chat box and the desktop app's
 // screenshot and DevTools. Served to apps beside rail.js, so it imports only the files beside it.
 import { mountMenus } from './ui/menu.js';
 import { copyText } from './ui/markdown.js';
@@ -48,8 +48,6 @@ function ownMatch(t) {
  * desktop app, and a message up to Citadel's page.
  */
 export function appMenuFor(target, e, ctx) {
-  // A phone's long press stays the app's (and the phone's): text selection, drags.
-  if (e?.pointerType === 'touch' || e?.sourceCapabilities?.firesTouchEvents) return null;
   if (target.closest('.citadel-rail, .citadel-layer')) return null;
   const title = ctx.title();
   const desktop = ctx.desktop();
@@ -112,8 +110,21 @@ async function pointAt(el, ctx, draw = false) {
   ctx.post('point', { note, draw, crop: await cropPart(el) });
 }
 
-/** Wire the page's right-click to the app menu; rail.js calls it once on an app's page. */
+/**
+ * A phone's long press (#1670) opens the sheet only on what an app added with menu.add() and on links, so plain text
+ * keeps the phone's own selection; a selection in progress keeps it too.
+ */
+export function pressable(t) {
+  const sel = getSelection();
+  if (sel && !sel.isCollapsed && sel.containsNode(t, true)) return false;
+  return !!(ownMatch(t) || t.closest('a[href]'));
+}
+
+/** Wire the page's right-click and a phone's long press to the app menu; rail.js calls it once on an app's page. */
 export function mountAppMenu(ctx) {
   globalThis.citadel = Object.assign(globalThis.citadel ?? {}, { menu });
-  return mountMenus({ menuFor: (t, e) => appMenuFor(t, e, ctx) });
+  const noCallout = document.head.appendChild(document.createElement('style'));
+  noCallout.textContent = 'a[href] { -webkit-touch-callout: none; }'; // iPhone's own link preview would cover the sheet
+  const off = mountMenus({ menuFor: (t, e) => appMenuFor(t, e, ctx), longPress: (t) => pressable(t) });
+  return () => { off(); noCallout.remove(); };
 }

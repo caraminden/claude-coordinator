@@ -618,7 +618,7 @@ export const contraptionRoutes: Route[] = [
       // "May lose data" (#1682): whoever acts types the name; the Taskmaster passes `confirm` after a person gives it. Install, deploys and key rotation are not gated.
       if (risky && risk === 'loses_data') {
         const why = `${c.name} ${action} is marked "may lose data"${c.restart_note ? `: ${c.restart_note}` : ''}.`;
-        if (body.confirm !== c.name) throw new HttpError(409, `${why} Send confirm: "${c.name}" to run it anyway.`);
+        if (body.confirm !== c.name) throw new HttpError(409, `${why} A person must type the name first; then send it as confirm.`);
       }
       const asker = session.uid ?? (caller ? app.store.turnAsker(caller.id) : null);
       const who = asker ? app.store.getUser(asker)?.login ?? `user ${asker}` : 'unknown';

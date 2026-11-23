@@ -247,8 +247,8 @@ test('restart and stop carry a risk (#1682): shown first, a typed name for "may 
   const calls = fake.calls().length;
   r = await tool(CitadelTM, 'contraption_service', { name: 'twin', action: 'stop' });
   assert.equal(r.isError, true);
-  assert.match(r.text, /"may lose data": its queue is in memory\. Send confirm: "twin"/);
-  assert.match((await srv.call('/api/contraptions/twin/service', { action: 'restart' })).data.error, /Send confirm: "twin"/);
+  assert.match(r.text, /"may lose data": its queue is in memory\. A person must type the name first/);
+  assert.match((await srv.call('/api/contraptions/twin/service', { action: 'restart' })).data.error, /A person must type the name first/);
   assert.equal((await srv.call('/api/contraptions/twin/service', { action: 'restart', confirm: 'tw' })).status, 409);
   assert.equal(fake.calls().length, calls, 'a refused run never reaches systemd');
   assert.equal(store.contraptionRuns(twin().id).filter((x) => x.risk === 'loses_data').length, 0, 'a refusal is not a run');

@@ -123,8 +123,10 @@ export function pressable(t) {
 /** Wire the page's right-click and a phone's long press to the app menu; rail.js calls it once on an app's page. */
 export function mountAppMenu(ctx) {
   globalThis.citadel = Object.assign(globalThis.citadel ?? {}, { menu });
-  const noCallout = document.head.appendChild(document.createElement('style'));
-  noCallout.textContent = 'a[href] { -webkit-touch-callout: none; }'; // iPhone's own link preview would cover the sheet
+  // iPhone's own link preview would cover the sheet. A constructed sheet, which a strict CSP allows (as rail.js does).
+  const noCallout = new CSSStyleSheet();
+  noCallout.replaceSync('a[href] { -webkit-touch-callout: none; }');
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, noCallout];
   const off = mountMenus({ menuFor: (t, e) => appMenuFor(t, e, ctx), longPress: (t) => pressable(t) });
-  return () => { off(); noCallout.remove(); };
+  return () => { off(); document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== noCallout); };
 }

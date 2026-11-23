@@ -36,6 +36,12 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
 8. **Model and effort**, with one line of why from the Taskmaster's model table: `Opus 5.5 high:
    design-shaped, a new flow`. create_ticket takes the pick in `model` and `effort`; the
    line in the brief is the why. Nothing above high unless a person asks (`citadel:subagents`).
+   Then **`Expected cost: ~$N`** on a line of its own. Rule of thumb: the usual cost for the type on that
+   model (the budget part of list_tickets' lines, or the Budget line at the top of your own turns) times
+   how many minions' worth of work the brief holds; a port, a migration or many files weighs more, a
+   one-line fix less. create_ticket reads the line (or takes `expected_cost`), and the minion's budget
+   alarms count from it. Over $30 is a sign the work splits: split it if it can, and if it can't, say why
+   in the brief. A brief over $30 waits for a person's start card (Start, or Split first) before it runs.
    The tiers, read from the table when this skill loaded (a scheme with Fable off gets them without
    Fable):
 
@@ -85,6 +91,7 @@ Leave alone: the per-person Costs page.
 Ruled out: a per-person toggle (Cara, same message: "no toggle"). Tried: nothing yet.
 Read first: src/costs.ts (the totals), public/topbar.js (the bar), test/costs.test.ts.
 Model: Sonnet 5.5 medium: known-shape change, one query and one label (table: small feature).
+Expected cost: ~$4 (one small feature's worth).
 Ships straight to main.
 ```
 
@@ -98,7 +105,8 @@ constraints that matter most first and again at the end.
 
 create_ticket, and a person's Start on a handoff, warn when the brief (with any handoff file it
 names) has no quoted words from a person, no "Done when", no "Already shipped on this" or no "Leave alone". The minion is still created: add the
-missing part with message_ticket in the same turn, or say in the brief why there is none.
+missing part with message_ticket in the same turn, or say in the brief why there is none. create_ticket
+also notes a missing "Expected cost" line; that minion starts anyway, its alarms counted from the usual cost.
 
 ## Done lines (features)
 

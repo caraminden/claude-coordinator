@@ -634,6 +634,7 @@ const TOOLS = () => ([
         reason: PICK_REASON,
         workflow: WORKFLOW,
         plugin_folders: PLUGIN_FOLDERS,
+        expected_cost: { type: 'number', description: 'What the brief expects this minion to cost, in dollars (its "Expected cost: ~$N" line, citadel:briefing part 8; left out, that line is read). Its budget alarms count from the larger of this and the usual cost; over $30 it is created sealed and waits for a person\'s start card (Start, or Split first).' },
         not_duplicate: { type: 'boolean', description: 'true when create_ticket refused because open minions looked like the same work, or one open or closed in the last 3 days started from the same handoff file, and you checked it is not the same work' },
       },
       // properties is asked for but not required, so a client holding an older schema isn't refused before the fallback below.
@@ -1914,6 +1915,7 @@ async function runTool(name: string, args: any): Promise<string> {
         pick_reason: args.reason,
         workflow: args.workflow ?? null,
         plugin_dirs: args.plugin_folders,
+        expected_cost: args.expected_cost ?? null,
         not_duplicate: args.not_duplicate === true || undefined,
       });
       const fallback = untyped ? [`No type was given, so it is type: other for now. Set the right one with set_properties (ticket_id ${t.number}), and pass properties: { type: … } to create_ticket next time.`] : [];

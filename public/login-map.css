@@ -25,6 +25,13 @@ html:has(#splash) { background: #f3e9d2; }
 #splash .splash-mark svg { width: 34px; height: 34px; fill: #9333ea /* the app icon's violet (#227); not --accent */; animation: splash-pulse 1.1s ease-in-out both; }
 @keyframes splash-pulse { 0% { transform: scale(.7); opacity: 0; } 40% { transform: scale(1.06); opacity: 1; } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { #splash { transition: none; } #splash .splash-mark svg { animation: none; } }
+/* In the installed app the map starts below the window buttons' strip, which is one band of the map's paper with them
+   (login-map-art.js tints them the same): the map's edge under them changes with the width, so no one colour matches it (#1691). */
+@media (display-mode: window-controls-overlay) {
+  #splash { background: #f3e9d2; }
+  #splash .scene { top: env(titlebar-area-height, 0px); }
+}
+@media (display-mode: window-controls-overlay) and (prefers-color-scheme: dark) { #splash { background: #16142a; } }
 
 /* ---- the scene (generated from the mock's CSS) ---- */
 .login-map .scene { position: absolute; inset: 0px; overflow: hidden; container-type: size; }

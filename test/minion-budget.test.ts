@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { budgetCard, budgetFor, budgetFrom, budgetKey, CARD, markOf, medians, passed, turnLine, wakeText, ASK, WAKE } from '../src/minion-budget.ts';
+import { budgetCard, budgetFor, costReason, budgetFrom, budgetKey, CARD, markOf, medians, passed, turnLine, wakeText, ASK, WAKE } from '../src/minion-budget.ts';
 import { Runner } from '../src/runner.ts';
 import { stopTurns, testPins } from './helpers.ts';
 import { until } from './wait.ts';
@@ -42,7 +42,7 @@ test('a mark is its multiple or its floor, whichever is more, and each fires onc
   assert.deepEqual(passed(dear, 40, { asked: 1 }), ['wake']);
   assert.deepEqual(passed(dear, 63.9, { asked: 1, woke: 2 }), []);
   assert.match(turnLine(dear, 2), /usually cost about \$8\.00.*used \$2\.00 so far.*Past \$16 you'll be asked/);
-  assert.match(turnLine(dear, 17), /past 2x: if you haven't yet, say in one line why/);
+  assert.match(turnLine(dear, 17), /past 2x: if you haven't yet, say in one line starting "Costing more:" why/);
 });
 
 test('past the 4x wake, the Taskmaster is woken again at each doubling, and past 10x (at least $50) the owner gets a card (#1672)', () => {
@@ -71,13 +71,19 @@ test('past the 4x wake, the Taskmaster is woken again at each doubling, and past
   assert.match(wakeText(dear, 64, 2), /carry on lasts only until the next mark, \$128/);
   assert.match(wakeText(dear, 64, 2), /conditions you set last time/);
   assert.match(wakeText(dear, 33, 1), /over 4x the usual/);
+  // A first wake that jumps straight past 8x has nothing earlier to check.
+  assert.doesNotMatch(wakeText(dear, 100, 2, false), /conditions you set last time|woken about it before/);
 
   const card = budgetCard(dear, 81, 'fixing the flaky ship test');
   assert.match(card.question, /used about \$81, over 10x the usual \$8\.00 for a feature on Opus/);
-  assert.match(card.question, /fixing the flaky ship test/);
+  assert.match(card.question, /Its reason: “fixing the flaky ship test”/);
   assert.deepEqual(card.options.map((o) => o.label), ['Carry on', 'Split', 'Stop']);
   assert.match(card.options[0].description!, /\$128/);
-  assert.doesNotMatch(budgetCard(dear, 81, null).question, /null/);
+  assert.match(budgetCard(dear, 81, null).question, /It hasn't said why\./);
+  // The reason is the minion's latest "Costing more:" line, however it's marked up.
+  assert.equal(costReason(['Working.', 'Done.\n**Costing more:** three Opus Grunts on the logs\nNext: ship']), 'three Opus Grunts on the logs');
+  assert.equal(costReason(['Costing more: first', 'Costing more: second']), 'second');
+  assert.equal(costReason(['nothing here']), null);
 });
 
 // A real turn (the spend-turn harness, #723): a fake `claude -p` streams $10 Opus messages, `before` of them, then waits
@@ -100,7 +106,7 @@ process.stdin.on('data', (d) => appendFileSync(${JSON.stringify(stdin)}, d));
 const { before, after } = JSON.parse(readFileSync(${JSON.stringify(script)}, 'utf8'));
 let n = 0;
 const say = (count) => {
-  for (let i = 0; i < count; i++, n++) console.log(JSON.stringify({ type: 'assistant', parent_tool_use_id: null, message: { id: 'msg_' + n + '_' + Date.now(), model: 'claude-opus-5-5', usage: { input_tokens: 2500000, output_tokens: 1 }, content: [{ type: 'text', text: 'hi' }] } }));
+  for (let i = 0; i < count; i++, n++) console.log(JSON.stringify({ type: 'assistant', parent_tool_use_id: null, message: { id: 'msg_' + n + '_' + Date.now(), model: 'claude-opus-5-5', usage: { input_tokens: 2500000, output_tokens: 1 }, content: [{ type: 'text', text: 'Costing more: a long test run' }] } }));
 };
 say(before);
 const wait = setInterval(() => {
@@ -169,7 +175,7 @@ test('a turn past 2x gets the ask once, in the chat and the turn; its Taskmaster
   assert.equal(wakes.length, 2);
   assert.match(wakes[1].text, /over 8x the usual \$5\.00.*carry on lasts only until the next mark, \$80/);
   assert.deepEqual(cards.map((c) => c.ticket), [id]);
-  assert.match(cards[0].question, /over 10x the usual \$5\.00/);
+  assert.match(cards[0].question, /over 10x the usual \$5\.00.*Its reason: “a long test run”/);
 
   // Nor after a dismissal and a reopen (2R1): the marks outlive the close. $70 is short of 16x's $80.
   await runner.close(id, 'Dismissed.');

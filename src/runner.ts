@@ -60,7 +60,7 @@ import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type Proc
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
-import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, CARD, chatNote, markOf, passed, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
+import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, readAgentFiles, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
@@ -4170,8 +4170,18 @@ export class Runner {
       if (steer) this.steerSystem(ticketId, askText(budget, spent), row.id);
     }
     // tellTaskmaster posts its own "Sent the Taskmaster" line in the chat.
-    if (marks.includes('wake')) this.onBudgetWake(ticketId, wakeText(budget, spent, level));
-    if (marks.includes('card')) this.onBudgetCard(ticketId, budgetCard(budget, spent, this.store.getTicket(ticketId)?.note ?? null));
+    if (marks.includes('wake')) this.onBudgetWake(ticketId, wakeText(budget, spent, level, !!state.woke));
+    if (marks.includes('card')) this.onBudgetCard(ticketId, budgetCard(budget, spent, this.costReason(ticketId)));
+  }
+
+  /** The minion's own "Costing more:" line since the ask (#1672), from its main thread's replies; null when it never said. */
+  private costReason(ticketId: number): string | null {
+    const ask = this.store.eventsOfKinds(ticketId, ['note']).findLast((e) => JSON.parse(e.data).text?.startsWith('Budget:'));
+    const texts = this.store.eventsOfKinds(ticketId, ['claude'], ask?.id ?? 0).filter((e) => e.data.includes(REASON)).flatMap((e) => {
+      const d = JSON.parse(e.data);
+      return d.type === 'assistant' && !d.parent_tool_use_id && Array.isArray(d.message?.content) ? d.message.content.filter((c: any) => c?.type === 'text' && typeof c.text === 'string').map((c: any) => c.text) : [];
+    });
+    return costReason(texts);
   }
 
   /**

@@ -98,13 +98,24 @@ export function turnLine(b: Budget, spent: number): string {
   const head = `Budget: ${b.basis} has usually cost about ${usd(b.usd)} (the median of ${b.n} minions in the last 4 weeks, every scheme); this minion has used ${usd(spent)} so far. It is not a cap and quality comes first.`;
   // Past the mark, the line carries the ask too: a turn that ended before it could read the ask still gets it.
   return spent >= markOf(b, ASK)
-    ? `${head} It is past ${ASK.times}x: if you haven't yet, say in one line why it is costing more, and split off what's left for a fresh minion (citadel:briefing, sent to your Taskmaster) if it splits cleanly.`
+    ? `${head} It is past ${ASK.times}x: if you haven't yet, say in one line starting "${REASON}" why it is costing more, and split off what's left for a fresh minion (citadel:briefing, sent to your Taskmaster) if it splits cleanly.`
     : `${head} Past ${usd(markOf(b, ASK))} you'll be asked to say why or split the work; past ${usd(markOf(b, WAKE))} your Taskmaster hears of it.`;
 }
 
 /** The one ask past the first mark (Josh, "Say why, or split"), passed into the running turn or opening the next. */
 export function askText(b: Budget, spent: number): string {
-  return `Budget: this minion has now used about ${usd(spent)}, over ${ASK.times}x the usual ${usd(b.usd)} for ${b.basis}. In your next reply, say in one line why it is costing more. If the rest of the work splits off cleanly, write a handoff for a fresh minion (citadel:briefing) and send it to your Taskmaster instead of carrying on here. Nothing stops you: finish what needs finishing, and quality still comes first.`;
+  return `Budget: this minion has now used about ${usd(spent)}, over ${ASK.times}x the usual ${usd(b.usd)} for ${b.basis}. In your next reply, say why it is costing more in one line starting "${REASON}" (its owner sees that line if it reaches ${CARD.times}x). If the rest of the work splits off cleanly, write a handoff for a fresh minion (citadel:briefing) and send it to your Taskmaster instead of carrying on here. Nothing stops you: finish what needs finishing, and quality still comes first.`;
+}
+
+/** How the minion's one-line reason starts, so the owner's card can quote it. */
+export const REASON = 'Costing more:';
+/** The minion's latest "Costing more:" line in `texts` (its replies, oldest first), or null when it never said why. */
+export function costReason(texts: string[]): string | null {
+  for (const t of texts.toReversed()) {
+    const m = [...t.matchAll(/^\W*Costing more:\**\s*(.+)$/gim)].at(-1);
+    if (m) return m[1].trim().slice(0, 300);
+  }
+  return null;
 }
 
 /** What people read in the chat past the first mark (the second's is tellTaskmaster's "Sent the Taskmaster" line). */
@@ -120,20 +131,23 @@ export function wakeLevel(b: Budget, spent: number): number {
 /** The next wake's dollar mark once `level` has been woken. */
 const nextWake = (b: Budget, level: number) => markOf(b, WAKE) * 2 ** level;
 
-/** The Taskmaster's wake at `level` (1 at 4x, 2 at 8x…): a carry on lasts to the next mark, and a repeat checks last time's conditions. */
-export function wakeText(b: Budget, spent: number, level = 1): string {
+/**
+ * The Taskmaster's wake at `level` (1 at 4x, 2 at 8x…): a carry on lasts to the next mark, and `again` (it was woken
+ * before) asks it to check last time's conditions.
+ */
+export function wakeText(b: Budget, spent: number, level = 1, again = level > 1): string {
   const times = WAKE.times * 2 ** (level - 1);
   const head = `Budget: this minion has used about ${usd(spent)}, over ${times}x the usual ${usd(b.usd)} for ${b.basis}`;
-  const lead = level > 1
+  const lead = again
     ? `${head}. You were woken about it before. Read its replies since then and check whether the conditions you set last time (a cheaper model for its Grunts, cost lines, a split) actually happened.`
     : `${head} (it was asked at ${usd(markOf(b, ASK))} to say why or split the work). Read its last reply.`;
   const card = spent < markOf(b, CARD) ? ` Past ${usd(markOf(b, CARD))} its owner gets a card to carry on, split or stop.` : '';
   return `${lead} Decide: let it carry on, split the rest into a new minion, or stop it. A carry on lasts only until the next mark, ${usd(nextWake(b, level))}: you'll be woken again there.${card} No action is taken by itself.`;
 }
 
-/** The owner's card past the 10x mark: the spend, the usual cost, the minion's latest note, and carry on, split or stop. */
-export function budgetCard(b: Budget, spent: number, note: string | null) {
-  const said = note?.trim() ? ` Its latest note: “${note.trim()}”.` : '';
+/** The owner's card past the 10x mark: the spend, the usual cost, the minion's own reason (costReason), and carry on, split or stop. */
+export function budgetCard(b: Budget, spent: number, reason: string | null) {
+  const said = reason ? ` Its reason: “${reason}”.` : " It hasn't said why.";
   return {
     header: 'Budget',
     question: `This minion has used about ${usd(spent)}, over ${CARD.times}x the usual ${usd(b.usd)} for ${b.basis}.${said} Should it carry on, split off what is left (it writes a handoff for a fresh minion and stops), or stop now?`,

@@ -259,11 +259,6 @@ async function choicesDoc(app: App, ticket: Ticket, raw: unknown): Promise<{ pat
   return { path: found.abs, title: pageTitle(html, found.abs) };
 }
 
-/**
- * A direct card's addressee (#687): `to` names one member of the asking scheme, by name or login, and comes back
- * as their name (what the chat, the inbox and push go by); null for a card to everyone. Only the asking scheme's
- * members: a card never reaches anyone a message in its chat couldn't.
- */
 /** The stop button: the turn, its waiting test-box job and its running ship (unless past moving main: `ship` says which). */
 function stopMinion(app: App, ticket: Ticket, by: string) {
   const stopped = app.runner.stop(ticket.id);
@@ -274,6 +269,11 @@ function stopMinion(app: App, ticket: Ticket, by: string) {
   return { stopped: stopped || followed > 0, ship };
 }
 
+/**
+ * A direct card's addressee (#687): `to` names one member of the asking scheme, by name or login, and comes back
+ * as their name (what the chat, the inbox and push go by); null for a card to everyone. Only the asking scheme's
+ * members: a card never reaches anyone a message in its chat couldn't.
+ */
 function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
   if (raw == null || raw === '') return null;
   const want = String(raw).trim().replace(/^@/, '').toLowerCase();
@@ -961,11 +961,11 @@ export const ticketRoutes: Route[] = [
         runner.broadcastTicket(id);
         return json(res, 202, ticketView(app, id));
       }
-      // A budget card's Stop (#1672): stopped as the stop button does, and the minion hears it held, so no turn starts.
+      // A budget card's Stop (#1672): stopped as the stop button does. The answer is only recorded (it settles the card):
+      // sent, it would start the very turn Stop is for.
       if (data.budget && answers[0]?.selected[0] === CARD_STOP) {
         stopMinion(app, ticket, session.name);
-        runner.send(id, session.name, 'My answer to your budget card: Stop. I stopped your turn; do nothing more on this until someone writes.', [], { answer: { questionId: body.questionId, answers }, hold: true });
-        runner.broadcastTicket(id);
+        runner.recordAnswer(id, session.name, `My answer to your budget card: ${CARD_STOP}. I stopped your turn.`, { answer: { questionId: body.questionId, answers } });
         return json(res, 202, ticketView(app, id));
       }
       const text = questions.map((q: any, i: number) => {

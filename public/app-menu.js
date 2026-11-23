@@ -2,7 +2,7 @@
 // rail.js mounts it on every app page that loads /apps/_citadel/rail.js: right-click (or Shift+F10 / the Menu key) gets
 // Citadel UI's menu (ui/menu.js) with Point at this and Point and draw… (inside Citadel's frame, where a chat is to point
 // into), then the app's own items for what was clicked, added with citadel.menu.add() and shown under "From <app>", then
-// Copy. In the desktop app it ends with Inspect. Text boxes and Shift+right-click keep the browser's own; on a phone a long press opens it as a
+// Copy. In the desktop app it ends with Reload and Inspect. Text boxes and Shift+right-click keep the browser's own; on a phone a long press opens it as a
 // sheet on an app's own items and links only (#1670), and plain text keeps the phone's selection. Point and Inspect go up to Citadel's page (pick.js), which owns the chat box and the desktop app's
 // screenshot and DevTools. Served to apps beside rail.js, so it imports only the files beside it.
 import { mountMenus } from './ui/menu.js';
@@ -58,7 +58,10 @@ export function appMenuFor(target, e, ctx) {
     '-',
   ] : []);
   const [x, y] = e?.clientX || e?.clientY ? [e.clientX, e.clientY] : centre(target);
-  const tail = desktop ? ['-', { label: 'Inspect', icon: '⌕', keys: 'Ctrl+Shift+I', run: () => ctx.post('inspect', { x, y }) }] : [];
+  const inspect = { label: 'Inspect', icon: '⌕', keys: 'Ctrl+Shift+I', run: () => ctx.post('inspect', { x, y }) };
+  const reload = { label: `Reload ${title}`, icon: '↻', keys: 'Ctrl+R', run: () => location.reload() };
+  // This menu cancels the desktop app's own, which offers Reload this app in every app (#1691), so each desktop menu keeps one.
+  const tail = desktop ? ['-', reload, inspect] : [];
   const hue = document.querySelector('meta[name=theme-color]:not([media])')?.content;
   const appTone = hue ? { hue } : { tone: 'violet' };
 
@@ -88,11 +91,12 @@ export function appMenuFor(target, e, ctx) {
   }
   const page = [
     { label: `Copy link to ${title}`, icon: '🔗', run: () => copy(location.href, 'Link') },
-    { label: `Reload ${title}`, icon: '↻', keys: 'Ctrl+R', run: () => location.reload() },
+    reload,
   ];
+  const end = desktop ? ['-', inspect] : [];
   const part = target.closest(PICKABLE);
-  if (part && part !== document.body) return { kind: 'Part', tone: 'neutral', name: describePart(part, title, '').label.split(' · ')[0], foot, items: [...point(part), ...page, ...tail] };
-  return { kind: title, ...appTone, name: document.title && document.title !== title ? document.title : undefined, foot, items: [...point(document.body, 'Point at this page'), ...page, ...tail] };
+  if (part && part !== document.body) return { kind: 'Part', tone: 'neutral', name: describePart(part, title, '').label.split(' · ')[0], foot, items: [...point(part), ...page, ...end] };
+  return { kind: title, ...appTone, name: document.title && document.title !== title ? document.title : undefined, foot, items: [...point(document.body, 'Point at this page'), ...page, ...end] };
 }
 
 const centre = (el) => {

@@ -169,11 +169,12 @@ if (what === 'keys' || what === 'all') {
       focus = null;
       await front();
       await mouse(where, 'left', false);
-      await until(() => focus === where, 3000);
+      // A missed click leaves focus elsewhere, and a reload there would pass for this frame's: no focus, no pass.
+      const focused = await until(() => focus === where, 3000);
       const f = focus, n = loads.length, s = seen.length;
       await press(k);
       const reloaded = await until(() => loads.length > n, 4000);
-      const ok = reloaded && (!hard || loads.at(-1).hard);
+      const ok = focused && reloaded && (!hard || loads.at(-1).hard);
       if (!ok) fails++;
       console.log(`${ok ? 'PASS' : 'FAIL'} focus ${where.padEnd(9)} (focused: ${f ?? 'unknown'}) ${name.padEnd(12)} -> ${reloaded ? (loads.at(-1).hard ? 'hard reload' : 'reload') : 'no reload'}${seen.length > s ? `; the page got ${seen.slice(s).join(', ')}` : ''}`);
       if (reloaded) await ready();

@@ -25,6 +25,7 @@ const FRAMER = `<!doctype html><meta charset="utf-8"><meta name="viewport" conte
   import { initAppSwitch } from '/c/appswitch.js';
   window.echo = {};
   window.upward = [];
+  if (new URLSearchParams(location.search).has('desktop')) window.citadelDesktop = {}; // as desktop/preload.cjs sets it
   addEventListener('message', (e) => { if (e.data?.test) window.echo[e.data.test] = e.data.value; if (['ext', 'app', 'go-url'].includes(e.data?.type)) window.upward.push(e.data.type + ' ' + e.data.url); if (e.data?.type === 'point') window.upward.push('point ' + e.data.note?.label + (e.data.draw ? ' draw' : '')); });
   showRail();
   initAppSwitch('josh');
@@ -137,8 +138,8 @@ after(async () => {
   await new Promise((r) => (server ? server.close(r) : r(null)));
 });
 
-const framer = (opts: { width: number; height?: number; touch?: boolean }, query = '') =>
-  browser.page(`${citadel()}/c/framer?src=${encodeURIComponent(`${contraption()}/apps/peek/${query}`)}`, opts);
+const framer = (opts: { width: number; height?: number; touch?: boolean }, query = '', framerQuery = '') =>
+  browser.page(`${citadel()}/c/framer?src=${encodeURIComponent(`${contraption()}/apps/peek/${query}`)}${framerQuery}`, opts);
 
 test("the frame is another origin: Citadel can't read the contraption's page", { skip }, async () => {
   const page = await framer({ width: 1000, height: 600 });
@@ -317,4 +318,21 @@ test("right-click in a framed app gets Citadel's menu with the app's own items u
   await ask({ menu: 'Point at this' });
   await waitFor(page, 'Point told to Citadel', `window.upward.some((u) => u.startsWith('point '))`);
   assert.match(await page.eval<string>(`window.upward.find((u) => u.startsWith('point '))`), /^point Menu · Peek · \d+×\d+ light$/);
+});
+
+test("in the desktop app, Citadel's menu on an app's own item still ends with Reload and Inspect, as the app's native menu would (#1691)", { skip }, async () => {
+  const page = await framer({ width: 1000, height: 600 }, '', '&desktop');
+  await waitFor(page, "the contraption's page in the frame", `'handle' in window.echo`);
+  const ask = (data: object) => page.eval(`document.querySelector('#frames iframe').contentWindow.postMessage(${JSON.stringify(data)}, '*')`);
+  await ask({ where: 'header button' });
+  await waitFor(page, "the button's place in the frame", `!!window.echo.where`);
+  const at = await page.eval<{ x: number; y: number }>(`(() => { const f = document.querySelector('#frames iframe').getBoundingClientRect(); return { x: f.left + window.echo.where.x, y: f.top + window.echo.where.y }; })()`);
+  await until('a menu with Inspect', async () => {
+    for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'right', buttons: type === 'mousePressed' ? 2 : 0, clickCount: 1 });
+    await page.eval(`delete window.echo.menu`);
+    await ask({ menu: '' });
+    await waitFor(page, 'the menu told', `'menu' in window.echo`);
+    return /From Peek.*Inspect/.test(await page.eval<string>(`String(window.echo.menu)`));
+  }, 10_000);
+  assert.equal(await page.eval(`window.echo.menu`), 'Peek item | Menu | Point at this | Point and draw… | - | From Peek | Mark done | - | Copy text | - | Reload Peek | Inspect');
 });

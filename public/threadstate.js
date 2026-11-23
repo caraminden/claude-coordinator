@@ -81,22 +81,24 @@ const mentionOf = (t) => {
 
 function baseState(t, usage, now) {
   const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
-  const waited = (word) => `${word} ${shortAgo(t.updated_at, now)}`;
+  // A wait shows its age alone, the colour saying whose and the chip what (#1692; Cara picked "The time alone" for every
+  // word-plus-time cell, 2026-11-23): "answer 3h" and "ready 2h" read "3h" and "2h"; the label keeps the words for the popover and screen readers.
+  const waited = (who = '') => `${who ? `${who} ` : ''}${shortAgo(t.updated_at, now)}`;
   // An approval is its assignee's to answer, as the server's Needs you counts it (src/inbox.ts).
   if (t.approvals) { const who = cardFor(null, t);
-    return isYou(who) ? { rank: 0, fam: 'you', cell: waited('approve'), label: 'Answer needed: approve or deny' } : { rank: 2, fam: 'wait', cell: waited(who), label: `Waiting on ${who} to approve or deny` }; }
+    return isYou(who) ? { rank: 0, fam: 'you', cell: waited(), label: 'Answer needed: approve or deny' } : { rank: 2, fam: 'wait', cell: waited(who), label: `Waiting on ${who} to approve or deny` }; }
   // A minion parked on start_after is new (it hasn't run) but not working (#261).
   const by = workingBy(t);
   // Gone quiet (#906; Cara picked "Running blue, dot stopped", 2026-11-17): no output well past its usual gap (src/quiet.ts).
   const quiet = by === 'turn' && t.activity?.quiet_since;
-  if (quiet) return { rank: 1, fam: 'work', cell: `quiet ${shortAgo(t.activity.at, now)}`, quiet: true, label: 'Quiet: no output for a while' };
+  if (quiet) return { rank: 1, fam: 'work', cell: shortAgo(t.activity.at, now), quiet: true, label: 'Quiet: no output for a while' };
   if (by === 'turn') return { rank: 1, fam: 'work', cell: steps.trim() || 'working', pulse: true, counted: !!steps, label: workingLabel(t) };
   // On its way in a release (#764, releases.js pendingRelease): the release's name where "landing" or "deploying" would be.
   const rel = t.release;
   const relLabel = rel ? `${rel.target} ${rel.name}: ${rel.stage}${rel.text ? `, ${rel.text}` : ''}` : '';
   if (by === 'server') return { rank: 1, fam: 'work', cell: rel?.name ?? 'shipping', pulse: true, server: true, label: rel ? `${serverLabel(t.wait)} · ${relLabel}` : serverLabel(t.wait) };
   if (t.status === 'error' && t.state === 'limited') return limitState(t, waited, usage, now);
-  if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited('stuck'), label: 'Stuck: the last turn failed' };
+  if (t.status === 'error') return { rank: 0, fam: 'broken', cell: waited(), label: 'Stuck: the last turn failed' };
   // Dismissed once landed, its change not live yet (on main waiting for CI, a deploy): still on its way.
   // A wait outside the pipeline past releasemath.js STUCK_MS (a CI runner that never came, a failed build) reads as stuck (#1019).
   if ((t.status === 'closed' || t.state === 'pending-deploy') && rel?.stuck) return { rank: 2, fam: 'broken', cell: 'stuck', label: `Stuck: ${relLabel}` };
@@ -117,24 +119,24 @@ function baseState(t, usage, now) {
   if (t.pending_card_at) {
     const cards = t.open_cards?.length ? t.open_cards : [{}];
     const age = shortAgo(t.pending_card_at, now);
-    if (cards.some((c) => isYou(cardFor(c, t)))) return { rank: 0, fam: 'you', cell: `answer ${age}`, label: 'Answer needed', since: t.pending_card_at };
+    if (cards.some((c) => isYou(cardFor(c, t)))) return { rank: 0, fam: 'you', cell: age, label: 'Answer needed', since: t.pending_card_at };
     const who = cardFor(cards[0], t);
     return { rank: 2, fam: 'wait', cell: `${who} ${age}`, label: `Waiting on ${who}`, since: t.pending_card_at };
   }
   // Pending review, ready to try and done, read it: for a person to look at, not an answer owed, so not amber and not in
   // Needs you (#1121; Josh, 2026-11-19: "Answers only", ready "Its own green state"). LOOK sorts them after the answers.
-  if (t.state === 'ready') return { rank: LOOK, fam: 'done', cell: waited('ready'), label: state.label };
+  if (t.state === 'ready') return { rank: LOOK, fam: 'done', cell: waited(), label: state.label };
   // Complete carries what's left (nothing, or what to read) in its note, so the label says it at a glance (#547).
-  if (t.state === 'complete') return { rank: LOOK, fam: 'done', cell: waited('read it'), label: t.note ? `${state.label}: ${t.note}` : state.label };
-  if (t.state === 'try') return { rank: LOOK, fam: 'work', cell: waited('try it'), label: state.label };
+  if (t.state === 'complete') return { rank: LOOK, fam: 'done', cell: waited(), label: t.note ? `${state.label}: ${t.note}` : state.label };
+  if (t.state === 'try') return { rank: LOOK, fam: 'work', cell: waited(), label: state.label };
   // One-tap replies wait on a go, as a card does: its assignee's, else anyone's.
   if (t.replies?.length) {
     const who = cardFor(null, t);
-    if (isYou(who)) return { rank: 0, fam: 'you', cell: waited('answer'), label: 'Answer needed: it offered replies' };
+    if (isYou(who)) return { rank: 0, fam: 'you', cell: waited(), label: 'Answer needed: it offered replies' };
     return { rank: 2, fam: 'wait', cell: waited(who), label: `Waiting on ${who}` };
   }
   // Nothing running and nothing asked: not your move, so grey, beside parked (#1121; before it, amber "Your move").
-  return { rank: 4, fam: 'idle', cell: waited('idle'), label: 'Idle' };
+  return { rank: 4, fam: 'idle', cell: waited(), label: 'Idle' };
 }
 
 /**
@@ -145,7 +147,7 @@ function limitState(t, waited, usage, now) {
   if (t.limit_resume_at) return { rank: 2, fam: 'wait', cell: `resumes ${shortIn(t.limit_resume_at, now)}`, label: 'Usage limit: resumes by itself' };
   const hit = [usage?.session, usage?.weekly].find((w) => w?.status === 'rejected' && w.resetsAt > now);
   if (hit) return { rank: 2, fam: 'wait', cell: `resets ${shortIn(hit.resetsAt, now)}`, label: STATES.limited.label };
-  if (usage?.updatedAt > t.updated_at) return { rank: 4, fam: 'idle', cell: waited('idle'), label: 'Idle: the usage limit has reset; send a message to carry on' };
+  if (usage?.updatedAt > t.updated_at) return { rank: 4, fam: 'idle', cell: waited(), label: 'Idle: the usage limit has reset; send a message to carry on' };
   return { rank: 2, fam: 'wait', cell: 'limit hit', label: STATES.limited.label };
 }
 
@@ -288,6 +290,14 @@ function shortIn(ms, now) {
 }
 
 /** "now", "5m", "3h", "2d": ages for tight spaces. */
+/** A cell as a screen reader says it (#1692): its label, then a bare age in words ("Answer needed, 3 hours"); a cell with words of its own follows as it is. */
+export function spokenCell(st) {
+  const m = /^(@ )?(?:(now)|(\d+)([mhd]))$/.exec(st.cell ?? '');
+  if (!m) return st.cell ? `${st.label}, ${st.cell}` : st.label;
+  const n = Number(m[3]);
+  return `${st.label}, ${m[2] ? 'just now' : `${n} ${{ m: 'minute', h: 'hour', d: 'day' }[m[4]]}${n === 1 ? '' : 's'}`}`;
+}
+
 function shortAgo(ms, now) {
   const s = Math.round((now - ms) / 1000);
   if (s < 60) return 'now';

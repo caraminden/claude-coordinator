@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setAccount, setView } from '../public/base.js';
-import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, workingBy } from '../public/threadstate.js';
+import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, spokenCell, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -17,15 +17,15 @@ test('rowState: each kind of minion gets its family, text and rank', () => {
   const rows = [
     // what the minion is                                         rank, family, text
     // Nothing running and nothing asked is idle, grey, not your move (#1121: it was amber "reply").
-    [{}, [4, 'idle', 'idle 5m']],
-    [{ replies: ['Ship it'] }, [0, 'you', 'answer 5m']],
+    [{}, [4, 'idle', '5m']],
+    [{ replies: ['Ship it'] }, [0, 'you', '5m']],
     // For a person to look at, not an answer (#1121): after Needs you, before working.
-    [{ state: 'ready' }, [LOOK, 'done', 'ready 5m']],
-    [{ state: 'complete', note: 'nothing left' }, [LOOK, 'done', 'read it 5m']],
-    [{ state: 'try' }, [LOOK, 'work', 'try it 5m']],
-    [{ state: 'ready', pending_card_at: NOW - 2 * HOUR }, [0, 'you', 'answer 2h']],
-    [{ approvals: 1, status: 'running' }, [0, 'you', 'approve 5m']],
-    [{ status: 'error' }, [0, 'broken', 'stuck 5m']],
+    [{ state: 'ready' }, [LOOK, 'done', '5m']],
+    [{ state: 'complete', note: 'nothing left' }, [LOOK, 'done', '5m']],
+    [{ state: 'try' }, [LOOK, 'work', '5m']],
+    [{ state: 'ready', pending_card_at: NOW - 2 * HOUR }, [0, 'you', '2h']],
+    [{ approvals: 1, status: 'running' }, [0, 'you', '5m']],
+    [{ status: 'error' }, [0, 'broken', '5m']],
     [{ status: 'running' }, [1, 'work', 'working', 'pulse']],
     [{ status: 'running', steps: { done: 3, total: 7 } }, [1, 'work', '3/7', 'pulse']],
     [{ status: 'new' }, [1, 'work', 'working', 'pulse']],
@@ -53,23 +53,23 @@ test('rowState: amber only for a card or replies of yours; another person\'s say
   setAccount({ name: 'Josh' });
   try {
     const age = { pending_card_at: NOW - HOUR };
-    assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'josh' })] }), [0, 'you', 'answer 1h'], 'addressed to you, any case');
-    assert.deepEqual(pill({ ...age, open_cards: [card()] }), [0, 'you', 'answer 1h'], "anyone's, on no one's minion");
-    assert.deepEqual(pill({ ...age, open_cards: [card()], properties: { assigned: 'Josh' } }), [0, 'you', 'answer 1h'], "anyone's, on yours");
+    assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'josh' })] }), [0, 'you', '1h'], 'addressed to you, any case');
+    assert.deepEqual(pill({ ...age, open_cards: [card()] }), [0, 'you', '1h'], "anyone's, on no one's minion");
+    assert.deepEqual(pill({ ...age, open_cards: [card()], properties: { assigned: 'Josh' } }), [0, 'you', '1h'], "anyone's, on yours");
     assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'Cara' })] }), [2, 'wait', 'Cara 1h'], 'addressed to Cara');
     assert.deepEqual(pill({ ...age, open_cards: [card()], properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 1h'], "anyone's, on Cara's minion");
-    assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'Cara' }), card({ to: 'Josh' })] }), [0, 'you', 'answer 1h'], 'one of them yours');
+    assert.deepEqual(pill({ ...age, open_cards: [card({ to: 'Cara' }), card({ to: 'Josh' })] }), [0, 'you', '1h'], 'one of them yours');
     assert.equal(rowState(t({ ...age, open_cards: [card({ to: 'Cara' })] }), null, NOW).label, 'Waiting on Cara');
     assert.equal(rowState(t({ ...age, open_cards: [card()] }), null, NOW).label, 'Answer needed');
     assert.deepEqual(pill({ replies: ['Go'], properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 5m'], "Cara's go");
     // Whose the server says it is wins over the raw assignee (#1449): a gone assignee's minion is the owner's.
-    assert.deepEqual(pill({ ...age, open_cards: [card()], assignee: 'Josh', properties: { assigned: 'Olive' } }), [0, 'you', 'answer 1h'], "Olive left: it's yours");
-    assert.deepEqual(pill({ ...age, open_cards: [card()], assignee: null, properties: { assigned: 'Olive' } }), [0, 'you', 'answer 1h'], "no one's: anyone's");
+    assert.deepEqual(pill({ ...age, open_cards: [card()], assignee: 'Josh', properties: { assigned: 'Olive' } }), [0, 'you', '1h'], "Olive left: it's yours");
+    assert.deepEqual(pill({ ...age, open_cards: [card()], assignee: null, properties: { assigned: 'Olive' } }), [0, 'you', '1h'], "no one's: anyone's");
     assert.equal(rowState(t({}), null, NOW).label, 'Idle');
     assert.equal(rowState(t({ state: 'try' }), null, NOW).label, 'Ready to try');
     // An approval is the assignee's, as the server counts it; the badge and the popover link go by whose card it is.
     assert.deepEqual(pill({ approvals: 1, status: 'running', properties: { assigned: 'Cara' } }), [2, 'wait', 'Cara 5m'], "Cara's approval");
-    assert.deepEqual(pill({ approvals: 1, status: 'running', properties: { assigned: 'josh' } }), [0, 'you', 'approve 5m'], 'your approval');
+    assert.deepEqual(pill({ approvals: 1, status: 'running', properties: { assigned: 'josh' } }), [0, 'you', '5m'], 'your approval');
     const mixed = { ...age, open_cards: [card({ to: 'Cara', href: '#cara' }), card({ to: 'Josh', href: '#josh' })] };
     assert.deepEqual(cardsYours(t(mixed)).map((c) => c.href), ['#josh']);
     assert.equal(rowWhy(t(mixed), rowState(t(mixed), null, NOW), NOW).link.href, '#josh', 'the popover opens your card, not the older one of Cara\'s');
@@ -89,10 +89,19 @@ test('rowState: a complete minion says what is left in its label (#547)', () => 
   assert.equal(rowState(t({ state: 'complete' }), null, NOW).label, 'Done, read it');
 });
 
+test('spokenCell: a bare age is said in words after the label, as the pill lost its word (#1692)', () => {
+  assert.equal(spokenCell({ cell: '3h', label: 'Answer needed' }), 'Answer needed, 3 hours');
+  assert.equal(spokenCell({ cell: '1d', label: 'Idle' }), 'Idle, 1 day');
+  assert.equal(spokenCell({ cell: 'now', label: 'Pending review' }), 'Pending review, just now');
+  assert.equal(spokenCell({ cell: '@ 5m', label: 'Josh mentioned you' }), 'Josh mentioned you, 5 minutes');
+  assert.equal(spokenCell({ cell: 'Josh 1h', label: 'Waiting on Josh' }), 'Waiting on Josh, Josh 1h', 'a cell with its own words follows as it is');
+  assert.equal(spokenCell({ cell: '', label: 'Idle' }), 'Idle');
+});
+
 test('rowState: ages and the steps flag', () => {
-  assert.equal(pill({ updated_at: NOW - 20_000 })[2], 'idle now');
-  assert.equal(pill({ updated_at: NOW - 3 * HOUR })[2], 'idle 3h');
-  assert.equal(pill({ updated_at: NOW - 50 * HOUR })[2], 'idle 2d');
+  assert.equal(pill({ updated_at: NOW - 20_000 })[2], 'now');
+  assert.equal(pill({ updated_at: NOW - 3 * HOUR })[2], '3h');
+  assert.equal(pill({ updated_at: NOW - 50 * HOUR })[2], '2d');
   // `counted` tells the row to drop the count from its activity line; `since` times a card from its posting.
   assert.equal(rowState(t({ status: 'running', steps: { done: 1, total: 2 } }), null, NOW).counted, true);
   assert.equal(rowState(t({ status: 'running' }), null, NOW).counted, false);
@@ -112,7 +121,7 @@ test('rowState: a minion that hit the usage limit counts down, then is idle unti
   assert.deepEqual(pill(limited, shut), [2, 'wait', 'resets 1h30']);
   // A window whose reset has passed doesn't count; a later turn's report says the limit is over.
   const reopened = { weekly: { status: 'rejected', resetsAt: NOW - MIN }, updatedAt: NOW - MIN };
-  assert.deepEqual(pill(limited, reopened), [4, 'idle', 'idle 5m']);
+  assert.deepEqual(pill(limited, reopened), [4, 'idle', '5m']);
   // Nothing known since it stopped.
   assert.deepEqual(pill(limited, { updatedAt: NOW - HOUR }), [2, 'wait', 'limit hit']);
   assert.deepEqual(pill(limited), [2, 'wait', 'limit hit']);
@@ -153,8 +162,8 @@ test('rowState: a wait colours the chip while working or outside, which keeps th
     [{ status: 'running', wait: testing }, [1, 'work', 'working', 'pulse']],
     [{ state: 'outside', wait: testing }, [2, 'work', 'waiting', 'pulse']],
     [{ state: 'pending-deploy', steps: { done: 5, total: 5 }, wait: { ...line, kind: 'restart', stage: 'restart', chip: 'restart · 2 turns' } }, [2, 'wait', 'deploying 5/5']],
-    [{ state: 'ready', wait: line }, [LOOK, 'done', 'ready 5m']],
-    [{ status: 'running', approvals: 1, wait: line }, [0, 'you', 'approve 5m']],
+    [{ state: 'ready', wait: line }, [LOOK, 'done', '5m']],
+    [{ status: 'running', approvals: 1, wait: line }, [0, 'you', '5m']],
     [{ status: 'closed', wait: line }, [5, 'idle', 'dismissed']],
     // A PR's CI run (#546): violet while queued, blue while its jobs run, green or red once it ends.
     [{ state: 'outside', steps: { done: 4, total: 5 }, wait: { ...line, kind: 'ci', stage: 'queued', chip: 'CI · queued' } }, [2, 'wait', 'waiting 4/5']],
@@ -371,12 +380,12 @@ test('rowState: a minion on its way in a release shows that release where landin
 const QUIET = { status: 'running', activity: { at: NOW - 14 * MIN, quiet_since: NOW - 9 * MIN, tool: { name: 'Bash', label: 'Bash: citadel-test test/media.test.ts', started: NOW - 14 * MIN, limit: 5 * MIN } } };
 
 test('rowState: a quiet turn stays running blue with a stopped dot and says how long (#906)', () => {
-  assert.deepEqual(pill(QUIET), [1, 'work', 'quiet 14m']);
+  assert.deepEqual(pill(QUIET), [1, 'work', '14m']);
   const st = rowState(t(QUIET), null, NOW);
   assert.equal(st.quiet, true);
   assert.equal(st.pulse, undefined, 'no pulse: the dot stops');
   // A wait doesn't recolour or re-pulse it, and a turn not yet quiet is plain working.
-  assert.deepEqual(pill({ ...QUIET, wait: { kind: 'heavy', stage: 'run', chip: 'x', text: 'x', since: NOW, usual: 60 } }), [1, 'work', 'quiet 14m']);
+  assert.deepEqual(pill({ ...QUIET, wait: { kind: 'heavy', stage: 'run', chip: 'x', text: 'x', since: NOW, usual: 60 } }), [1, 'work', '14m']);
   assert.deepEqual(pill({ status: 'running', activity: { at: NOW - MIN, quiet_since: null, tool: null } }), [1, 'work', 'working', 'pulse']);
 });
 
@@ -441,10 +450,10 @@ test('rowState: a mention of you is yours until you open its chat; a card of you
     setView({ seen: {} });
     assert.deepEqual(pill({ id: 7, state: 'ready' }), [0, 'you', '@ 1h']);
     assert.equal(rowState(t({ id: 7, state: 'parked' }), null, NOW).label, 'Cara mentioned you');
-    assert.deepEqual(pill({ id: 8, state: 'ready' }), [LOOK, 'done', 'ready 5m'], 'another minion is as it was');
+    assert.deepEqual(pill({ id: 8, state: 'ready' }), [LOOK, 'done', '5m'], 'another minion is as it was');
     assert.equal(rowState(t({ id: 7, pending_card_at: NOW - MIN, open_cards: [{ kind: 'question', to: 'Josh' }] }), null, NOW).label, 'Answer needed');
     setView({ seen: { 7: NOW - MIN } });
-    assert.deepEqual(pill({ id: 7, state: 'ready' }), [LOOK, 'done', 'ready 5m'], 'opened since: back to its own state');
+    assert.deepEqual(pill({ id: 7, state: 'ready' }), [LOOK, 'done', '5m'], 'opened since: back to its own state');
   } finally {
     mentions.clear();
     setView(null);

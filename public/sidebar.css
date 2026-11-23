@@ -141,7 +141,7 @@
   .thread-row .card-badge::after { content: ''; position: absolute; inset: min(0px, calc((100% - var(--control-h)) / 2)) -0.3rem; }
 }
 .thread-row .state { align-self: center; font-weight: 650; white-space: nowrap; font-size: 0.78em; line-height: 1.35; padding: 0.1rem 0.45rem; border-radius: 999px; font-variant-numeric: tabular-nums;
-  color: var(--c); background: color-mix(in srgb, var(--t, var(--c)) 15%, var(--panel)); }
+  min-width: 2.2em; text-align: center; color: var(--c); background: color-mix(in srgb, var(--t, var(--c)) 15%, var(--panel)); }
 /* The owner's initial (#690): quiet; your own minions' rows show none. */
 .thread-row .owner { align-self: center; margin-left: 0.4rem; width: 1.35rem; height: 1.35rem; box-sizing: border-box; display: inline-grid; place-items: center; border-radius: 50%; font-size: 0.72em; font-weight: 650; line-height: 1;
   color: var(--muted); background: var(--code-bg); border: 1px solid var(--line); }

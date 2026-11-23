@@ -59,7 +59,7 @@ function stateOf(n) {
   const t = n.project === view.projectId ? view.tickets?.get(n.id) : null;
   if (t) {
     const st = rowState(t, usage);
-    return { word: st.cell || st.label, fam: t.asleep && t.status !== 'closed' ? 'idle' : st.fam || 'idle', pulse: !!st.pulse, t };
+    return { word: st.cell || st.label, label: st.label, fam: t.asleep && t.status !== 'closed' ? 'idle' : st.fam || 'idle', pulse: !!st.pulse, t };
   }
   if (n.status === 'build') return { word: 'Build', fam: 'idle' };
   if (n.status === 'closed') return { word: 'Dismissed', fam: 'idle' };
@@ -168,7 +168,7 @@ function node(n, ch, row, here) {
     onfocus: (e) => trace(e.currentTarget), onblur: (e) => untrace(e.currentTarget),
   },
   h('span', { class: 'chain-node-top' }, h('span', { class: 'num' }, n.number ? `#${n.number}` : '⑂'), other ? schemeTag(other.name) : '',
-    h('span', { class: 'chain-state' }, s.pulse ? phase(h('i', { class: 'pulse' }), 1600) : '', s.word)),
+    h('span', { class: 'chain-state', title: s.label ?? null }, s.pulse ? phase(h('i', { class: 'pulse' }), 1600) : '', s.word)),
   h('span', { class: 'chain-node-title' }, n.title),
   after.length ? h('span', { class: 'chain-after' }, '↳ after ', after.join(', ')) : '');
   // The grid's place, through the CSSOM (the CSP refuses style="").

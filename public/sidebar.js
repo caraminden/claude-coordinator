@@ -10,7 +10,7 @@ import { withoutCount } from './progress.js';
 import { startScheme } from './schemes.js';
 import { othersIn, presenceChip } from './presence.js';
 import { refreshWelcome, welcomePanel } from './welcome.js';
-import { byUrgency, cardChip, cardsYours, rowBar, rowState, rowUnread, rowWhy, SHIP, workingBy } from './threadstate.js';
+import { byUrgency, cardChip, cardsYours, rowBar, rowState, rowUnread, rowWhy, SHIP, spokenCell, workingBy } from './threadstate.js';
 import { progressTrack, waitBar, waitClock, waitLine, waitWords } from './wait.js';
 import { renderInbox } from './inbox.js';
 import { CLOSED_PAGE, closedCount, closedState, loadAllClosed, loadMoreClosed, loadedClosed, searchClosed } from './closedlist.js';
@@ -555,7 +555,7 @@ let whyTips = null;
 function stateChip(t, st) {
   drawn.set(t.id, { t, st });
   whyTips ??= mountTips(document.body, { selector: '.thread-row .state[data-tip-id]', body: (el) => whyBody(Number(el.dataset.tipId)), role: 'dialog', label: 'Why', tapOpens: true, className: 'why-tip' });
-  return h('span', { class: `state${st.quiet ? ' quiet' : ''}`, 'data-tip-id': t.id, tabindex: 0, title: '', 'aria-label': `${st.cell}: ${st.label}` },
+  return h('span', { class: `state${st.quiet ? ' quiet' : ''}`, 'data-tip-id': t.id, tabindex: 0, title: '', 'aria-label': spokenCell(st) },
     st.pulse ? phase(h('i', { class: 'pulse' }), 1600) : st.quiet ? h('i', { class: 'still' }) : '', st.cell);
 }
 

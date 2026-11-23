@@ -8,7 +8,7 @@ import { schemeSwitchHash } from '../public/scheme-switch.js';
 const dir = new URL('../public/', import.meta.url);
 const src = (f) => readFileSync(new URL(f, dir), 'utf8');
 // Page-shaped exports that are not Settings or Orders pages: they have their own routes.
-const NOT_SETTINGS_PAGES = new Set(['releasesPage', 'setReleasesPage']);
+const NOT_SETTINGS_PAGES = new Set(['releasesPage', 'setReleasesPage', 'chainsPage']);
 
 test('every row names a module that exports its page', () => {
   for (const r of PAGES) {

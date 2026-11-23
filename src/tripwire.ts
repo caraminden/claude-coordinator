@@ -226,7 +226,9 @@ function secretInside(root: string, cfg: TripwireConfig): string | null {
 /** The end of a search's secrets refusal: the folders inside its root to search instead (#1718), or a plain "search elsewhere". */
 function searchInstead(root: string, cfg: TripwireConfig): string {
   const scheme = join(cfg.data, 'projects', String(cfg.project));
-  if (under(cfg.data, root)) return ` Search the part you need instead, such as \`${join(scheme, 'repo')}\` (the scheme's code) or \`${join(scheme, 'shared/project')}\` (its shared folder).`;
+  // A Taskmaster's walk refuses a repo for its size (#1030), so its suggestion carries the way past that rule too.
+  const env = cfg.envFiles?.length ? " Leave .env files out there: `--exclude='.env*'` for grep, a `glob` for the Grep tool." : '';
+  if (under(cfg.data, root)) return ` Search the part you need instead, such as \`${join(scheme, 'repo')}\` (the scheme's code) or \`${join(scheme, 'shared/project')}\` (its shared folder).${env}`;
   if (isClaudeConfig(root, cfg)) return ` Search the part you need instead, such as \`${join(root, 'projects')}\` (memory and session logs).`;
   return " Search a folder that doesn't hold secrets.";
 }

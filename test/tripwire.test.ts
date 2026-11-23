@@ -1205,6 +1205,37 @@ test('a Taskmaster\'s recursive search passes when no .env sits below its root, 
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });
 
+test('a minion\'s recursive search of a scheme\'s code passes, .env below or not: only Taskmaster turns close .env files (#656, #1718)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-env-'));
+  try {
+    const d = join(tmp, 'data');
+    const repo = join(d, 'projects/3/repo');
+    for (const dir of ['src', 'app']) mkdirSync(join(repo, dir), { recursive: true });
+    writeFileSync(join(repo, 'app/.env'), 'SECRET=x');
+    const c: TripwireConfig = { ...cfg, home: tmp, data: d, checkout: join(tmp, 'live') };
+    for (const cmd of [`grep -rn SECRET ${repo}/src`, `grep -rn SECRET ${repo}`, `rg -uu SECRET ${repo}`]) assert.equal(bash(cmd, join(d, 'projects/2/tickets/9'), c), null, cmd);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('a search refused for the credentials below its root names the folders to search instead, and those pass (#1718)', () => {
+  const instead = (command: string, cwd?: string) => {
+    const why = bash(command, cwd) ?? '';
+    assert.match(why, /would read/, command);
+    const named = [...why.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    assert.ok(named.length, `${command}: names no folder in ${why}`);
+    for (const p of named) assert.equal(bash(`grep -rn token ${p}`), null, `${command}: the folder it names, ${p}, is refused too`);
+    return named;
+  };
+  for (const command of [`grep -rn token ${data}`, `cd ${data} && grep -rn token .`, 'grep -rn token ~/.local/share', 'grep -rn token ~', `rg token ${data}`]) {
+    const named = instead(command);
+    assert.ok(named.includes(`${data}/projects/2/repo`) && named.includes(`${data}/projects/2/shared/project`), `${command}: ${named}`);
+  }
+  assert.ok(instead('grep -rn token ~/.claude').includes(`${home}/.claude/projects`));
+  assert.ok(instead('grep -rn token ~/.claude-3').includes(`${home}/.claude-3/projects`));
+  const grepTool = tripwire({ tool_name: 'Grep', tool_input: { pattern: 'token', path: data }, cwd: worktree }, cfg)?.reason ?? '';
+  assert.match(grepTool, new RegExp(`would read .*\`${data}/projects/2/repo\``));
+});
+
 test('the path-in-a-variable and piped-SQL refusals name a command that passes (#1030)', () => {
   const blind = bash('rm -rf $DIR/build') ?? '';
   assert.match(blind, /set the variable in this same command \(`d=\/abs\/path; rm -rf "\$d\/out"`/);

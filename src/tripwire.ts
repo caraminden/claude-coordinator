@@ -223,6 +223,15 @@ function secretInside(root: string, cfg: TripwireConfig): string | null {
   if (under(root, join(cfg.data, 'claude-accounts'))) return 'the Claude logins of the server login\'s extra accounts';
   return secrets.find((x) => x !== root && under(x, root)) ?? null;
 }
+/** The end of a search's secrets refusal: the folders inside its root to search instead (#1718), or a plain "search elsewhere". */
+function searchInstead(root: string, cfg: TripwireConfig): string {
+  const scheme = join(cfg.data, 'projects', String(cfg.project));
+  if (under(cfg.data, root)) return ` Search the part you need instead, such as \`${join(scheme, 'repo')}\` (the scheme's code) or \`${join(scheme, 'shared/project')}\` (its shared folder).`;
+  if (isClaudeConfig(root, cfg)) return ` Search the part you need instead, such as \`${join(root, 'projects')}\` (memory and session logs).`;
+  return " Search a folder that doesn't hold secrets.";
+}
+/** Whether root is a Claude config folder: its login sits right inside it. */
+const isClaudeConfig = (root: string, cfg: TripwireConfig) => [cfg.claudeConfig, join(cfg.home, '.claude'), join(cfg.home, '.claude-2'), join(cfg.home, '.claude-3')].includes(root);
 const SEARCHERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag']);
 // Commands that only print their words, or look a command up by name, without running it.
 const PRINTERS = /^(echo|printf|man|which|type|whatis|apropos)$/;
@@ -1189,7 +1198,7 @@ function segmentReason(seg: Segment, st: State, cfg: TripwireConfig): Verdict | 
     const paths = roots.length ? roots.flatMap((w) => pathsOf(w, st, cfg)) : st.cwd ? [st.cwd] : [];
     for (const p of paths) {
       const secret = secretInside(p, cfg);
-      if (secret) return hard(`Searching ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
+      if (secret) return hard(`Searching ${p} would read ${secret}.${searchInstead(p, cfg)}`);
     }
     const env = cfg.envFiles && searchesEnv(name, args) ? (opensArchives(args) && paths.some((p) => cfg.envFiles!.some((r) => under(p, r) || under(r, p))) ? 'archives it would open' : envBelow(paths, cfg, follows(name, args), excludedDirs(name, args))) : null;
     if (env) {
@@ -1557,7 +1566,7 @@ export function tripwire(input: any, cfg: TripwireConfig): Verdict | null {
   const read = readReason(p, cfg);
   if (read) return hard(`${tool} of ${p} is blocked. ${read}`);
   const secret = tool === 'Grep' ? secretInside(p, cfg) : null;
-  if (secret) return hard(`Grep of ${p} would read ${secret}. Search a folder that doesn't hold secrets.`);
+  if (secret) return hard(`Grep of ${p} would read ${secret}.${searchInstead(p, cfg)}`);
   // The Grep tool searches hidden files; a `glob` that can't match .env keeps them out.
   const env = tool === 'Grep' && (typeof ti.glob !== 'string' || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env') || globCovers([ti.glob.replace(/^\*\*\//, '')], '.env.local')) ? envBelow([p], cfg, false) : null;
   if (env) return hard(`Grep of ${p} could print .env files (${env}). ${ENV_FILE_WHY} Give it a \`glob\` such as "*.ts", or use grep with \`--exclude='.env*'\`.`);

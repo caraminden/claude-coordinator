@@ -82,7 +82,8 @@ const mentionOf = (t) => {
 function baseState(t, usage, now) {
   const steps = t.steps ? ` ${t.steps.done}/${t.steps.total}` : '';
   // A wait shows its age alone, the colour saying whose and the chip what (#1692; Cara picked "The time alone" for every
-  // word-plus-time cell, 2026-11-23): "answer 3h" and "ready 2h" read "3h" and "2h"; the label keeps the words for the popover and screen readers.
+  // word-plus-time cell, 2026-11-23): "answer 3h" and "ready 2h" read "3h" and "2h"; the label keeps the words for the popover and
+  // screen readers. A wait on someone else keeps their name ("Josh 2h"), and a mention its "@": they say who, not what.
   const waited = (who = '') => `${who ? `${who} ` : ''}${shortAgo(t.updated_at, now)}`;
   // An approval is its assignee's to answer, as the server's Needs you counts it (src/inbox.ts).
   if (t.approvals) { const who = cardFor(null, t);
@@ -289,7 +290,6 @@ function shortIn(ms, now) {
   return `${Math.floor(m / 1440)}d`;
 }
 
-/** "now", "5m", "3h", "2d": ages for tight spaces. */
 /** A cell as a screen reader says it (#1692): its label, then a bare age in words ("Answer needed, 3 hours"); a cell with words of its own follows as it is. */
 export function spokenCell(st) {
   const m = /^(@ )?(?:(now)|(\d+)([mhd]))$/.exec(st.cell ?? '');
@@ -298,6 +298,7 @@ export function spokenCell(st) {
   return `${st.label}, ${m[2] ? 'just now' : `${n} ${{ m: 'minute', h: 'hour', d: 'day' }[m[4]]}${n === 1 ? '' : 's'}`}`;
 }
 
+/** "now", "5m", "3h", "2d": ages for tight spaces. */
 function shortAgo(ms, now) {
   const s = Math.round((now - ms) / 1000);
   if (s < 60) return 'now';

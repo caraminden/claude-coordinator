@@ -14,7 +14,7 @@ import { shortSpan } from './releasemath.js';
 import { LAST_SCHEME } from './sidebar.js';
 import { scopedPageHash } from './page-scope.js';
 import { usage } from './core.js';
-import { rowBar, rowState } from './threadstate.js';
+import { rowBar, rowState, spokenCell } from './threadstate.js';
 import { progressTrack, waitBar } from './wait.js';
 import { loadingLine, tabs as uiTabs } from './ui/state.js';
 import { optimistic } from './ui/optimistic.js';
@@ -61,7 +61,7 @@ export function fixBox(x, now = Date.now()) {
   return h('div', { class: `ci-fix f-${st.fam || 'none'}${closed ? ' closed' : ''}`, title: st.label },
     h('div', { class: 'ci-fix-top' },
       h('a', { class: 'ci-fix-link', href: `#/p/${t.project_id}/t/${t.number}` }, h('span', { class: 'num' }, `#${t.number}`), ' ', t.title),
-      h('span', { class: `state${st.quiet ? ' quiet' : ''}` }, st.pulse ? h('i', { class: 'pulse' }) : st.quiet ? h('i', { class: 'still' }) : '', st.cell || st.label)),
+      h('span', { class: `state${st.quiet ? ' quiet' : ''}`, role: st.cell ? 'img' : null, 'aria-label': st.cell ? spokenCell(st) : null }, st.pulse ? h('i', { class: 'pulse' }) : st.quiet ? h('i', { class: 'still' }) : '', st.cell || st.label)),
     h('div', { class: 'ci-fix-line muted' }, `${line} · ${on}`),
     bar,
     h('div', { class: 'ci-fix-rerun' }, !re ? '' : re.state === 'running' ? `Re-running on ${re.sha}` : re.state === 'failed' ? `The re-run on ${re.sha} failed` : `Waiting for a person to re-run on ${re.sha}`,

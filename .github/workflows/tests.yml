@@ -229,7 +229,11 @@ jobs:
         continue-on-error: true
         run: |
           [ -s "$RUNNER_TEMP/suite-secs" ] || exit 0
-          nums=("suite-time=$(cat "$RUNNER_TEMP/suite-secs")s")
+          # A run that included the pipeline's own test files (tools/run-tests.sh's "tier all" line, #581) is its own series:
+          # it runs ~70-80 s longer, so mixed into suite-time a run of pipeline ships read as a step up (#1700). Runs from before keep suite-time.
+          series=suite-time
+          ! grep -q '^run-tests: tier all' "$RUNNER_TEMP/tests.log" || series=suite-time-pipeline
+          nums=("$series=$(cat "$RUNNER_TEMP/suite-secs")s")
           nums+=("front-end-size=$(find public -type f -printf '%s\n' | awk '{s+=$1} END {print s}')B")
           tools/ci-numbers.sh "${nums[@]}" || true
       # The full suite's failed files, each rerun alone once to label it flake or real (tools/run-tests.sh), in a step of

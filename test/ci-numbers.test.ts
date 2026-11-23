@@ -1,6 +1,6 @@
 // CI numbers kept per commit, and the step-up flag (#1369, src/ci-numbers.ts).
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -146,4 +146,29 @@ test('a ship\'s land/ run counts as main, a branch line never flags, and a furth
   // A second slowdown on top of the first is news.
   [150, 151, 150].forEach((v) => send(v));
   assert.deepEqual(told, ['refs/heads/main 120', 'refs/heads/main 150']);
+});
+
+test('pipeline runs are their own series: 140 s front-end runs then 210-280 s pipeline runs raise no flag (#1700)', () => {
+  const store = new Store(join(root, 'pipeline.db'));
+  const peek = store.createProject('Citadel', 'https://github.com/caraminden/claude-coordinator', null);
+  let t = Date.UTC(2026, 10, 1);
+  const numbers = new CiNumbers(store, () => (t += 60_000));
+  const told: string[] = [];
+  numbers.onStep = (_p, step) => told.push(step.name);
+  const front = [140, 141, 139, 140, 142, 140, 139, 141, 140, 140, 140, 141, 139];
+  const pipeline = [210, 240, 280, 250, 215, 270, 260];
+  let run = 1;
+  for (const v of front) numbers.take(peek, claims(run++), { numbers: [{ name: 'suite-time', value: v, unit: 's' }] });
+  for (const v of pipeline) numbers.take(peek, claims(run++), { numbers: [{ name: 'suite-time-pipeline', value: v, unit: 's' }] });
+  assert.deepEqual(told, []);
+  // Under one name the same runs are the step the alert fired on.
+  assert.ok(stepUp([...front, 210, 240, 280]));
+  const names = numbers.view(peek.id).series.map((s) => s.name);
+  assert.deepEqual(names, ['suite-time', 'suite-time-pipeline']);
+});
+
+test('tests.yml records a run that ran the pipeline test files as suite-time-pipeline (#1700)', () => {
+  const yml = readFileSync(new URL('../.github/workflows/tests.yml', import.meta.url), 'utf8');
+  assert.match(yml, /grep -q '\^run-tests: tier all' "\$RUNNER_TEMP\/tests\.log" \|\| series=suite-time-pipeline/);
+  assert.match(yml, /nums=\("\$series=\$\(cat "\$RUNNER_TEMP\/suite-secs"\)s"\)/);
 });

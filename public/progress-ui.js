@@ -3,6 +3,7 @@ import { api, dismissedWhen, h, isCoordinator, statusLabel, view } from './base.
 import { threadRefs, usage } from './core.js';
 import { rowState, workingBy } from './threadstate.js';
 import { progressTrack, waitClock, waitLate, waitNow, waitTrack } from './wait.js';
+import { waitTail } from './wait-tail.js';
 import { EMPTY_TRACK } from './threadstate.js';
 import { stepMark } from './ui/chat.js';
 import { firstSentence, ticketActionRef } from './chattext.js';
@@ -240,7 +241,7 @@ export function renderProgress() {
       loose.length ? looseWork(loose, running, !p.tasks.length) : '',
       !p.tasks.length && !loose.length ? h('p', { class: 'muted empty' }, 'Nothing has run yet.') : '');
   }
-  progressEl.replaceChildren(bar, meter, caption, detail);
+  progressEl.replaceChildren(bar, meter, caption, w ? waitTail(view.ticket.id, w) : '', detail);
   if (detail) detail.scrollTop = scrollTop;
   progressEl.hidden = false;
 }

@@ -3,6 +3,7 @@
 // land line's ticket files (tools/deploy-queue.sh), citadel-heavy's slot and waiter files, and the ship
 // line's "deploying" stage. CI runs (#546, src/ci-wait.ts) fill the same record: a PR's run, and a landing's CI gate;
 // a test run's file counts (#545, tools/progress-reporter.ts) fill in done and total.
+import { readTail } from './wait-tail.ts';
 import { median as statsMedian } from './stats.ts';
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -516,6 +517,12 @@ export class Waits {
       if (t) this.byLabel.set(label, t.id);
     }
     return this.byLabel.get(label) ?? null;
+  }
+
+  /** The newest `n` output lines of the heavy run this minion holds a slot for (#1681); none when it has no run. */
+  async tail(ticketId: number, n: number): Promise<string[]> {
+    const h = readHeavy(this.d.heavyDir, this.now(), this.d.held).holders.find((x) => this.ticketFor(x.who) === ticketId);
+    return h ? readTail(join(this.d.heavyDir, `slot-${h.slot - 1}.out`), n) : [];
   }
 
   private name = (label: string) => {

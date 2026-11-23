@@ -438,9 +438,12 @@ elif [ -n "$forced" ]; then say "the box is still busy ($(load_text)) after $(du
 # A Node test suite run through tools/citadel-node keeps slot-N.progress up to date with its file counts (#545),
 # which Citadel shows as the holder's wait; another command leaves it alone, and shows elapsed time only.
 progress="$dir/slot-$slot.progress"
+# What the command prints is also teed into slot-N.out, whose end Citadel shows under the minion's wait (#1681).
+out="$dir/slot-$slot.out"
 rm -f "$progress" "$progress.tmp" 2>/dev/null
+: >"$out" 2>/dev/null || out=/dev/null
 printf '%s: %s (since %s, pid %s)\n' "$who" "$what" "$(date +%H:%M)" "$$" >"$dir/slot-$slot.who" 2>/dev/null
-trap 'rm -f "$dir/slot-$slot.who" "$waitfile" "$waitfile.tmp" "$progress" "$progress.tmp"' EXIT
+trap 'rm -f "$dir/slot-$slot.who" "$waitfile" "$waitfile.tmp" "$progress" "$progress.tmp" "$dir/slot-$slot.out"' EXIT
 export CITADEL_TEST_PROGRESS=$progress
 # The command runs as a child without the lock's fd, so a daemon it leaves behind (sccache, a build
 # server) can't keep the slot; this shell holds it until the command ends.
@@ -448,11 +451,12 @@ export CITADEL_HEAVY_HELD=1
 t1=$(us) c0=$(cpu_ticks)
 nicer=()
 [ -n "$first" ] || { nicer=(nice -n 19); ! command -v ionice >/dev/null || nicer+=(ionice -c 3); }
-"${nicer[@]}" "$@" 8>&-
+# The tees close fd 8 too: they must not hold the slot's lock past the command.
+"${nicer[@]}" "$@" 8>&- > >(tee -a "$out" 8>&-) 2> >(tee -a "$out" 8>&- >&2)
 status=$?
 # Free the slot before the history work, so a slow or stuck write can't hold up the line. The holder's files go
 # first: once the lock is free the next holder writes its own, which a later clean-up here would delete.
-rm -f "$dir/slot-$slot.who" "$waitfile" "$waitfile.tmp" "$progress" "$progress.tmp" 2>/dev/null
+rm -f "$dir/slot-$slot.who" "$waitfile" "$waitfile.tmp" "$progress" "$progress.tmp" "$dir/slot-$slot.out" 2>/dev/null
 trap - EXIT
 exec 8>&-
 history="$dir/history"

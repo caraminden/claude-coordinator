@@ -432,3 +432,12 @@ test("the kit core's tickets in deploy-queue.sh's queue (#1323): their order lin
   assert.equal(landPhase('running land_fallback on abc123def456 since 14:02').key, 'tests');
   assert.equal(landPhase('deploying abc123def456').stage, 'deploy');
 });
+
+test('tail: the newest lines of the run a minion holds a slot for, none for anyone else (#1681)', async () => {
+  const { heavy, waits } = setup();
+  const a = minion(), b = minion();
+  writeFileSync(join(heavy, 'slot-0.who'), `Citadel #${a.number} (cara): npm test (since 14:00, pid 4242)\n`);
+  writeFileSync(join(heavy, 'slot-0.out'), 'one\ntwo\nthree\n');
+  assert.deepEqual(await waits.tail(a.id, 2), ['two', 'three']);
+  assert.deepEqual(await waits.tail(b.id, 2), []);
+});

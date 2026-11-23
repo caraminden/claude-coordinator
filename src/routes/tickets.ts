@@ -541,6 +541,13 @@ export const ticketRoutes: Route[] = [
     },
   },
   {
+    // A waiting heavy run's newest output lines (#1681), for the readout under the wait; the page asks every few seconds.
+    method: 'GET', path: '/api/tickets/:ticket/wait-tail', who: ['person', 'taskmaster', 'minion'], everyScheme: true,
+    async handler({ res, ticket, app }) {
+      return json(res, 200, { lines: (await app.waits?.tail(ticket.id, 20)) ?? [] });
+    },
+  },
+  {
     method: 'PATCH', path: '/api/tickets/:ticket', who: ['person', 'taskmaster', 'minion'],
     async handler(ctx) {
       const { req, res, app, session, caller, ticket } = ctx;

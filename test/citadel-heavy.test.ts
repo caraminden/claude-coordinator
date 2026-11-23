@@ -580,3 +580,19 @@ test("the history line's last column is the command's CPU seconds, its children'
   const cpu = Number(lastLine(dir)[8]);
   assert.ok(cpu >= 1 && cpu <= Number(lastLine(dir)[5]) * 16, `${cpu} CPU s`);
 });
+
+test('what the command prints is teed into its slot\'s .out file while it runs, and the file goes with the run (#1681)', async () => {
+  const { dir, env } = folder(2);
+  const go = join(root, 'go-tee');
+  const j = spawn(heavy, ['sh', '-c', `echo out-line; echo err-line >&2; ${waitFor(go)}`], { env: { ...env, CITADEL_HEAVY_WHO: 'Citadel #1 (cara)' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '', err = '';
+  j.stdout!.on('data', (b) => (out += b));
+  j.stderr!.on('data', (b) => (err += b));
+  const closed = new Promise((r) => j.on('close', r));
+  await until('the output is teed', () => existsSync(join(dir, 'slot-0.out')) && /out-line/.test(readFileSync(join(dir, 'slot-0.out'), 'utf8')) && /err-line/.test(readFileSync(join(dir, 'slot-0.out'), 'utf8')));
+  writeFileSync(go, '');
+  await closed;
+  assert.match(out, /^out-line$/m);
+  assert.match(err, /err-line/);
+  assert.equal(existsSync(join(dir, 'slot-0.out')), false);
+});

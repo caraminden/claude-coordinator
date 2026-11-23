@@ -1,6 +1,6 @@
 // Holding a warm session's tool text (#1731): only description wording may stay old; any other change lists the current tools.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -29,6 +29,9 @@ test('tools/list keeps what the session saw in its TMPDIR and serves it on a war
   assert.equal(await toolsForTurn(seen, env), seen, 'first turn: the current list');
   assert.deepEqual(await toolsForTurn(reworded, { ...env, CITADEL_TOOL_HOLD: '1' }), seen, 'warm: the list it saw');
   assert.equal(await toolsForTurn(reworded, env), reworded, 'cold: the current list');
-  assert.deepEqual(JSON.parse(readFileSync(join(dir, '.citadel-tools-7.json'), 'utf8')), reworded, 'which is now the one kept');
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, '.citadel-tools-7.json'), 'utf8')).tools, reworded, 'which is now the one kept');
+  assert.equal(await toolsForTurn(seen, { ...env, CITADEL_TOOL_HOLD: '1', COORDINATOR_MSG: '{"max":3}' }), seen, 'new message numbers: the current list');
+  writeFileSync(join(dir, '.citadel-tools-7.json'), '{"msg":"","tools":[');
+  assert.equal(await toolsForTurn(reworded, { ...env, CITADEL_TOOL_HOLD: '1' }), reworded, 'a broken file is no hold, not an error');
   assert.equal(await toolsForTurn(seen, { COORDINATOR_TICKET: '7', CITADEL_TOOL_HOLD: '1' }), seen, 'no TMPDIR: no hold');
 });

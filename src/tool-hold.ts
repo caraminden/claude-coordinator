@@ -3,7 +3,7 @@
 // whole conversation. While the prompt hold says the turn resumes its warm session under the cap (CITADEL_TOOL_HOLD), the
 // tool server lists the tools as that session last saw them, as long as only description wording changed: a changed
 // parameter, tool or flag takes the current list at once. The list a session saw is kept in the turn's own TMPDIR.
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /** A tool list with its description strings left out: what a held list must still match. */
@@ -19,9 +19,15 @@ export async function toolsForTurn<T>(current: T[], env: NodeJS.ProcessEnv): Pro
   if (!env.TMPDIR || !env.COORDINATOR_TICKET) return current;
   // The ticket in the name: a turn whose own temp folder couldn't be made shares the server's TMPDIR.
   const file = join(env.TMPDIR, `.citadel-tools-${env.COORDINATOR_TICKET}.json`);
+  // The scheme's message numbers sit in tool text and are enforced elsewhere (src/msg-settings.ts): a change to them is no rewording.
+  const msg = env.COORDINATOR_MSG ?? '';
   const hold = env.CITADEL_TOOL_HOLD === '1';
-  const held = hold ? await readFile(file, 'utf8').then((t) => JSON.parse(t) as T[], () => null) : null;
-  const tools = heldTools(current, held, hold);
-  if (tools === current) await writeFile(file, JSON.stringify(current)).catch(() => {});
+  const kept = hold ? await readFile(file, 'utf8').then((t) => JSON.parse(t)).catch(() => null) : null;
+  const tools = heldTools(current, kept?.msg === msg ? kept.tools : null, hold);
+  if (tools === current) {
+    // Whole or not at all: a half-written file would only lose the hold, but a rename never leaves one.
+    const part = `${file}.${process.pid}.part`;
+    await writeFile(part, JSON.stringify({ msg, tools: current })).then(() => rename(part, file)).catch(() => {});
+  }
   return tools;
 }

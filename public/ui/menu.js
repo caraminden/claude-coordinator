@@ -71,13 +71,15 @@ export function openMenu(spec, x, y) {
   menu.setAttribute('popover', 'manual');
   menu.setAttribute('role', 'menu');
   menu.setAttribute('aria-label', spec.label ?? `${spec.kind ?? 'Page'} actions`);
+  // Inside the topmost open modal dialog, if any: everything outside one is inert, so the menu's rows couldn't be clicked or focused.
+  const home = topModal() ?? document.body;
   let scrim = null;
   if (spec.sheet) {
     // The dim behind the sheet, closed by a tap. Ignored for a moment so the finger still down from the press can't close it.
     scrim = el('div', 'cui-menu-scrim');
     const born = Date.now();
     scrim.addEventListener('click', () => { if (Date.now() - born > 350) close(true); });
-    document.body.append(scrim);
+    home.append(scrim);
   }
   const head = el('div', 'cui-menu-head');
   if (spec.sheet) head.append(el('span', 'cui-menu-grab'));
@@ -120,7 +122,7 @@ export function openMenu(spec, x, y) {
     menu.append(b);
   });
   if (spec.foot) menu.append(el('div', 'cui-menu-foot', spec.foot));
-  document.body.append(menu);
+  home.append(menu);
   menu.showPopover?.();
   if (!spec.sheet) {
     const vw = document.documentElement.clientWidth;
@@ -205,6 +207,11 @@ export function openMenu(spec, x, y) {
   // A touch sheet has no use for a focus ring on its first row: focus the sheet, and the arrows still work from there.
   if (spec.sheet) { menu.tabIndex = -1; menu.focus({ preventScroll: true }); } else focusAt(0);
   return menu;
+}
+
+/** The topmost open modal dialog, or null (also where :modal isn't supported). */
+function topModal() {
+  try { return [...document.querySelectorAll('dialog:modal')].at(-1) ?? null; } catch { return null; }
 }
 
 /** The element a redraw put in place of `gone`: same tag, same id or data-id. Null when there's none to tell by. */

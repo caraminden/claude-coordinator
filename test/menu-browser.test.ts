@@ -169,3 +169,50 @@ test('a moved finger cancels the long press, and message text keeps its own sele
   await page.touch('touchEnd');
   assert.equal(await page.eval(menuOpen), false, 'moved more than 10 px: no sheet');
 });
+
+// A modal <dialog> makes everything outside it inert, so a menu appended to <body> drew but couldn't be clicked (Peek Auras #885).
+const inDialog = (sheet: boolean) => `(async () => {
+  const { openDialog } = await import('/ui/dialog.js');
+  const { openMenu } = await import('/ui/menu.js');
+  const b = document.createElement('button'); b.id = 'tgt'; b.textContent = 'target';
+  const d = openDialog({ title: 'Library', body: [b] });
+  window.ran = 0; window.dlgClosed = false; d.addEventListener('close', () => { window.dlgClosed = true; });
+  const r = b.getBoundingClientRect();
+  openMenu({ kind: 'Pack', name: 'x', sheet: ${sheet}, returnTo: b, items: [{ label: 'Do it', run: () => { window.ran++; } }] }, r.left, r.bottom);
+})()`;
+
+test('a menu opened inside a modal dialog can be clicked, and Escape closes only the menu', { skip }, async () => {
+  const page = await open('Menu in dialog');
+  await page.eval(inDialog(false));
+  assert.equal(await page.eval(`document.querySelector('.cui-menu').closest('dialog') === document.querySelector('dialog:modal')`), true, 'mounted in the modal');
+  await esc(page);
+  await waitFor(page, 'the menu to close', `!${menuOpen}`);
+  assert.equal(await page.eval('window.dlgClosed'), false, 'the dialog stays open');
+  assert.equal(await page.eval('document.activeElement?.id'), 'tgt', 'focus returns to the target');
+});
+
+test('clicking an item of a menu inside a modal dialog runs it', { skip }, async () => {
+  const page = await open('Menu in dialog click');
+  await page.eval(inDialog(false));
+  const { x, y } = await page.centre('.cui-menu-item');
+  for (const type of ['mousePressed', 'mouseReleased']) await page.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 });
+  await waitFor(page, 'the item to run', 'window.ran === 1');
+  assert.equal(await page.eval(menuOpen), false);
+  assert.equal(await page.eval('window.dlgClosed'), false);
+});
+
+test('the phone sheet inside a modal dialog: its row runs, its dim closes only the sheet', { skip }, async () => {
+  const page = await open('Menu in dialog phone', { phone: true });
+  await page.eval(inDialog(true));
+  await waitFor(page, 'the sheet at the bottom', 'Math.abs(document.querySelector(".cui-menu").getBoundingClientRect().bottom - innerHeight) < 1');
+  await hold(400);
+  await page.tap(20, 20); // the dim
+  await waitFor(page, 'the sheet to close', `!${menuOpen}`);
+  assert.equal(await page.eval('window.dlgClosed'), false, 'the dialog stays open');
+  await page.eval(inDialog(true));
+  await waitFor(page, 'the sheet at the bottom', 'Math.abs(document.querySelector(".cui-menu").getBoundingClientRect().bottom - innerHeight) < 1');
+  await hold(400);
+  const { x, y } = await page.centre('.cui-menu-item');
+  await page.tap(x, y);
+  await waitFor(page, 'the row to run', 'window.ran === 1');
+});

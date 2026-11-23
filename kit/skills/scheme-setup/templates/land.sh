@@ -22,7 +22,8 @@
 #   tools/land.sh --into build/<n> [<test files>]   a feeder merges into it: rebases onto build/<n> (no rebase when it
 #       is already under the branch), runs the named test files through CHECK_FILE_CMD (with none named, or no
 #       CHECK_FILE_CMD: CHECK_LIGHT, else CHECK), and moves build/<n> by compare-and-swap. No CI, no line, no push:
-#       it waits only for other runs on the same build (a lock per build).
+#       it waits only for other runs on the same build (a lock per build). A merge of light paths alone (build-claims.md,
+#       or what the LANES map marks light) runs no check (#1684).
 #   tools/land.sh --into build/<n> --full           the build minion's merge of $BRANCH: build/<n> must already be
 #       under its branch (it ran git merge build/<n>; no rebase, which would flatten the build's merges), then the
 #       full CHECK and CI on land/<branch>, as --verify runs them, then the same compare-and-swap. Out of the line.
@@ -31,6 +32,8 @@
 #       then build/<n> is deleted, here and on origin. Only as the head of the line, never stacked, never in fast mode.
 #   A plain land refuses a branch that carries commits of a build/* that $BRANCH doesn't have: half a build would go live.
 #   Claims (#1159): with a build-claims.md on build/<n>, --into first checks the feeder's files against it (claims_check).
+#   While the build minion's merge of a changed build-claims.md is in flight, a feeder's --into waits for it to end and
+#   is checked against the new claims, and its --check (the hand-off) passes, rather than both refusing (claims_gate).
 #   Lock order: a build's lock (fd 6) before the land lock (fd 9); --into and --full take only the build's.
 # Fast mode (#1017): with LAND_FAST=1 (Citadel sets it for a low or medium risk land in a scheme whose Settings turn
 #    fast mode on), a branch that changes none of tools/land.sh, tools/land.local.sh, the LANES map, .github/* or the

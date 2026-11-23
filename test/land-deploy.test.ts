@@ -42,7 +42,7 @@ test('a light land runs no tests and no boot check, and goes live without a rest
     assert.match(res.stderr, /lane: light \(tools\/lanes; the path that decided it: docs\/a\.md\)/);
     assert.match(res.stderr, /no tests and no CI/);
     assert.doesNotMatch(res.stderr, /CI FALLBACK|running the tests|boot check: the new code/);
-    assert.match(res.stderr, /live now: docs and config only, nothing to reload\. No restart\./);
+    assert.match(res.stderr, /live now: docs, config and tests only, nothing to reload\. No restart\./);
     assert.deepEqual(runs(), [], 'no test ran anywhere');
     assert.equal(readFileSync(join(r.dir, 'sighups'), 'utf8').trim().split('\n').length, 1);
     assert.ok(!existsSync(join(r.dir, 'restarted')), 'no restart was queued');
@@ -56,7 +56,7 @@ test("a light land whose SIGHUP the server doesn't take queues a restart rather 
     lightLand(r);
     const res = await run(land, r.wt);
     assert.match(res.stderr, /the server did not pick up the new commit on SIGHUP; queuing a restart instead/);
-    assert.doesNotMatch(res.stderr, /live now: docs and config only/);
+    assert.doesNotMatch(res.stderr, /live now: docs, config and tests only/);
     assert.match(res.stderr, /live now: the server restarted on/);
   }, () => ({ reload: 'sighup', version: 'v1', ...(running && { commit: running }) })));
 

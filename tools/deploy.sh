@@ -87,12 +87,16 @@ health() {
 
 # frontend if every file changed between two commits is under public/, none if nothing changed, light if every one
 # is in tools/lanes' light lane as <from> has it (#753: no test or server code reads them), server otherwise (and
-# whenever the running commit is unknown).
+# whenever the running commit is unknown). Files under test/ are left out first (#1416): the running server never
+# reads them, so tests alone are light and tests with public/ only reload. They stay out of tools/lanes' light lane,
+# which would land them untested.
 change_kind() {
   local dir=$1 from=$2 to=$3 files
   if [ -z "$from" ] || ! git -C "$dir" cat-file -e "$from^{commit}" 2>/dev/null; then echo server; return; fi
   files=$(git -C "$dir" diff --no-renames --name-only "$from" "$to")
-  if [ -z "$files" ]; then echo none
+  if [ -z "$files" ]; then echo none; return; fi
+  files=$(grep -v '^test/' <<<"$files" || true)
+  if [ -z "$files" ]; then echo light
   elif [ -x "$dir/tools/lane.sh" ] && [ "$(cd "$dir" && tools/lane.sh "$from" <<<"$files" | cut -d' ' -f1)" = light ]; then echo light
   elif grep -qv '^public/' <<<"$files"; then echo server
   else echo frontend; fi
@@ -607,7 +611,7 @@ deploy() {
   # DEPLOY_TESTED: the commit tools/land.sh just tested, so the same commit isn't tested twice under the lock;
   # a stray file here (an untracked test) wasn't in that run, so then it tests again.
   if [ "$kind" = light ]; then
-    say "skipping the tests and the boot check: nothing changed but docs and config no test or server code reads"
+    say "skipping the tests and the boot check: nothing changed but docs, config and tests, which the server never reads"
   elif [ -n "$TO" ]; then
     say "skipping the tests: $(short "$new") is last green, so CI passed the full suite on it"
   elif [ "${DEPLOY_TESTED:-}" = "$new" ] && [ -z "$(git_live status --porcelain --ignored)" ]; then
@@ -672,7 +676,7 @@ deploy() {
       if { [ "$kind" = light ] && [ "$(health commit)" = "$new" ]; } || { [ "$kind" != light ] && [ "$(health version)" = "$version" ]; }; then
         mark live
         git_live tag -f last-good "$new" >/dev/null
-        local what="docs and config only, nothing to reload" pushed
+        local what="docs, config and tests only, nothing to reload" pushed
         [ "$kind" = light ] || what="the server reloaded the front end ($version); open tabs reload when idle"
         say "live now: $what. No restart."
         if [ -n "$TO" ]; then

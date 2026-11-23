@@ -228,6 +228,50 @@ test("deploy.sh tells a light change (tools/lanes, as the running commit has it)
   assert.equal(kind(both, git('rev-parse', 'HEAD')), 'server', 'a file renamed into docs/ counts where it came from too');
 });
 
+test('deploy.sh restarts nothing for a change to test/ alone, and judges test/ with the rest by the rest (#1416)', () => {
+  // The running server never reads test/ (checked by grep 2026-11-22), so a test-only ship is light and test/ next to
+  // public/ only reloads the front end. kit/ and tools/ still restart: every turn's pinned copies are made at boot.
+  const g = join(root, 'tests-only');
+  const git = (...args: string[]) => execFileSync('git', ['-C', g, ...args], { encoding: 'utf8' }).trim();
+  mkdirSync(join(g, 'tools'), { recursive: true });
+  git('init', '-q');
+  git('config', 'user.email', 't@t');
+  git('config', 'user.name', 't');
+  const commit = (...files: string[]) => {
+    for (const file of files) {
+      mkdirSync(dirname(join(g, file)), { recursive: true });
+      writeFileSync(join(g, file), String(Math.random()));
+    }
+    git('add', '-A');
+    git('commit', '-qm', files.join(' '));
+    return git('rev-parse', 'HEAD');
+  };
+  cpSync(join(repo, 'tools', 'lane.sh'), join(g, 'tools', 'lane.sh'));
+  writeFileSync(join(g, 'tools', 'lanes'), 'light docs/*\nkit kit/*\n');
+  const base = commit('src/a.ts');
+  const kind = (to: string, from = base) =>
+    execFileSync('bash', [join(repo, 'tools', 'deploy.sh'), 'change-kind', g, from, to], { encoding: 'utf8', env: hostEnv }).trim();
+  const at = (...files: string[]) => {
+    git('checkout', '-q', '--detach', base);
+    return commit(...files);
+  };
+  assert.equal(kind(at('test/a.test.ts', 'test/b.ts')), 'light', 'tests only: no restart, no tests or boot check under the lock');
+  assert.equal(kind(at('test/a.test.ts', 'docs/a.md')), 'light', 'tests and docs: light');
+  assert.equal(kind(at('test/a.test.ts', 'public/app.js')), 'frontend', 'tests and the front end: reload only');
+  assert.equal(kind(at('test/a.test.ts', 'src/a.ts')), 'server', 'tests and server code: restart');
+  assert.equal(kind(at('test/a.test.ts', 'tools/x.sh')), 'server', 'tools/ is pinned into turns at boot: restart');
+  assert.equal(kind(at('tools/x.sh')), 'server', 'tools/ only: restart');
+  assert.equal(kind(at('kit/a.md')), 'server', 'kit/ only: restart (the kit lane is for tests, not for the deploy)');
+  assert.equal(kind(at('test/a.test.ts', 'public/app.js', 'docs/a.md')), 'server', 'front end with docs restarts, as before');
+  assert.equal(kind(at('src/test/a.ts')), 'server', 'only the top-level test/ folder');
+  assert.equal(kind(at('test/a.test.ts'), ''), 'server', 'an unknown running commit still restarts');
+  git('checkout', '-q', '--detach', base);
+  mkdirSync(join(g, 'test'), { recursive: true });
+  git('mv', 'src/a.ts', 'test/a.ts');
+  git('commit', '-qm', 'rename');
+  assert.equal(kind(git('rev-parse', 'HEAD')), 'server', 'a file moved into test/ counts where it came from too');
+});
+
 // A command on PATH that notes each call's arguments, then runs the real one: how a test sees which wait deploy.sh asked
 // for without timing it (a bound on time goes red on a loaded box).
 function noting(bin: string, cmd: string, log: string) {

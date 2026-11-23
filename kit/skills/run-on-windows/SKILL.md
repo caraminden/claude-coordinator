@@ -99,6 +99,10 @@ point, and leaves a shot at `%TEMP%\electron-drag.png`. After editing `public/`,
 `rig.ts reload` wants the Edge driver. Electron is the one in `%LOCALAPPDATA%\defender-copy`. A turn without the
 `tailscale` command sets `RIG_HOST=perigee.tail59477f.ts.net` for `rig.ts up`.
 
+`scripts/electron-app/reload.mjs` (#1697) times reloads the same way (`reload.mjs <rig URL> - 6`): reload to the app drawn and
+to the splash gone, and each front file as 200, 304 or served from cache. Touch `shell-cache-off` in the dev copy's data folder
+first when live has the service worker's shell off, or every file comes from the worker.
+
 `scripts/electron-app/keys.mjs` (#1691) needs no dev copy: it serves its own page (a text box and three app frames: same host,
 sandboxed, cross-site) and runs a published build (`keys.mjs 9`), the checkout's `desktop/` on the newest build's Electron
 (`keys.mjs checkout`) or an Edge app window (`keys.mjs edge`). `keys` presses Ctrl+R, F5, Ctrl+Shift+R and Ctrl+F5 with focus

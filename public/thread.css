@@ -572,8 +572,9 @@ details.recap-group:not([open]) > summary { margin: 0; }
 .ctx-meter.hot { color: var(--danger, #c0392b); }
 
 /* A waiting heavy run's newest output (#1681) */
-.wait-tail { margin: 0.1rem 0.3rem 0.4rem; display: flex; gap: 0.5rem; align-items: baseline; min-width: 0; }
+.wait-tail { margin: 0.1rem 0.3rem 0.4rem; display: flex; gap: 0.5rem; align-items: flex-start; min-width: 0; }
 .wait-tail[hidden] { display: none; }
 .wait-tail pre { margin: 0; flex: 1; min-width: 0; overflow-x: auto; font: 0.78em/1.4 var(--mono, ui-monospace, monospace); color: var(--muted); white-space: pre; max-height: 16em; overflow-y: auto; }
-.wait-tail button { all: unset; cursor: pointer; font-size: 0.78em; color: var(--accent, #4a7bd6); white-space: nowrap; }
+.wait-tail button { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; min-height: 24px; padding: 0 0 0 0.3rem; cursor: pointer; font-size: 0.78em; color: var(--accent, #4a7bd6); white-space: nowrap; }
 .wait-tail button:focus-visible { outline: 2px solid var(--accent, #4a7bd6); border-radius: 3px; }
+@media (max-width: 800px) { .wait-tail button { min-height: 40px; } }

@@ -203,6 +203,9 @@ You set the label, not the Grunt; take the highest row that matches what the fin
 Judge data changes by what they do: editing the file that holds the queries is not high by
 itself. The files Project facts lists as high risk by file (auth, deploy and restart code, guards)
 stay high whatever the edit, since a slip there can stop the service or open it up.
+One exception: the section 1 facts print `SHIP SCRIPT SYNC` when the diff's only touch of `tools/land.sh` or
+`tools/land.local.sh` leaves it byte-identical to the kit's template (`scheme-setup/templates/`): that sync is medium.
+`SHIP SCRIPT EDIT`, or any other high-by-file file in the diff, stays high.
 
 | Risk | When the change |
 |---|---|

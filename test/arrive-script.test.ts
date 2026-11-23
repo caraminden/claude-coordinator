@@ -2,7 +2,7 @@
 // unshipped build branch this one grew from, else main.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -66,4 +66,22 @@ test('a feeder behind its build still gets build/7 as its base, and is told what
   out = arrive(dir);
   assert.match(out, /base: main /);
   assert.doesNotMatch(out, /BEHIND/);
+});
+
+test('a ship script identical to the kit template prints SYNC (medium), a one-line edit prints EDIT (high)', () => {
+  const dir = join(root, 'ship');
+  spawnSync('git', ['init', '-q', '-b', 'main', dir]);
+  commit(dir, 'a.txt');
+  git(dir, 'switch', '-q', '-c', 'ticket/9-sync');
+  mkdirSync(join(dir, 'tools'));
+  const tpl = join(import.meta.dirname, '..', 'kit', 'skills', 'scheme-setup', 'templates', 'land.sh');
+  copyFileSync(tpl, join(dir, 'tools', 'land.sh'));
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-qm', 'sync');
+  assert.match(arrive(dir), /SHIP SCRIPT SYNC: tools\/land\.sh/);
+  appendFileSync(join(dir, 'tools', 'land.sh'), '# local tweak\n');
+  git(dir, 'commit', '-qam', 'edit');
+  const out = arrive(dir);
+  assert.match(out, /SHIP SCRIPT EDIT: tools\/land\.sh/);
+  assert.doesNotMatch(out, /SYNC/);
 });

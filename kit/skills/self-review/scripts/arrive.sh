@@ -41,3 +41,15 @@ if [ -f CLAUDE.md ]; then
 else
   echo "no CLAUDE.md"
 fi
+# A ship script this diff touches that is now byte-identical to the kit's template is a straight sync (section 4).
+tpl=$(cd "$(dirname "$0")/../../scheme-setup/templates" 2>/dev/null && pwd)
+if [ -n "$tpl" ]; then
+  for f in land.sh land.local.sh; do
+    git diff --name-only "$base"...HEAD | grep -qx "tools/$f" || continue
+    if git show "HEAD:tools/$f" 2>/dev/null | cmp -s - "$tpl/$f"; then
+      echo "--- SHIP SCRIPT SYNC: tools/$f is byte-identical to the kit template (section 4: medium if no other high-risk file changed)"
+    else
+      echo "--- SHIP SCRIPT EDIT: tools/$f differs from the kit template (section 4: high)"
+    fi
+  done
+fi

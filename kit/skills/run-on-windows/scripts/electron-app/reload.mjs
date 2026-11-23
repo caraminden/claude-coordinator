@@ -45,6 +45,8 @@ const onNet = (d) => {
     else if (r.status === 304) net0.n304++;
     else net0.n200++;
   }
+  // The status on the wire: a revalidated file's responseReceived shows the cached 200, its extra info the 304.
+  if (d.method === 'Network.responseReceivedExtraInfo' && d.params.statusCode === 304) net0.wire304.add(d.params.requestId);
   if (d.method === 'Network.loadingFinished' && net0.asked.has(d.params.requestId)) net0.bytes += d.params.encodedDataLength;
 };
 ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.method) onNet(d); const w = waits.get(d.id); if (w) { waits.delete(d.id); d.error ? w.j(new Error(d.error.message)) : w.r(d.result); } };
@@ -74,7 +76,7 @@ await sleep(3000);
 
 const rows = [];
 for (let i = 0; i < N; i++) {
-  net0 = { asked: new Map(), n200: 0, n304: 0, cached: 0, bytes: 0 };
+  net0 = { asked: new Map(), n200: 0, n304: 0, cached: 0, bytes: 0, wire304: new Set() };
   const t0 = Date.now();
   await send('Page.reload', { ignoreCache: false }, s);
   let r = null;
@@ -92,7 +94,7 @@ for (let i = 0; i < N; i++) {
   if (!r) { console.log(`reload ${i + 1}: did not finish in 15 s`); continue; }
   const off = r.origin - t0; // ms from the reload call to the new page's navigation start
   const row = { reload: i + 1, toDrawn: Math.round(off + r.drawn), toFade: r.fade == null ? null : Math.round(off + r.fade), toGone: Math.round(off + r.gone),
-    navToDrawn: Math.round(r.drawn), files: net0.asked.size, ok200: net0.n200, ok304: net0.n304, cached: net0.cached, kb: Math.round(net0.bytes / 1024), page: r.pageStatus, load: Math.round(r.loadEnd) };
+    navToDrawn: Math.round(r.drawn), files: net0.asked.size, ok200: net0.n200 - [...net0.wire304].filter((r) => net0.asked.has(r)).length, ok304: net0.n304 + [...net0.wire304].filter((r) => net0.asked.has(r)).length, cached: net0.cached, kb: Math.round(net0.bytes / 1024), page: r.pageStatus, load: Math.round(r.loadEnd) };
   rows.push(row);
   console.log(JSON.stringify(row));
   await sleep(2000);

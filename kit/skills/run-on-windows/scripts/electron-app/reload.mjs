@@ -32,7 +32,22 @@ for (let i = 0; i < 60 && !browserWs; i++) {
 const ws = new WebSocket(browserWs);
 await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
 let id = 0; const waits = new Map();
-ws.onmessage = (m) => { const d = JSON.parse(m.data); const w = waits.get(d.id); if (w) { waits.delete(d.id); d.error ? w.j(new Error(d.error.message)) : w.r(d.result); } };
+// Every front-end file a reload asks for, from DevTools' network events: 200 from the network, 304, or the browser's cache.
+let net0 = null;
+const front = (url) => { try { const p = new URL(url).pathname; return p.startsWith('/c/') && !p.startsWith('/c/api/'); } catch { return false; } };
+const onNet = (d) => {
+  if (!net0) return;
+  if (d.method === 'Network.requestWillBeSent' && front(d.params.request.url)) net0.asked.set(d.params.requestId, d.params.request.url);
+  if (d.method === 'Network.requestServedFromCache' && net0.asked.has(d.params.requestId)) net0.cached++;
+  if (d.method === 'Network.responseReceived' && net0.asked.has(d.params.requestId)) {
+    const r = d.params.response;
+    if (r.fromDiskCache || r.fromServiceWorker || r.fromPrefetchCache) net0.cached++;
+    else if (r.status === 304) net0.n304++;
+    else net0.n200++;
+  }
+  if (d.method === 'Network.loadingFinished' && net0.asked.has(d.params.requestId)) net0.bytes += d.params.encodedDataLength;
+};
+ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.method) onNet(d); const w = waits.get(d.id); if (w) { waits.delete(d.id); d.error ? w.j(new Error(d.error.message)) : w.r(d.result); } };
 const send = (method, params = {}, sessionId) => new Promise((r, j) => { const n = ++id; waits.set(n, { r, j }); ws.send(JSON.stringify({ id: n, method, params, sessionId })); });
 const [cn, cv] = [cfg.cookie.slice(0, cfg.cookie.indexOf('=')), cfg.cookie.slice(cfg.cookie.indexOf('=') + 1)];
 if (!live) await send('Storage.setCookies', { cookies: [{ name: cn, value: cv, domain: 'localhost', path: '/' }] });
@@ -42,6 +57,7 @@ const s = (await send('Target.attachToTarget', { targetId: page.targetId, flatte
 const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, s)).result.value;
 // Each new document notes when #app first has children and when the splash fades and goes (ms since its navigation start).
 await send('Page.enable', {}, s);
+await send('Network.enable', {}, s);
 await send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
   const t = window.__reload = {};
   const look = () => {
@@ -58,6 +74,7 @@ await sleep(3000);
 
 const rows = [];
 for (let i = 0; i < N; i++) {
+  net0 = { asked: new Map(), n200: 0, n304: 0, cached: 0, bytes: 0 };
   const t0 = Date.now();
   await send('Page.reload', { ignoreCache: false }, s);
   let r = null;
@@ -75,12 +92,12 @@ for (let i = 0; i < N; i++) {
   if (!r) { console.log(`reload ${i + 1}: did not finish in 15 s`); continue; }
   const off = r.origin - t0; // ms from the reload call to the new page's navigation start
   const row = { reload: i + 1, toDrawn: Math.round(off + r.drawn), toFade: r.fade == null ? null : Math.round(off + r.fade), toGone: Math.round(off + r.gone),
-    navToDrawn: Math.round(r.drawn), files: r.files, ok200: r.ok, ok304: r.notModified, kb: Math.round(r.bytes / 1024), page: r.pageStatus, load: Math.round(r.loadEnd) };
+    navToDrawn: Math.round(r.drawn), files: net0.asked.size, ok200: net0.n200, ok304: net0.n304, cached: net0.cached, kb: Math.round(net0.bytes / 1024), page: r.pageStatus, load: Math.round(r.loadEnd) };
   rows.push(row);
   console.log(JSON.stringify(row));
   await sleep(2000);
 }
 const med = (k) => { const v = rows.map((r) => r[k]).filter((x) => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
-console.log(`MEDIAN reload→drawn ${med('toDrawn')} ms, reload→splash gone ${med('toGone')} ms, files 200 ${med('ok200')} / 304 ${med('ok304')}, ${med('kb')} KB`);
+console.log(`MEDIAN reload→drawn ${med('toDrawn')} ms, reload→splash gone ${med('toGone')} ms, files 200 ${med('ok200')} / 304 ${med('ok304')} / cache ${med('cached')}, ${med('kb')} KB`);
 app.kill(); fwd?.close(); ws.close();
 process.exit(0);

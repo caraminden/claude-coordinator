@@ -36,6 +36,10 @@ test('an Orders page stays open for the clicked scheme', () => {
   assert.equal(schemeSwitchHash('#/p/3/schedules/9', 5), '#/p/5/schedules');
   assert.equal(schemeSwitchHash('#/p/3/memory/notes.md', 5), '#/p/5/memory');
 });
+test('the Chains page stays open for the clicked scheme, without the highlighted chain (#1679)', () => {
+  assert.equal(schemeSwitchHash('#/p/3/chains/1416', 5), '#/p/5/chains');
+  assert.equal(schemeSwitchHash('#/p/3/chains', 5), '#/p/5/chains');
+});
 
 test('CI and Status open on the scheme from a scheme, on all schemes from Home', async () => {
   const { scopedPageHash } = await import('../public/page-scope.js');

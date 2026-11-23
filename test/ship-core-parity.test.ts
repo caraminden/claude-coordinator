@@ -109,3 +109,23 @@ test("land.local.sh's CI defaults match land.sh's", () => {
   assert.ok(shared.includes('LAND_CI_TIMEOUT') && shared.includes('LAND_CI_POLL'), `shared: ${shared.join(' ')}`);
   for (const k of shared) assert.equal(local.get(k), land.get(k), `${k}: land.local.sh ${local.get(k)}, land.sh ${land.get(k)}`);
 });
+
+test("land.local.sh's citadel_retro_log is land.sh's retro_log, header text and all", () => {
+  const body = (file: string, name: string) => {
+    const m = readFileSync(join(repo, 'tools', file), 'utf8').match(new RegExp(`^${name}\\(\\) \\(\\n[\\s\\S]*?^\\) >/dev/null 2>&1 \\|\\| true\\n`, 'm'));
+    assert.ok(m, `${name} in ${file}`);
+    return m[0].replace(name, 'retro_log');
+  };
+  assert.equal(body('land.local.sh', 'citadel_retro_log'), body('land.sh', 'retro_log'));
+});
+
+test("the burn-in line parser is the same sed in land.sh's burn_lines and land.local.sh's two copies", () => {
+  const parser = (file: string, name: string) => {
+    const m = readFileSync(join(repo, 'tools', file), 'utf8').match(new RegExp(`^${name}\\(\\) \\{.*?(sed -n '[^']*burn-in: [^']*').*$`, 'm'));
+    assert.ok(m, `${name} in ${file}`);
+    return m[1];
+  };
+  const land = parser('land.sh', 'burn_lines');
+  assert.equal(parser('land.local.sh', 'citadel_burn_lines'), land);
+  assert.equal(parser('land.local.sh', 'citadel_ci_burn_lines'), land);
+});

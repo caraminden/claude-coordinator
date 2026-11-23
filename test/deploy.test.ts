@@ -958,6 +958,26 @@ test('a restart waits for a starved box at most its hold, then goes anyway and s
   assert.match(eased.reports[0].text, /The restart held \d+ s for a starved box\./);
   assert.match(restartLine('eased')[0], /· restart · live · held \d+ s for a starved box$/);
 
+  // A turn starts during the hold: the hold's note goes at once (it would promise a time the turn's wait doesn't keep),
+  // and the report counts only the starved wait. The box eases while the turn runs, and it restarts once the turn ends.
+  let phase = 0;
+  let noteDuringTurn: boolean | undefined;
+  const turned = await restartWith('turned', (restarts, _n, c) => {
+    const hold = join(state('turned'), 'hold');
+    if (restarts === 0 && phase === 0 && existsSync(hold)) phase = 1;
+    else if (phase === 1) {
+      noteDuringTurn = existsSync(hold);
+      writeFileSync(join(root, 'turned-psi-cpu'), 'some avg10=5.00 avg60=5.00 avg300=1.00 total=1\n');
+      phase = 2;
+    } else if (phase === 2) phase = 3;
+    return restarts === 0 && (phase === 1 || phase === 2) ? JSON.stringify({ ok: true, commit: c.good, interruptible: 1 }) : health(restarts, c);
+  }, { ...waiting, ...psi('turned', 63), DEPLOY_PRESSURE_HOLD: '600', COORDINATOR_SHARED_DIR: shared('turned') });
+  assert.equal(turned.status, 0, turned.stderr);
+  assert.equal(noteDuringTurn, false, 'the hold note goes once a turn starts');
+  assert.match(turned.stderr, /waiting for 1 running turn a restart would cut off/);
+  assert.equal(turned.restarts, 1);
+  assert.match(restartLine('turned')[0], /· restart · live · held \d+ s for a starved box$/);
+
   // Memory pressure at its line starves the box too.
   const mem = await restartWith('starved-mem', (restarts, _n, c) => health(restarts, c), { ...waiting, ...psi('starved-mem', 10, 25), DEPLOY_PRESSURE_HOLD: '1' });
   assert.equal(mem.status, 0, mem.stderr);

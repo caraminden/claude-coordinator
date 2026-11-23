@@ -21,7 +21,7 @@ after(() => rmSync(root, { recursive: true, force: true }));
 const env = {
   ...scriptEnv(), COORDINATOR_CONTAINER: undefined, COORDINATOR_SHARED_DIR: undefined, COORDINATOR_TICKET: undefined, COORDINATOR_TOKEN: undefined, COORDINATOR_API: undefined,
   CITADEL_HEAVY_DIR: join(root, 'heavy'), LAND_QUIET_PROC: quietProc(join(root, 'proc')), CITADEL_HEAVY_PRESSURE: join(root, 'proc', 'pressure', 'cpu'),
-  NODE_TEST_CONTEXT: undefined, DEPLOY_TEST_CPU_WEIGHT: '', LAND_CI: '0', LAND_FIX: undefined, LAND_PREFLIGHT: undefined, DEPLOY_REMOTE: '', DEPLOY_NOW: undefined,
+  NODE_TEST_CONTEXT: undefined, DEPLOY_TEST_CPU_WEIGHT: '', LAND_CI: '0', LAND_FIX: undefined, LAND_URGENT: undefined, LAND_PREFLIGHT: undefined, DEPLOY_REMOTE: '', DEPLOY_NOW: undefined,
   // deploy.sh's own waits, turned down as test/land-deploy.test.ts does (#1615; a real landing here took 6 s of 1 s sleeps):
   // five health asks 0.2 s apart, a 0.2 s settle and a 0.2 s look at the line. The live grace keeps how long a deploy
   // watches for live (HEALTHY_WAIT * 2 + SETTLE + LIVE_GRACE s) at the 20 s it was.

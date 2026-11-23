@@ -1350,3 +1350,17 @@ test('light check: no verdict joins the line; with the side runner busy, or LAND
     }
   }
 });
+
+// #1417: the front's restart held for a starved box (deploy.sh's <state>/hold) tells each rider when it expects to be
+// live, and an urgent fix riding the train (the land tool's urgent: true) marks that restart to skip the hold.
+test("riders of a restart held for a starved box say when it expects to be live; only an urgent rider marks it to skip the hold (#1417)", async () => {
+  for (const urgent of [false, true]) {
+    const l = await line([{}, { env: { FAKE_NOT_LIVE: '1' } }, { env: urgent ? { LAND_URGENT: '1' } : {} }, {}]);
+    writeFileSync(join(l.state, 'hold'), `${Math.floor(Date.now() / 1000) + 600} CPU pressure 63%\n`);
+    const done = await l.go();
+    done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+    for (const i of [3, 4]) assert.match(done[i - 1].stderr, /^deploy: not live yet: the restart ticket\/2-x's ship train queued carries it; the box is starved \(CPU pressure 63%\), so it waits for it to ease, live by about \d\d?:\d\d P[SD]T at the latest/m, `ship ${i}`);
+    assert.equal(existsSync(join(l.state, 'urgent')), urgent, urgent ? 'the urgent rider marks the restart' : 'no urgent rider, no mark');
+    l.done();
+  }
+});

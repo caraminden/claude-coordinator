@@ -554,7 +554,9 @@ train_verdict() {
         echo "deploy: live now: $c's ship train went live with it" >&2
         land_mark live
       else
-        # A restart held for a starved box (deploy.sh's hold, #1417) says when it expects to go.
+        # An urgent fix riding the train lets the front's restart skip the starved-box hold (deploy.sh's hold, #1417),
+        # and a restart still held says when it expects to go.
+        [ -z "${LAND_URGENT:-}${LAND_FIX:-}" ] || touch "$state/urgent"
         if [ -s "$state/hold" ] && read -r x d <"$state/hold" 2>/dev/null && [[ $x =~ ^[0-9]+$ ]]; then
           echo "deploy: not live yet: the restart $c's ship train queued carries it; the box is starved ($d), so it waits for it to ease, live by about $(TZ=America/Los_Angeles date -d "@$((x + 60))" '+%H:%M %Z') at the latest, and reports in that minion's chat" >&2
         else

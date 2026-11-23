@@ -403,15 +403,21 @@ starved() {
 live_by() { echo "live by about $(TZ=America/Los_Angeles date -d "@$(($1 + 60))" '+%H:%M %Z')"; }
 
 # The starved-box hold (#1417): once no turn would be cut off, a starved box holds the restart, at most HOLD s from the
-# first starved look, then it goes anyway and says so. A roll back, a fix's restart (<state>/urgent: LAND_FIX, the land
-# tool's fix: true) and one while lands wait for a fix (<state>/bad) never wait; --now skips the whole wait loop.
+# first starved look, then it goes anyway and says so. A roll back, an urgent fix's restart (<state>/urgent: LAND_URGENT
+# or LAND_FIX, the land tool's urgent: true or fix: true) and one while lands wait for a fix (<state>/bad) never wait; --now skips the whole wait loop.
 # Returns 0 while it holds. <state>/hold ("<latest go> <why>") tells the deploy and the riders when it expects to go.
 held_since='' R_HOLD=''
+# Ends a hold that didn't run out: the box eased, or a turn started (its own wait follows, and a later starved look holds
+# afresh). The first hold is the one reported.
+unhold() {
+  rm -f "$STATE/hold"
+  [ -z "$held_since" ] || [ -n "$R_HOLD" ] || R_HOLD="held $((SECONDS - held_since)) s for a starved box"
+  held_since=''
+}
 hold() {
   local why
   if [ -n "$PIN" ] || [ -e "$STATE/urgent" ] || [ -s "$STATE/bad" ] || ! why=$(starved) || [ -z "$why" ]; then
-    rm -f "$STATE/hold"
-    [ -z "$held_since" ] || [ -n "$R_HOLD" ] || R_HOLD="held $((SECONDS - held_since)) s for a starved box"
+    unhold
     return 1
   fi
   if [ -z "$held_since" ]; then
@@ -444,6 +450,7 @@ restart() {
       n=$(interruptible)
       if [ "$n" = 0 ]; then hold || break; sleep "$IDLE_POLL"; continue; fi
     fi
+    unhold # a turn runs: its wait isn't the starved box's, so the hold's note mustn't promise a time
     # A server that stays up but silent (#553: seen after a failed rollback) can't say whether a turn runs, and
     # would never say none does: after a short while that is a broken server, which a restart is the cure for.
     if [ "$n" = '?' ]; then
@@ -763,7 +770,7 @@ deploy() {
   # Before the unit can start, under both locks: deploys and lands refuse while it is there and the unit runs.
   [ -z "$TO" ] || { echo "$prev $new $(date +%s)" >"$STATE/rolling-back"; rm -f "$STATE/rolled-back"; }
   local out
-  [ -z "${LAND_FIX:-}" ] || touch "$STATE/urgent" # a fix's restart skips the starved-box hold, this one or the one it rides (#1417)
+  [ -z "${LAND_URGENT:-}${LAND_FIX:-}" ] || touch "$STATE/urgent" # an urgent fix's restart skips the starved-box hold, this one or the one it rides (#1417)
   if out=$(systemd-run --user --collect --unit="$UNIT" --description="Restart $SERVICE (tools/deploy.sh)" \
     --setenv=DEPLOY_LIVE="$LIVE" --setenv=DEPLOY_SERVICE="$SERVICE" --setenv=DEPLOY_URL="$URL" --setenv=DEPLOY_DB="$DB" \
     --setenv=DEPLOY_IDLE_TRIES="$IDLE_TRIES" --setenv=DEPLOY_HEALTHY_WAIT="$HEALTHY_WAIT" --setenv=DEPLOY_SETTLE="$SETTLE" --setenv=DEPLOY_HANDOVER_WAIT="$HANDOVER_WAIT" --setenv=DEPLOY_REPORT_WAIT="$REPORT_WAIT" --setenv=DEPLOY_REMOTE="$REMOTE" \

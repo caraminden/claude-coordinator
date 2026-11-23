@@ -367,7 +367,9 @@ test("ClaudeLink: never mounts a login, a key or the database; turns go where th
   assert.ok(existsSync(join(hook, 'citadel-hook.mjs')));
   // The code the server runs is readable, never writable (#621).
   const checkout = join(import.meta.dirname, '..');
-  assert.deepEqual(spec.mounts.filter((m) => m.src === checkout), [{ src: checkout, dst: checkout, ro: true }]);
+  // A test tree with devDependencies installed (fast-check's node_modules, #1657) has too many ignored files to cover, so it isn't mounted: the spec follows checkoutMounts.
+  const covered = checkoutMounts(checkout);
+  assert.deepEqual(spec.mounts.filter((m) => m.src === checkout), covered ? [{ src: checkout, dst: checkout, ro: true }] : []);
   // Files git ignores there can hold secrets: each is covered, read-only, and a checkout git can't list isn't mounted.
   const live = mkdtempSync(join(root, 'live-'));
   execFileSync('git', ['init', '-q', live]);

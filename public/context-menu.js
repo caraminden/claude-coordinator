@@ -210,4 +210,7 @@ function linkMenu(a) {
   ] };
 }
 
-mountMenus({ menuFor });
+// A phone's long press (#1664) opens the sheet on the things Cara listed (rows, cards, files, code blocks, releases,
+// links), not on message text, which keeps the phone's own selection, or on bare page and part menus.
+const LONG_PRESS = new Set(['Minion', 'Card', 'File', 'Code block', 'Release', 'Link']);
+mountMenus({ menuFor, longPress: (t, spec) => LONG_PRESS.has(spec.kind) && !t.closest('[data-reorder]') });

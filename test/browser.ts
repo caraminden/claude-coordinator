@@ -28,7 +28,7 @@ export interface Page {
   mouse(x: number, y: number): Promise<void>;
   /** Press and release a key: 'Tab', 'Escape'. */
   key(key: 'Tab' | 'Escape'): Promise<void>;
-  touch(type: 'touchStart' | 'touchEnd', x?: number, y?: number): Promise<void>;
+  touch(type: 'touchStart' | 'touchMove' | 'touchEnd', x?: number, y?: number): Promise<void>;
   tap(x: number, y: number): Promise<void>;
   /** The centre of the first element matching `selector`. */
   centre(selector: string): Promise<{ x: number; y: number }>;

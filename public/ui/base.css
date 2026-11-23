@@ -336,6 +336,17 @@
 :where(.cui-menu-danger) { color: var(--citadel-danger); }
 :where(.cui-menu-item[aria-disabled="true"]) { opacity: 0.45; cursor: default; }
 @media (max-width: 800px) { :where(.cui-menu-item) { min-height: var(--citadel-control-h); } }
+/* The same menu as a bottom sheet on a phone's long press (#1664, ui/menu.js spec.sheet): full width at the bottom,
+   a grab bar over the head, rows 44 px tall, the page dimmed behind. A swipe down on the head closes it. */
+:where(.cui-menu[data-sheet]) {
+  inset: auto 0 0 0; width: auto; max-width: none; max-height: 80vh; padding: 0 10px calc(10px + env(safe-area-inset-bottom));
+  border-radius: 16px 16px 0 0; border-width: 1px 0 0; transform-origin: bottom center;
+}
+@starting-style { :where(.cui-menu[data-sheet]:popover-open) { opacity: 1; transform: translateY(100%); } }
+:where(.cui-menu[data-sheet] .cui-menu-head) { position: relative; flex-wrap: wrap; padding-top: 18px; touch-action: none; }
+:where(.cui-menu-grab) { position: absolute; top: 7px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--citadel-border); }
+:where(.cui-menu[data-sheet] .cui-menu-item) { min-height: 48px; padding: 0 12px; font-size: var(--citadel-size-body, 15px); }
+:where(.cui-menu-scrim) { position: fixed; inset: 0; background: rgb(0 0 0 / 0.38); touch-action: none; }
 :where(.cui-menu-sep) { height: 0; margin: 4px 6px; border: 0; border-top: 1px solid var(--citadel-border); }
 :where(.cui-menu-from) { padding: 6px 8px 2px; color: var(--citadel-muted); font-size: var(--citadel-size-meta); font-weight: 600; }
 :where(.cui-menu-foot) { padding: 6px 8px 3px; margin-top: 4px; border-top: 1px solid var(--citadel-border); color: var(--citadel-muted); font-size: var(--citadel-size-meta); }

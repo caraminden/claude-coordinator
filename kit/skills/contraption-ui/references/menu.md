@@ -41,3 +41,11 @@ contenteditable) and Shift+right-click to the browser, so spelling and Paste sti
 
 CSP: placement and the chip's hue are CSSOM writes (`el.style.left`, `setProperty`), which the CSP allows;
 never `style=""`. Keep a menu short: the thing's few real actions, the commonest first.
+
+**Phones:** `mountMenus({ menuFor, longPress: true })` (or `longPress(target, spec) => boolean` to pick) opens the
+same menu as a bottom sheet after a 450 ms touch hold: a grab bar, the kind chip and name, rows 48 px tall, the page
+dimmed. A move past 10 px cancels it, the tap that ends it does nothing, a tap on the dim or a swipe down on the
+head closes it, and focus goes back. It has its own timer because iPhone Safari sends no `contextmenu`; Android's is
+answered too. Leave long-press off where text should keep the phone's own selection (leave those targets out in
+the function). Add `-webkit-touch-callout: none` to the things it opens on. `openMenu({ ...spec, sheet: true })`
+draws a sheet directly.

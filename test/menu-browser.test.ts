@@ -31,10 +31,10 @@ after(async () => {
   await srv?.stop();
 });
 
-async function open(title: string, { mouse = false } = {}) {
+async function open(title: string, { mouse = false, phone = false } = {}) {
   const t = (await srv.call(`/api/projects/${projectId}/tickets`, { title, message: 'hi' })).data;
   await until('the first turn to end', async () => (await srv.call(`/api/tickets/${t.id}`)).data.ticket.status !== 'running');
-  const page = await (mouse ? mouseBrowser : browser).page('data:text/html,<script>window.ready=true</script>', { width: 1280, height: 800 });
+  const page = await (mouse ? mouseBrowser : browser).page('data:text/html,<script>window.ready=true</script>', phone ? { width: 390, height: 800, touch: true } : { width: 1280, height: 800 });
   const [name, value] = srv.cookie.split('=');
   await page.send('Network.setCookie', { name, value, url: srv.base });
   await page.send('Page.navigate', { url: `${srv.base}/#/p/${projectId}/t/${t.number}` });
@@ -50,6 +50,7 @@ async function rightClick(page: Page, selector: string, { shift = false } = {}) 
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'right', clickCount: 1, modifiers });
 }
 
+const hold = (ms: number) => new Promise((r) => setTimeout(r, ms)); // timing-ok: the press length is what these tests are about
 const menuOpen = '!!document.querySelector(".cui-menu")';
 const items = '[...document.querySelectorAll(".cui-menu .cui-menu-item")].map((b) => b.textContent)';
 const esc = (page: Page) => page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -127,4 +128,44 @@ test('on a mouse device the composer has no 🎯 and a one-time tip says to righ
   // Alt+Shift+P still starts a pick.
   await page.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'P', code: 'KeyP', modifiers: 9, windowsVirtualKeyCode: 80 });
   await waitFor(page, 'pick mode', '!!document.querySelector(".pick-dim")');
+});
+
+// A phone's long press (#1664, Cara 2026-11-22: "Long-press opens the menu on phones: Yes, a sheet").
+test('a long press on a link opens the menu as a sheet; its tap does nothing; the dim closes it', { skip }, async () => {
+  const page = await open('Menu phone', { phone: true });
+  await page.eval(`(() => { const m = document.querySelector('#log .msg.user'); m.insertAdjacentHTML('beforeend', '<p><a id="lp" href="#/p/999">a link</a></p>'); window.clicked = 0; document.getElementById('lp').addEventListener('click', () => { window.clicked++; }); })()`);
+  const { x, y } = await page.centre('#lp');
+  await page.touch('touchStart', x, y);
+  await hold(250);
+  assert.equal(await page.eval(menuOpen), false, 'not yet at 250 ms');
+  await waitFor(page, 'the sheet', '!!document.querySelector(".cui-menu[data-sheet]")');
+  await page.touch('touchEnd');
+  assert.equal(await page.eval('window.clicked'), 0, 'the press did not click the link');
+  assert.equal(await page.eval('location.hash.includes("999")'), false);
+  assert.equal(await page.eval('document.querySelector(".cui-menu .cui-menu-kind").textContent'), 'Link');
+  const rows = await page.eval('[...document.querySelectorAll(".cui-menu .cui-menu-item")].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)])') as [string, number][];
+  assert.match(rows[0][0], /Point at this/);
+  assert.match(rows[1][0], /Point and draw/);
+  assert.ok(rows.every(([, h]) => h >= 44), `every row is 44 px or taller: ${JSON.stringify(rows)}`);
+  assert.equal(await page.eval('!!document.querySelector(".cui-menu .cui-menu-grab")'), true);
+  await waitFor(page, 'the sheet at the bottom', 'Math.abs(document.querySelector(".cui-menu").getBoundingClientRect().bottom - innerHeight) < 1');
+  await hold(400);
+  await page.tap(200, 60); // the dim
+  await waitFor(page, 'the sheet to close', `!${menuOpen}`);
+});
+
+test('a moved finger cancels the long press, and message text keeps its own selection', { skip }, async () => {
+  const page = await open('Menu phone cancel', { phone: true });
+  const t = await page.centre('#log .msg.user');
+  await page.touch('touchStart', t.x, t.y);
+  await hold(650);
+  await page.touch('touchEnd');
+  assert.equal(await page.eval(menuOpen), false, 'message text: no sheet');
+  await page.eval(`document.querySelector('#log .msg.user').insertAdjacentHTML('beforeend', '<p><a id="lp" href="#/p/999">a link</a></p>')`);
+  const { x, y } = await page.centre('#lp');
+  await page.touch('touchStart', x, y);
+  await page.touch('touchMove', x, y + 30);
+  await hold(650);
+  await page.touch('touchEnd');
+  assert.equal(await page.eval(menuOpen), false, 'moved more than 10 px: no sheet');
 });

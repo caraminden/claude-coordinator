@@ -40,6 +40,8 @@ export interface MenuSpec {
   label?: string;
   /** Where focus goes back on Escape (default: what had focus when it opened; if a redraw replaced it, its copy with the same id or data-id). */
   returnTo?: HTMLElement;
+  /** Draw it as a bottom sheet with a grab bar and a dim behind (x and y are ignored). mountMenus's `longPress` sets it. */
+  sheet?: boolean;
   /** Called once when it closes, however it closes. */
   onClose?(): void;
 }
@@ -66,7 +68,13 @@ export interface MountMenusOptions {
   /** Where right-clicks are heard (default the document). */
   root?: Document | HTMLElement;
   /** The menu for what was right-clicked (or focused, for Shift+F10 / the Menu key); null for the browser's own. */
-  menuFor(target: Element, event: Event): MenuSpec | null;
+  menuFor(target: Element, event: Event | null): MenuSpec | null;
+  /**
+   * Open the menu as a bottom sheet on a phone's long press (450 ms, a move past 10 px cancels; the ending tap is
+   * swallowed). `true` for everything `menuFor` has a menu for, or a function that picks by target and spec.
+   * Default off.
+   */
+  longPress?: boolean | ((target: Element, spec: MenuSpec) => boolean);
 }
 
 /**

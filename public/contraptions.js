@@ -105,11 +105,14 @@ export function servicePanel(c, summary = () => {}) {
   };
   deployBtn.onclick = async () => {
     if (!confirm(`Deploy ${c.title} from ${c.repo} ${c.branch || 'main'}? It builds and restarts it, and rolls back if that fails.`)) return;
-    try {
-      showDeploy(await api(`api/contraptions/${c.name}/deploy`, { method: 'POST' }));
-    } catch (err) {
-      deployLine.textContent = err.message;
-    }
+    const before = deployLine.textContent;
+    optimistic({
+      key: `contraption-deploy:${c.name}`,
+      apply: () => { deployBtn.disabled = true; deployLine.textContent = 'Deploying…'; },
+      send: () => api(`api/contraptions/${c.name}/deploy`, { method: 'POST' }),
+      undo: () => { deployBtn.disabled = false; deployLine.textContent = before; },
+      label: `deploy ${c.title}`,
+    }).then(showDeploy, () => {});
   };
   api(base).then(show).catch((err) => {
     line.textContent = `Service: ${err.message}`;

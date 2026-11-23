@@ -511,7 +511,7 @@ export function statusPane(onData = () => {}) {
   const el = h('div', { class: 'st-page' }, pills, detail);
   const lines = shipLinePanel(el);
   const pill = (key, name, v) => h('button', { type: 'button', class: `chip st-app${picked === key ? ' on' : ''}`, 'aria-pressed': String(picked === key), 'data-key': key, title: v.reasons[0] ?? WORD[v.tone],
-    onclick: () => { picked = key; draw(); } },
+    onclick: () => { picked = key; panels.clear(); draw(); } },
   h('span', { class: `dot ${DOT[v.tone]}` }), name);
   /** Start, Restart, Stop and Deploy for an app, the very panel Settings → Contraptions draws; admins only, as there. */
   const controls = (name) => {

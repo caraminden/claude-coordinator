@@ -122,8 +122,9 @@ land_timing() (
     retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[tests]}") · tests $(span "${t[tests]}" "${t[gate]}") · $out"
   else
     retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[ci]}") · ci-queue $ciq · ci-run $cir · fallback $fb · deploy $(span "${t[deploy]}" "${t[queued]}") · live $live${early_ahead:+ · ci early ${early_ahead}s} · $out"
-    # A landing that waited on CI (#1722): its counted gh calls, and what was left of the login's hour as that wait began and now.
-    [ -z "${t[quota]}" ] || retro_log "github · $label · $(awk -v b="$branch" -v s="${t[start]:-0}" '$1 >= s && $2 == b' "$state/gh-calls" 2>/dev/null | wc -l) gh calls · left ${t[quota]} as CI began, $(gh_quota | cut -d, -f1) at the end"
+    # A landing that asked CI (#1722): its counted gh calls, and what was left of the login's hour as it began. No GitHub
+    # call here: this runs in the EXIT trap with the lock held (#553 M14).
+    [ -z "${t[quota]}" ] || retro_log "github · $label · $(awk -v b="$branch" -v s="${t[start]:-0}" '$1 >= s && $2 == b' "$state/gh-calls" 2>/dev/null | wc -l) gh calls · left ${t[quota]} as CI began"
   fi
   rm -f "$times"
 ) >/dev/null 2>&1
@@ -1057,7 +1058,7 @@ hub() { gh_count "$@"; env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.con
 # What is left of the login's hour, as GitHub counts it (#1722): every login's calls draw on it, land.sh's, the server's and
 # each turn's alike, so each CI wait logs it and the next "API rate limit exceeded" has numbers. "<left>/<limit>, resets
 # in <n> min", or "unknown" when GitHub doesn't say. Free: GitHub doesn't count the rate_limit read itself, and gh_count,
-# which counts only a bare gh, leaves out this one through timeout 10 (it also runs as the landing ends: no 30 s hang there).
+# which counts only a bare gh, leaves out this one through timeout 10 (a short wait when GitHub hangs).
 gh_quota() {
   local l='' m='' r=''
   read -r l m r < <(hub timeout 10 gh api rate_limit --jq '.resources.core | "\(.remaining) \(.limit) \(.reset)"' 2>/dev/null) || true
@@ -1221,8 +1222,6 @@ ci_gate() {
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
   ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
-  ci_quota=$(gh_quota)
-  { echo "quota ${ci_quota%%,*}" >>"$times"; } 2>/dev/null || true # the github line's start figure (#1722)
   # A CI outage is paid once (#553): a landing that waited out a limit leaves a note, and those of the next minutes
   # go straight to the run here instead of each waiting to learn the same thing.
   local down_at='' down_why='' now
@@ -1233,6 +1232,9 @@ ci_gate() {
     why="CI gave no answer to a landing $((now - down_at)) s ago ($down_why), so this one doesn't wait for it (it is asked again from $(date -d "@$((down_at + CI_DOWN))" +%H:%M))"
     return 2
   fi
+  # After the outage note (#553): a landing it sends straight to the run here doesn't ask GitHub even this.
+  ci_quota=$(gh_quota)
+  { echo "quota ${ci_quota%%,*}" >>"$times"; } 2>/dev/null || true # the github line's figure (#1722)
   ci_run || { why="GitHub didn't answer$(ci_said)"; return 2; }
   # A run of this commit that is green or still going (a landing stopped and started again) will do; otherwise a new one.
   if [ -z "$ci_id" ] || { [ "$ci_status" = completed ] && [ "$ci_result" != success ]; }; then
@@ -2326,7 +2328,8 @@ else
   say "CI FALLBACK: $why. Running the full suite on perigee instead."
   say "BURN-IN SKIPPED: new and changed tests were not run as 10 copies at once, since that runs only on CI, never on perigee (#1443)"
   say "=========================================================================="
-  retro_log "ci fallback · $branch · $why${ci_quota:+ · GitHub calls left: $(gh_quota)}" # once it got as far as asking GitHub
+  # Once it asked GitHub; asked again only if it answered then, so an outage isn't waited on twice.
+  retro_log "ci fallback · $branch · $why${ci_quota:+ · GitHub calls left: $([ "$ci_quota" = unknown ] && echo unknown || gh_quota)}"
   say "running the tests"
   started=$(date +%H:%M)
   queue_phase "running the tests since $started"

@@ -218,7 +218,7 @@ test('a landing leaves one timing line with every phase; CI that answers fills t
   assert.equal(githubLines.length, 1);
   const counted = readFileSync(join(r.live, '.git', 'cc-deploy', 'gh-calls'), 'utf8').trim().split('\n').length;
   assert.ok(counted >= 3, `the runners check, a push and the polls are counted: ${counted}`);
-  assert.match(githubLines[0], new RegExp(`^- \\S+ · github · ticket/1-x · ${counted} gh calls · left 4321/5000 as CI began, 4321/5000 at the end$`));
+  assert.match(githubLines[0], new RegExp(`^- \\S+ · github · ticket/1-x · ${counted} gh calls · left 4321/5000 as CI began$`));
   // A deploy whose restart isn't live by the time it ends.
   r.commit(r.wt, 'b.txt', 'two\n');
   res = c.run({ COORDINATOR_SHARED_DIR: shared, FAKE_NOT_LIVE: '1' });

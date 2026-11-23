@@ -649,6 +649,7 @@ const longJobs = new LongJobs({
     return m ? storedSettings(m) : DEFAULT_SETTINGS;
   },
   gh: (projectId, args) => {
+    ghTally.add(args.find((a) => !a.startsWith('-')) ?? '', 0); // its polls are plain reads: each one counts (#1722)
     const p = store.getProject(projectId);
     const env = { ...process.env, ...(p?.repo_dir ? githubOf(p.repo_dir) : {}) };
     return new Promise((done, fail) => execFile('gh', ['api', ...args], { env, timeout: 120_000, maxBuffer: 256 << 20 }, (err, out, errOut) =>
@@ -1608,9 +1609,11 @@ if (!BOOT_CHECK && !PREVIEW) {
 }
 // GitHub artifact sweep (#657): weekly, every scheme's repo keeps its newest few artifacts of each kind (src/artifact-sweep.ts).
 const artifactSweep = new ArtifactSweep(store, { as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined), log: (line) => console.log(line) });
-// The server's own GitHub calls each 10 min (#1722): the login's hour is shared with land.sh and every turn, so the
-// journal says what the server spent when "API rate limit exceeded" comes back. Restarts are often, so not hourly.
-if (!BOOT_CHECK) every('github tally', 10 * 60_000, () => { const r = ghTally.report(); if (r) console.log(`github: last 10 min ${r}`); });
+// The server's GitHub polls each 10 min (#1722: ghGet, ghPost and the long heavy jobs; not one-off calls such as the
+// artifact sweep's deletes): the login's hour is shared with land.sh and every turn, so the journal says what the
+// server spent when "API rate limit exceeded" comes back. Restarts are often, so not hourly, and SIGTERM logs the rest.
+const logGhTally = (when: string) => { const r = ghTally.report(); if (r) console.log(`github: ${when} ${r}`); };
+if (!BOOT_CHECK) every('github tally', 10 * 60_000, () => logGhTally('last 10 min'));
 if (!BOOT_CHECK) every('artifact sweep', 60 * 60_000, async () => { if (await pressure.gate('artifact sweep')) await artifactSweep.tick(); });
 // The CI desktop's load (#534): the runner agents' samples and CI health's jobs become a verdict per PC; one that
 // holds is a quiet Mandate item for every admin, cleared when it ends.
@@ -2137,6 +2140,7 @@ function closeDown(why: string) {
 }
 process.on('SIGTERM', () => {
   console.log('SIGTERM: finishing requests, then exiting; running turns carry on.');
+  logGhTally('since the last tally');
   stopWork();
   closeDown('SIGTERM');
 });

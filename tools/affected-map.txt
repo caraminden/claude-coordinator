@@ -31,7 +31,8 @@ tools/guard.sh: test/guard.test.ts
 
 # Agent instructions and the tools every turn loads.
 src/prompts.ts: test/prompt-done-when.test.ts test/prompt-hashes.test.ts test/model-table.test.ts
-src/mcp.ts: test/mcp-always-load.test.ts
+src/mcp.ts: test/mcp-always-load.test.ts test/held-list.test.ts
+src/minion-relay.ts: test/cold-mail.test.ts test/held-list.test.ts test/taskmaster-mail.test.ts
 src/turn-launch.ts: test/pinned-mcp.test.ts
 # How a turn's claude starts: the shared supervisor (#1343), the per-turn wrapper, and what both run.
 src/turn-supervisor.mjs: test/turn-supervisor.test.ts

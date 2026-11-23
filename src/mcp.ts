@@ -1708,17 +1708,17 @@ const THREAD_TOOLS = () => ([
     // Always loaded (ALWAYS_LOAD, #1275), so every word here is in every minion's prompt: the how-to lives in the self-review skill.
     description:
       // Its other rules are in its refusals (uncommitted work, a conflict, a missing go) and its result (#1575).
-      'Ship: the server runs tools/land.sh in your worktree.',
+      'Ship: the server runs tools/land.sh in your worktree (a public/ diff needs the ui-screenshots critic run first, self-review 3).',
     inputSchema: {
       type: 'object',
       properties: {
         summary: { type: 'string', maxLength: 300, description: 'What ships, in one line' },
-        learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or the docs missed and what got in your way; "nothing" is fine. It never holds the ship' },
-        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out only when no review gives one (your Kit reviewers line); it then ships as high and needs go" },
-        risk_reason: { type: 'string', maxLength: 300, description: 'One line: why, plus anything you chose not to fix' },
+        learned: { type: 'string', maxLength: 1000, description: 'Always pass it: up to three lines on what your brief or docs missed or fought you; "nothing" is fine. Never holds the ship' },
+        risk: { type: 'string', enum: ['low', 'medium', 'high'], description: "The self-review's label. Left out (no review gives one), it ships as high and needs go" },
+        risk_reason: { type: 'string', maxLength: 300, description: 'One line: why, plus what you chose not to fix' },
         go: { type: 'string', maxLength: 200, description: 'At or above your go threshold, or with no risk: who gave the go and when, e.g. "Cara, 3:05 PM PST"' },
         fix_proof: { type: 'object', description: 'A proven bug fix\'s proof, instead of go: {test, red_on, red_output, review} (self-review)' },
-        stay_open: { type: 'boolean', description: 'Only when your brief has more pieces for you: it ships, and you stay open in state ready' },
+        stay_open: { type: 'boolean', description: 'Only when your brief has more pieces for you: it ships, you stay open in state ready' },
         waiting_on: { type: 'string', maxLength: 120, description: 'With stay_open: a wait or after-land steps ("Cara testing on her phone"); woken once live, do them and set your state' },
         ...LAND_PROPS,
         ...(C().HOME_CONTRAPTIONS.length ? { deploy: { type: 'boolean', description: 'false: nothing to serve, so no deploy (a PC-only build, say)' } } : {}),

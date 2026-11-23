@@ -47,6 +47,8 @@ Before your final test run, rebase onto your base once (the one "take a newer ba
 - **Deep** when the change is high in 4, takes the fix route in 5 whatever its size, or the diff is over about 300 lines.
 - **Light** for everything else.
 
+**Critics run before any `hand_off_land`, low-first path included.** A diff that matches a critic's `when:` (any `public/` file: `ui-screenshots`, even a timing-only change the shots can't show) is refused until that critic's run is on record: run `citadel:critique` with the rubric from your turn's review-set folder, then `review_set` with `run: {round, verdict}`.
+
 **Alongside the ship.** A change qualifies when how it ships is `hand_off_land` (the server runs
 the ship and the call returns at once), the Shipping line in your prompt lets a low change ship
 with no go and no try first, the sizing is Light, the branch is no feeder's (a feeder reviews

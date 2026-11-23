@@ -3381,7 +3381,8 @@ export class Runner {
       // (by the caller) if it stopped (a reboot) without replacing one a review may be running in.
       const codexAt = place.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
       const reviewAt = codexAt && !codexAt.host ? codexAt : null;
-      const coordinator = this.coordinatorEnv(ticket);
+      // CITADEL_, not COORDINATOR_: a warm turn's flag must not move the keepalive fingerprint (src/keepalive.ts).
+      const coordinator = { ...this.coordinatorEnv(ticket), ...(hold?.warm ? { CITADEL_TOOL_HOLD: '1' } : {}) };
       const heavy = this.heavyEnv(ticket, person);
       // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
       const github = this.githubFor?.(f.github === undefined ? person : f.github, dir) ?? null;

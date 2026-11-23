@@ -42,6 +42,8 @@ export interface HoldDecision {
   record: HoldRecord;
   /** Why it took the current prompt, for the log: null when it held or nothing changed. */
   reload: 'cold' | 'session' | 'cap' | 'too-long' | null;
+  /** The turn resumes its warm session under the cap, so its tool server may keep the tool text it last saw (src/tool-hold.ts). */
+  warm: boolean;
 }
 
 /**
@@ -51,18 +53,18 @@ export interface HoldDecision {
 export function decideHold(o: { record: HoldRecord | null; held: PromptSections | null; current: PromptSections; session: string | null; lastEnd: number | null; now: number }): HoldDecision {
   const { record, held, current, session, lastEnd, now } = o;
   const hash = promptHash(current);
-  const take = (reload: HoldDecision['reload']): HoldDecision => ({ system: current, note: null, held: false, record: { hash, since: now, session, sent: hash }, reload });
+  const take = (reload: HoldDecision['reload']): HoldDecision => ({ system: current, note: null, held: false, record: { hash, since: now, session, sent: hash }, reload, warm: false });
   if (!record || !session) return take(null);
   if (record.session !== session) return take('session');
   if (!held) return take('cold');
   if (lastEnd === null || now - lastEnd >= HOLD_WARM_MS) return take(record.hash === hash ? null : 'cold');
   // Back to the held text: a session that read a note about a later version hears that it no longer applies.
-  if (record.hash === hash) return { system: current, note: record.sent === hash ? null : BACK_NOTE, held: false, record: { ...record, pending: hash }, reload: null };
+  if (record.hash === hash) return { system: current, note: record.sent === hash ? null : BACK_NOTE, held: false, record: { ...record, pending: hash }, reload: null, warm: now - record.since < HOLD_CAP_MS };
   if (now - record.since >= HOLD_CAP_MS) return take('cap');
   const note = changeNote(held, current, record.sent !== record.hash);
   if (note.length > NOTE_MAX) return take('too-long');
   // The note goes once per change: a session that read it keeps it in its conversation (a compaction clears `sent`).
-  return { system: held, note: record.sent === hash ? null : note, held: true, record: { ...record, pending: hash }, reload: null };
+  return { system: held, note: record.sent === hash ? null : note, held: true, record: { ...record, pending: hash }, reload: null, warm: true };
 }
 
 /** The note for a session whose instructions changed and then changed back to its system prompt's. */

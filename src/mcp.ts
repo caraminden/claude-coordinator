@@ -66,6 +66,7 @@ import { DONE_LINES } from './done-lines.ts';
 import { NEEDS, NEED_LINES, stateWord } from './needs.ts';
 import { heldToolText, msgFromEnv } from './msg-settings.ts';
 import { pacificDay, pacificStamp } from './pacific.ts';
+import { toolsForTurn } from './tool-hold.ts';
 const NEED = { type: 'string', enum: [...NEEDS], description: `Required: what this message needs. ${NEEDS.map((n) => `${n}: ${NEED_LINES[n]}`).join('; ')}. A fyi is always held mail, whatever wake says.` };
 /** What message_ticket, message_coordinator and message_minion say when the loop guard holds a message. */
 const HELD = () => heldToolText(C().MSG, 'the minion and the Taskmaster');
@@ -2598,7 +2599,7 @@ export async function handle(req: any): Promise<object | null> {
         },
       });
     } else if (method === 'tools/list') {
-      return reply({ id: rid, result: { tools: toolList() } });
+      return reply({ id: rid, result: { tools: await toolsForTurn(toolList(), callEnv()) } });
     } else if (method === 'tools/call') {
       try {
         const text = await runTool(params?.name, params?.arguments ?? {});

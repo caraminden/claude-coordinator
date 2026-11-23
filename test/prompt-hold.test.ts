@@ -66,6 +66,11 @@ test('it takes the current prompt when cold, past the cap, on a new session, or 
   assert.equal(same.held, false);
   assert.equal(same.note, null);
   assert.equal(same.reload, null);
+  assert.equal(same.warm, true, 'unchanged and warm: its tools may hold too');
+  assert.equal(decide(old, { record: recordOf(old, { since: now - HOLD_CAP_MS }) }).warm, false, 'past the cap the tools refresh even when the prompt never changed');
+  assert.equal(decide(edited).warm, true);
+  assert.equal(decide(edited, { lastEnd: null }).warm, false);
+  assert.equal(decide(edited, { session: 'other' }).warm, false);
 });
 
 test('the note lists a new section and a dropped one', () => {
@@ -104,7 +109,7 @@ writeFileSync(fake, `#!${process.execPath}
 const fs = require('node:fs');
 const system = fs.readFileSync(process.argv[process.argv.indexOf('--append-system-prompt-file') + 1], 'utf8');
 require('node:readline').createInterface({ input: process.stdin }).once('line', (input) => {
-  fs.appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ input: JSON.parse(input), system, resumed: process.argv.includes('--resume') }) + '\\n');
+  fs.appendFileSync(${JSON.stringify(seen)}, JSON.stringify({ input: JSON.parse(input), system, resumed: process.argv.includes('--resume'), toolHold: process.env.CITADEL_TOOL_HOLD ?? null }) + '\\n');
   console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sess', claude_code_version: '9.9.9' }));
   console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done', session_id: 'sess', total_cost_usd: 0.01, usage: { input_tokens: 1, output_tokens: 1 } }));
   process.exit(0);
@@ -134,6 +139,7 @@ test('a Settings edit reaches the next warm turn as a note on the same system pr
 
   const first = await turn(t.id, 'hello');
   assert.equal(first.resumed, false);
+  assert.equal(first.toolHold, null, 'a new session lists the current tools');
   assert.match(first.system, /Reply in English\./);
   const file = transcriptPath(process.env.CLAUDE_CONFIG_DIR!, cwd, 'sess');
   mkdirSync(dirname(file), { recursive: true });
@@ -145,10 +151,12 @@ test('a Settings edit reaches the next warm turn as a note on the same system pr
   assert.equal(warm.system, first.system, 'the warm turn runs on the system prompt it last ran with');
   assert.match(warm.message, /Your instructions changed[\s\S]*Under "## Old rule":\nSay it in Pacific time\./);
   assert.equal(warm.hashes.held, true);
+  assert.equal(warm.toolHold, '1', 'a warm session keeps the tool text it saw (src/tool-hold.ts)');
 
   const quiet = await turn(t.id, 'and again');
   assert.equal(quiet.system, first.system);
   assert.doesNotMatch(quiet.message, /Your instructions changed/, 'the note goes once');
+  assert.equal(quiet.toolHold, '1');
 
   runner.now = () => Date.now() + HOLD_WARM_MS + 60_000;
   try {
@@ -157,6 +165,7 @@ test('a Settings edit reaches the next warm turn as a note on the same system pr
     assert.match(cold.system, /Reply in English\.\nSay it in Pacific time\./, 'the first cold turn takes the whole new prompt');
     assert.doesNotMatch(cold.message, /Your instructions changed/);
     assert.equal(cold.hashes.held, undefined);
+    assert.equal(cold.toolHold, null, 'a cold turn lists the current tools');
   } finally {
     runner.now = () => Date.now();
   }

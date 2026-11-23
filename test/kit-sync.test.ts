@@ -299,3 +299,29 @@ test('a guard self-test that fails only on the sync does not say main fails it',
   assert.notEqual(r.code, 0);
   assert.doesNotMatch(r.out, /main fails it too/);
 });
+
+test('a byte copy of the newest kit version is its own base, though only an older trailer is in the log (#1730)', () => {
+  const f = fixture();
+  try {
+    const s = repo(f.root, 'scheme');
+    commit(s, { [LAND.path]: f.v1 }, `old machine sync\n\n${TRAILER}: ${f.c1}`);
+    // A hand sync: byte-equal to v2, with the trailer in a paragraph of its own, so git reads no trailer from it.
+    commit(s, { [LAND.path]: f.v2 }, `hand sync\n\n${TRAILER}: ${f.c2}\n\nCo-Authored-By: X <x@example.com>`);
+    const base = pickBase(f.kit, templateHistory(f.kit, 'HEAD', LAND.template), s, 'HEAD', LAND);
+    assert.deepEqual(base && { commit: base.commit, how: base.how }, { commit: f.c2, how: 'exact' });
+  } finally {
+    f.done();
+  }
+});
+
+test('a Kit-Sync line outside the last paragraph is found by a body grep when the copy is not an exact version (#1730)', () => {
+  const f = fixture();
+  try {
+    const s = repo(f.root, 'scheme');
+    commit(s, { [LAND.path]: edit(f.v2, 30, 'ours') }, `hand sync\n\n${TRAILER}: ${f.c2}\n\nCo-Authored-By: X <x@example.com>`);
+    const base = pickBase(f.kit, templateHistory(f.kit, 'HEAD', LAND.template), s, 'HEAD', LAND);
+    assert.deepEqual(base && { commit: base.commit, how: base.how }, { commit: f.c2, how: 'trailer' });
+  } finally {
+    f.done();
+  }
+});

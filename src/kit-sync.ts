@@ -102,16 +102,26 @@ export interface Base {
  */
 export function pickBase(kitDir: string, history: { commit: string; blob: string }[], schemeDir: string, rev: string, file: { template: string; path: string }): Base | null {
   // The newest commit touching the file that carries one: an edit of the scheme's own after a sync keeps that base.
-  const trailer = (tryGit(schemeDir, ['log', '-n', '500', `--format=%(trailers:key=${TRAILER},valueonly,separator=%x20)`, rev, '--', file.path]) ?? '')
-    .split('\n').map((l) => l.trim()).find(Boolean)?.split(/\s+/)[0];
-  if (trailer && /^[0-9a-f]{7,64}$/.test(trailer)) {
-    const blob = blobAt(kitDir, trailer, file.template);
-    if (blob) return { blob, commit: tryGit(kitDir, ['rev-parse', trailer])?.trim() ?? trailer, how: 'trailer' };
+  // git reads trailers only from a message's last paragraph, so a `Kit-Sync:` line anywhere else (a hand sync that put
+  // it above a blank line and Co-Authored-By) is found by a body grep instead.
+  const log = (args: string[]) => (tryGit(schemeDir, ['log', '-n', '500', ...args, rev, '--', file.path]) ?? '');
+  const sha = log([`--format=%(trailers:key=${TRAILER},valueonly,separator=%x20)`]).split('\n').map((l) => l.trim()).find(Boolean)?.split(/\s+/)[0]
+    ?? log(['-E', `--grep=^${TRAILER}:`, '--format=%B']).split('\n').map((l) => l.match(new RegExp(`^${TRAILER}:\\s*(\\S+)`))?.[1]).find(Boolean);
+  let trailer: Base | null = null;
+  if (sha && /^[0-9a-f]{7,64}$/.test(sha)) {
+    const blob = blobAt(kitDir, sha, file.template);
+    if (blob) trailer = { blob, commit: tryGit(kitDir, ['rev-parse', sha])?.trim() ?? sha, how: 'trailer' };
   }
   const own = blobAt(schemeDir, rev, file.path);
-  if (!own || !history.length) return null;
-  const exact = history.find((v) => v.blob === own);
-  if (exact) return { ...exact, how: 'exact' };
+  if (!own || !history.length) return trailer;
+  // A byte copy of a kit version is never given an older base than itself. A trailer naming a newer version than the
+  // copy still wins: the scheme undid that kit change on purpose after the sync.
+  const exactAt = history.findIndex((v) => v.blob === own);
+  if (exactAt >= 0) {
+    const trailerAt = trailer ? history.findIndex((v) => v.blob === trailer!.blob) : -1;
+    if (!trailer || trailerAt < 0 || exactAt <= trailerAt) return { ...history[exactAt], how: 'exact' };
+  }
+  if (trailer) return trailer;
   const ours = git(schemeDir, ['cat-file', 'blob', own]);
   let best: { commit: string; blob: string; d: number } | null = null;
   const seen = new Set<string>();
@@ -379,7 +389,7 @@ export class KitSync {
         sync.state = 'conflict';
         sync.files = clashes;
         const chat = await this.d.chat(project);
-        if (chat) this.d.mail(chat, `Kit sync (kit ${short(kit)}): ${list(clashes)} clash with this scheme's own edits, so no sync was made here, not even of the files that merge cleanly. A minion has to take the kit's change by hand: diff each file against the kit's template in Citadel's repo (kit/skills/scheme-setup/templates/), keep this scheme's lines, and put "${TRAILER}: ${kit}" in the commit message so the next sync merges from there.`);
+        if (chat) this.d.mail(chat, `Kit sync (kit ${short(kit)}): ${list(clashes)} clash with this scheme's own edits, so no sync was made here, not even of the files that merge cleanly. A minion has to take the kit's change by hand: diff each file against the kit's template in Citadel's repo (kit/skills/scheme-setup/templates/), keep this scheme's lines, and put "${TRAILER}: ${kit}" in the commit's final trailer block (right above Co-Authored-By, no blank line between them) and touch every file named above, so the next sync merges from there.`);
         continue;
       }
       try {

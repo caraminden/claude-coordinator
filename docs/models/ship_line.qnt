@@ -14,6 +14,9 @@
 // Releases page reordering the line (.order), the check lock and the build locks, time itself. A wait with a
 // time limit (the slot under the CI fallback, the restart lock) is an action that can give up; waiting in line
 // counts as a wait with no limit, since a line that times out is the failure.
+// Simplified on purpose: land.sh takes the restart lock before main moves, so a give-up leaves main untouched;
+// here Land moves main first and a give-up puts it back. The reachable mains are the same; a design change
+// about when main moves should write the real order in first.
 module ship_line {
   const SHIPS: Set[int]     // the ships that may get in line
   const CI_BATCH: int       // how many ships share one CI run

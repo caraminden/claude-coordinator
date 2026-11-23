@@ -38,6 +38,12 @@ that literally, by design: the head waits under the lock for the restart lock (#
 the CI fallback, for a heavy slot (`CITADEL_HEAVY_MAX_WAIT`). Both waits give up, so the model checks the version
 that matters: no wait without a limit while holding a lock, and no deadlock.
 
+What that means for today's results: every wait under a lock today gives up, so it's modelled as a give-up action,
+not in `hardWaits`, and NoLockedWait can't fail on `today` or `todayLocks`. It bites when a design adds a wait with
+no limit, and that wait has to be written into `hardWaits` as well as into the actions (see the mutation runs
+below). Likewise MainGreen is close to true by construction (`Land` needs a green ticket); what it really guards
+is `deepest`'s "the commit sits on main with every member ahead of it" test.
+
 ### Results, 2026-11-22
 
 | Instance | What | Result |
@@ -55,7 +61,9 @@ from inside citadel-heavy holds the only slot and waits in line behind ship 1, w
 
 **The checks bite (mutation runs):** dropping the "the commit sits on main with every member ahead" test from
 `deepest` makes TLC find a MainGreen break in `today` (1 min); letting a passed-over ship wait behind every later
-batch instead of shipping right after the one that passed it makes it find an OrderKept break (6 min). The
+batch instead of shipping right after the one that passed it makes it find an OrderKept break (6 min); making the
+restart-lock wait unbounded (no give-up, and written into `hardWaits`) makes it find a NoLockedWait break in
+`todayLocks` (11 s): a deploy by hand takes the land lock while the restart unit runs, then waits on it. The
 witnesses `NoBatchShips`, `NoPassOver` and `NoFlakeGreen` are each violated in simulation, so batches, pass-over
 and flake reruns are really reached.
 

@@ -1,11 +1,11 @@
 // The scheme-setup template land.sh: build branches (--into build/<n> <files>, --into build/<n> --full, --build
 // and the plain land's guard), each on a throwaway scheme repo. Citadel's own tools/land.sh: land-build.test.ts.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { env, git, queueSetup, rebasedCalls, rebasedHook } from './scheme-setup-land-fixture.ts';
+import { env, git, queueSetup, rebasedCalls, rebasedHook, until } from './scheme-setup-land-fixture.ts';
 
 // Three worktrees off main: two feeders (f1.txt, f2.txt) and the build minion's (f3.txt), and build/1 made at main
 // the way a build minion makes it. CHECK_FILE_CMD logs each test file a feeder's check ran to $RAN.
@@ -19,7 +19,15 @@ function buildSetup(config: Record<string, string> = {}, local?: string) {
   const at = (ref: string, where = q.main) => git(where, 'rev-parse', '-q', '--verify', ref);
   const has = (ref: string, where = q.main) => spawnSync('git', ['rev-parse', '-q', '--verify', ref], { cwd: where }).status === 0;
   const ranFiles = () => readFileSync(ran, 'utf8').split('\n').filter(Boolean);
-  return { ...q, run, at, has, ranFiles };
+  // Started and left running, for the runs that wait on each other.
+  const start = (i: number, ...args: string[]) => {
+    const child = spawn('bash', [join(q.wts[i - 1], 'tools', 'land.sh'), ...args], { cwd: q.wts[i - 1], stdio: ['ignore', 'ignore', 'pipe'], env: { ...env, RAN: ran, LAND_QUEUE_POLL: '0.05' } });
+    let stderr = '';
+    child.stderr!.on('data', (d) => (stderr += d));
+    const exit = new Promise<number | null>((ok) => child.on('close', ok));
+    return { exit, stderr: () => stderr };
+  };
+  return { ...q, run, at, has, ranFiles, start };
 }
 
 test('--into: a feeder rebases onto the build, runs only its test files, and moves the build; main is untouched', () => {
@@ -248,4 +256,74 @@ test("land_rebased runs in a feeder's --into, and its commit goes into the build
   const shipped = b.run(3, '--build');
   assert.equal(shipped.status, 0, shipped.stderr);
   assert.deepEqual(rebasedCalls(b.main), [`${build} ticket/2-x`], 'only the feeder called it');
+});
+
+// #1684 (Peek's Build 4): the build minion changed build-claims.md 8 times, and each docs-only merge ran the whole
+// light check (about 30 min) while late feeders waited on the build's lock.
+test('--into: a merge of only build-claims.md, or of only light paths, runs no check; a code change still does', () => {
+  const b = buildSetup({ CHECK: 'echo check >>"$RAN"', LANES: 'tools/lanes' });
+  b.commit(b.main, 'tools/lanes', 'light docs/*\n');
+  git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
+  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt docs/\n');
+  const claims = b.run(3, '--into', 'build/1');
+  assert.equal(claims.status, 0, claims.stderr);
+  assert.match(claims.stderr, /changes only light paths \(build-claims\.md\), so no check ran/);
+  assert.equal(b.at('build/1'), b.at('ticket/3-x'), 'the claims are on the build');
+  assert.deepEqual(b.ranFiles(), [], 'no check ran');
+  git(b.wts[0], 'reset', '-q', '--hard', 'build/1');
+  b.commit(b.wts[0], 'docs/a.md', 'docs\n');
+  const docs = b.run(1, '--into', 'build/1', 'docs/a.md');
+  assert.equal(docs.status, 0, docs.stderr);
+  assert.match(docs.stderr, /changes only light paths \(docs\/a\.md\), so no check ran/);
+  assert.deepEqual(b.ranFiles(), [], 'not even the named file');
+  b.commit(b.wts[0], 'f1.txt', 'code\n');
+  const code = b.run(1, '--into', 'build/1', 'f1.txt');
+  assert.equal(code.status, 0, code.stderr);
+  assert.doesNotMatch(code.stderr, /no check ran/);
+  assert.deepEqual(b.ranFiles(), ['f1.txt'], "a feeder's code change still runs its check");
+});
+
+test('--into: with no lanes map, only a build-claims.md-only merge skips the check; docs still run it', () => {
+  const b = buildSetup({ CHECK: 'echo check >>"$RAN"' });
+  git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
+  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt docs/\n');
+  const claims = b.run(3, '--into', 'build/1');
+  assert.equal(claims.status, 0, claims.stderr);
+  assert.deepEqual(b.ranFiles(), [], claims.stderr);
+  b.commit(b.wts[2], 'docs/a.md', 'docs\n');
+  const docs = b.run(3, '--into', 'build/1');
+  assert.equal(docs.status, 0, docs.stderr);
+  assert.deepEqual(b.ranFiles(), ['check'], 'docs are full without a map saying otherwise');
+});
+
+test("--into: a feeder that hands off while the build minion's claims merge is in flight waits for it, then goes ahead under the new claims", async () => {
+  const b = buildSetup();
+  git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
+  b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt\n#2: f2.txt f3.txt\n');
+  git(b.main, 'branch', '-f', 'build/1', 'ticket/3-x');
+  b.commit(b.wts[0], 'f3.txt', 'one needs it\n'); // #2's under the claims on the build
+  // Something else holds the build's lock, so the claims merge (f3.txt moves to #1) waits on it, in flight.
+  const lock = join(b.state, 'land-build-1.lock');
+  const release = join(b.dir, 'release');
+  const holder = spawn('bash', ['-c', `exec 6>"${lock}"; flock 6; touch "${lock}.held"; until [ -e "${release}" ]; do sleep 0.05; done`]);
+  const held = new Promise((ok) => holder.on('close', ok));
+  try {
+    await until('the lock is held', () => readdirSync(b.state).includes('land-build-1.lock.held'));
+    b.commit(b.wts[2], 'build-claims.md', 'build: #3\n#1: f1.txt f3.txt\n#2: f2.txt\n');
+    const claims = b.start(3, '--into', 'build/1');
+    await until('the claims merge is in flight', () => readdirSync(b.state).some((f) => f.startsWith('land-build-1.claims.')), 30_000, claims.stderr);
+    const early = b.run(1, '--check', '--into', 'build/1', 'f1.txt');
+    assert.equal(early.status, 0, `the hand-off goes ahead: ${early.stderr}`);
+    assert.match(early.stderr, /claims merge in flight on build\/1/);
+    const feeder = b.start(1, '--into', 'build/1', 'f1.txt');
+    await until('the feeder waits', () => /claims merge in flight on build\/1 .*waiting/.test(feeder.stderr()), 30_000, feeder.stderr);
+    writeFileSync(release, '');
+    assert.equal(await claims.exit, 0, claims.stderr());
+    assert.equal(await feeder.exit, 0, feeder.stderr());
+    assert.equal(git(b.main, 'log', '--format=%s', 'build/1', '-3'), 'f3.txt: one needs it\nf1.txt: 1\nbuild-claims.md: build: #3 #1: f1.txt f3.txt #2: f2.txt', 'the feeder went on top of the new claims');
+    assert.equal(readdirSync(b.state).filter((f) => f.startsWith('land-build-1.claims.')).length, 0, 'the claims merge cleared its mark');
+  } finally {
+    writeFileSync(release, '');
+    await held;
+  }
 });

@@ -1061,6 +1061,36 @@ claims_check() {
   refuse "$why"
 }
 
+# A claims merge in flight (#1684): the build minion's --into of a changed build-claims.md marks itself with a file
+# land-build-<n>.claims.<pid> (its queue_proc identity) in the main checkout's git dir until it ends, waiting for the
+# build's lock included. claims_inflight prints the pid of a live one other than this run (a dead one's mark goes).
+claims_mark() { echo "$(git rev-parse --path-format=absolute --git-common-dir)/land-build-${build#build/}.claims"; }
+claims_inflight() {
+  local f
+  for f in "$(claims_mark)".*; do
+    [ -f "$f" ] && [ "${f##*.}" != $$ ] || continue
+    [ "$(queue_proc "${f##*.}")" != "$(cat "$f" 2>/dev/null)" ] || { echo "${f##*.}"; return 0; }
+    rm -f "$f"
+  done
+  return 1
+}
+# claims_check, unless a claims merge is in flight: the claims are about to change, so a feeder's hand-off (--check)
+# goes ahead, and its run waits for that merge to end and is checked against the new plan rather than refused against
+# the old one (Peek #873 was refused twice so). Under the build's lock claims_check runs again whatever happened here.
+claims_gate() {
+  local pid t=$SECONDS
+  if pid=$(claims_inflight); then
+    say "claims merge in flight on $build (the build minion's run, pid $pid), waiting for it to end; the claims are checked against the new plan after"
+    [ -z "$check" ] || return 0
+    while pid=$(claims_inflight); do
+      [ $((SECONDS - t)) -lt "${LAND_BUILD_WAIT:-3600}" ] || refuse "waited ${LAND_BUILD_WAIT:-3600} s for the claims merge on $build (pid $pid) to end, so nothing merged: run it again later"
+      sleep "$QUEUE_POLL"
+    done
+    say "the claims merge on $build ended: checking the claims"
+  fi
+  claims_check "$BRANCH"
+}
+
 # land.local.sh's land_under <the branch's commit> <branch>, asked at the early checks and again right before each
 # rebase, since a deploy can roll back while the landing waits (plain landings only): prints the newest commit under the
 # branch's whose own commits came off $BRANCH since the branch took them (a deploy rolled them back),
@@ -1231,7 +1261,7 @@ if [ -n "$check" ]; then
   case $mode in
     land | build) early_conflict HEAD "at hand-off" || exit 3 ;;
     into)
-      ! git show-ref -q --verify "refs/heads/$build" || claims_check "$BRANCH"
+      ! git show-ref -q --verify "refs/heads/$build" || claims_gate
       git merge-base --is-ancestor "refs/heads/$build" HEAD 2>/dev/null || ! git show-ref -q --verify "refs/heads/$build" || early_conflict HEAD "at hand-off" "$build" || exit 3 ;;
   esac
   exit 0 # --full: no rebase, so nothing to check
@@ -1270,7 +1300,13 @@ case $mode in
     [[ $branch != build/* ]] || refuse "run it from a feeder's branch or the build minion's own, not from a build branch"
     git show-ref -q --verify "refs/heads/$build" || refuse "$build doesn't exist: its build minion makes it (git branch $build $BRANCH), so nothing merged"
     for f in "${files[@]}"; do [ -f "$f" ] || refuse "$f is not a file in $here, so nothing merged: name the test files the change touched, from the worktree's top"; done
-    claims_check "$BRANCH"
+    claims_gate
+    # This run changes the claims: its mark, until it ends (claims_inflight).
+    if [ "$mode" = into ] && ! git diff --quiet "$(git merge-base "refs/heads/$build" HEAD)" HEAD -- build-claims.md; then
+      claims_flag=$(claims_mark).$$
+      queue_proc $$ >"$claims_flag"
+      trap 'rm -f "$claims_flag"' EXIT
+    fi
     ;;
 esac
 # The first path the branch changes since it forked from main that is the pipeline's own (tools/land.sh,
@@ -2430,8 +2466,19 @@ if [ "$mode" = into ] || [ "$mode" = full ]; then
   tip=$(git rev-parse HEAD)
   if [ "$mode" = into ]; then
     # A feeder runs only what it touched: its test files through CHECK_FILE_CMD, else the light check, else CHECK.
-    chk=${CHECK_LIGHT:-$CHECK}
-    if [ ${#files[@]} -gt 0 ] && [ -n "$CHECK_FILE_CMD" ]; then
+    # A merge of light paths alone runs none (#1684): build-claims.md, the build minion's plan that never ships, or
+    # what the lanes map marks light (docs).
+    chk=${CHECK_LIGHT:-$CHECK} light=''
+    if [ -z "$(git diff --no-renames --name-only "$bbase" "$tip" -- . ':!build-claims.md')" ]; then
+      git diff --quiet "$bbase" "$tip" -- build-claims.md || light=build-claims.md
+    elif [ -n "$LANES" ]; then
+      read -r into_lane light < <(lane_of "$bbase" "$tip" "refs/heads/$BRANCH")
+      [ "$into_lane" = light ] || light=''
+    fi
+    if [ -n "$light" ]; then
+      chk=''
+      say "$branch changes only light paths ($light), so no check ran"
+    elif [ ${#files[@]} -gt 0 ] && [ -n "$CHECK_FILE_CMD" ]; then
       chk='r=0; '
       for f in "${files[@]}"; do chk+="{ ${CHECK_FILE_CMD//\{file\}/$(printf %q "$f")}; } || r=1; "; done
       chk+='exit $r'

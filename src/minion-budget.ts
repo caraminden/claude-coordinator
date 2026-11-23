@@ -1,6 +1,9 @@
 /**
  * A budget for every minion (#1114): what its type of work on its model has usually cost, a line each turn saying so,
- * one ask past twice that, and one Taskmaster wake past four times. Never a hard stop.
+ * one ask past twice that, and a Taskmaster wake past four times. Never a hard stop.
+ * Since #1672 the wake repeats at each doubling of its mark (8x, 16x…), and past 10x (at least $50) the minion's owner gets
+ * a card: carry on, split or stop (Cara, 2026-11-22, "Build it" on #1668's card). Every mark is a multiple of `Budget.usd`,
+ * so a brief's own cost estimate can stand in for the usual cost later without touching the marks.
  *
  * Josh's picks, 2026-11-19 (grilling cards on #1114): "2x and past $3" for the minion's ask, "4x and past $10" for the
  * Taskmaster, "Yes, each turn" for the line up front, "Say why, or split" for the ask, "Chat line + minion page" for people.
@@ -17,8 +20,10 @@ export const WINDOW_MS = 28 * 86_400_000;
 export const MIN_MINIONS = 5;
 /** The ask: twice the usual, and never under $3 (cheap minions doubling to $1 are noise). */
 export const ASK = { times: 2, floor: 3 };
-/** The Taskmaster's wake: four times the usual, and never under $10. */
+/** The Taskmaster's wake: four times the usual, and never under $10; again at each doubling of that. */
 export const WAKE = { times: 4, floor: 10 };
+/** The owner's card: ten times the usual, and never under $50; once. */
+export const CARD = { times: 10, floor: 50 };
 
 /** The usual cost of a minion's kind of work, and what it rests on. */
 export interface Budget {
@@ -29,8 +34,11 @@ export interface Budget {
   n: number;
 }
 
-/** Which of the two marks a minion has passed and been told about (a setting, so a restart keeps it). */
-export interface BudgetState { asked?: number; woke?: number }
+/**
+ * Which marks a minion has passed and been told about (a setting, so a restart keeps it): when it was asked, first woken
+ * and carded, and `wakes`, the doubling level of its last wake (1 at 4x, 2 at 8x…; missing with `woke` set means 1).
+ */
+export interface BudgetState { asked?: number; woke?: number; wakes?: number; carded?: number }
 export const budgetKey = (ticketId: number) => `minion_budget:${ticketId}`;
 
 const FAMILIES = ['fable', 'sonnet', 'haiku', 'opus'] as const;
@@ -104,15 +112,47 @@ export function chatNote(b: Budget, spent: number): string {
   return `Budget: about ${usd(spent)} used, over ${ASK.times}x the usual ${usd(b.usd)} for ${b.basis}. Asked the minion to say why or split the work.`;
 }
 
-/** The Taskmaster's wake past the second mark. */
-export function wakeText(b: Budget, spent: number): string {
-  return `Budget: this minion has used about ${usd(spent)}, over ${WAKE.times}x the usual ${usd(b.usd)} for ${b.basis} (it was asked at ${usd(markOf(b, ASK))} to say why or split the work). Read its last reply and decide: let it carry on, split the rest into a new minion, or stop it. No action is taken by itself.`;
+/** The doubling level `spent` has reached on the wake's mark: 1 from 4x, 2 from 8x, and so on; 0 below it. */
+export function wakeLevel(b: Budget, spent: number): number {
+  const r = spent / markOf(b, WAKE);
+  return r < 1 ? 0 : Math.floor(Math.log2(r)) + 1;
+}
+/** The next wake's dollar mark once `level` has been woken. */
+const nextWake = (b: Budget, level: number) => markOf(b, WAKE) * 2 ** level;
+
+/** The Taskmaster's wake at `level` (1 at 4x, 2 at 8x…): a carry on lasts to the next mark, and a repeat checks last time's conditions. */
+export function wakeText(b: Budget, spent: number, level = 1): string {
+  const times = WAKE.times * 2 ** (level - 1);
+  const head = `Budget: this minion has used about ${usd(spent)}, over ${times}x the usual ${usd(b.usd)} for ${b.basis}`;
+  const lead = level > 1
+    ? `${head}. You were woken about it before. Read its replies since then and check whether the conditions you set last time (a cheaper model for its Grunts, cost lines, a split) actually happened.`
+    : `${head} (it was asked at ${usd(markOf(b, ASK))} to say why or split the work). Read its last reply.`;
+  const card = spent < markOf(b, CARD) ? ` Past ${usd(markOf(b, CARD))} its owner gets a card to carry on, split or stop.` : '';
+  return `${lead} Decide: let it carry on, split the rest into a new minion, or stop it. A carry on lasts only until the next mark, ${usd(nextWake(b, level))}: you'll be woken again there.${card} No action is taken by itself.`;
 }
 
-/** The marks spend has newly passed, each once ever per minion; a jump past both gives both. Saves nothing: the caller records it. */
-export function passed(b: Budget, spent: number, state: BudgetState): ('ask' | 'wake')[] {
+/** The owner's card past the 10x mark: the spend, the usual cost, the minion's latest note, and carry on, split or stop. */
+export function budgetCard(b: Budget, spent: number, note: string | null) {
+  const said = note?.trim() ? ` Its latest note: “${note.trim()}”.` : '';
+  return {
+    header: 'Budget',
+    question: `This minion has used about ${usd(spent)}, over ${CARD.times}x the usual ${usd(b.usd)} for ${b.basis}.${said} Should it carry on, split off what is left (it writes a handoff for a fresh minion and stops), or stop now?`,
+    options: [
+      { label: 'Carry on', description: `It keeps going; its Taskmaster looks again at ${usd(nextWake(b, wakeLevel(b, spent)))}.` },
+      { label: 'Split', description: 'It writes a handoff for a fresh minion with what is left, sends it to its Taskmaster, and stops.' },
+      { label: 'Stop', description: 'Its turn stops now, as the stop button does. Nothing is undone.' },
+    ],
+  };
+}
+/** The budget card's Stop option, which the server acts on itself. */
+export const CARD_STOP = 'Stop';
+
+/** The marks spend has newly passed: the ask and the card once ever per minion, the wake once per doubling; a jump past several gives each kind once. Saves nothing: the caller records it. */
+export function passed(b: Budget, spent: number, state: BudgetState): ('ask' | 'wake' | 'card')[] {
+  const woken = state.wakes ?? (state.woke ? 1 : 0);
   return [
     ...(!state.asked && spent >= markOf(b, ASK) ? ['ask' as const] : []),
-    ...(!state.woke && spent >= markOf(b, WAKE) ? ['wake' as const] : []),
+    ...(spent >= nextWake(b, woken) ? ['wake' as const] : []),
+    ...(!state.carded && spent >= markOf(b, CARD) ? ['card' as const] : []),
   ];
 }

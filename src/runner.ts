@@ -60,7 +60,7 @@ import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type Proc
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
-import { ASK, askText, type Budget, budgetFor, budgetKey, type BudgetState, chatNote, markOf, passed, turnLine, WAKE, wakeText } from './minion-budget.ts';
+import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, CARD, chatNote, markOf, passed, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, readAgentFiles, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
@@ -785,6 +785,8 @@ export class Runner {
   private spends = new Map<number, { startedAt: number; meter: SpendMeter; prior: number; budget: Budget | null }>();
   /** A minion passed four times its budget (#1114): the server tells its Taskmaster. */
   onBudgetWake: (ticketId: number, text: string) => void = () => {};
+  /** A minion past 10x its budget (#1672): the server posts this card to its owner. */
+  onBudgetCard: (ticketId: number, question: ReturnType<typeof budgetCard>) => void = () => {};
   /** Applies a turn's status trailer (src/status-trailer.ts) as set_thread_status would; the server wires it to the PATCH route's checks. */
   onStatusTrailer: (ticketId: number, fields: StatusFields) => void = () => {};
   /** The running turn's last status trailer, applied when its result comes in. */
@@ -4158,14 +4160,18 @@ export class Runner {
     const marks = passed(budget, spent, state);
     if (!marks.length) return;
     const now = this.now();
-    this.store.setSetting(budgetKey(ticketId), { ...state, ...(marks.includes('ask') ? { asked: now } : {}), ...(marks.includes('wake') ? { woke: now } : {}) });
+    const level = wakeLevel(budget, spent);
+    this.store.setSetting(budgetKey(ticketId), {
+      ...state, ...(marks.includes('ask') ? { asked: now } : {}), ...(marks.includes('wake') ? { woke: state.woke ?? now, wakes: level } : {}), ...(marks.includes('card') ? { carded: now } : {}),
+    });
     console.log(`[budget] minion ${ticketId}: passed ${marks.join(' and ')} at about $${spent.toFixed(2)} (usual $${budget.usd.toFixed(2)})`);
     if (marks.includes('ask')) {
       const row = this.emit(ticketId, 'note', { text: chatNote(budget, spent) });
       if (steer) this.steerSystem(ticketId, askText(budget, spent), row.id);
     }
     // tellTaskmaster posts its own "Sent the Taskmaster" line in the chat.
-    if (marks.includes('wake')) this.onBudgetWake(ticketId, wakeText(budget, spent));
+    if (marks.includes('wake')) this.onBudgetWake(ticketId, wakeText(budget, spent, level));
+    if (marks.includes('card')) this.onBudgetCard(ticketId, budgetCard(budget, spent, this.store.getTicket(ticketId)?.note ?? null));
   }
 
   /**
@@ -4185,7 +4191,7 @@ export class Runner {
   /** What the minion page shows of its budget (#1114), or null with too little history. */
   private budgetView(ticket: Ticket, props?: Record<string, unknown>) {
     const b = budgetFor(this.store, ticket, Date.now(), props);
-    return b && { usd: b.usd, basis: b.basis, n: b.n, ask: markOf(b, ASK), wake: markOf(b, WAKE) };
+    return b && { usd: b.usd, basis: b.basis, n: b.n, ask: markOf(b, ASK), wake: markOf(b, WAKE), card: markOf(b, CARD) };
   }
 
   /** The running turn's unanswered spend alert (openSpend), or null; reads the saved turn only while one runs. */

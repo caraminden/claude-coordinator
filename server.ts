@@ -1838,6 +1838,13 @@ runner.onBudgetWake = (ticketId, text) => {
   const ticket = store.getTicket(ticketId);
   if (ticket) tellTaskmaster(app, ticket, text, false, true, 'ask', true).catch((e) => console.error(`[budget] minion ${ticketId}:`, e));
 };
+// Past ten times (#1672): a carry on / split / stop card to its owner (`assigned`, else who asked); everyone's with neither.
+runner.onBudgetCard = (ticketId, question) => {
+  const ticket = store.getTicket(ticketId);
+  const owner = ticket && store.minionOwner(ticket);
+  const to = owner != null ? store.getUser(owner)?.name : undefined;
+  if (ticket) postCard(app, ticket, { questions: [question], budget: true, ...(to ? { to } : {}) });
+};
 const routes = router(apiRoutes);
 
 // The scheme the backup chat at /backup talks to: Citadel's own.

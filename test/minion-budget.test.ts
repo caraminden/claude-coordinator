@@ -139,7 +139,7 @@ test('a turn past 2x gets the ask once, in the chat and the turn, and past 4x it
   for (let i = 0; i < 5; i++) store.recordTurn(make('feature'), { session_id: `open${i}`, ended_at: Date.now(), session_cost_usd: 1 });
   const id = make('feature');
   assert.deepEqual(budgetFor(store, store.getTicket(id)!), { usd: 5, n: 5, basis: 'a feature on Opus' });
-  assert.deepEqual(runner.view(store.getTicket(id)!).budget, { usd: 5, n: 5, basis: 'a feature on Opus', ask: 10, wake: 20 });
+  assert.deepEqual(runner.view(store.getTicket(id)!).budget, { usd: 5, n: 5, basis: 'a feature on Opus', ask: 10, wake: 20, card: 50 });
 
   const notes = () => store.listEvents(id).filter((e) => e.kind === 'note').map((e) => JSON.parse(e.data).text as string).filter((t) => t.startsWith('Budget:'));
   rmSync(go, { force: true });
@@ -156,16 +156,21 @@ test('a turn past 2x gets the ask once, in the chat and the turn, and past 4x it
   assert.equal(notes().length, 1);
   assert.deepEqual(wakes.map((w) => w.ticket), [id]);
   assert.match(wakes[0].text, /used about \$20, over 4x the usual \$5\.00/);
-  assert.deepEqual(Object.keys(store.getSetting(budgetKey(id)) as object).sort(), ['asked', 'woke']);
+  assert.deepEqual(Object.keys(store.getSetting(budgetKey(id)) as object).sort(), ['asked', 'wakes', 'woke']);
 
-  // A later turn passing both again says nothing more: each mark is once per minion.
+  assert.equal(cards.length, 0);
+
+  // A later turn to $60 asks no more, but passes 8x ($40, the Taskmaster again) and 10x ($50, the owner's card) (#1672).
   writeFileSync(script, JSON.stringify({ before: 3, after: 0 }));
   runner.send(id, 'Josh', 'again');
   await until('the second turn to end', () => store.listEvents(id).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'result').length === 2 && !runner.isRunning(id));
   assert.equal(notes().length, 1);
-  assert.equal(wakes.length, 1);
+  assert.equal(wakes.length, 2);
+  assert.match(wakes[1].text, /over 8x the usual \$5\.00.*carry on lasts only until the next mark, \$80/);
+  assert.deepEqual(cards.map((c) => c.ticket), [id]);
+  assert.match(cards[0].question, /over 10x the usual \$5\.00/);
 
-  // Nor after a dismissal and a reopen (2R1): the marks outlive the close.
+  // Nor after a dismissal and a reopen (2R1): the marks outlive the close. $70 is short of 16x's $80.
   await runner.close(id, 'Dismissed.');
   writeFileSync(script, JSON.stringify({ before: 1, after: 0 }));
   runner.send(id, 'Josh', 'reopened');

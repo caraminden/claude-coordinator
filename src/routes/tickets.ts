@@ -1,6 +1,7 @@
 // One minion's (or Taskmaster's) chat and state: what people, its Taskmaster and the minion itself
 // may do to it. Who may call each route is its `who` (src/http.ts).
 import { azureSpeech } from '../azure-speech.ts';
+import { CARD_STOP } from '../minion-budget.ts';
 import { parseSpend } from '../outside-spend.ts';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -263,6 +264,16 @@ async function choicesDoc(app: App, ticket: Ticket, raw: unknown): Promise<{ pat
  * as their name (what the chat, the inbox and push go by); null for a card to everyone. Only the asking scheme's
  * members: a card never reaches anyone a message in its chat couldn't.
  */
+/** The stop button: the turn, its waiting test-box job and its running ship (unless past moving main: `ship` says which). */
+function stopMinion(app: App, ticket: Ticket, by: string) {
+  const stopped = app.runner.stop(ticket.id);
+  // Its test-box job still waiting for the screen leaves the line, turn or no turn: Citadel follows it after the turn ends (#1425).
+  const followed = app.machines.minionStopped(ticket.id);
+  // Its running ship stops too (#1168).
+  const ship = ticket.kind === 'ticket' ? stopMinionShip(app, ticket.id, by) : null;
+  return { stopped: stopped || followed > 0, ship };
+}
+
 function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
   if (raw == null || raw === '') return null;
   const want = String(raw).trim().replace(/^@/, '').toLowerCase();
@@ -950,6 +961,13 @@ export const ticketRoutes: Route[] = [
         runner.broadcastTicket(id);
         return json(res, 202, ticketView(app, id));
       }
+      // A budget card's Stop (#1672): stopped as the stop button does, and the minion hears it held, so no turn starts.
+      if (data.budget && answers[0]?.selected[0] === CARD_STOP) {
+        stopMinion(app, ticket, session.name);
+        runner.send(id, session.name, 'My answer to your budget card: Stop. I stopped your turn; do nothing more on this until someone writes.', [], { answer: { questionId: body.questionId, answers }, hold: true });
+        runner.broadcastTicket(id);
+        return json(res, 202, ticketView(app, id));
+      }
       const text = questions.map((q: any, i: number) => {
         const { selected, other } = answers[i];
         // The text typed with a pick expands on it; typed alone, it is the answer.
@@ -1366,14 +1384,7 @@ export const ticketRoutes: Route[] = [
     method: 'POST', path: '/api/tickets/:ticket/stop', who: ['person', 'taskmaster'],
     async handler(ctx) {
       const { res, app, ticket, session } = ctx;
-      const { id } = ticket;
-      const { runner } = app;
-      const stopped = runner.stop(id);
-      // Its test-box job still waiting for the screen leaves the line, turn or no turn: Citadel follows it after the turn ends (#1425).
-      const followed = app.machines.minionStopped(id);
-      // Its running ship stops too (#1168), unless it is past moving main: `ship` says which.
-      const ship = ticket.kind === 'ticket' ? stopMinionShip(app, id, session?.agent !== undefined ? 'the Taskmaster' : session?.name ?? 'a member') : null;
-      return json(res, 200, { stopped: stopped || followed > 0, ship });
+      return json(res, 200, stopMinion(app, ticket, session?.agent !== undefined ? 'the Taskmaster' : session?.name ?? 'a member'));
     },
   },
   // "Is this still going?" on a quiet turn's chip (#906): a look at its process, no message and no model call.

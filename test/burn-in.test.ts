@@ -159,7 +159,7 @@ function single(env: Record<string, string>) {
 test('outside CI, a burn-in queues as one heavy job, clamps 10 copies to 4 and nices each copy (#1725)', () => {
   const { r, log } = single({ ...NO_CI, BURN_IN_COPIES: '10' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^burn-in: 10 copies at once is CI's; here it runs 4, queued for a heavy slot/m);
+  assert.match(r.stdout, /^burn-in: 10 copies\b.*\b4\b.*queued/m, 'one line: asked 10, runs 4, queued');
   assert.match(log, /^heavy JUDGE=0 --here bash .*\/tools\/burn-in\.sh test\/clean\.test\.ts 4$/m, 'one citadel-heavy job, the slot forced');
   assert.equal(log.match(/^heavy /gm)?.length, 1, 'the queued run does not queue again');
   assert.equal(log.match(/^nice -n 19$/gm)?.length, 4, 'four copies, each nice 19');
@@ -171,6 +171,13 @@ test('outside CI, 4 copies or fewer run as asked, still queued', () => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.doesNotMatch(r.stdout, /CI's; here it runs/);
   assert.match(log, /^heavy JUDGE=0 --here bash .* test\/clean\.test\.ts 2$/m);
+});
+
+test('a copy count that is not a whole number is refused, not run as 4', () => {
+  const { r, log } = single({ ...NO_CI, BURN_IN_COPIES: 'abc' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^burn-in: copies must be a whole number, not abc$/m);
+  assert.equal(log, '', 'nothing queued or ran');
 });
 
 test('on CI a burn-in runs as before: no citadel-heavy, no clamp, no nice of its own', () => {

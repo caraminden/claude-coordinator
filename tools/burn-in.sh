@@ -114,7 +114,8 @@ if [ "${1:-}" != --ship ]; then
   # times over, stalled the server on Nov 23). --here: the CI hand-off doesn't carry BURN_IN_QUEUED, and a CI re-run is
   # the way to 10. shortcut: other scripts that call a heavy tool by its absolute path still dodge tools/heavy-shim.
   if [ -z "${RUNNER_TEMP:-}${CI:-}${GITHUB_ACTIONS:-}${BURN_IN_QUEUED:-}" ]; then
-    [ "$n" -le 4 ] 2>/dev/null || { echo "burn-in: $n copies at once is CI's; here it runs 4, queued for a heavy slot (re-run CI for $n)"; n=4; }
+    [[ $n =~ ^[1-9][0-9]*$ ]] || { echo "burn-in: copies must be a whole number, not $n"; exit 1; }
+    [ "$n" -le 4 ] || { echo "burn-in: $n copies at once is CI's; here it runs 4, queued for a heavy slot (re-run CI for $n)"; n=4; }
     BURN_IN_QUEUED=1 BURN_IN_NICE=${BURN_IN_NICE:-nice -n 19} CITADEL_HEAVY_JUDGE=0 CITADEL_HEAVY_WHAT="burn-in $file x$n" \
       exec "$tools/citadel-heavy" --here bash "$tools/burn-in.sh" "$file" "$n"
   fi

@@ -36,6 +36,14 @@ test('a batch runs its copies at once (#1443), each in its own TMPDIR', () => {
   assert.equal(new Set(readFileSync(join(dir, 'dirs'), 'utf8').trim().split('\n')).size, 3, 'three copies, three TMPDIRs');
 });
 
+test('off CI a batch above 4 copies is refused before any burner starts, not reported clean (#1725)', () => {
+  const env = { ...process.env, GH_TOKEN: '', RUNNER_TEMP: '', CI: '', GITHUB_ACTIONS: '' };
+  const r = spawnSync('bash', [join(root, 'tools/flake-proof.sh'), 'test/none.test.ts', '10', '1'], { env, encoding: 'utf8' });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stdout, /^flake-proof: 10 copies at once is a CI batch/m);
+  assert.doesNotMatch(r.stdout, /clean runs|starting the batch|not waiting/, 'nothing ran');
+});
+
 test("the workflow's token may read the run list the wait asks for", () => {
   assert.match(yml, /^permissions:\n  contents: read\n  actions: read/m);
 });

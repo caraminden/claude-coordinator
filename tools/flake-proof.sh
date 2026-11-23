@@ -11,6 +11,8 @@ set -uo pipefail
 file=${1:?usage: flake-proof.sh test/x.test.ts [runs] [burners]}
 runs=${2:-10}
 burners=${3:-$(( $(nproc) / 2 ))}
+# Off CI tools/burn-in.sh runs at most 4 copies (#1725): refuse a bigger batch before any burner starts, not report copies that never ran.
+[ -n "${RUNNER_TEMP:-}${CI:-}${GITHUB_ACTIONS:-}" ] || [ "$runs" -le 4 ] 2>/dev/null || { echo "flake-proof: $runs copies at once is a CI batch (flake-proof.yml); off CI a burn-in runs at most 4"; exit 2; }
 # Same read and same give-up as tests.yml's "wait for the lands" step: only runs from the last 15 minutes count, a failed read
 # counts as a ship running, and after 30 minutes (60 looks, 30 s apart) it starts anyway. Without GH_TOKEN (a run by hand) it skips.
 wait_for_ships() {

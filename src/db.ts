@@ -592,7 +592,7 @@ export interface SavedView {
 export interface ContraptionErrorRow {
   contraption_id: number;
   day: string;
-  kind: 'tool' | 'http' | 'log';
+  kind: 'tool' | 'http' | 'log' | 'deploy';
   key: string;
   count: number;
   sample: string;
@@ -3665,7 +3665,7 @@ export class Store {
 
   /** An app's error counts per Pacific day, kind and key from `fromDay` on (#1123). */
   appErrorsSince(contraptionId: number, fromDay: string): { day: string; kind: string; key: string; count: number; sample: string; last_at: number }[] {
-    return this.db.prepare('SELECT day, kind, key, count, sample, last_at FROM contraption_errors WHERE contraption_id = ? AND day >= ? ORDER BY day, count DESC')
+    return this.db.prepare("SELECT day, kind, key, count, sample, last_at FROM contraption_errors WHERE contraption_id = ? AND day >= ? AND kind != 'deploy' ORDER BY day, count DESC")
       .all(contraptionId, fromDay) as unknown as { day: string; kind: string; key: string; count: number; sample: string; last_at: number }[];
   }
 

@@ -147,3 +147,33 @@ test("one scheme's folder that can't be written leaves the others' files, and is
   await digest.tick();
   assert.ok(existsSync(join(root, 'ok-shared', String(a.id), 'reports', 'contraption-errors', '2026-11-16.md')), 'the failed day is written next tick');
 });
+
+test('a 502-504 inside a restart window is tagged deploy and counted apart; one outside it, or a restart-less app, is an error (#1728)', async () => {
+  const store = new Store(join(root, 'deploy.db'));
+  const josh = store.createUser({ name: 'Josh', login: 'josh' });
+  const home = store.createProject('Mandate', null, josh.id);
+  const c = new Contraptions(store, 's'.repeat(40), join(root, 'keys4'));
+  const app = c.register({ name: 'mandate', title: 'Mandate', port: 9601, icon: null, home_scheme: home.id, open_paths: '[]', default_model: null, turn_cap: null });
+  const other = c.register({ name: 'other', title: 'Other', port: 9602, icon: null, home_scheme: home.id, open_paths: '[]', default_model: null, turn_cap: null });
+  const restarting = new Set<string>();
+  const digest = new ErrorDigest(store, { sharedDir: (id) => join(root, 'deploy-shared', String(id)), now: () => NOV16_NOON, restarting: (name) => restarting.has(name) });
+
+  restarting.add('mandate');
+  digest.httpError(app, 502, 'GET', '/api/history', 'not answering: ECONNREFUSED');
+  digest.httpError(app, 503, 'GET', '/api/items');
+  digest.httpError(app, 500, 'GET', '/api/boom', '');
+  restarting.delete('mandate');
+  digest.httpError(app, 502, 'GET', '/api/history', 'not answering: ECONNREFUSED');
+  digest.httpError(other, 502, 'GET', '/api/x'); // no restart of this one
+
+  const rows = store.contraptionErrors('2026-11-16');
+  const by = (name: string) => rows.filter((r) => r.name === name).map((r) => [r.kind, r.count]).sort();
+  assert.deepEqual(by('mandate'), [['deploy', 2], ['http', 1], ['http', 1]], 'two in the window are deploy; the 500 and the late 502 stay http');
+  assert.deepEqual(by('other'), [['http', 1]]);
+  await digest.tick();
+  const text = readFileSync(join(root, 'deploy-shared', String(home.id), 'reports', 'contraption-errors', '2026-11-16.md'), 'utf8');
+  assert.match(text, /## Mandate \(mandate\): 2\n/, 'its heading counts only real errors');
+  assert.doesNotMatch(text, /×\s*deploy/, 'no group line for them: the review sums group lines');
+  assert.match(text, /Restart windows \(not errors, #1728\): 2/);
+  assert.equal(digest.summary(home.id, NOV17)?.total, 3, "the morning count leaves them out too: mandate's 2 plus other's 1");
+});

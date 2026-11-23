@@ -83,6 +83,12 @@ export class RestartHolds {
     };
   }
 
+  /** Whether the app is restarting now or its restart ended within `graceMs` (the error digest's deploy windows, #1728). */
+  restarting(name: string, graceMs: number): boolean {
+    const app = this.apps.get(name);
+    return !!app && !app.stopped && (app.holds > 0 || (app.ended > 0 && this.now() - app.ended < graceMs));
+  }
+
   /** The app was stopped on purpose: what is left of a restart's grace ends, so it fails fast. */
   stopped(name: string) {
     const app = this.apps.get(name) ?? { holds: 0, ended: 0, waiting: 0 };

@@ -34,7 +34,15 @@ export interface DigestDeps {
   /** An app's journal entries after `cursor` (null: the last few minutes), and the cursor to read on from. */
   journal?: (row: ContraptionRow, cursor: string | null) => Promise<{ entries: JournalEntry[]; cursor: string | null }>;
   now?: () => number;
+  /** Whether an app is restarting now or was within RESTART_WINDOW_MS (a deploy's or a person's restart, #1728): its 502-504s in that time are deploy windows, not errors. */
+  restarting?: (name: string) => boolean;
 }
+
+/**
+ * How long after a restart ends its 502-504s still count as the restart (#1728). Picked from the data: a deploy's restart
+ * stage takes 6-7 s (contraption_deploys.stages) and Mandate measured ~8 s down; Mandate's ask was ~15 s.
+ */
+export const RESTART_WINDOW_MS = 15_000;
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
 
@@ -99,7 +107,9 @@ export class ErrorDigest {
   }
 
   /** A 5xx answer through the proxy, or `note` when the app didn't answer at all. */
-  httpError(row: Pick<ContraptionRow, 'id'>, status: number, method: string, path: string, note = '') {
+  httpError(row: Pick<ContraptionRow, 'id' | 'name'>, status: number, method: string, path: string, note = '') {
+    // Citadel's proxy answers 502 "not answering" while an app restarts: that is a deploy window, kept as a count only.
+    if (status >= 502 && status <= 504 && this.deps.restarting?.(row.name)) return this.add(row, 'deploy', 'not answering during a restart', sampleLine(`${status} ${method} ${path.split('?')[0]}`));
     const tail = note ? ` (${note})` : '';
     this.add(row, 'http', `${status} ${method} ${pathKey(path)}${tail}`, sampleLine(`${status} ${method} ${path.split('?')[0]}${tail}`));
   }
@@ -193,7 +203,7 @@ export class ErrorDigest {
   summary(projectId: number, now = this.now()): { day: string; total: number; apps: { title: string; count: number }[]; file: string } | null {
     const day = addDays(pacificDay(now), -1);
     const by = new Map<string, number>();
-    for (const r of this.store.contraptionErrors(day)) if (r.home_scheme === projectId) by.set(r.title, (by.get(r.title) ?? 0) + r.count);
+    for (const r of this.store.contraptionErrors(day)) if (r.home_scheme === projectId && r.kind !== 'deploy') by.set(r.title, (by.get(r.title) ?? 0) + r.count);
     const apps = [...by].map(([title, count]) => ({ title, count })).sort((a, b) => b.count - a.count);
     const total = apps.reduce((n, a) => n + a.count, 0);
     return total ? { day, total, apps, file: `${DIGEST_DIR}/${day}.md` } : null;
@@ -209,9 +219,13 @@ export function render(scheme: string, day: string, apps: ContraptionRow[], rows
     `${scheme}'s contraptions' errors that day, counted by Citadel (#835): failed agent tool calls (tool), 5xx answers through Citadel's proxy (http) and error lines in their service journals (log). One line per kind of error, with numbers and ids taken out, biggest first; the sample is the first one seen, scrubbed and cut to one line. Written ${pacific(now)}${ended ? '' : ', the day still running'}.`,
   ];
   for (const app of apps) {
-    const mine = rows.filter((r) => r.contraption_id === app.id);
+    const all = rows.filter((r) => r.contraption_id === app.id);
+    // 502-504s during a restart (#1728) are a count line, not a group line: the weekly review sums group lines into handoffs.
+    const mine = all.filter((r) => r.kind !== 'deploy');
+    const windows = all.filter((r) => r.kind === 'deploy').reduce((n, r) => n + r.count, 0);
     out.push('', `## ${app.title} (${app.name}): ${mine.reduce((n, r) => n + r.count, 0)}`, '');
     if (!mine.length) out.push('No errors.');
+    if (windows) out.push('', `Restart windows (not errors, #1728): ${windows} × 502-504 "not answering" while the app restarted, or within ${RESTART_WINDOW_MS / 1000} s after`);
     // Calls to a tool the agent has not got (#1174), so it shows whether the did-you-mean note helped.
     const phantom = mine.filter((r) => r.kind === 'tool' && /No such tool available/.test(r.key));
     if (phantom.length) {

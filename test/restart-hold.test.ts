@@ -212,3 +212,20 @@ test('through Citadel: a restart from Settings holds the app\'s requests, a stop
   assert.deepEqual([(await booting).status, (await booting).body], [200, 'got ']);
   await stop(fixture);
 });
+
+test('restarting() is true during a hold and for the grace after its release, never for a stopped or unknown app (#1728)', () => {
+  let t = 1000;
+  const holds = new RestartHolds(HOLD_MS, 200, () => t);
+  assert.equal(holds.restarting('a', 15_000), false, 'never restarted');
+  const release = holds.hold('a');
+  t += 60_000;
+  assert.equal(holds.restarting('a', 15_000), true, 'still held, however long');
+  release();
+  t += 14_999;
+  assert.equal(holds.restarting('a', 15_000), true);
+  t += 2;
+  assert.equal(holds.restarting('a', 15_000), false, 'past the window');
+  holds.hold('a')();
+  holds.stopped('a');
+  assert.equal(holds.restarting('a', 15_000), false, 'stopped on purpose');
+});

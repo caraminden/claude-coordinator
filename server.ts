@@ -111,7 +111,7 @@ import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
 import { adminAlert, adminClear, fallbacks } from './src/fallbacks.ts';
 import { TimerAlerts } from './src/timer-alerts.ts';
-import { ErrorDigest } from './src/contraption-errors.ts';
+import { ErrorDigest, RESTART_WINDOW_MS } from './src/contraption-errors.ts';
 import { ensureCoordinatorFor } from './src/routes/projects.ts';
 import { KitSync, type KitSyncState } from './src/kit-sync.ts';
 import { llamaEmbed, MemoryIndexer } from './src/memory.ts';
@@ -1666,6 +1666,8 @@ if (!BOOT_CHECK) {
 const errorDigest = new ErrorDigest(store, {
   sharedDir: (id) => projectSharedDir(DATA_DIR, id),
   journal: services.opts.off ? undefined : (row, cursor) => services.journalSince(row, cursor),
+  // 502-504s while an app restarts (a deploy's or a person's) or just after are deploy windows, not errors (#1728).
+  restarting: (name) => apps.restarts.restarting(name, RESTART_WINDOW_MS),
 });
 contraptionTurns.onToolError = (c, tool, error) => void safely('error digest', () => errorDigest.toolError(c, tool, error));
 if (!BOOT_CHECK && !PREVIEW) errorDigest.start();

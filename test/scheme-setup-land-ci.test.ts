@@ -476,6 +476,8 @@ test("CI gate: the built-in reader takes the newest run of each workflow, the wo
     const a = c.land(1);
     const sha = await c.tip(a);
     assert.match(gh(), new RegExp(`api repos/.*/actions/runs\\?head_sha=${sha}`), 'it asks about the exact commit');
+    // Each CI wait says what is left of the login's hour (Citadel #1722).
+    assert.match(a.stderr(), /waiting for CI on [0-9a-f]{12} \(origin's \S+\)\. GitHub calls left this hour: 4321\/5000, resets in 25 min\n/);
     // One workflow green, the other still running: not green.
     runs(run('ci.yml', 2, 'completed', 'success'), run('slow.yml', 3, 'in_progress', '-'));
     await sleep(400);

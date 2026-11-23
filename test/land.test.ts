@@ -212,6 +212,13 @@ test('a landing leaves one timing line with every phase; CI that answers fills t
   assert.equal(header('run-tests.sh'), header('land.sh'));
   assert.deepEqual(timings(shared).length, 1);
   assert.match(timings(shared)[0], /^- \d\d:\d\d:\d\dZ · timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue \d+ · ci-run \d+ · fallback - · deploy \d+ · live \d+ · landed$/);
+  // #1722: each CI wait says what is left of the login's GitHub hour, and the landing logs its gh calls beside it.
+  assert.match(res.stderr, /land: waiting for CI on \S+: .*\. GitHub calls left this hour: 4321\/5000, resets in 25 min\n/);
+  const githubLines = landLog(shared).split('\n').filter((l) => l.includes(' · github · '));
+  assert.equal(githubLines.length, 1);
+  const counted = readFileSync(join(r.live, '.git', 'cc-deploy', 'gh-calls'), 'utf8').trim().split('\n').length;
+  assert.ok(counted >= 3, `the runners check, a push and the polls are counted: ${counted}`);
+  assert.match(githubLines[0], new RegExp(`^- \\S+ · github · ticket/1-x · ${counted} gh calls · left 4321/5000 as CI began, 4321/5000 at the end$`));
   // A deploy whose restart isn't live by the time it ends.
   r.commit(r.wt, 'b.txt', 'two\n');
   res = c.run({ COORDINATOR_SHARED_DIR: shared, FAKE_NOT_LIVE: '1' });
@@ -484,6 +491,7 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
   const cases: [string, Record<string, string>, RegExp][] = [
     ['no runner online', { FAKE_RUNNERS: '0' }, /no citadel-ci-linux runner is online/],
     ['GitHub down', { FAKE_CI: 'down' }, /GitHub didn't answer/],
+    ['GitHub down, and it says nothing of the hour either (#1722)', { FAKE_CI: 'down', FAKE_QUOTA: 'down' }, /GitHub didn't answer/],
     ['the runner list fails', { FAKE_RUNNERS: 'down' }, /didn't say which runners are online/],
     ['no runner starts the job, and none is online', { FAKE_CI: 'queued', LAND_CI_START: '1', FAKE_RUNNERS_WAIT: '0' }, /no runner started the job within 1s, and no citadel-ci-linux runner is online/],
     ['a runner is online but starts no job in the longer bound', { FAKE_CI: 'queued', LAND_CI_START: '1', LAND_CI_START_ONLINE: '2' }, /no runner started the job within 2s, though a citadel-ci-linux runner is online/],
@@ -506,6 +514,9 @@ test('when CI cannot answer, it says so loudly, logs it, runs the suite here and
       assert.match(res.stderr, why);
       assert.match(res.stderr.trimEnd().split('\n').at(-1)!, /landed on perigee's own test run, not CI: /, 'the last line says it again');
       assert.match(landLog(shared), /^- \d\d:\d\d:\d\dZ · ci fallback · ticket\/1-x · /m);
+      // #1722: once GitHub was asked at all, the fallback line ends with what was left of the hour.
+      const left = extra.FAKE_QUOTA === 'down' ? 'unknown' : '4321/5000, resets in 25 min';
+      if (extra.LAND_CI !== '0') assert.ok(landLog(shared).split('\n').some((l) => l.includes(' · ci fallback · ticket/1-x · ') && l.endsWith(` · GitHub calls left: ${left}`)), landLog(shared));
       assert.match(landLog(shared), /· timing · ticket\/1-x · line \d+ · rebase \d+ · ci-queue - · ci-run - · fallback \d+\+\d+ · deploy \d+ · live \d+ · landed$/m);
       assert.equal(c.localRuns(), 1);
       assert.equal(git(r.source, 'rev-parse', 'main'), git(r.wt, 'rev-parse', 'HEAD'));

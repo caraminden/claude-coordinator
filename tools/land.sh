@@ -122,6 +122,8 @@ land_timing() (
     retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[tests]}") · tests $(span "${t[tests]}" "${t[gate]}") · $out"
   else
     retro_log "timing · $label · line $(span "${t[start]}" "${t[lock]}") · rebase $(span "${t[lock]}" "${t[ci]}") · ci-queue $ciq · ci-run $cir · fallback $fb · deploy $(span "${t[deploy]}" "${t[queued]}") · live $live${early_ahead:+ · ci early ${early_ahead}s} · $out"
+    # A landing that waited on CI (#1722): its counted gh calls, and what was left of the login's hour as that wait began and now.
+    [ -z "${t[quota]}" ] || retro_log "github · $label · $(awk -v b="$branch" -v s="${t[start]:-0}" '$1 >= s && $2 == b' "$state/gh-calls" 2>/dev/null | wc -l) gh calls · left ${t[quota]} as CI began, $(gh_quota | cut -d, -f1) at the end"
   fi
   rm -f "$times"
 ) >/dev/null 2>&1
@@ -622,6 +624,7 @@ prep_check() {
 }
 # Every gh call of any landing is counted in $state/gh-calls (epoch seconds, the landing's branch and the endpoint, no tokens), so
 # the next time the 5,000 an hour run out, `cut -d" " -f2 "$state/gh-calls" | sort | uniq -c` says which landing asked how often (#1655).
+# GitHub's rate_limit read costs none of them, so gh_quota's isn't counted (#1722).
 # At the top level: hub() and own-check.sh's own_hub call it in every copy, the rebased one and --into too.
 gh_count() { [ "$1" != gh ] || printf '%s %s %s\n' "$(date +%s)" "${branch:-?}" "${2:-} ${3:-}" >>"$state/gh-calls" 2>/dev/null || true; }
 # The rebased copy is the same process, so the ticket it was started with (none, from a land.sh older than the
@@ -1051,8 +1054,20 @@ CI_RERUN_STEP='rerun failed files alone' CI_RERUN=${LAND_CI_RERUN:-180}
 CI_BURN_STEP='burn in new and changed tests' CI_BURN=${LAND_CI_BURN:-180} CI_BASE_REF=land-base/$branch
 # As the box's own gh login, like deploy.sh's push of main (#182), whoever's turn this is; never holding the lock.
 hub() { gh_count "$@"; env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$HOME/.config/gh" GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 7>&- 6>&-; }
+# What is left of the login's hour, as GitHub counts it (#1722): every login's calls draw on it, land.sh's, the server's and
+# each turn's alike, so each CI wait logs it and the next "API rate limit exceeded" has numbers. "<left>/<limit>, resets
+# in <n> min", or "unknown" when GitHub doesn't say. Free: GitHub doesn't count the rate_limit read itself, and gh_count,
+# which counts only a bare gh, leaves out this one through timeout 10 (it also runs as the landing ends: no 30 s hang there).
+gh_quota() {
+  local l='' m='' r=''
+  read -r l m r < <(hub timeout 10 gh api rate_limit --jq '.resources.core | "\(.remaining) \(.limit) \(.reset)"' 2>/dev/null) || true
+  if [[ $l =~ ^[0-9]+$ && $m =~ ^[0-9]+$ ]]; then
+    [[ $r =~ ^[0-9]+$ ]] && r=", resets in $(((r - $(date +%s) + 59) / 60)) min" || r=''
+    echo "$l/$m$r"
+  else echo unknown; fi
+}
 ci_fail_n=0 ci_fail_at=''
-ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why='' burn_red='' burned=''
+ci_quota='' ci_slug='' ci_id='' ci_status='' ci_result='' ci_url='' ci_pushed='' why='' burn_red='' burned=''
 # Perigee runs a ship's suite only while it is quiet (#1254, Josh 2026-11-20: "only if and when perigee has plenty of
 # resources, just make sure we play nice and that it doesnt affect performance"): CPU pressure (some avg60) under
 # QUIET_PSI %, the 1-minute load under half the cores, at least QUIET_MEM % of memory available, and citadel-heavy's
@@ -1206,6 +1221,8 @@ ci_gate() {
   [ "${LAND_CI:-1}" != 0 ] || { why="LAND_CI=0 was set"; return 2; }
   { [ -n "$REMOTE" ] && url=$(git remote get-url "$REMOTE" 2>/dev/null); } || { why="this repo has no ${REMOTE:-GitHub} remote"; return 2; }
   ci_slug=${url#*github.com[:/]} ci_slug=${ci_slug%.git}
+  ci_quota=$(gh_quota)
+  { echo "quota ${ci_quota%%,*}" >>"$times"; } 2>/dev/null || true # the github line's start figure (#1722)
   # A CI outage is paid once (#553): a landing that waited out a limit leaves a note, and those of the next minutes
   # go straight to the run here instead of each waiting to learn the same thing.
   local down_at='' down_why='' now
@@ -1229,7 +1246,7 @@ ci_gate() {
     # there is no one's work to overwrite. Atomic, so the run never starts without the base its burn-in compares with.
     hub git push -q --atomic "$REMOTE" "+$tip:refs/heads/$CI_REF" "+$old:refs/heads/$CI_BASE_REF" 2>"$state/ci.err" || { why="pushing $short to GitHub failed$(ci_said)"; return 2; }
   fi
-  say "waiting for CI on $short: the full suite on Cara's desktop (up to $((CI_START_ONLINE / 60)) min for a runner to start it while one is online, then at most $((CI_LIMIT / 60)) min for the run; past that it runs here once perigee is quiet)"
+  say "waiting for CI on $short: the full suite on Cara's desktop (up to $((CI_START_ONLINE / 60)) min for a runner to start it while one is online, then at most $((CI_LIMIT / 60)) min for the run; past that it runs here once perigee is quiet). GitHub calls left this hour: $ci_quota"
   queue_phase "waiting for CI since $(date +%H:%M)"
   while :; do
     # One missed answer is not a verdict: the limits below end the wait. But a run of them is: ci_status is then the last
@@ -2309,7 +2326,7 @@ else
   say "CI FALLBACK: $why. Running the full suite on perigee instead."
   say "BURN-IN SKIPPED: new and changed tests were not run as 10 copies at once, since that runs only on CI, never on perigee (#1443)"
   say "=========================================================================="
-  retro_log "ci fallback · $branch · $why"
+  retro_log "ci fallback · $branch · $why${ci_quota:+ · GitHub calls left: $(gh_quota)}" # once it got as far as asking GitHub
   say "running the tests"
   started=$(date +%H:%M)
   queue_phase "running the tests since $started"

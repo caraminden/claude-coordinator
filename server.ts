@@ -105,7 +105,7 @@ import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { addRunnerWaiter, CiHealth, taskmastersFor, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
 import { Incidents, readCiRuns, readDeploys, readJournal } from './src/incidents.ts';
-import { ghGet, ghHelpers } from './src/gh-api.ts';
+import { ghGet, ghHelpers, ghTally } from './src/gh-api.ts';
 import { ciEvidence } from './src/flake-evidence.ts';
 import { CiLoad } from './src/ci-load.ts';
 import { callMandate } from './src/mandate-items.ts';
@@ -1608,6 +1608,9 @@ if (!BOOT_CHECK && !PREVIEW) {
 }
 // GitHub artifact sweep (#657): weekly, every scheme's repo keeps its newest few artifacts of each kind (src/artifact-sweep.ts).
 const artifactSweep = new ArtifactSweep(store, { as: (p) => (p.repo_dir ? githubOf(p.repo_dir) : undefined), log: (line) => console.log(line) });
+// The server's own GitHub calls each 10 min (#1722): the login's hour is shared with land.sh and every turn, so the
+// journal says what the server spent when "API rate limit exceeded" comes back. Restarts are often, so not hourly.
+if (!BOOT_CHECK) every('github tally', 10 * 60_000, () => { const r = ghTally.report(); if (r) console.log(`github: last 10 min ${r}`); });
 if (!BOOT_CHECK) every('artifact sweep', 60 * 60_000, async () => { if (await pressure.gate('artifact sweep')) await artifactSweep.tick(); });
 // The CI desktop's load (#534): the runner agents' samples and CI health's jobs become a verdict per PC; one that
 // holds is a quiet Mandate item for every admin, cleared when it ends.

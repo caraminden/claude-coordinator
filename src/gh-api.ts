@@ -138,10 +138,48 @@ function ask(socket: string, nonce: string, path: string, etag: string | null): 
 
 export const ghHelpers = new GhHelpers();
 
+/** A REST path as a poller's name: run and issue numbers become N, a commit sha SHA, a query keeps its names only. */
+export function pathShape(path: string): string {
+  const [p, q] = path.replace(/^\//, '').split('?', 2);
+  const shape = p.split('/').map((s) => (/^\d+$/.test(s) ? 'N' : /^[0-9a-f]{40}$/i.test(s) ? 'SHA' : s)).join('/');
+  return q ? `${shape}?${q.split('&').map((kv) => kv.split('=')[0]).join('&')}` : shape;
+}
+
+/**
+ * The server's GitHub calls by path shape since the last report (#1722): every login's calls draw on one hour of
+ * quota, and a 304 is the only answer GitHub doesn't count, so the next "API rate limit exceeded" names who spent it.
+ */
+export class GhTally {
+  #paths = new Map<string, { counted: number; free: number }>();
+  add(path: string, status: number): void {
+    const shape = pathShape(path);
+    const n = this.#paths.get(shape) ?? { counted: 0, free: 0 };
+    if (status === 304) n.free++;
+    else n.counted++;
+    this.#paths.set(shape, n);
+  }
+  /** "<counted> counted, <free> free (304): <busiest paths>", or null when nothing was asked; starts the next one afresh. */
+  report(top = 8): string | null {
+    if (!this.#paths.size) return null;
+    const rows = [...this.#paths].sort(([, a], [, b]) => b.counted - a.counted || b.free - a.free);
+    this.#paths = new Map();
+    const sum = (rs: typeof rows, k: 'counted' | 'free') => rs.reduce((t, [, n]) => t + n[k], 0);
+    const shown = rows.slice(0, top).map(([s, n]) => `${s} ${n.counted}${n.free ? `+${n.free} free` : ''}`);
+    const rest = rows.slice(top);
+    if (rest.length) shown.push(`and ${rest.length} more paths ${sum(rest, 'counted')}`);
+    return `${sum(rows, 'counted')} counted, ${sum(rows, 'free')} free (304): ${shown.join(', ')}`;
+  }
+}
+
+export const ghTally = new GhTally();
+
 /** One REST GET, conditional on `etag`, through the login's helper when it is up, else the gh CLI; any HTTP status comes back, only a failure to ask throws. */
 export async function ghGet(path: string, etag: string | null, as: GithubEnv): Promise<GhAnswer> {
   const helped = await ghHelpers.get(path, etag, as);
-  if (helped) return helped;
+  if (helped) {
+    ghTally.add(path, helped.status);
+    return helped;
+  }
   let out: string;
   try {
     ({ stdout: out } = await run('gh', ['api', '-i', path, ...(etag ? ['-H', `If-None-Match: ${etag}`] : [])], { env: asEnv(as), timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }));
@@ -158,11 +196,13 @@ export async function ghGet(path: string, etag: string | null, as: GithubEnv): P
   try {
     body = rest.trim() ? JSON.parse(rest) : null;
   } catch {}
+  ghTally.add(path, status);
   return { status, etag: /^etag:\s*(.+?)\s*$/im.exec(head)?.[1] ?? null, body };
 }
 
 /** One REST POST through the gh CLI; the status of the answer, 0 when gh printed none. */
 export async function ghPost(path: string, as: GithubEnv, fields: Record<string, string> = {}): Promise<{ status: number }> {
+  ghTally.add(path, 0);
   try {
     const { stdout } = await run('gh', ['api', '-i', '-X', 'POST', path, ...Object.entries(fields).flatMap(([k, v]) => ['-f', `${k}=${v}`])], { env: asEnv(as), timeout: 30_000 });
     return { status: Number(/^HTTP\/\S+ (\d+)/.exec(stdout)?.[1] ?? 0) };

@@ -1404,6 +1404,17 @@ fi
 cilog="$state/land-ci-${branch//\//-}.log"
 # Never holding the lock: a gh or git left hanging after its timeout mustn't keep it.
 hub() { GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 30 "$@" 9>&- 6>&-; }
+# What is left of the login's hour of GitHub calls, which every caller on that login shares (Citadel #1722), so each CI wait
+# says it and the next "API rate limit exceeded" has numbers: "<left>/<limit>, resets in <n> min", or "unknown". Free:
+# GitHub doesn't count the rate_limit read itself.
+gh_quota() {
+  local l='' m='' r=''
+  read -r l m r < <(hub gh api rate_limit --jq '.resources.core | "\(.remaining) \(.limit) \(.reset)"' 2>/dev/null) || true
+  if [[ $l =~ ^[0-9]+$ && $m =~ ^[0-9]+$ ]]; then
+    [[ $r =~ ^[0-9]+$ ]] && r=", resets in $(((r - $(date +%s) + 59) / 60)) min" || r=''
+    echo "$l/$m$r"
+  else echo unknown; fi
+}
 
 pre=$(git rev-parse HEAD) # the branch as it was: every build starts from here
 base=''    # the commit the build sits on: main, or the commit of the one directly ahead
@@ -1625,7 +1636,7 @@ ci_push() {
   hub git push -q --no-verify origin ":refs/heads/$CI_REF" 2>/dev/null || true
   hub git push -q --no-verify origin "+$tip:refs/heads/$CI_REF" || refuse "couldn't push ${tip:0:12} to origin's $CI_REF, so CI can't run on it and nothing landed"
   pushed=1 pushed_at=$SECONDS ci_clock=$SECONDS ci_begun='' ci_more=0 ci_more_keys=''
-  say "waiting for CI on ${tip:0:12} (origin's $CI_REF)"
+  say "waiting for CI on ${tip:0:12} (origin's $CI_REF). GitHub calls left this hour: $(gh_quota)"
 }
 
 # Stops the scratch branch's runs nobody waits for now, so they don't hold a runner. Best effort. A run of a

@@ -1,7 +1,7 @@
 // One minion's (or Taskmaster's) chat and state: what people, its Taskmaster and the minion itself
 // may do to it. Who may call each route is its `who` (src/http.ts).
 import { azureSpeech } from '../azure-speech.ts';
-import { CARD_STOP } from '../minion-budget.ts';
+import { CARD_STOP, money, SPLIT, START, START_CARD_USD, startHoldKey } from '../minion-budget.ts';
 import { parseSpend } from '../outside-spend.ts';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -302,6 +302,19 @@ export function deliverAnswer(app: App, ticketId: number, author: string, text: 
 export async function unparkTicket(app: App, ticket: Ticket, by: string, author: string, quiet = false): Promise<void> {
   if (ticket.kind === 'coordinator') throw new HttpError(400, `The ${AGENT_NAME} is never sealed`);
   if (ticket.status === 'closed') throw new HttpError(409, `#${ticket.number} is dismissed: reopen it instead`);
+  // A brief expected over $30 (#1674) starts on a person's OK: a person's Unseal (`author` is their name) is one and
+  // settles its start card; the Taskmaster's or a minion's isn't.
+  const hold = app.store.getSetting<{ usd: number; card: string }>(startHoldKey(ticket.id));
+  if (hold) {
+    if (author !== by) throw new HttpError(409, `#${ticket.number} waits for a person's start card (its brief expects about ${money(hold.usd)}): only a person's answer or Unseal starts it`);
+    app.store.deleteSetting(startHoldKey(ticket.id));
+    const card = app.store.eventsOfKinds(ticket.id, ['question']).find((e) => JSON.parse(e.data).id === hold.card);
+    if (card) {
+      const settled = { at: Date.now(), by };
+      app.store.setEventData(card.id, { ...JSON.parse(card.data), settled });
+      app.runner.emit(ticket.id, 'question_result', { id: hold.card, settled });
+    }
+  }
   // A scheduled run or flaky-test fixer waiting for the box (#1302): Unseal is its "Start now", with no pressure check.
   if (app.held?.release(ticket.id, `${by} unsealed it`)) return;
   if (app.runner.heldFor(ticket.id)) {
@@ -667,7 +680,7 @@ export const ticketRoutes: Route[] = [
         // message_ticket with unseal (#718): the Taskmaster unseals it, and this message is what wakes it.
         // A person's "Send and unseal" does the same: held for nothing, the message is what wakes it.
         const unparks = body.unpark === true && runner.parked(ticket);
-        if (unparks) await unparkTicket(app, ticket, session.name, APP_NAME, true);
+        if (unparks) await unparkTicket(app, ticket, session.name, caller ? APP_NAME : session.name, true); // quiet: author only tells a person from an agent
         // The Taskmaster's messages to a minion go through the loop guard; a person's never wait.
         if (caller && ticket.kind !== 'coordinator') {
           held = runner.relay(id, id, session.name, text, body.urgent === true || unparks, true, undefined, caller.id);
@@ -959,6 +972,24 @@ export const ticketRoutes: Route[] = [
         runner.send(id, session.name, `My answer to the kit sync card: ${choice}`, [], { answer: { questionId: body.questionId, answers }, hold: true });
         runner.emit(id, 'note', { text: line });
         runner.broadcastTicket(id);
+        return json(res, 202, ticketView(app, id));
+      }
+      // A start card (#1674): the server acts on it with no turn of its own. Start releases the held brief (a chained one
+      // still waits for its leader); Split first dismisses it unrun and asks its Taskmaster to split the brief.
+      if (data.startCost) {
+        const pick = answers[0]?.selected[0];
+        if (pick !== START && pick !== SPLIT) throw new HttpError(400, "Pick one of the card's options");
+        store.deleteSetting(startHoldKey(id));
+        const added = answers[0].other ? ` They added: ${answers[0].other}` : '';
+        runner.recordAnswer(id, session.name, `My answer to your start card: ${pick}.${added}`, { answer: { questionId: body.questionId, answers } });
+        if (pick === START) {
+          if (!runner.heldFor(id) && store.getTicket(id)?.state === 'parked') runner.unpark(id, session.name, session.name);
+          else runner.emit(id, 'note', { text: `${session.name} OK'd its start; it starts once its leader's work is in.` });
+        } else {
+          await runner.close(id, `${session.name} picked ${SPLIT} on its start card, so it was dismissed before it ran.`);
+          await tellTaskmaster(app, ticket, `${session.name} picked "${SPLIT}" on the start card of #${ticket.number} ${ticket.title} (expected ${money(data.startCost)}): it was dismissed without running.${added} Split its brief (and the handoff it names) into minions expected at ${money(START_CARD_USD)} or less each, with an "Expected cost" line in each, and start those.`, false, true, 'ask');
+        }
+        await ownWrites();
         return json(res, 202, ticketView(app, id));
       }
       // A budget card's Stop (#1672): stopped as the stop button does. The answer is only recorded (it settles the card):

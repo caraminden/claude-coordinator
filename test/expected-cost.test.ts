@@ -53,7 +53,7 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     const big = await create('Big', `Start from ${join(shared, 'handoff-big.md')}.`);
     assert.equal(big.status, 201, JSON.stringify(big.data));
     const id = big.data.id;
-    assert.match(big.data.notes.join('\n'), /expected \$45.*over \$30.*card/i);
+    assert.match(big.data.notes.join('\n'), /expects about \$45, over \$30.*start card/);
     assert.equal(big.data.state, 'parked');
     assert.equal(big.data.budget.usd, 45, 'its marks scale from the estimate');
     const held = await card(id);
@@ -88,7 +88,7 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     assert.equal(await card(small.data.id), undefined);
     const none = await create('None', 'Fix it.');
     assert.notEqual(none.data.state, 'parked');
-    assert.match(none.data.notes.join('\n'), /no "Expected cost"/);
+    assert.match(none.data.notes.join('\n'), /no "Expected cost: \$N" line/);
     // The param wins over the line.
     const param = await create('Param', 'Fix it.\nExpected cost: $5', { expected_cost: 40 });
     assert.equal(param.data.state, 'parked');

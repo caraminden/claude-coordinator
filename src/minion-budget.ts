@@ -4,6 +4,8 @@
  * Since #1672 the wake repeats at each doubling of its mark (8x, 16x…), and past 10x (at least $50) the minion's owner gets
  * a card: carry on, split or stop (Cara, 2026-11-22, "Build it" on #1668's card). Every mark is a multiple of `Budget.usd`,
  * so a brief's own cost estimate can stand in for the usual cost later without touching the marks.
+ * Since #1674 it does: a brief's "Expected cost: $N" (or create_ticket's expected_cost) is the base when it is the larger,
+ * and one over START_CARD_USD waits for a person's start card (Cara, 2026-11-22, "Build it" on #1668's card).
  *
  * Josh's picks, 2026-11-19 (grilling cards on #1114): "2x and past $3" for the minion's ask, "4x and past $10" for the
  * Taskmaster, "Yes, each turn" for the line up front, "Say why, or split" for the ask, "Chat line + minion page" for people.
@@ -25,20 +27,39 @@ export const WAKE = { times: 4, floor: 10 };
 /** The owner's card: ten times the usual, and never under $50; once. */
 export const CARD = { times: 10, floor: 50 };
 
-/** The usual cost of a minion's kind of work, and what it rests on. */
+/** A brief expected to cost more than this waits for a person's start card (the one exception to "stop rate limiting my minions"). */
+export const START_CARD_USD = 30;
+
+/** The usual cost of a minion's kind of work, and what it rests on; with `estimate`, its brief's estimate is the base instead. */
 export interface Budget {
   usd: number;
-  /** "a feature on Opus", or "a minion on Opus" for the family-wide fallback. */
+  /** "a feature on Opus", or "a minion on Opus" for the family-wide fallback; "its brief" with no history. */
   basis: string;
   /** How many minions the median is of. */
   n: number;
+  /** The brief's expected cost, set only when it is the base (`usd`): it was larger than the usual cost. */
+  estimate?: number;
+  /** The usual cost it replaced, when there was one. */
+  usual?: number;
+}
+
+/** The dollars on a brief's "Expected cost:" line (a range by its top), or null without one. */
+export function expectedCost(text: string): number | null {
+  const m = /expected cost:\**\s*~?\s*\$\s*(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*\$?\s*(\d+(?:\.\d+)?))?/i.exec(text);
+  return m ? Number(m[2] ?? m[1]) : null;
+}
+
+/** The budget with its brief's estimate as the base when that is larger: max(usual, estimate). */
+export function withEstimate(b: Budget | null, estimate: number | undefined): Budget | null {
+  if (!estimate || estimate <= (b?.usd ?? 0)) return b;
+  return b ? { ...b, usd: estimate, estimate, usual: b.usd } : { usd: estimate, n: 0, basis: 'its brief', estimate };
 }
 
 /**
  * Which marks a minion has passed and been told about (a setting, so a restart keeps it): when it was asked, first woken
  * and carded, and `wakes`, the doubling level of its last wake (1 at 4x, 2 at 8x…; missing with `woke` set means 1).
  */
-export interface BudgetState { asked?: number; woke?: number; wakes?: number; carded?: number }
+export interface BudgetState { asked?: number; woke?: number; wakes?: number; carded?: number; /** Its brief's expected cost in dollars (#1674), set at its start. */ estimate?: number }
 export const budgetKey = (ticketId: number) => `minion_budget:${ticketId}`;
 
 const FAMILIES = ['fable', 'sonnet', 'haiku', 'opus'] as const;
@@ -85,17 +106,42 @@ export function budgetFor(store: Store, ticket: { id: number; model: string | nu
   let c = cache.get(store);
   if (!c || now - c.at > CACHE_MS) cache.set(store, c = { at: now, table: medians(store.minionCosts(now - WINDOW_MS)) });
   const type = (props ?? store.props.forTarget('minion', ticket.id)).type;
-  return budgetFrom(c.table, typeof type === 'string' ? type : null, ticket.model ?? ticket.last_model);
+  const usual = budgetFrom(c.table, typeof type === 'string' ? type : null, ticket.model ?? ticket.last_model);
+  // A Codex minion's turns aren't priced: no budget, estimate or not.
+  return family(ticket.model ?? ticket.last_model) ? withEstimate(usual, store.getSetting<BudgetState>(budgetKey(ticket.id))?.estimate) : null;
 }
 
 /** The dollar amount of a mark for a budget. */
 export const markOf = (b: Budget, mark: { times: number; floor: number }) => Math.max(b.usd * mark.times, mark.floor);
 
 const usd = (n: number) => `$${n < 10 ? n.toFixed(2) : Math.round(n)}`;
+export const money = usd;
+
+/** A minion waiting on its start card (#1674): its estimate and the card's question id; deleted once a person answers or unseals it. */
+export const startHoldKey = (ticketId: number) => `start_hold:${ticketId}`;
+export const START = 'Start';
+export const SPLIT = 'Split first';
+/** The start card for a brief expected over START_CARD_USD. */
+export function startCard(number: number, title: string, estimate: number) {
+  return {
+    header: 'Big start',
+    question: `The Taskmaster started a minion for “${title}” (#${number}) whose brief expects it to cost about ${usd(estimate)}, more than the ${usd(START_CARD_USD)} that needs a person's OK first. Start it as it is, or have the Taskmaster split it into smaller minions first?`,
+    options: [
+      { label: START, description: `It starts now with its brief. Its budget alarms count from ${usd(estimate)}.` },
+      { label: SPLIT, description: `It is dismissed without running, and the Taskmaster splits the brief into minions expected at ${usd(START_CARD_USD)} or less each.` },
+    ],
+  };
+}
+
+/** What the marks are multiples of, in a sentence: "the usual $5.00 for a feature on Opus" or "its brief's expected $15". */
+const base = (b: Budget) => (b.estimate ? `its brief's expected ${usd(b.usd)}` : `the usual ${usd(b.usd)} for ${b.basis}`);
 
 /** The line at the top of each turn (Josh, "Yes, each turn"): the usual cost, spend so far, and that it isn't a cap. */
 export function turnLine(b: Budget, spent: number): string {
-  const head = `Budget: ${b.basis} has usually cost about ${usd(b.usd)} (the median of ${b.n} minions in the last 4 weeks, every scheme); this minion has used ${usd(spent)} so far. It is not a cap and quality comes first.`;
+  const median = `the median of ${b.n} minions in the last 4 weeks, every scheme`;
+  const said = !b.estimate ? `${b.basis} has usually cost about ${usd(b.usd)} (${median})`
+    : `its brief expected about ${usd(b.usd)}${b.usual ? ` (${b.basis} has usually cost about ${usd(b.usual)}, ${median})` : ''}`;
+  const head = `Budget: ${said}; this minion has used ${usd(spent)} so far. It is not a cap and quality comes first.`;
   // Past the mark, the line carries the ask too: a turn that ended before it could read the ask still gets it.
   return spent >= markOf(b, ASK)
     ? `${head} It is past ${ASK.times}x: if you haven't yet, say in one line starting "${REASON}" why it is costing more, and split off what's left for a fresh minion (citadel:briefing, sent to your Taskmaster) if it splits cleanly.`
@@ -104,7 +150,7 @@ export function turnLine(b: Budget, spent: number): string {
 
 /** The one ask past the first mark (Josh, "Say why, or split"), passed into the running turn or opening the next. */
 export function askText(b: Budget, spent: number): string {
-  return `Budget: this minion has now used about ${usd(spent)}, over ${ASK.times}x the usual ${usd(b.usd)} for ${b.basis}. In your next reply, say why it is costing more in one line starting "${REASON}" (its owner sees that line if it reaches ${CARD.times}x). If the rest of the work splits off cleanly, write a handoff for a fresh minion (citadel:briefing) and send it to your Taskmaster instead of carrying on here. Nothing stops you: finish what needs finishing, and quality still comes first.`;
+  return `Budget: this minion has now used about ${usd(spent)}, over ${ASK.times}x ${base(b)}. In your next reply, say why it is costing more in one line starting "${REASON}" (its owner sees that line if it reaches ${CARD.times}x). If the rest of the work splits off cleanly, write a handoff for a fresh minion (citadel:briefing) and send it to your Taskmaster instead of carrying on here. Nothing stops you: finish what needs finishing, and quality still comes first.`;
 }
 
 /** How the minion's one-line reason starts, so the owner's card can quote it. */
@@ -120,7 +166,7 @@ export function costReason(texts: string[]): string | null {
 
 /** What people read in the chat past the first mark (the second's is tellTaskmaster's "Sent the Taskmaster" line). */
 export function chatNote(b: Budget, spent: number): string {
-  return `Budget: about ${usd(spent)} used, over ${ASK.times}x the usual ${usd(b.usd)} for ${b.basis}. Asked the minion to say why or split the work.`;
+  return `Budget: about ${usd(spent)} used, over ${ASK.times}x ${base(b)}. Asked the minion to say why or split the work.`;
 }
 
 /** The doubling level `spent` has reached on the wake's mark: 1 from 4x, 2 from 8x, and so on; 0 below it. */
@@ -137,7 +183,7 @@ const nextWake = (b: Budget, level: number) => markOf(b, WAKE) * 2 ** level;
  */
 export function wakeText(b: Budget, spent: number, level = 1, again = level > 1): string {
   const times = WAKE.times * 2 ** (level - 1);
-  const head = `Budget: this minion has used about ${usd(spent)}, over ${times}x the usual ${usd(b.usd)} for ${b.basis}`;
+  const head = `Budget: this minion has used about ${usd(spent)}, over ${times}x ${base(b)}`;
   const lead = again
     ? `${head}. You were woken about it before. Read its replies since then and check whether the conditions you set last time (a cheaper model for its Grunts, cost lines, a split) actually happened.`
     : `${head} (it was asked at ${usd(markOf(b, ASK))} to say why or split the work). Read its last reply.`;
@@ -150,7 +196,7 @@ export function budgetCard(b: Budget, spent: number, reason: string | null) {
   const said = reason ? ` Its reason: “${reason}”.` : " It hasn't said why.";
   return {
     header: 'Budget',
-    question: `This minion has used about ${usd(spent)}, over ${CARD.times}x the usual ${usd(b.usd)} for ${b.basis}.${said} Should it carry on, split off what is left (it writes a handoff for a fresh minion and stops), or stop now?`,
+    question: `This minion has used about ${usd(spent)}, over ${CARD.times}x ${base(b)}.${said} Should it carry on, split off what is left (it writes a handoff for a fresh minion and stops), or stop now?`,
     options: [
       { label: 'Carry on', description: `It keeps going; its Taskmaster looks again at ${usd(nextWake(b, wakeLevel(b, spent)))}.` },
       { label: 'Split', description: 'It writes a handoff for a fresh minion with what is left, sends it to its Taskmaster, and stops.' },

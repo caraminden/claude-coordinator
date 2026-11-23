@@ -48,6 +48,7 @@ import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { briefWarning, namedFiles } from '../brief-lint.ts';
+import { budgetKey, type BudgetState, expectedCost, money, START_CARD_USD, startCard, startHoldKey } from '../minion-budget.ts';
 import { relayFile } from '../taskmaster-files.ts';
 import { mergedAfter, mergedPage } from '../history.ts';
 import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
@@ -1257,6 +1258,11 @@ export const projectRoutes: Route[] = [
       let model = oneOf(body.model ?? null, MODELS, 'Model');
       let effort = oneOf(body.effort ?? null, EFFORTS, 'Effort');
       const workflow = body.workflow == null ? 0 : workflowSwitch(body.workflow);
+      // Its expected cost (#1674): create_ticket's expected_cost, else the brief's (or its handoff's) "Expected cost: $N" line.
+      const briefText = `${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`;
+      const givenCost = body.expected_cost == null ? null : Number(body.expected_cost);
+      if (givenCost != null && !(Number.isFinite(givenCost) && givenCost > 0 && givenCost <= 100_000)) throw new HttpError(400, 'expected_cost must be dollars, more than 0');
+      const estimate = givenCost ?? expectedCost(briefText);
       let plugins = '';
       try {
         plugins = cleanPluginPicks(body.plugin_dirs, project.optional_plugin_dirs);
@@ -1347,6 +1353,18 @@ export const projectRoutes: Route[] = [
         const who = !by ? session.name : by.coordinator_of == null ? 'The Overlord' : `${store.getUser(by.coordinator_of)?.name ?? 'Someone'}'s ${AGENT_NAME}`;
         store.noteDigest(project.id, by?.id ?? 0, `${who} started #${store.getTicket(id)!.number} ${title}`);
       }
+      if (estimate) store.setSetting(budgetKey(id), { estimate } satisfies BudgetState);
+      // Over $30, an agent's brief waits for a person's start card; a person starting their own is their OK. Every message
+      // to it is held meanwhile (runner.send), a chained one's brief too.
+      if (caller && estimate && estimate > START_CARD_USD) {
+        const t = store.getTicket(id)!;
+        const owner = store.minionOwner(t);
+        const to = owner != null ? store.getUser(owner)?.name : undefined;
+        const card = postCard(app, t, { questions: [startCard(t.number, title, estimate)], startCost: estimate, ...(to ? { to } : {}) });
+        store.setSetting(startHoldKey(id), { usd: estimate, card: card.id });
+        if (!follow) store.updateTicket(id, { state: 'parked', note: `waits for its start card: expected ${money(estimate)}` });
+        notes.push(`Held: its brief expects about ${money(estimate)}, over ${money(START_CARD_USD)}, so no turn runs until a person answers its start card (${card.href}): Start, or Split first (it is dismissed and you split the brief). Link that card in your reply; you can't answer or unseal it.`);
+      }
       if (follow) {
         const { leader, when } = follow;
         waiters.chain({ ticket: id, after: leader.id, when, message: brief0, from: session.name, base: follow.base, since: follow.since });
@@ -1364,8 +1382,9 @@ export const projectRoutes: Route[] = [
       }
       // A brief an agent wrote (the Taskmaster's) is checked for its person's words and done-when (#1108); a person's own typed ask is already their words.
       if (caller) {
-        const warning = briefWarning(`${message}\n${namedFiles(message, projectSharedDir(app.dataDir, project.id))}`);
+        const warning = briefWarning(briefText);
         if (warning) notes.push(warning);
+        if (estimate == null) notes.push(`Cost check: the brief has no "Expected cost: $N" line (citadel:briefing, part 8), so its budget marks use the usual cost for its type. Put one in your next brief.`);
       }
       // The Taskmaster's create_ticket checks for look-alikes before it creates (#488); startChecks covers the rest.
       void startChecks(app, project.id, id, session.name, caller, `${title}\n${message}`);

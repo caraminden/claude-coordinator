@@ -60,7 +60,7 @@ import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type Proc
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
-import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
+import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, startHoldKey, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, readAgentFiles, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
@@ -2105,7 +2105,8 @@ export class Runner {
     // Nor a Taskmaster's fresh-start step: what's said now goes to the fresh session. Nor a stopped turn, still dying: it would drop it.
     // Nor a low-effort turn (#951) something other than a success notice: it waits for a turn at the minion's own effort.
     const steers = !!(steer && live && turn && !turn.result && !turn.fresh && !turn.keepalive && !turn.stopped && !otherPerson && !(turn.light && !light) && existsSync(join(live.dir, 'steer.jsonl')));
-    const parked = !!(hold && !live && ticket && this.parked(ticket));
+    // A minion waiting on its start card (#1674) holds everything, wakes and its chained brief too, until a person answers it.
+    const parked = !!(!live && ticket && ((hold && this.parked(ticket)) || (!('answer' in extra) && this.store.getSetting(startHoldKey(ticketId)))));
     // The message goes into the queue (or steer file) first, then its chat line (#1378): a crash between the two leaves a
     // message the next turn reads, never a line in the chat that no turn gets. Its id is the line's, handed out now.
     // The chat shows it masked; the turn still gets it as typed, for a key someone hands over on purpose.
@@ -4201,7 +4202,7 @@ export class Runner {
   /** What the minion page shows of its budget (#1114), or null with too little history. */
   private budgetView(ticket: Ticket, props?: Record<string, unknown>) {
     const b = budgetFor(this.store, ticket, Date.now(), props);
-    return b && { usd: b.usd, basis: b.basis, n: b.n, ask: markOf(b, ASK), wake: markOf(b, WAKE), card: markOf(b, CARD) };
+    return b && { usd: b.usd, basis: b.basis, n: b.n, ask: markOf(b, ASK), wake: markOf(b, WAKE), card: markOf(b, CARD), ...(b.estimate ? { estimate: b.estimate } : {}) };
   }
 
   /** The running turn's unanswered spend alert (openSpend), or null; reads the saved turn only while one runs. */

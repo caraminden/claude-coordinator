@@ -1,1 +1,0 @@
-../kit/skills/scheme-setup/templates/land.sh

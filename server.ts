@@ -1400,10 +1400,18 @@ const ciHealth = new CiHealth(store, {
   tell: judged('ci-red', 'tell', (project, text, wake, people) => {
     const to = taskmastersFor(store, project.id, people);
     if (!to.length) return false;
-    for (const coordinator of to) {
-      if (!wake) runner.leaveMail(coordinator.id, APP_NAME, text);
-      else runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
-    }
+    // One wake per problem (a cold context each, and each would start its own fix minion): the first person's Taskmaster; the others get held mail.
+    let sent = false;
+    to.forEach((coordinator, i) => {
+      try {
+        if (!wake || i > 0) runner.leaveMail(coordinator.id, APP_NAME, i > 0 ? `${text}\n(${store.getTicket(to[0].id)?.title ?? 'Another Taskmaster'} was woken for this; check list_tickets for a fix minion before starting one.)` : text);
+        else runner.send(coordinator.id, APP_NAME, text, [], runner.isOverlord(coordinator) ? { everyone: true } : {});
+        if (i === 0) sent = true; // the wake itself; the others only get mail
+      } catch (err) {
+        console.error(`CI health: telling Taskmaster #${coordinator.id} failed:`, err);
+      }
+    });
+    if (!sent) return false;
     if (!wake) return true;
     // The chat entry the wake became (the CI page links to it, #992); true if it can't be found.
     return store.eventsOfKinds(to[0].id, ['user_message']).at(-1)?.id ?? true;

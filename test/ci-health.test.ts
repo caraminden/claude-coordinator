@@ -12,7 +12,7 @@ import {
   firstTickDelay, START_DELAY_MS, clock, ORPHAN_MS, orphanRuns, landProblems, landStep, newLandState, RED_FIX_MS, type LandState, runMinion,
 } from '../src/ci-health.ts';
 import { Contraptions } from '../src/contraptions.ts';
-import type { AlertPart } from '../src/alert-wakes.ts';
+import { quietUntil, type AlertPart } from '../src/alert-wakes.ts';
 import { Store } from '../src/db.ts';
 import { machineRoutes } from '../src/routes/machines.ts';
 import { Readable } from 'node:stream';
@@ -1115,7 +1115,8 @@ test("a red whose first fix minion closed names the open one fixing it now (the 
   await health.tick(NOW + 2 * HOUR + 5 * MIN);
   // All closed: the newest (9602 came after they closed): its Taskmaster's for an hour from that run, then it rings, naming it (#1662).
   assert.match(item()!, new RegExp(`still is after #${review.number} closed`));
-  await health.tick(closedAt + MIN + RED_FIX_MS);
+  // closedAt is the real clock: a run made in 2-9 AM Pacific counts its hour from 9 (#1662), so CI at 2 AM was red.
+  await health.tick((quietUntil(closedAt + MIN) ?? closedAt + MIN) + RED_FIX_MS);
   assert.match(item('ci.open')!, new RegExp(`still is after #${review.number} closed`));
 });
 

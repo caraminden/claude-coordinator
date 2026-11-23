@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { Approvals } from '../src/approvals.ts';
-import { envBelow, tripwire, type TripwireConfig } from '../src/tripwire.ts';
+import { envBelow, tripwire, tripwireResult, type TripwireConfig } from '../src/tripwire.ts';
 import { tripwireHooks } from '../src/turn-launch.ts';
 import { testPins } from './helpers.ts';
 
@@ -1270,4 +1270,69 @@ test('a push to heads/main is refused like refs/heads/main: git completes it (#1
   for (const command of ['git push origin heads/main', 'git push origin ticket/9:heads/main', 'git push origin HEAD:heads/master'])
     assert.ok(verdict(command), command);
   assert.equal(bash('git push origin ticket/9:heads-up'), null);
+});
+
+test('a dirty file checked out or restored: its diff is saved under the turn\'s TMPDIR, then the call runs (#1716)', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'tripwire-1716-'));
+  const turnTmp = join(tmp, 'projects/2/tmp/9');
+  const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp, env: { TMPDIR: turnTmp } };
+  const wt = join(tmp, 'projects/2/tickets/9');
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  const sh = (cmd: string, cwd = wt) => execSync(cmd, { cwd, stdio: 'pipe', env }).toString();
+  const run = (command: string, cwd = wt) => tripwireResult(JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd }), JSON.stringify(c));
+  const at = (command: string, cwd = wt) => tripwire({ tool_name: 'Bash', tool_input: { command }, cwd }, c)?.reason ?? null;
+  /** The note's patch path, after checking the call was let through with it. */
+  const saved = (command: string, cwd = wt) => {
+    const r = run(command, cwd);
+    assert.equal(r.code, undefined, `${command}: ${r.stderr}`);
+    const note: string = JSON.parse(r.stdout ?? '{}').hookSpecificOutput?.additionalContext ?? '';
+    const patch = note.match(/\/\S+\.patch/)?.[0] ?? '';
+    assert.ok(patch.startsWith(`${turnTmp}/`), `${command}: the note names a patch in TMPDIR: ${note}`);
+    return patch;
+  };
+  const patches = () => readdirSync(join(turnTmp, 'tripwire-saves')).length;
+  try {
+    mkdirSync(join(wt, 'sub'), { recursive: true });
+    mkdirSync(turnTmp, { recursive: true });
+    sh('git init -q -b ticket/9 && echo a > a.txt && echo b > b.txt && echo c > sub/c.txt && git add . && git commit -qm a && git branch other');
+
+    // The habit the digest counted: put back a file you edited. The patch holds the edit, and puts it back.
+    writeFileSync(join(wt, 'a.txt'), 'mine\n');
+    const patch = saved('git checkout -- a.txt');
+    assert.match(readFileSync(patch, 'utf8'), /^\+mine$/m);
+    sh('git checkout -- a.txt');
+    sh(`git apply ${patch}`);
+    assert.equal(readFileSync(join(wt, 'a.txt'), 'utf8'), 'mine\n');
+
+    // Every single-file form, from HEAD or the index, saves first.
+    for (const ok of ['git checkout HEAD -- a.txt', 'git checkout a.txt', 'git checkout HEAD a.txt', 'git checkout -q -- a.txt b.txt', 'git restore a.txt', 'git restore -- a.txt', 'git restore --staged --worktree a.txt', 'git restore --source=HEAD a.txt', `git -C ${wt} checkout -- a.txt`, 'bash -c "git checkout -- a.txt"', 'git checkout -- a.txt || git show HEAD:./a.txt > a.txt'])
+      saved(ok);
+    writeFileSync(join(wt, 'sub/c.txt'), 'mine\n');
+    assert.match(readFileSync(saved('git checkout -- c.txt', join(wt, 'sub')), 'utf8'), /^\+mine$/m);
+
+    // From HEAD, staged edits go too, so that patch is against HEAD; from the index, only the unstaged part goes.
+    sh('git add a.txt');
+    writeFileSync(join(wt, 'a.txt'), 'mine again\n');
+    const head = readFileSync(saved('git checkout HEAD -- a.txt'), 'utf8');
+    assert.match(head, /^-a$/m);
+    assert.match(head, /^\+mine again$/m);
+    assert.match(readFileSync(saved('git checkout -- a.txt'), 'utf8'), /^-mine\n\+mine again$/m);
+    sh('git reset -q a.txt');
+
+    // A clean file has nothing to save: through, with no patch.
+    const before = patches();
+    assert.deepEqual(run('git checkout -- b.txt'), {});
+    assert.equal(patches(), before);
+
+    // Still refused: a folder, a pattern, an unknown path, another commit's version, -f, a branch switch over the edit, stash, reset --hard.
+    for (const no of ['git checkout -- .', 'git checkout .', 'git checkout -- sub', 'git restore sub', 'git restore .', "git checkout -- '*.txt'", 'git checkout -- "$F"', 'git checkout -- :/a.txt', 'git checkout other -- a.txt', 'git checkout other a.txt', 'git restore --source=other a.txt', 'git checkout -f -- a.txt', 'git checkout -p -- a.txt', 'git checkout other', 'git stash', 'git reset --hard'])
+      assert.ok(at(no), no);
+    // A refusal later in the same call writes no patch.
+    assert.equal(run('git checkout -- a.txt && git stash').code, 2);
+    assert.equal(patches(), before);
+    // With no TMPDIR to save into, it stays refused.
+    assert.ok(tripwire({ tool_name: 'Bash', tool_input: { command: 'git checkout -- a.txt' }, cwd: wt }, { ...c, env: {} }));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
 });

@@ -270,11 +270,11 @@ test('helper is executable', () => assert.equal(execFileSync(new URL('./run.sh',
 });
 
 test('a new case after a top-level await is judged red on the base, never passed for the cases that did run (#1724)', () => {
-  // #1399's thread-identity.test.ts: a test, then `await` setup, then the new case. With --test-force-exit node
+  // #1399's thread-identity.test.ts: a test, then `await` setup (a server's listen), then the new case. With --test-force-exit node
   // ended the file once the first test was done, before the new case was registered, and the unnamed case read as a pass.
   const dir = repo('await');
   writeFileSync(join(dir, 'math.ts'), 'export const double = (n: number) => n * 2 + 0;\n');
-  writeFileSync(join(dir, 'test', 'math.test.ts'), "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\nimport { double } from '../math.ts';\n\ntest('doubles', () => assert.equal(double(2), 4));\n\nconst ready = await Promise.resolve(true);\n\ntest('negative zero doubles to zero', () => assert.ok(ready && Object.is(double(-0), 0)));\n");
+  writeFileSync(join(dir, 'test', 'math.test.ts'), "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\nimport { double } from '../math.ts';\n\ntest('doubles', () => assert.equal(double(2), 4));\n\nconst s = (await import('node:http')).createServer();\nawait new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.close())));\n\ntest('negative zero doubles to zero', () => assert.ok(Object.is(double(-0), 0)));\n");
   commit(dir);
   const r = check(dir);
   assert.match(r.stdout, /^red +test\/math\.test\.ts › negative zero doubles to zero$/m, r.stdout + r.stderr);

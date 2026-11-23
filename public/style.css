@@ -415,7 +415,7 @@ html.frame-topbar .frame-nav { display: inline-flex; }
   transform: translateX(-50%); display: flex; align-items: center; gap: 0.5rem; max-width: calc(100vw - var(--citadel-rail, 0px) - 1.5rem); box-sizing: border-box; box-shadow: 0 4px 12px rgb(0 0 0 / 0.12); }
 .frame-update > span { min-width: 0; }
 .frame-update .cui-btn { flex: none; app-region: no-drag; }
-@media (max-width: 800px) { .frame-update { left: 50%; max-width: calc(100vw - 1.5rem); } }
+@media (max-width: 800px) { .frame-update { left: 50%; width: calc(100vw - 1.5rem); max-width: 26rem; } .frame-update > span { flex: 1; } }
 /* The frame's .cui-topbar as the window's drag regions (#667, frames.js mirrorBar): invisible, and takes no clicks. */
 .frame-drag { position: fixed; pointer-events: none; }
 .frame-drag > div { position: absolute; }

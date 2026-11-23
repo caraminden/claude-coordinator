@@ -4,6 +4,7 @@
 import { execFile } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pickFor } from '../public/model-table.js';
 import { APP_NAME } from './appname.ts';
 import { pacificDay } from './pacific.ts';
 import { landPhase } from './land.ts';
@@ -29,7 +30,7 @@ export async function approveHostTool(app: App, askingId: number, t: HostTool, b
     const scheme = asking && store.getProject(asking.project_id);
     const citadel = store.getProject(GLOBAL_OWNER);
     if (!citadel?.repo_dir) return tell(`${byHand ? 'Approved' : `Installed ${label}`}, but there's no ${APP_NAME} scheme repo to list it in: tell your Taskmaster.`);
-    const { id, number, cwd } = await app.newMinion(citadel, { title: `List host tool ${label}`, props: { type: 'chore' } }, APP_NAME);
+    const { id, number, cwd } = await app.newMinion(citadel, { title: `List host tool ${label}`, props: { type: 'chore' }, ...pickFor('chore') }, APP_NAME);
     const chore = { ...store.getTicket(id)!, cwd };
     const file = join(cwd, MANIFEST);
     writeFileSync(file, manifestText(withTool(readManifest(file), { ...t, approved_by: by, approved_on: pacificDay(Date.now()), asked_by: `${scheme?.name ?? '?'} #${asking?.number ?? '?'}` })));

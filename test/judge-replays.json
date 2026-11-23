@@ -18,12 +18,12 @@
     "summary": "23 as before, 1 new, 4 gone"
   },
   "flake-counter": {
-    "hash": "1d5f69214da21a37",
-    "at": "2026-11-22",
+    "hash": "cae84b38872376d7",
+    "at": "2026-11-23",
     "days": 3,
-    "inputs": "288 passes over 12 schemes: their retro logs, land-recorded flakes and minions",
-    "hits": 24,
-    "real": 46,
-    "summary": "22 as before, 2 new, 10 gone"
+    "inputs": "288 passes over 15 schemes: their retro logs, land-recorded flakes and minions",
+    "hits": 27,
+    "real": 38,
+    "summary": "27 as before, 0 new, 3 gone"
   }
 }

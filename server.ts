@@ -1472,7 +1472,7 @@ if (!BOOT_CHECK && !PREVIEW) every('fast mode', 30_000, () => fastMode.tick());
 const flakeFixes = new FlakeFixes({
   store, sharedDir: (id) => projectSharedDir(DATA_DIR, id),
   start: judged('flake-counter', 'start', async (project, brief) => {
-    const { id } = await newMinion(project, { title: brief.title, props: { type: 'bug' } }, APP_NAME);
+    const { id } = await newMinion(project, { title: brief.title, props: { type: 'bug' }, model: brief.model, effort: brief.effort }, APP_NAME);
     store.updateTicket(id, { person_id: project.owner_id ?? null });
     runner.emit(id, 'note', { text: 'Started by the flaky-test rule (a third sighting in 7 days, or a held fix that flaked again): the Test health tab shows its owner, age and clean runs.' });
     await heldStarts.start({ ticket: id, from: APP_NAME, message: brief.message, opts: { brief: true } }, () => runner.send(id, APP_NAME, brief.message, [], { brief: true }));

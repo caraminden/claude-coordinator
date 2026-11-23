@@ -9,6 +9,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { intermittentTier } from '../public/model-table.js';
 import { pacificStamp } from './pacific.ts';
 import type { Job, Run } from './ci-health.ts';
 import type { FlakeFix, Project, Store } from './db.ts';
@@ -30,7 +31,7 @@ export interface FlakeFixDeps {
   /** The scheme's shared folder, where retro-log/ is; null for a scheme with none. */
   sharedDir: (projectId: number) => string | null;
   /** Start the fix minion (server.ts's newMinion and its first message); its id. */
-  start: (project: Project, brief: { title: string; message: string }) => Promise<{ id: number }>;
+  start: (project: Project, brief: { title: string; message: string; model: string; effort: string }) => Promise<{ id: number }>;
   /** The flake-proof workflow's runs on a branch, and a run's jobs (CiHealth.workflowRuns and runJobs); null when GitHub won't say. */
   runs: (project: Project, branch: string) => Promise<Run[] | null>;
   jobs: (project: Project, run: Run) => Promise<Job[] | null>;
@@ -207,7 +208,7 @@ export class FlakeFixes {
       }
       try {
         const count = store.flakeCounts(project.id, now - FLAKE_WINDOW_MS, 1000).find((f) => f.file === file)?.count ?? sights.length;
-        const m = await this.d.start(project, flakeBrief(file, count, store.flakeDetails(project.id, file)));
+        const m = await this.d.start(project, { ...flakeBrief(file, count, store.flakeDetails(project.id, file)), ...intermittentTier() });
         store.updateFlakeFix(id, { ticket_id: m.id });
         started++;
       } catch (err: any) {

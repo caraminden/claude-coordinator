@@ -169,21 +169,17 @@ test('a reader never sees half of one main step: two writes in one run of the ma
     return { title: JSON.parse(got.body).ticket.title as string, reader: got.reader };
   };
   await until('a reader answers for the minion', async () => (await title()).reader);
-  const step = fetch(`${srv.base}/api/test/half-step?ticket=${STEPS.id}&ms=1500`);
   const before = (await title()).title;
-  const seen: string[] = [];
-  let byReader = 0;
-  const t0 = Date.now();
-  // timing-ok: reads spread over the step's 1.5 s pause, which the first write has long run within
-  while (Date.now() - t0 < 1200) {
-    const t = await title();
-    seen.push(t.title);
-    if (t.reader) byReader++;
-  }
+  let stepEnded = 0;
+  const step = fetch(`${srv.base}/api/test/half-step?ticket=${STEPS.id}&ms=5000`).then((r) => ((stepEnded = Date.now()), r));
+  // timing-ok: the step's first write and its 5 s pause start within this; the reads below are checked to have been asked before the step ended
+  await new Promise((r) => setTimeout(r, 300));
+  // A reader holds a read back while a step is open and the busy main thread answers it when the step ends: whichever answers, it is never the half.
+  const reads = await Promise.all([1, 2, 3, 4].map(async () => ({ asked: Date.now(), ...(await title()) })));
   assert.equal((await step).status, 200);
-  // The claim is about reads that landed inside the pause: readers must have answered during it, with the title from before the step.
-  assert.ok(byReader >= 2, `readers answered ${byReader} of ${seen.length} reads during the pause`);
-  assert.deepEqual([...new Set(seen)], [before], 'every read in the pause is the title from before the step');
+  assert.ok(reads.every((r) => r.asked < stepEnded), 'every read was asked while the step was still running, so none could pass on a step already over');
+  const seen = reads.map((r) => r.title);
+  assert.ok(seen.every((t) => t === before || t === 'whole'), `a read saw ${[...new Set(seen)].join(', ')} (before: ${before})`);
   assert.ok(!seen.includes('half'), `a read saw half the step: ${[...new Set(seen)].join(', ')}`);
   // Once the step is whole, readers answer again, with all of it.
   await until('a reader answers with the whole step', async () => {

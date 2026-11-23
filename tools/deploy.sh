@@ -409,7 +409,7 @@ live_by() { echo "live by about $(TZ=America/Los_Angeles date -d "@$(($1 + 60))"
 # Returns 0 while it holds. <state>/hold ("<latest go> <why>") tells the deploy and the riders when it expects to go.
 held_since='' held_total=0 R_HOLD=''
 # Ends a hold that didn't run out: the box eased, or a turn started (its own wait follows, and a later starved look holds
-# afresh). The first hold is the one reported.
+# again with what is left of HOLD). The first hold is the one reported.
 unhold() {
   rm -f "$STATE/hold"
   [ -z "$held_since" ] || [ -n "$R_HOLD" ] || R_HOLD="held $((SECONDS - held_since)) s for a starved box"

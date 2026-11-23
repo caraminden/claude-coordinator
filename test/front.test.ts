@@ -171,8 +171,8 @@ test('a reader never sees half of one main step: two writes in one run of the ma
   await until('a reader answers for the minion', async () => (await title()).reader);
   const before = (await title()).title;
   let stepEnded = 0;
-  const step = fetch(`${srv.base}/api/test/half-step?ticket=${STEPS.id}&ms=5000`).then((r) => ((stepEnded = Date.now()), r));
-  // timing-ok: the step's first write and its 5 s pause start within this; the reads below are checked to have been asked before the step ended
+  const step = fetch(`${srv.base}/api/test/half-step?ticket=${STEPS.id}&ms=2000`).then((r) => ((stepEnded = Date.now()), r));
+  // timing-ok: the step's first write and its 2 s pause start within this; the reads below are checked to have been asked before the step ended
   await new Promise((r) => setTimeout(r, 300));
   // A reader holds a read back while a step is open and the busy main thread answers it when the step ends: whichever answers, it is never the half.
   const reads = await Promise.all([1, 2, 3, 4].map(async () => ({ asked: Date.now(), ...(await title()) })));

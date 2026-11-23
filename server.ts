@@ -1772,9 +1772,8 @@ async function staticTable(assets: Map<string, Buffer>, version: string, hashes:
   const files = Object.fromEntries(await Promise.all([...assets].map(async ([name, body]) => [name, await file(name, name === 'sw.js' ? sw(false) : body)] as const)));
   return { files, darkManifest: await file('manifest.webmanifest', dark), swOff: await file('sw.js', sw(true)), dataDir: DATA_DIR };
 }
-/** `kit`: asked for as Citadel UI's, under /apps/_citadel/, which answers with an ETag. */
-async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string, kit = false) {
-  const a = STATICS && staticAnswer(STATICS, path === '/' ? 'index.html' : path.replace(/^\//, ''), kit, req.headers);
+async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
+  const a = STATICS && staticAnswer(STATICS, path === '/' ? 'index.html' : path.replace(/^\//, ''), req.headers);
   if (!a) throw new HttpError(404, 'Not found');
   res.writeHead(a.status, a.headers).end(a.body);
 }
@@ -1927,7 +1926,7 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
     // A contraption's own host is the proxy's alone, besides Citadel UI's files: none of Citadel's pages or API.
     if (apps.onAppHost(req)) {
       const path = (req.url ?? '/').split('?')[0];
-      if (KIT_FILE.test(path) && (req.method === 'GET' || req.method === 'HEAD')) await serveStatic(req, res, path.slice('/apps/_citadel'.length), true);
+      if (KIT_FILE.test(path) && (req.method === 'GET' || req.method === 'HEAD')) await serveStatic(req, res, path.slice('/apps/_citadel'.length));
       else apps.serve(req, res);
       return;
     }
@@ -1949,7 +1948,7 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
       await routes(app, req, res, url, session);
     } else if (KIT_FILE.test(url.pathname)) {
       // The app rail, phone drawers (and their types), the Alt+` switcher, drag to reorder and link handling (extlinks.js) the rail loads, colours and Citadel UI (public/ui/).
-      await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length), true);
+      await serveStatic(req, res, url.pathname.slice('/apps/_citadel'.length));
     } else if (url.pathname.startsWith('/apps/')) {
       apps.serve(req, res);
     } else if (preview) {

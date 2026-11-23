@@ -3,10 +3,12 @@
 // reader that dies or hangs is replaced and its request answered by the main thread; a read never misses a write the
 // writer is still holding. Real servers on one data folder, with the front thread on and off (CITADEL_FRONT=0).
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { connect } from 'node:net';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { READER_PATHS, READER_ROUTES } from '../src/front.ts';
@@ -216,6 +218,34 @@ const raw = (path: string, headers: Record<string, string> = {}, method = 'GET')
   req.on('error', reject).end();
 });
 const viaMainThread = (path: string) => `${path}${path.includes('?') ? '&' : '?'}citadel-test-reader=main`;
+
+test('a reload asks again and gets a 304 for every front-end file it already has, its tag the hash of the bytes it got (#1697)', { timeout: 60_000 }, async () => {
+  const sha = (b: Buffer) => `"${createHash('sha256').update(b).digest('hex').slice(0, 16)}"`;
+  for (const [path, headers] of [['/c/', {}], ['/c/app.js', {}], ['/c/style.css', { 'Accept-Encoding': 'gzip' }], ['/manifest.webmanifest', { 'Sec-CH-Prefers-Color-Scheme': 'dark' }], ['/sw.js', {}], ['/apps/_citadel/theme.css', {}]] as const) {
+    for (const ask of [raw, (p: string, h: Record<string, string>) => raw(viaMainThread(p), h)]) {
+      const first = await ask(path, { ...headers });
+      assert.equal(first.status, 200, path);
+      // never stale: the browser asks every time (no-cache), and a ship's new bytes are a new tag
+      assert.equal(first.headers['cache-control'], 'no-cache', path);
+      assert.equal(first.headers.etag, sha(first.headers['content-encoding'] ? gunzipSync(first.body) : first.body), path);
+      const again = await ask(path, { ...headers, 'If-None-Match': String(first.headers.etag) });
+      assert.equal(again.status, 304, path);
+      assert.equal(again.body.length, 0, path);
+      assert.equal((await ask(path, { ...headers, 'If-None-Match': '"0000000000000000"' })).status, 200, path);
+    }
+  }
+  // A variant is its own tag: the light manifest's tag doesn't get a 304 for the dark one.
+  const light = await raw('/manifest.webmanifest');
+  assert.equal((await raw('/manifest.webmanifest', { 'Sec-CH-Prefers-Color-Scheme': 'dark', 'If-None-Match': String(light.headers.etag) })).status, 200);
+  // Nor the service worker's: with the off switch on, the on worker's tag gets the off worker.
+  const on = await raw('/sw.js');
+  writeFileSync(join(srv.data, SHELL_OFF_FILE), '');
+  try {
+    const off = await raw('/sw.js', { 'If-None-Match': String(on.headers.etag) });
+    assert.equal(off.status, 200);
+    assert.notDeepEqual(off.body, on.body);
+  } finally { rmSync(join(srv.data, SHELL_OFF_FILE)); }
+});
 
 test("front-end files come from the front thread, the bytes and headers main sends, and while main is busy", { timeout: 60_000 }, async () => {
   const kit = await raw(viaMainThread('/apps/_citadel/theme.css'));

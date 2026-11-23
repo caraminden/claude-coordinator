@@ -3,6 +3,7 @@
 // read-only connection with the real router, Auth and access checks; everything else is piped as it is (bodies,
 // live streams, websocket upgrades) to the main thread, which listens on a local socket. This file loads no app code
 // and reads no database, so nothing here can block. Design: the shared folder's specs/reader-threads.md.
+import { createHash } from 'node:crypto';
 import { Worker, isMainThread, parentPort, receiveMessageOnPort, workerData } from 'node:worker_threads';
 import { Agent, createServer, request, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { connect, Server as NetServer, type Socket } from 'node:net';
@@ -82,12 +83,17 @@ export type StaticFile = { headers: Record<string, string>; body: Uint8Array; gz
  */
 export type Statics = { files: Record<string, StaticFile>; darkManifest: StaticFile; swOff: StaticFile; dataDir: string };
 const gzipped = promisify(gzip);
+/**
+ * Every file's ETag is the hash of the bytes it sends (#1697), so a reload revalidates (no-cache) and gets a 304 for
+ * what it has, while a ship's changed bytes are a new tag: never stale. Per variant, so the dark manifest and the off
+ * switch's worker never answer a 304 for the other one.
+ */
 export const readyFile = async (headers: Record<string, string>, body: Uint8Array): Promise<StaticFile> =>
-  ({ headers: { Vary: 'Accept-Encoding', ...headers }, body, gz: body.length >= MIN_GZIP_BYTES ? await gzipped(body, { level: 6 }) : null });
+  ({ headers: { Vary: 'Accept-Encoding', ...headers, ETag: `"${createHash('sha256').update(body).digest('hex').slice(0, 16)}"` }, body, gz: body.length >= MIN_GZIP_BYTES ? await gzipped(body, { level: 6 }) : null });
 
-/** The front-end file a request's URL names, and whether it was asked for as Citadel UI's (an ETag); null for anything else. */
-export function staticName(url: string, onAppHost: boolean): { name: string; kit: boolean } | null {
-  const kit = (path: string) => (KIT_FILE.test(path) ? { name: path.slice('/apps/_citadel/'.length), kit: true } : null);
+/** The front-end file a request's URL names (Citadel UI's under /apps/_citadel/ too); null for anything else. */
+export function staticName(url: string, onAppHost: boolean): string | null {
+  const kit = (path: string) => (KIT_FILE.test(path) ? path.slice('/apps/_citadel/'.length) : null);
   // A contraption's own host serves only Citadel UI's files of Citadel's.
   if (onAppHost) return kit(url.split('?')[0]);
   const own = ownPath(url);
@@ -97,22 +103,18 @@ export function staticName(url: string, onAppHost: boolean): { name: string; kit
     path = new URL(own?.url ?? url, 'http://localhost').pathname;
     decodeURIComponent(path);
   } catch { return null; }
-  return kit(path) ?? (path.startsWith('/api/') || path.startsWith('/apps/') ? null : { name: path === '/' ? 'index.html' : path.slice(1), kit: false });
+  return kit(path) ?? (path.startsWith('/api/') || path.startsWith('/apps/') ? null : path === '/' ? 'index.html' : path.slice(1));
 }
 
 /** The answer to a GET or HEAD for front-end file `name`, or null when there is no such file. One copy for both threads. */
-export function staticAnswer(s: Statics, name: string, kit: boolean, req: IncomingHttpHeaders): { status: number; headers: Record<string, string>; body: Uint8Array } | null {
+export function staticAnswer(s: Statics, name: string, req: IncomingHttpHeaders): { status: number; headers: Record<string, string>; body: Uint8Array } | null {
   if (!Object.hasOwn(s.files, name)) return null;
   let f = s.files[name];
   if (name === 'sw.js' && shellOff(s.dataDir)) f = s.swOff;
   if (name === 'manifest.webmanifest' && /dark/.test(String(req['sec-ch-prefers-color-scheme'] ?? ''))) f = s.darkManifest;
-  const headers = { ...f.headers };
-  // Contraptions' pages load these on every page: a 304 until a deploy changes them.
-  if (kit) {
-    headers.ETag = `"${headers['X-Front-Hash']}"`;
-    const asked = String(req['if-none-match'] ?? '').split(',').map((t) => t.trim().replace(/^W\//, ''));
-    if (asked.includes(headers.ETag) || asked.includes('*')) return { status: 304, headers, body: new Uint8Array() };
-  }
+  const headers = f.headers;
+  const asked = String(req['if-none-match'] ?? '').split(',').map((t) => t.trim().replace(/^W\//, ''));
+  if (asked.includes(headers.ETag) || asked.includes('*')) return { status: 304, headers, body: new Uint8Array() };
   if (f.gz && /\bgzip\b/.test(String(req['accept-encoding'] ?? ''))) return { status: 200, headers: { ...headers, 'Content-Encoding': 'gzip' }, body: f.gz };
   return { status: 200, headers, body: f.body };
 }
@@ -408,7 +410,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
   const serveStatic = (req: IncomingMessage, res: ServerResponse) => {
     if ((req.method !== 'GET' && req.method !== 'HEAD') || req.headers.upgrade || (testHooks && /[?&]citadel-test-reader=main\b/.test(req.url ?? ''))) return false;
     const file = staticName(req.url ?? '/', appHost(req, opts.appsDomain) !== null);
-    const a = file && caughtUp() && statics && staticAnswer(statics, file.name, file.kit, req.headers);
+    const a = file && caughtUp() && statics && staticAnswer(statics, file, req.headers);
     if (!a) return false;
     res.writeHead(a.status, { ...a.headers, 'X-Citadel-Answered': 'front' });
     res.end(a.body);

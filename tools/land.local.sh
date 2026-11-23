@@ -323,9 +323,11 @@ land_preflight() {
 }
 
 # Core hook (MERGES src/db.ts hook): Citadel's numbers_git driver, ship-numbers.ts merge; git's own merge without it.
+# CITADEL_TOOLS: the tools/ folder, when land.sh runs the core as its merge driver (#1418) from where tools/ isn't.
 land_merge() {
-  if [ -f tools/ship-numbers.ts ]; then
-    tools/citadel-node --no-warnings tools/ship-numbers.ts merge "$1" "$2" "$3" "$4"
+  local t=${CITADEL_TOOLS:-tools}
+  if [ -f "$t/ship-numbers.ts" ]; then
+    "$t/citadel-node" --no-warnings "$t/ship-numbers.ts" merge "$1" "$2" "$3" "$4"
   elif [ -z "${LAND_MERGE_DIFF3:-}" ]; then
     git merge-file "$3" "$2" "$4"
   else

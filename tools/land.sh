@@ -284,16 +284,18 @@ under_of() {
   done < <(cat "$state/taken-back" 2>/dev/null || true)
   echo "$u"
 }
-# Numbers at ship time (#1221): git with tools/ship-numbers.ts as the merge driver for src/db.ts, so a SCHEMA_HISTORY
-# number main took while this waited goes to the branch's next free one instead of conflicting. <main side> names which
-# side of the merge is main or the build (ours for merge-tree and a rebase, theirs for --build's merge of main): its
-# numbers stay. Only land.sh's own merges get it, not a person's rebase. A tools/ that lacks the driver (mid-rebase
-# onto a build without it) merges as git would.
+# Ship-time merges (#1221, #1418): git with the kit core's merge driver (tools/land-core.sh --merge, by the MERGES rules
+# in land.local.sh) for the files tools/ship-numbers.attributes names. A SCHEMA_HISTORY number main took while this
+# waited goes to the branch's next free one (ship-numbers.ts), MIGRATIONS lines both sides added are kept, a prompt
+# budget both raised becomes main's plus the branch's raise, and the prompt baseline takes main's copy, measured again
+# below. What a rule isn't sure of conflicts as before. <main side> names which side of the merge is main or the build
+# (ours for merge-tree and a rebase, theirs for --build's merge of main). Only land.sh's own merges get it, not a
+# person's rebase. A tools/ that lacks the core (mid-rebase onto a build without it) renumbers only, or merges as git would.
 numbers_git() {
   local side=$1
   shift
-  git -c "core.attributesFile=$tools/ship-numbers.attributes" -c "merge.citadel-numbers.name=SCHEMA_HISTORY numbers at ship time" \
-    -c "merge.citadel-numbers.driver=if [ -f '$tools/ship-numbers.ts' ]; then '$tools/citadel-node' --no-warnings '$tools/ship-numbers.ts' merge $side %O %A %B; else git merge-file %A %O %B; fi" "$@"
+  git -c "core.attributesFile=$tools/ship-numbers.attributes" -c "merge.citadel-numbers.name=land.sh's ship-time merges" \
+    -c "merge.citadel-numbers.driver=if [ -f '$tools/land-core.sh' ]; then CITADEL_TOOLS='$tools' bash '$tools/land-core.sh' --merge $side %O %A %B %P; elif [ -f '$tools/ship-numbers.ts' ]; then '$tools/citadel-node' --no-warnings '$tools/ship-numbers.ts' merge $side %O %A %B; else git merge-file %A %O %B; fi" "$@"
 }
 # A conflict in src/db.ts the driver couldn't sort out: the number to take, from <onto>'s history.
 number_hint() {
@@ -396,7 +398,8 @@ if [ "$mode" = build ]; then
   ! git cat-file -e HEAD:build-claims.md 2>/dev/null || refuse "build-claims.md, the build's claims, is still on $branch and would ship to main: git rm it, commit, run tools/land.sh --into $build (a docs-only merge), then this again. Nothing landed"
 fi
 now_again=${LAND_RETRY_NOW:-}
-unset LAND_REBASED LAND_REDO LAND_BUILD LAND_RETRY_NOW LAND_RETRIED LAND_FLAKE_KEPT
+pre=${LAND_PRE:-} # the branch as it was before the rebase, from the copy that rebased (the prompt baseline, below)
+unset LAND_REBASED LAND_REDO LAND_BUILD LAND_RETRY_NOW LAND_RETRIED LAND_FLAKE_KEPT LAND_PRE
 if [ -n "$check" ]; then
   under=$(under_of)
   case $mode in
@@ -674,6 +677,7 @@ if [ "$mode" = build ] && [ "$redo" = 1 ]; then
   git reset -q --keep "$base" # main went back while this waited: main is merged in again without what came off it
 fi
 under=$(under_of) # under_of above: a commit that came off main, which the rebase leaves behind
+[ -n "$pre" ] || pre=$(git rev-parse HEAD)
 case $mode in
   land)
     [ -z "$under" ] || say "$branch sits on $(git log -1 --format='%h "%s"' "$under"), which came off main when its deploy was rolled back: leaving it behind"
@@ -716,7 +720,7 @@ esac
 # Bash goes on reading the file it started from, so a rebase that replaced land.sh would land with the old one (#500):
 # go on in the rebased one instead. It keeps the lock on fd 9 (and the build's on fd 6), and its own rebase finds
 # nothing to do. Not --into: that holds no deploy lock for the copy to find, and only tests and moves a branch.
-[ "$mode" = into ] || [ -n "$quiet" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} LAND_BUILD=$build exec bash "$tools/land.sh" "${args[@]}"
+[ "$mode" = into ] || [ -n "$quiet" ] || [ "$(stat -c %d:%i "$tools/land.sh")" = "$self" ] || LAND_REBASED=1 LAND_REDO=${redo:+2} LAND_BUILD=$build LAND_PRE=$pre exec bash "$tools/land.sh" "${args[@]}"
 
 # ADR numbers at ship time (#1221): a docs/adr/NNNN-*.md this branch adds whose number main (a feeder: the build) took
 # while it waited goes to the next free number, with its links and the branch's own "ADR NNNN" lines, in one commit.
@@ -730,6 +734,15 @@ if [ -n "$adr_onto" ] && [ -f "$tools/ship-numbers.ts" ]; then
     git commit -q -m "${n:+#$n: }$(head -n 1 <<<"$renamed")" -m "Numbered at ship time by tools/land.sh (#1221):" -m "$renamed"
     [ "$mode" != into ] || claims_check main # its link rewrites may reach a file another feeder claims
   fi
+fi
+# The prompt baseline (#1418): a branch that changed it got main's copy from the merge (numbers_git above), so it is
+# measured again on the merged prompts. shortcut: not for --build, whose merge of main keeps main's baseline (it only
+# lists what grew, it never fails a test); upgrade if a build's baseline going stale bites.
+if [[ $mode = land || $mode = into ]] && [ -f test/prompt-budget.test.ts ] && ! git diff --quiet "$(git merge-base "$adr_onto" "$pre")" "$pre" -- test/prompt-baseline.json; then
+  PROMPT_BASELINE=write "$tools/citadel-node" --no-warnings --test test/prompt-budget.test.ts >/dev/null 2>&1 </dev/null || true
+  git add test/prompt-baseline.json
+  n=${branch#ticket/} n=${n%%-*}
+  git diff --cached --quiet || git commit -q -m "${n:+#$n: }test/prompt-baseline.json measured again at ship time"
 fi
 
 # Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true used to read "#N: ..." as a comment

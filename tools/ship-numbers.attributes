@@ -1,1 +1,3 @@
 src/db.ts merge=citadel-numbers
+test/prompt-budget.test.ts merge=citadel-numbers
+test/prompt-baseline.json merge=citadel-numbers

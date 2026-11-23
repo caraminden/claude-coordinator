@@ -20,9 +20,9 @@ git rev-parse --verify -q "$base" >/dev/null || { echo "no local branch '$base':
 echo "branch: $(git rev-parse --abbrev-ref HEAD)  head: $(git rev-parse --short HEAD)  base: $base $(git rev-parse --short $base)"
 # A feeder's reviewers read the build's tip (section 2, "A feeder"): say what other feeders merged since it started.
 case $base in build/*)
-  behind=$(git rev-list --count HEAD.."$base")
+  behind=$(git rev-list --count --no-merges HEAD.."$base")
   if [ "$behind" != 0 ]; then
-    echo "BEHIND: $base has $behind commits this branch lacks (other feeders' merges). Rebase onto it before the review (section 2, \"A feeder\"); newest first, at most 15:"
+    echo "BEHIND: $base has $behind commits this branch lacks (other feeders' merges, and main if the build took it in). Rebase onto it before the review (section 2, \"A feeder\"); newest first, at most 15:"
     git log --oneline --no-merges HEAD.."$base" | cap 15
   fi ;;
 esac

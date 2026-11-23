@@ -49,7 +49,8 @@ Before your final test run, rebase onto your base once (the one "take a newer ba
 
 **Alongside the ship.** A change qualifies when how it ships is `hand_off_land` (the server runs
 the ship and the call returns at once), the Shipping line in your prompt lets a low change ship
-with no go and no try first, the sizing is Light, and the file list alone says low.
+with no go and no try first, the sizing is Light, the branch is no feeder's (a feeder reviews
+before it merges in: 2, "A feeder"), and the file list alone says low.
 `git diff --name-only main...HEAD` shows only front-end files, `README.md`, docs outside
 `docs/rubrics/` and `docs/design-system/`, and test files that exercise no high-risk file, and it
 shows none of: a file on Project facts' high-risk-by-file or medium-at-least lists, a file under
@@ -85,8 +86,8 @@ feeders had closed). Right before starting the review Grunts:
 1. Run `git rebase build/<n>`. When it brought commits in (the facts' `BEHIND:` line lists them),
    re-run the tests you touched.
 2. Every reviewer's brief gets the same two lines: the kit's reviewer and each of the scheme's own
-   reviewing agents your diff triggers (Project facts or the "Kit reviewers" line names them, with
-   their trigger paths). The lines are: the change is `git diff build/<n>...HEAD`, and "The other
+   reviewing agents your diff triggers (the "Kit reviewers" line names them; Project facts or the
+   agent's own description says which diffs each one is for). The lines are: the change is `git diff build/<n>...HEAD`, and "The other
    feeders' work this change now sits on: `git log --oneline --no-merges main..build/<n>`; check
    where this change meets their code." (That `main` stays main: it is what the build adds.)
 3. Fix real findings in your branch (section 3) before you merge in. A finding in another feeder's code

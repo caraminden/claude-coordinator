@@ -163,6 +163,28 @@ test('--build: main comes in by merge, the build ships through the gate, and bui
   assert.equal(b.has('refs/heads/build/1', b.origin), false, 'and on origin');
 });
 
+// #1698: a build holds feeders' commits and the build minion's, some "#N: ..." and some not, and rewording them rewrites the
+// feeders' hashes, so --build skips the lost-title check that a plain ship keeps.
+test('--build ships a build whose commits mix "#N:" and plain titles; a plain ship with a lost title is still refused', () => {
+  const b = buildSetup();
+  writeFileSync(join(b.wts[0], 'f1.txt'), 'x\n');
+  git(b.wts[0], 'add', '-A');
+  git(b.wts[0], 'commit', '-qm', '#1: feeder');
+  assert.equal(b.run(1, '--into', 'build/1', 'f1.txt').status, 0);
+  git(b.wts[2], 'reset', '-q', '--hard', 'build/1');
+  b.commit(b.wts[2], 'f3.txt', '3\n'); // "f3.txt: 3": no "#N" while a sibling has one
+  assert.equal(b.run(3, '--into', 'build/1', '--full').status, 0);
+  const res = b.run(3, '--build');
+  assert.doesNotMatch(res.stderr, /lost its #N: title/);
+  assert.equal(res.status, 0, res.stderr);
+  const plain = buildSetup();
+  writeFileSync(join(plain.wts[0], 'g.txt'), 'x\n');
+  git(plain.wts[0], 'add', '-A');
+  git(plain.wts[0], 'commit', '-qm', '#1: a');
+  plain.commit(plain.wts[0], 'h.txt', 'y\n');
+  assert.match(plain.run(1).stderr, /lost its #N: title/);
+});
+
 test('--build refuses a branch not at a build\'s tip, and one a merge of main ahead of it', () => {
   const b = buildSetup();
   const main = b.at('main');

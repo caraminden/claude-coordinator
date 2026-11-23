@@ -114,7 +114,7 @@ const wait = setInterval(() => {
 );
 chmodSync(fake, 0o755);
 
-test('a turn past 2x gets the ask once, in the chat and the turn, and past 4x its Taskmaster hears once', async () => {
+test('a turn past 2x gets the ask once, in the chat and the turn; its Taskmaster hears past 4x and each doubling, its owner past 10x', async () => {
   const store = new Store(join(root, 'test.db'));
   const project = store.createProject('Delve', null); // any scheme: the medians pool every scheme's minions
   const runner = new Runner(store, () => {}, () => ({}), fake);
@@ -160,8 +160,9 @@ test('a turn past 2x gets the ask once, in the chat and the turn, and past 4x it
 
   assert.equal(cards.length, 0);
 
-  // A later turn to $60 asks no more, but passes 8x ($40, the Taskmaster again) and 10x ($50, the owner's card) (#1672).
-  writeFileSync(script, JSON.stringify({ before: 3, after: 0 }));
+  // A later turn to $60 (the fake's turns record no cost, so each counts from $0) asks no more, but passes 8x ($40, the
+  // Taskmaster again) and 10x ($50, the owner's card) (#1672).
+  writeFileSync(script, JSON.stringify({ before: 6, after: 0 }));
   runner.send(id, 'Josh', 'again');
   await until('the second turn to end', () => store.listEvents(id).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'result').length === 2 && !runner.isRunning(id));
   assert.equal(notes().length, 1);
@@ -172,7 +173,7 @@ test('a turn past 2x gets the ask once, in the chat and the turn, and past 4x it
 
   // Nor after a dismissal and a reopen (2R1): the marks outlive the close. $70 is short of 16x's $80.
   await runner.close(id, 'Dismissed.');
-  writeFileSync(script, JSON.stringify({ before: 1, after: 0 }));
+  writeFileSync(script, JSON.stringify({ before: 7, after: 0 }));
   runner.send(id, 'Josh', 'reopened');
   await until('the reopened turn to end', () => store.listEvents(id).filter((e) => e.kind === 'claude' && JSON.parse(e.data).type === 'result').length === 3 && !runner.isRunning(id));
   assert.equal(notes().length, 1);

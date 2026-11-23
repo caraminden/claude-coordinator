@@ -256,6 +256,8 @@
   flex: none; display: grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; font-weight: 700;
   color: var(--cui-tone); background: color-mix(in srgb, var(--cui-tone) 15%, var(--citadel-surface));
 }
+/* Each of these sets a display that would beat [hidden]: chat.js hides its own empty line (a .cui-empty) with it (#1689). */
+:where(.cui-loading[hidden], .cui-failed[hidden], .cui-empty[hidden]) { display: none; }
 :where(.cui-empty-text) { display: flex; flex-direction: column; min-width: 0; }
 :where(.cui-empty-text > span) { color: var(--citadel-muted); }
 :where(.cui-tabs) { display: flex; gap: var(--citadel-space-1); border-bottom: 1px solid var(--citadel-border); }

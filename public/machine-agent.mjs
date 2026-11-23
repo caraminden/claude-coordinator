@@ -453,7 +453,7 @@ export function leaveScreenLine(ticket) {
   }
 }
 
-/** The live waiters, in arrival order, dropping dead ones. */
+/** The live waiters, CI jobs first and then by arrival, dropping dead ones. */
 export function screenLine(file) {
   const dir = screenLineDir(file);
   let names;

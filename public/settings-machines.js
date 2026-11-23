@@ -22,7 +22,7 @@ function machineStatusText(m) {
   return `${reason} · ${m.when.label} ${m.when.label === 'added' ? new Date(m.when.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ago(m.when.at)}`;
 }
 
-/** A test box's screen (#1422): who has it, then its line in arrival order (CI jobs and minions alike). */
+/** A test box's screen (#1422): who has it, then its line (CI jobs first, then by arrival). */
 function machineScreen(sc) {
   const user = (u, when) => `${u.what} for ${u.who}${u.since ? `, ${when} ${ago(u.since)}` : ''}`;
   return h('div', { class: 'small' },

@@ -1272,7 +1272,7 @@ test('a push to heads/main is refused like refs/heads/main: git completes it (#1
   assert.equal(bash('git push origin ticket/9:heads-up'), null);
 });
 
-test('a dirty file checked out or restored: its diff is saved under the turn\'s TMPDIR, then the call runs (#1716)', () => {
+test('a dirty file checked out or restored: its diff is saved under the turn\'s TMPDIR, then the call runs (#1716)', async () => {
   const tmp = mkdtempSync(join(tmpdir(), 'tripwire-1716-'));
   const turnTmp = join(tmp, 'projects/2/tmp/9');
   const c = { ...cfg, home: join(tmp, 'home/me'), data: tmp, env: { TMPDIR: turnTmp } };
@@ -1302,6 +1302,11 @@ test('a dirty file checked out or restored: its diff is saved under the turn\'s 
     // The habit the digest counted: put back a file you edited. The patch holds the edit, and puts it back.
     writeFileSync(join(wt, 'a.txt'), 'mine\n');
     const patch = saved('git checkout -- a.txt');
+    // Turns run it through the one hook runner: the note reaches the turn from there too.
+    const { hookRun } = await import('../src/hook-run.ts');
+    const merged = await hookRun(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git checkout -- a.txt', description: WHY }, cwd: wt }), { tripwire: c, wording: {}, schemeRefs: {} });
+    assert.equal(merged.code, undefined);
+    assert.match(JSON.parse(merged.stdout ?? '{}').hookSpecificOutput?.additionalContext ?? '', /Saved the uncommitted changes of a\.txt/);
     assert.match(readFileSync(patch, 'utf8'), /^\+mine$/m);
     sh('git checkout -- a.txt');
     sh(`git apply ${patch}`);

@@ -73,6 +73,14 @@ test('a step down, or a change by nobody above the first pick, is not trouble (#
   assert.equal((await s.retros.tick()).length, 1);
 });
 
+test('the default model reads as Opus: default to Sonnet is a step down (#1796)', async () => {
+  const s = setup();
+  const x = s.minion();
+  s.store.addPick(x.id, null, 'medium', 'Taskmaster', 'start', T0 - 4 * H); // the first pick was the table's; a null model follows
+  s.store.addPick(x.id, 'claude-sonnet-5-5', 'medium', 'Taskmaster', 'cheaper', T0);
+  assert.deepEqual(await s.retros.tick(), []);
+});
+
 test('a tick starts at most PER_TICK post-mortems (#1796)', async () => {
   const s = setup();
   for (let i = 0; i < PER_TICK + 2; i++) s.over(s.minion().id);

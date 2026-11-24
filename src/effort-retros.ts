@@ -190,10 +190,9 @@ const WHAT: Record<Trouble, string> = { budget: 'went past twice its budget', st
 
 const MODEL_RANK = ['haiku', 'sonnet', 'opus', 'fable'];
 const EFFORT_RANK = ['low', 'medium', 'high', 'xhigh', 'max'];
-const rank = (list: string[], v: string | null, by: (x: string) => boolean) => list.findIndex((x) => by(x) && v != null && (v.includes(x) || v === x));
-/** Whether `to` is a higher tier than `from`: a better model, or the same model at more effort. */
+/** Whether `to` is a higher tier than `from`: a better model, or the same model at more effort. A null model is the default, Opus (family()). */
 function stepsUp(from: { model: string | null; effort: string | null }, to: { model: string | null; effort: string | null }): boolean {
-  const [a, b] = [rank(MODEL_RANK, from.model, () => true), rank(MODEL_RANK, to.model, () => true)];
+  const [a, b] = [MODEL_RANK.indexOf(family(from.model) ?? ''), MODEL_RANK.indexOf(family(to.model) ?? '')];
   if (a !== b) return b > a;
   return EFFORT_RANK.indexOf(to.effort ?? '') > EFFORT_RANK.indexOf(from.effort ?? '');
 }

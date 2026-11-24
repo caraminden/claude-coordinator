@@ -11,17 +11,26 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 
 type Defect = { fix: number; title: string; why: string; cause: string; foundBy: string; fixCommits: string[] };
-type Case = { id: string; kind: 'escape' | 'clean'; origin: number; title: string; lines: number; base: string; head?: string; picks?: string[]; defects?: Defect[]; taught?: string };
+type Plant = { file: string; from: string; to: string };
+// An escape or a planted case has defects to name; a clean one or a control has none. A planted case is a real small commit
+// (`head`, on `base` its parent) with `plant` applied to it: one diff-visible bug a reviewer reading the diff should name (#1738).
+type Case = { id: string; kind: 'escape' | 'clean' | 'planted' | 'control'; origin: number; title: string; lines: number; base: string; head?: string; picks?: string[]; defects?: Defect[]; taught?: string; plant?: Plant[]; plantKind?: string; set?: string };
+const hasDefects = (c: Case) => c.kind === 'escape' || c.kind === 'planted';
 type Arm = { name: string; model: string; effort: string; lens?: string };
 type Meta = { cost: number; ms: number; turns: number; models: string[]; error?: string };
 type Verdict = { fix: number; verdict: 'named' | 'near' | 'no'; finding: number | null; why: string };
 
-const SET: Case[] = JSON.parse(readFileSync(join(HERE, 'set.json'), 'utf8')).cases;
+/** `--set escapes|planted|all` (default all), or the path of a set file (its group is its file name). */
+function loadSet(which: string): Case[] {
+  const files = which === 'all' ? ['set.json', 'planted.json'] : which === 'escapes' ? ['set.json'] : which === 'planted' ? ['planted.json'] : [resolve(which)];
+  return files.flatMap((f) => (JSON.parse(readFileSync(resolve(HERE, f), 'utf8')).cases as Case[]).map((c) => ({ ...c, set: f === 'set.json' ? 'escapes' : 'planted' })));
+}
 const ARMS: Arm[] = JSON.parse(readFileSync(join(HERE, 'arms.json'), 'utf8')).arms;
 const GRUNT_LINE = 'Citadel, Scheme, Taskmaster, Minion and Grunt are playful names for how the work is organised, not a comment on ability. Work as a careful, senior engineer: think things through, check your work, and push back when something looks wrong.';
 
 const argv = process.argv.slice(2);
 const arg = (k: string) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
+const SET = loadSet(arg('--set') ?? 'all');
 const git = (...a: string[]) => execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 << 20 });
 const KEEP = /^(PATH|HOME|USER|LOGNAME|LANG|LC_\w+|TERM|SHELL|TZ|CLAUDE_CONFIG_DIR|ANTHROPIC_\w+)$/;
 const cleanEnv = (tmp: string) => ({ ...Object.fromEntries(Object.entries(process.env).filter(([k]) => KEEP.test(k))), TMPDIR: tmp, CLAUDE_CODE_TMPDIR: tmp });
@@ -30,7 +39,9 @@ const cleanEnv = (tmp: string) => ({ ...Object.fromEntries(Object.entries(proces
  *  shipped. Only those two refs and no remote, so nothing later (the fix above all) shows in its log. */
 function workspace(c: Case, out: string): string {
   const dir = join(out, 'ws', c.id);
-  if (existsSync(join(dir, '.ready'))) return dir;
+  // A workspace is reused while the case's own text is unchanged (a plant edited since needs a rebuild).
+  const stamp = JSON.stringify([c.base, c.head, c.picks, c.plant]);
+  if (existsSync(join(dir, '.ready')) && readFileSync(join(dir, '.ready'), 'utf8') === stamp) return dir;
   execFileSync('rm', ['-rf', dir]);
   git('clone', '-q', '--shared', '--no-checkout', REPO, dir);
   const g = (...a: string[]) => git('-C', dir, '-c', 'user.name=replay', '-c', 'user.email=replay@localhost', '-c', 'core.hooksPath=/dev/null', ...a);
@@ -38,6 +49,16 @@ function workspace(c: Case, out: string): string {
   let base = c.base, how = 'as shipped';
   g('checkout', '-q', '--detach', c.base);
   g('checkout', '-q', '-b', branch, c.head ?? c.base);
+  if (c.plant) {
+    // The plant goes into the head commit itself, so the reviewer's `git diff main...HEAD` has only the planted version and
+    // no commit says what was changed.
+    for (const p of c.plant) {
+      const file = join(dir, p.file), text = readFileSync(file, 'utf8');
+      if (text.split(p.from).length !== 2) throw new Error(`${c.id}: the plant's "from" text is in ${p.file} ${text.split(p.from).length - 1} times, not once`);
+      writeFileSync(file, text.replace(p.from, () => p.to));
+    }
+    g('commit', '-q', '-a', '--amend', '--no-edit');
+  }
   if (c.picks) {
     // Other work landed between its commits: replay them onto where it started; when that conflicts, take the last
     // one's tree with them reverted out as main and the change as one commit carrying their messages; when that
@@ -67,7 +88,7 @@ function workspace(c: Case, out: string): string {
   // Copy in what the two refs reach and drop the link to the repo's objects, so the fix can't be found by hash.
   g('repack', '-a', '-d', '-q');
   execFileSync('rm', ['-f', join(dir, '.git', 'objects', 'info', 'alternates')]);
-  writeFileSync(join(dir, '.ready'), '');
+  writeFileSync(join(dir, '.ready'), stamp);
   // Keep the marker out of the reviewer's `git status`.
   writeFileSync(join(dir, '.git', 'info', 'exclude'), '.ready\n', { flag: 'a' });
   return dir;
@@ -121,14 +142,15 @@ async function review(c: Case, arm: Arm, out: string, kit: string): Promise<void
 const countFindings = (text: string) => (text.match(/^\s*\**\d+\.?\**[.)]?\s*\**\s*(Must fix|Should fix)/gim) ?? []).length;
 
 /** What the fix changed: its commit messages and its non-test diff, capped. */
-function fixShape(d: Defect): string {
+function fixShape(d: Defect, c: Case): string {
+  if (c.plant) return `The bug was planted on purpose, in code this change added. What the change looked like before the plant, and after it:\n${c.plant.map((p) => `${p.file}\n--- original\n${p.from}\n--- planted\n${p.to}`).join('\n\n')}`;
   if (!d.fixCommits.length) return '(no commits found for the fix)';
   const log = git('-C', REPO, 'show', '-s', '--format=%s%n%b', ...d.fixCommits).trim();
   const diff = git('-C', REPO, 'show', '--format=', '--unified=2', ...d.fixCommits, '--', '.', ':!test/**', ':!**/*.test.*').split('\n');
   return `Commit messages:\n${log.slice(0, 3000)}\n\nCode diff (tests left out${diff.length > 260 ? ', first 260 lines' : ''}):\n${diff.slice(0, 260).join('\n')}`;
 }
 
-const JUDGE_RULES = `You judge whether a code review, written before a change shipped, named a defect that was found and fixed after it shipped. You don't know who wrote the review or how.
+const JUDGE_RULES = `You judge whether a code review, written before a change shipped, named a defect that was found and fixed after it shipped (or, for a planted defect, put into the change on purpose). You don't know who wrote the review or how.
 
 For each defect, answer one of:
 - named: one finding describes this defect: the same wrong behaviour on the same code path, so that acting on that finding would have fixed it (or a fix very like the real one). Its wording, severity or suggested fix can differ.
@@ -139,9 +161,9 @@ Be strict: the same file or area is not enough for named. Reply with JSON only, 
 
 async function judge(c: Case, arm: Arm, out: string, model: string): Promise<void> {
   const dir = join(out, arm.name, c.id);
-  if (c.kind !== 'escape' || existsSync(join(dir, 'judge.json')) || !existsSync(join(dir, 'review.md'))) return;
+  if (!hasDefects(c) || existsSync(join(dir, 'judge.json')) || !existsSync(join(dir, 'review.md'))) return;
   const reviewText = readFileSync(join(dir, 'review.md'), 'utf8').trim() || '(the review returned nothing)';
-  const defects = c.defects!.map((d) => `### Defect fixed by #${d.fix}: ${d.title}\nWhat went wrong: ${d.why}\n\n${fixShape(d)}`).join('\n\n');
+  const defects = c.defects!.map((d) => `### ${c.kind === 'planted' ? 'Planted defect' : `Defect fixed by #${d.fix}`}: ${d.title}\nWhat went wrong: ${d.why}\n\n${fixShape(d, c)}`).join('\n\n');
   const prompt = `${JUDGE_RULES}\n\n## The change reviewed\n#${c.origin}: ${c.title}\n\n## Defects found after it shipped\n\n${defects}\n\n## The review\n\n${reviewText}\n`;
   writeFileSync(join(dir, 'judge-prompt.md'), prompt);
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--model', model, '--effort', 'medium', '--tools', '', '--max-turns', '1',
@@ -158,46 +180,74 @@ async function pool<T>(items: T[], jobs: number, fn: (t: T) => Promise<void>) {
   await Promise.all(Array.from({ length: jobs }, async () => { for (let t = q.shift(); t !== undefined; t = q.shift()) await fn(t); }));
 }
 
-function report(out: string, arms: Arm[]): string {
+/** The numbers of one arm on one group of cases (escapes, planted); `summary.json` keeps them for tools/review-escapes/bench.ts. */
+export type Tally = { reviews: number; defects: number; named: number; near: number; cases: number; casesNamed: number; findings: number; controls: number; controlsWith: number; controlFindings: number; cost: number; judgeCost: number; unjudged: number; medianSec: number };
+
+function tally(out: string, arm: Arm, group: string): { t: Tally; per: string[] } {
   const read = (p: string) => existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : undefined;
-  const rows: string[] = ['| Arm | Reviews | Defects named | Near | Changes with a defect named | Findings on escapes (per review) | Clean changes with a finding | Findings on clean | Review cost | Judge cost | $ per defect named | Median time |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|'];
-  const per: string[] = [];
-  for (const arm of arms) {
-    let reviews = 0, named = 0, near = 0, defects = 0, casesNamed = 0, escFind = 0, escN = 0, cleanWith = 0, cleanFind = 0, cleanN = 0, cost = 0, jcost = 0, unjudged = 0;
-    const times: number[] = [];
-    for (const c of SET) {
-      const dir = join(out, arm.name, c.id);
-      const meta: Meta | undefined = read(join(dir, 'meta.json'));
-      if (!meta) continue;
-      reviews++; cost += meta.cost; times.push(meta.ms);
-      const f = countFindings(existsSync(join(dir, 'review.md')) ? readFileSync(join(dir, 'review.md'), 'utf8') : '');
-      if (c.kind === 'clean') { cleanN++; cleanFind += f; if (f) cleanWith++; continue; }
-      escN++; escFind += f;
-      const j = read(join(dir, 'judge.json'));
-      if (!j?.verdicts?.length) { unjudged++; continue; }
-      jcost += j.cost;
-      let any = false;
-      for (const d of c.defects!) {
-        defects++;
-        const v = j.verdicts.find((x: Verdict) => x.fix === d.fix)?.verdict ?? 'no';
-        if (v === 'named') { named++; any = true; } else if (v === 'near') near++;
-        per.push(`${arm.name}\t${c.id}\t#${d.fix}\t${v}${c.taught ? '\ttaught' : ''}`);
-      }
-      if (any) casesNamed++;
+  const t: Tally = { reviews: 0, defects: 0, named: 0, near: 0, cases: 0, casesNamed: 0, findings: 0, controls: 0, controlsWith: 0, controlFindings: 0, cost: 0, judgeCost: 0, unjudged: 0, medianSec: 0 };
+  const per: string[] = [], times: number[] = [];
+  for (const c of SET.filter((c) => c.set === group)) {
+    const dir = join(out, arm.name, c.id);
+    const meta: Meta | undefined = read(join(dir, 'meta.json'));
+    if (!meta) continue;
+    t.reviews++; t.cost += meta.cost; times.push(meta.ms);
+    const f = countFindings(existsSync(join(dir, 'review.md')) ? readFileSync(join(dir, 'review.md'), 'utf8') : '');
+    if (!hasDefects(c)) { t.controls++; t.controlFindings += f; if (f) t.controlsWith++; continue; }
+    t.cases++; t.findings += f;
+    const j = read(join(dir, 'judge.json'));
+    if (!j?.verdicts?.length) { t.unjudged++; continue; }
+    t.judgeCost += j.cost;
+    let any = false;
+    for (const d of c.defects!) {
+      t.defects++;
+      const v = j.verdicts.find((x: Verdict) => x.fix === d.fix)?.verdict ?? 'no';
+      if (v === 'named') { t.named++; any = true; } else if (v === 'near') t.near++;
+      per.push(`${arm.name}\t${c.id}\t#${d.fix}\t${v}${c.taught ? '\ttaught' : ''}`);
     }
-    times.sort((a, b) => a - b);
-    rows.push(`| ${arm.name} | ${reviews} | ${named} of ${defects} | ${near} | ${casesNamed} of ${escN - unjudged} | ${escN ? (escFind / escN).toFixed(1) : '-'} | ${cleanWith} of ${cleanN} | ${cleanFind} | $${cost.toFixed(2)} | $${jcost.toFixed(2)} | ${named ? '$' + (cost / named).toFixed(2) : '-'} | ${times.length ? Math.round(times[times.length >> 1] / 1000) + ' s' : '-'} |${unjudged ? ` (${unjudged} unjudged)` : ''}`);
+    if (any) t.casesNamed++;
+  }
+  times.sort((a, b) => a - b);
+  t.medianSec = times.length ? Math.round(times[times.length >> 1] / 1000) : 0;
+  return { t, per };
+}
+
+function report(out: string, arms: Arm[]): string {
+  const rows: string[] = ['| Arm | Set | Reviews | Defects named | Near | Changes with a defect named | Findings on those (per review) | Clean changes or controls with a finding | Findings on clean | Review cost | Judge cost | $ per defect named | Median time |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
+  const per: string[] = [], summary: Record<string, Record<string, Tally>> = {};
+  for (const arm of arms) for (const group of [...new Set(SET.map((c) => c.set!))]) {
+    const { t, per: p } = tally(out, arm, group);
+    if (!t.reviews) continue;
+    per.push(...p);
+    (summary[arm.name] ??= {})[group] = t;
+    rows.push(`| ${arm.name} | ${group} | ${t.reviews} | ${t.named} of ${t.defects} | ${t.near} | ${t.casesNamed} of ${t.cases - t.unjudged} | ${t.cases ? (t.findings / t.cases).toFixed(1) : '-'} | ${t.controlsWith} of ${t.controls} | ${t.controlFindings} | $${t.cost.toFixed(2)} | $${t.judgeCost.toFixed(2)} | ${t.named ? '$' + (t.cost / t.named).toFixed(2) : '-'} | ${t.medianSec} s |${t.unjudged ? ` (${t.unjudged} unjudged)` : ''}`);
   }
   writeFileSync(join(out, 'verdicts.tsv'), per.join('\n') + '\n');
+  writeFileSync(join(out, 'summary.json'), JSON.stringify(summary, null, 1));
   return rows.join('\n');
+}
+
+/** What is wrong with a planted case: a plant that isn't in lines the change added, one that doesn't change the diff, or a file that no longer parses. */
+function plantProblems(c: Case, ws: string): string[] {
+  const bad: string[] = [];
+  const added = (git('-C', REPO, 'show', '--format=', '-U0', c.head!).split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).map((l) => l.slice(1))).join('\n');
+  for (const p of c.plant!) {
+    if (p.from === p.to) bad.push(`${p.file}: from and to are the same`);
+    if (!added.includes(p.from)) bad.push(`${p.file}: "${p.from.slice(0, 50)}" is not in the lines this change added (whole consecutive added lines' text, indent included)`);
+    if (/\.(ts|js)$/.test(p.file)) {
+      try { execFileSync(process.execPath, ['--check', join(ws, p.file)], { stdio: 'pipe' }); } catch (e: any) { bad.push(`${p.file} no longer parses: ${String(e.stderr).split('\n').find((l: string) => /Error/.test(l)) ?? ''}`); }
+    }
+  }
+  if (!c.defects?.length || !c.defects[0].why) bad.push('no defect text');
+  return bad;
 }
 
 const HELP = `tools/review-escapes: the pre-ship reviewer against defects that really escaped (#1505)
 
-  node tools/review-escapes/run.ts run [--arms sonnet,opus,lens] [--case <regex>] [--jobs 3] [--out <dir>] [--kit <dir>] [--judge-model opus] [--budget 6]
+  node tools/review-escapes/run.ts run [--arms sonnet,opus,lens] [--set escapes|planted|all|<file>] [--case <regex>] [--jobs 3] [--out <dir>] [--kit <dir>] [--judge-model opus] [--budget 6]
       reviews each case with each arm (skipping ones already in --out), judges the escapes blind, prints the table
-  node tools/review-escapes/run.ts report [--arms ...] [--out <dir>]     the table again, and <out>/verdicts.tsv
+  node tools/review-escapes/run.ts report [--arms ...] [--out <dir>]     the table again, and <out>/verdicts.tsv and summary.json
   node tools/review-escapes/run.ts check [--case <regex>] [--out <dir>]  builds every case's workspace, no model calls
 
   --out defaults to $TMPDIR/review-escapes. --kit defaults to this checkout's kit/, the reviewer under test.
@@ -218,8 +268,9 @@ async function main() {
     for (const c of cases) {
       const ws = workspace(c, out);
       const stat = git('-C', ws, 'diff', '--shortstat', 'main...HEAD').trim();
-      const leak = git('-C', ws, 'log', '--all', '--format=%s').split('\n').filter((s) => c.defects?.some((d) => new RegExp(`#${d.fix}(?!\\d)`).test(s)));
-      console.log(`${c.id} (${readFileSync(join(ws, ".git", "replay-how"), "utf8")}): ${stat}${leak.length ? '  LEAK: ' + leak[0] : ''}`);
+      const leak = c.plant ? [] : git('-C', ws, 'log', '--all', '--format=%s').split('\n').filter((s) => c.defects?.some((d) => new RegExp(`#${d.fix}(?!\\d)`).test(s)));
+      const bad = c.plant ? plantProblems(c, ws) : [];
+      console.log(`${c.id} (${readFileSync(join(ws, ".git", "replay-how"), "utf8")}): ${stat}${leak.length ? '  LEAK: ' + leak[0] : ''}${bad.length ? '  PROBLEM: ' + bad.join('; ') : ''}`);
     }
     return;
   }

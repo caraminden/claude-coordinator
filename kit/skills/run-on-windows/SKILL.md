@@ -74,7 +74,8 @@ keys): read `references/citadel-desktop.md` first; its rigs live under `scripts/
   you stop it: build first, as step 4 says.
   Never stop someone else's job.
 - **Busy:** only `screenshot` says "The screen is busy". It waits 50 s in line and can't keep a
-  place. Try again in a few minutes, or take it while your own `run` job has the screen.
+  place, so don't retry it on a timer: start your app with `run_task` (step 6), which keeps its
+  place, end your turn, and take the screenshot once Citadel says your job has the screen.
 - **Pixel tests:** the box is unactivated on purpose, so an "Activate Windows" watermark may
   appear in the bottom-right corner. The first screenshots (2026-11-10) had none, but Windows can
   add it later, so keep pixel checks out of that corner.

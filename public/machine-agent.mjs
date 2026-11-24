@@ -265,7 +265,7 @@ const TOOLS = [
   },
   {
     name: 'screenshot',
-    description: 'Take a PNG of this computer\'s screen, or of the first visible window whose title contains `window`, after `delay` seconds (most 30), and copy it to your files folder on the app\'s server; returns its path, which you can open to look at. Only on a computer whose owner turned screenshots on (a test box).',
+    description: 'Take a PNG of this computer\'s screen, or of the first visible window whose title contains `window`, after `delay` seconds (most 30), and copy it to your files folder on the app\'s server; returns its path, which you can open to look at. Only on a computer whose owner turned screenshots on (a test box). While someone else has the screen it waits up to 50 s and keeps no place in line; take it while your own run_task job has the screen.',
     inputSchema: { type: 'object', properties: { window: { type: 'string', description: 'Part of the window\'s title; leave out for the whole screen' }, delay: { type: 'number' } } },
   },
 ];
@@ -1036,7 +1036,7 @@ export class WorkspaceHost {
         if (turn.lock) return turn.lock;
         if (Date.now() >= until) {
           const others = turn.waiting - 1;
-          throw new ToolError(`The screen is busy: ${holderText(turn.holder)}${others > 0 ? `, and ${others} other${others === 1 ? ' is' : 's are'} in line (${turn.ahead} ahead of this)` : ''}. Waited ${this.screenWaitS} s; nothing was taken. A screenshot can't hold a place in line: try again in a few minutes, or take it from inside a run task once that has the screen.`);
+          throw new ToolError(`The screen is busy: ${holderText(turn.holder)}${others > 0 ? `, and ${others} other${others === 1 ? ' is' : 's are'} in line (${turn.ahead} ahead of this)` : ''}. Waited ${this.screenWaitS} s; nothing was taken. A screenshot waits only inside its own call. To see your app, start it with run_task: a screen task keeps its place in line and starts on its own, and Citadel messages you when it has the screen. Take the screenshot while it runs.`);
         }
         await sleep(Math.max(0, Math.min(this.linePollMs, until - Date.now())));
       }

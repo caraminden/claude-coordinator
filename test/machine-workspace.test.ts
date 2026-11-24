@@ -401,7 +401,8 @@ test('screenshots: off unless the owner turns them on, shared with the screen lo
   const started = await boxCall('run_task', { workspace: 'peek', task: 'app', wait: 0 });
   const id = started.text.match(/job (\w+)\)/)[1];
   assert.match((await boxCall('screenshot', { window: 'Peek' })).text, /Took window "Peek - Peek Auras", 800x600/);
-  await refused(boxCall('screenshot', {}, '#7 in Delve'), /screen is busy: task app in peek for #121 in Peek Auras has the screen, started \d+ s ago\. Waited 1 s/);
+  await refused(boxCall('screenshot', {}, '#7 in Delve'), /screen is busy: task app in peek for #121 in Peek Auras has the screen, started \d+ s ago\. Waited 1 s; nothing was taken\. A screenshot waits only inside its own call\. To see your app, start it with run_task: a screen task keeps its place in line/);
+  await assert.rejects(boxCall('screenshot', {}, '#7 in Delve'), (err: Error) => !/try again|retry/i.test(err.message), 'a busy screen never says to retry by hand (#1819)');
   await boxCall('stop_job', { id });
   assert.deepEqual(shots, ['', 'Peek']);
   await refused(boxCall('screenshot', { window: 'x'.repeat(201) }), /at most 200/);

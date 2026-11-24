@@ -247,10 +247,6 @@
   "rmTemp": {
    "n": 1,
    "ok": 0
-  },
-  "sleep": {
-   "n": 1,
-   "ok": 0
   }
  },
  "instructions-verdicts.test.ts": {
@@ -915,7 +911,7 @@
  },
  "visible.test.ts": {
   "sleep": {
-   "n": 8,
+   "n": 1,
    "ok": 0
   }
  },

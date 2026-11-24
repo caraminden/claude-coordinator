@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { SLOW_KEEP } from '../src/db/slow-moments.ts';
 import { slowRows } from '../src/routes/app.ts';
+import { slowView } from '../src/status-page.ts';
 
 const NOW = 1_800_000_000_000;
 const moment = (over: Record<string, unknown> = {}) => ({ kind: 'request', what: 'GET /api/projects/2', page: '#/p/2/t/394', at: NOW - 5000, total: 20_100.4, server: 100, network: 200, tab_ms: 19_800, ...over });
@@ -47,4 +48,15 @@ test('the table keeps only the newest SLOW_KEEP rows and lists newest first', ()
   const newest = store.slowMoments(0, 3);
   assert.deepEqual(newest.map((r) => r.at), [NOW + SLOW_KEEP + 29, NOW + SLOW_KEEP + 28, NOW + SLOW_KEEP + 27]);
   assert.deepEqual(store.slowMoments(NOW + SLOW_KEEP + 29), [newest[0]]);
+});
+
+test("the Status page lists the day's moments the viewer may see: another scheme's stay out of the rows, count and longest", () => {
+  const store = new Store(':memory:');
+  const row = (at: number, project_id: number | null, total_ms: number) => ({ at, person: 'Cara', device: 'd', tab: 't', kind: 'request', what: 'GET /api/x', page: '#/', project_id, total_ms, server_ms: 10, network_ms: 10, tab_ms: 0 });
+  store.addSlowMoments([row(NOW - 86_400_000 - 1, 1, 90_000), row(NOW - 3000, 1, 2500), row(NOW - 2000, 2, 60_000), row(NOW - 1000, null, 4000)]);
+  const view = slowView(store, { canSee: (id: number) => id === 1 } as any, NOW);
+  assert.equal(view.count, 2);
+  assert.equal(view.longest, 4000, "scheme 2's minute and the day-old 90 s are not this viewer's");
+  assert.deepEqual(view.rows.map((r) => [r.at, r.total_ms]), [[NOW - 1000, 4000], [NOW - 3000, 2500]]);
+  assert.ok(view.rows.every((r) => !('project_id' in r) && !('id' in r)));
 });

@@ -11,7 +11,7 @@ import { until } from './wait.ts';
 const bin = chromium();
 const skip = !bin && skipMessage;
 const RECORDER = readFileSync(join(import.meta.dirname, '..', 'public', 'slow-moments.js'), 'utf8');
-const PAGE = '<!doctype html><meta charset="utf-8"><script src="/slow-moments.js"></script><body><p>page</p></body>';
+const PAGE = '<!doctype html><meta charset="utf-8"><script src="/slow-moments.js"></script><script>addEventListener("load", () => setTimeout(() => { window.ready = true; }))</script><body><p>page</p></body>';
 
 type Row = { kind: string; what: string; page: string; total: number; server: number | null; network: number; tab_ms: number; tab: string };
 let app: App;
@@ -45,19 +45,19 @@ after(async () => {
   await app?.close();
 });
 
-/** A page with the recorder running and its load moment past, so what follows is all a test does. */
+/** A page with the recorder running and its load moment past (window.ready), so what follows is all a test does. */
 async function open(): Promise<Page> {
   reports = [];
-  const page = await browser.page(app.base);
-  await until('the page loaded', () => page.eval(`document.readyState === 'complete' && !!globalThis.citadelSlow`));
-  return page;
+  return browser.page(app.base);
 }
 const rows = (kind: string) => reports.flatMap((r) => r.moments).filter((m) => m.kind === kind);
+/** Go to `hash` and wait for its hashchange, which is when the recorder notes the page. */
+const go = (hash: string) => `new Promise((r) => { addEventListener('hashchange', r, { once: true }); location.hash = '${hash}'; })`;
 const SLOW_FETCH = `(async () => { const start = performance.now(); const res = await fetch('/api/slow'); globalThis.citadelSlow.request('GET', '/api/slow?x=1', start, res); })()`;
 
 test('a tab frozen over 2 s is one row, nearly all of it tab time', { skip }, async () => {
   const page = await open();
-  await page.eval(`location.hash = '#/p/7/t/3'`);
+  await page.eval(go('#/p/7/t/3'));
   await page.eval(`(() => { const t = performance.now(); while (performance.now() - t < 2600) {} })()`);
   const [freeze] = await until('the freeze was reported', () => rows('freeze').length && rows('freeze'));
   assert.equal(freeze.page, '#/p/7/t/3');
@@ -69,10 +69,10 @@ test('a tab frozen over 2 s is one row, nearly all of it tab time', { skip }, as
 
 test('a slow request splits into the server time it was stamped with and the network', { skip }, async () => {
   const page = await open();
-  await page.eval(`location.hash = '#/p/7'`);
+  await page.eval(go('#/p/7'));
   const ask = page.eval(SLOW_FETCH);
   // Left while it was waiting: the wait still belongs to the page it was asked on.
-  await page.eval(`location.hash = '#/status'`);
+  await page.eval(go('#/status'));
   await ask;
   const [req] = await until('the request was reported', () => rows('request').length && rows('request'));
   assert.equal(req.what, 'GET /api/slow');
@@ -85,8 +85,10 @@ test('a slow request splits into the server time it was stamped with and the net
 test('opening a page that waits over 2 s is one row, named by its slowest request', { skip }, async () => {
   const page = await open();
   await page.eval(`(async () => {
-    document.body.classList.add('navigating');
+    // As core.js does it: the address changes, then route() (a hashchange listener after the recorder's) dims the page.
     location.hash = '#/p/7/status';
+    await new Promise((r) => addEventListener('hashchange', r, { once: true }));
+    document.body.classList.add('navigating');
     await ${SLOW_FETCH};
     document.body.classList.remove('navigating');
   })()`);

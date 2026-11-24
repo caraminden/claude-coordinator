@@ -91,6 +91,28 @@ test('the #1234 replay', async () => {
   assert.equal(hits.length, 6, JSON.stringify(hits, null, 1));
 });
 
+test('a new short file over a seam an existing file drives names that file; one over a new seam gets no line', () => {
+  const root = repo('short');
+  write(root, {
+    'test/relay-again.test.ts': `import { relay } from '../src/relay.ts';
+test('relays twice', async () => {
+  await post('/api/relay/when-live', { kind: 'relay_when_live' });
+  assert.equal(relay(2), 2);
+});
+`,
+    'src/queue.ts': 'export const queue = [];\n',
+    'test/queue-replay.test.ts': "import { queue } from '../src/queue.ts';\ntest('starts empty', () => assert.deepEqual(queue, []));\n",
+  });
+  git(root, 'add', '-A');
+  git(root, 'commit', '-qm', 'short');
+  const hits = scan(root, addedFromGit(root, 'main'));
+  assert.deepEqual(
+    hits.map((h) => `${h.file} ${h.kind}`),
+    ['test/relay-again.test.ts seam'],
+  );
+  assert.match(hits[0].text, /^new \d+-line file; test\/relay-when-live\.test\.ts already drives the same seam/);
+});
+
 test('a clean branch, and habits that were already on main, give no lines', () => {
   const root = repo('clean');
   write(root, {

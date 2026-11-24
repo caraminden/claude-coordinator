@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import { APPROVAL_TOOL, Approvals, cleanPluginDirs, cleanPluginPicks, cleanRules, cleanWorkflows, permissionArgs, pluginDirArgs, turnPluginDirs, unsettledCards } from '../src/approvals.ts';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { agentToken, bootServer, tempRoot, testPins, until } from './helpers.ts';
+import { bootServer, mintedAgentToken, tempRoot, testPins, until } from './helpers.ts';
 testPins();
 
 const tmp = tempRoot('approvals-');
@@ -378,7 +378,7 @@ test("through the route, a card is judged with the turn's own TMPDIR, not the se
     const project = (await srv.call('/api/projects', { name: 'Scheme' })).data;
     const created = (await srv.call(`/api/projects/${project.id}/tickets`, { message: 'tidy up' })).data;
     const t = created.ticket ?? created;
-    const minion = { Authorization: `Bearer ${agentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' };
+    const minion = { Authorization: `Bearer ${await mintedAgentToken(srv.data, t.id)}`, 'Content-Type': 'application/json' };
     await until('the turn', async () => (await fetch(`${srv.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion })).ok);
     const bak = join(srv.data, 'coordinator.db.bak-x');
     const command = `cp ${bak} "$TMPDIR/" && rm ${bak}`;

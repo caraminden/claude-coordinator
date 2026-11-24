@@ -200,7 +200,7 @@
   "test/citadel-test.test.ts": [2, 0],
   "test/citadel-wait.test.ts": [0, 1],
   "test/claims.test.ts": [0, 6],
-  "test/claude-container.test.ts": [0, 5],
+  "test/claude-container.test.ts": [0, 4],
   "test/claude-link.test.ts": [1, 0],
   "test/close-self.test.ts": [0, 1],
   "test/codex-runner-replay.test.ts": [1, 1],

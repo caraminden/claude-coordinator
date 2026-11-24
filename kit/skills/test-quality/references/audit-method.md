@@ -79,6 +79,30 @@ REMINDER: read-only, 3-line return.
 - **A test that fails on one box and passes on CI** is a fixture that depends on its host. Find the cause: on
   Citadel it was fixture paths that are real paths on perigee.
 
+## 3b. Overlap list: pairs that run the same code (~20 min, one Sonnet Grunt)
+
+The batch Grunts each see one slice, so they under-call REDUNDANT across batches. This step finds the cross-batch
+pairs by measurement. Overlap only makes a pair a suspect: a unit test and an end-to-end test can run the same lines
+and check different things, and both stay. The rule in section 0 holds.
+
+1. **Measure** (Node's built-in coverage, one test file at a time, for `node:test` repos):
+   `citadel-heavy node <kit>/skills/test-quality/scripts/test-overlap.ts --out "$TMPDIR/overlap" --jobs 3`
+   (the kit's folder is this session's citadel plugin dir). Run it in the background and wait with
+   `citadel-wait pid <pid>`; it resumes where it stopped if killed. Only inside the audit: it starts one process per
+   test file (Citadel's 633 files took about 14 min at 3 jobs), so never in CI or a ship script. An
+   audit that scopes to changed files passes them as arguments; the list then only covers pairs among those.
+2. **Read the output** `pairs.tsv`: containment (the share of the smaller file's lines the larger also runs, with
+   lines nearly every test runs weighted down), jaccard, shared lines and the source files they share, ranked.
+3. **One Sonnet Grunt** (read-only, own brief) gets the top 15 to 25 pairs. For each it reads both test files whole,
+   side by side, and answers REDUNDANT (name the cases to drop, from which file), SAME LINES, DIFFERENT CHECKS (what
+   each guards that the other doesn't), or UNSURE. Judge its REDUNDANT calls yourself as in section 3.
+4. **Fold the REDUNDANT calls** into batch B of the report.
+
+**Other stacks:** the script reads node's lcov. For another runner produce the same thing, one lcov file per test
+file (pytest-cov `--cov-report=lcov`, `cargo llvm-cov --lcov`, jest/vitest `--coverage --coverageReporters=lcov`),
+and feed them to `parseLcov` and `scorePairs` in the script, or skip this step and say so in the report when per-file
+coverage is too slow or not available.
+
 ## 4. Report, card, handoffs (~15 min)
 
 1. **Write one report:** `reports/test-audit-<scheme>-<yyyy-mm>.md`. Keep it short and scannable:

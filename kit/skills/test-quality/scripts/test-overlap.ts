@@ -1,0 +1,165 @@
+#!/usr/bin/env node
+// test-overlap: which pairs of test files run mostly the same source lines. Step 3b of the kit's audit method
+// (kit/skills/test-quality/references/audit-method.md). Overlap only makes a pair a suspect: a unit test and an
+// end-to-end test can run the same lines and check different things, so a Grunt reads each pair side by side.
+//
+//   node test-overlap.ts [--out <dir>] [--jobs N] [--top N] [--min 0.6] [--min-lines 30] [--rescore] [test files...]
+//
+// For node:test repos. With no files it takes every *.test.{ts,js,mjs} under the folder the package.json test
+// script names last (default test/). Each file runs ALONE under node's built-in coverage, with the test script's
+// own launcher and flags (its global setup and timeout), and its lcov goes to <out>/cov/. A finished file is kept,
+// so a rerun resumes. Writes <out>/pairs.tsv (ranked) and prints the top pairs.
+// Heavy: one process per test file. Run it under `citadel-heavy`, only inside an audit, never in CI or a ship.
+// Scores: each covered line weighs 1/(test files covering it), so lines every file runs (imports, setup) count
+// for almost nothing. containment = weighted |A∩B| / min(|A|,|B|) (a small file inside a big one scores 1.0, which
+// Jaccard hides); jaccard = weighted |A∩B| / |A∪B|. Ranked by containment, then jaccard.
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join, relative } from 'node:path';
+
+export type Covered = Map<string, Set<string>>; // test file -> set of "source:line" keys it ran
+export type Pair = { a: string; b: string; containment: number; jaccard: number; shared: number; top: string[] };
+
+/** The source lines an lcov report says ran at least once, as "file:line" keys. */
+export function parseLcov(text: string): Set<string> {
+  const lines = new Set<string>();
+  let sf = '';
+  for (const row of text.split('\n')) {
+    if (row.startsWith('SF:')) sf = row.slice(3).trim();
+    else if (row.startsWith('DA:')) {
+      const [n, hits] = row.slice(3).split(',');
+      if (Number(hits) > 0) lines.add(`${sf}:${n}`);
+    }
+  }
+  return lines;
+}
+
+/** Ranked pairs whose covered lines mostly overlap. Pairs under minLines (unweighted) on either side are skipped: a
+ * test that runs a handful of lines sits "inside" everything. */
+export function scorePairs(covered: Covered, opts: { min?: number; minLines?: number } = {}): Pair[] {
+  const min = opts.min ?? 0.6;
+  const minLines = opts.minLines ?? 30;
+  const names = [...covered.keys()].filter((n) => covered.get(n)!.size >= minLines);
+  const df = new Map<string, number>();
+  for (const set of covered.values()) for (const k of set) df.set(k, (df.get(k) ?? 0) + 1);
+  const w = (k: string): number => 1 / (df.get(k) ?? 1);
+  const weight = new Map(names.map((n) => [n, [...covered.get(n)!].reduce((s, k) => s + w(k), 0)]));
+  const pairs: Pair[] = [];
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      const [a, b] = [names[i], names[j]];
+      const sa = covered.get(a)!;
+      const sb = covered.get(b)!;
+      const [small, big] = sa.size <= sb.size ? [sa, sb] : [sb, sa];
+      let inter = 0;
+      let shared = 0;
+      const perFile = new Map<string, number>();
+      for (const k of small) {
+        if (!big.has(k)) continue;
+        inter += w(k);
+        shared++;
+        const f = k.slice(0, k.lastIndexOf(':'));
+        perFile.set(f, (perFile.get(f) ?? 0) + w(k));
+      }
+      if (!shared) continue;
+      const wa = weight.get(a)!;
+      const wb = weight.get(b)!;
+      const containment = inter / Math.min(wa, wb);
+      if (containment < min) continue;
+      const top = [...perFile].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([f]) => f);
+      pairs.push({ a, b, containment, jaccard: inter / (wa + wb - inter), shared, top });
+    }
+  }
+  return pairs.sort((x, y) => y.containment - x.containment || y.jaccard - x.jaccard);
+}
+
+/** The test script's launcher and the flags worth keeping, as base-check.ts does for one node --test file. */
+export function nodeArgs(script: string): { launcher: string; flags: string[] } {
+  const first = script.trim().split(/\s+/)[0] ?? '';
+  const launcher = /--test\b/.test(script) && first && first !== 'node' && !first.includes('=') ? first : 'node';
+  const flags = [...script.matchAll(/(?:^|\s)(--test-global-setup=\S+|--test-timeout=\S+|--experimental-[\w-]+(?:=\S+)?|--(?:import|require)(?:=|\s+)\S+)/g)].flatMap((m) => m[1].split(/\s+/));
+  return { launcher, flags: flags.map((f) => f.replace(/^['"]|['"]$/g, '')) };
+}
+
+function findTests(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...findTests(p));
+    else if (/\.test\.(ts|js|mjs)$/.test(e.name)) out.push(p);
+  }
+  return out.sort();
+}
+
+function runOne(cmd: string[], cwd: string, timeoutMs: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    const p = spawn(cmd[0], cmd.slice(1), { cwd, stdio: 'ignore' });
+    const t = setTimeout(() => p.kill('SIGKILL'), timeoutMs);
+    p.on('close', (code) => {
+      clearTimeout(t);
+      resolve(code);
+    });
+    p.on('error', () => resolve(null));
+  });
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const opt = (name: string, d: string): string => {
+    const i = args.indexOf(name);
+    return i < 0 ? d : args.splice(i, 2)[1];
+  };
+  const rescore = args.includes('--rescore');
+  if (rescore) args.splice(args.indexOf('--rescore'), 1);
+  const out = opt('--out', join(process.env.TMPDIR ?? '/tmp', 'test-overlap'));
+  const jobs = Number(opt('--jobs', '4'));
+  const top = Number(opt('--top', '20'));
+  const min = Number(opt('--min', '0.6'));
+  const minLines = Number(opt('--min-lines', '30'));
+  const root = process.cwd();
+  let script = '';
+  try {
+    script = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts?.test ?? '';
+  } catch {
+    /* no package.json: defaults */
+  }
+  const dirName = (script.trim().split(/\s+/).pop() ?? '').replace(/\/$/, '');
+  const dir = dirName && existsSync(join(root, dirName)) ? dirName : 'test';
+  const files = args.length ? args : findTests(join(root, dir)).map((f) => relative(root, f));
+  const cov = join(out, 'cov');
+  mkdirSync(cov, { recursive: true });
+  const { launcher, flags } = nodeArgs(script);
+  const key = (f: string): string => f.replaceAll('/', '__');
+  const started = Date.now();
+  const failed: string[] = [];
+  let next = 0;
+  let done = 0;
+  const worker = async (): Promise<void> => {
+    while (next < files.length && !rescore) {
+      const f = files[next++];
+      const dest = join(cov, `${key(f)}.lcov`);
+      if (!existsSync(dest)) {
+        const cmd = [launcher, '--test', ...flags, '--experimental-test-coverage', `--test-coverage-exclude=${dir}/**`, '--test-coverage-exclude=**/node_modules/**', '--test-reporter=lcov', `--test-reporter-destination=${dest}`, f];
+        const code = await runOne(cmd, root, 300_000);
+        if (code !== 0) failed.push(`${f} (exit ${code})`);
+      }
+      done++;
+      if (done % 25 === 0) console.error(`${done}/${files.length} files, ${Math.round((Date.now() - started) / 1000)} s`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, jobs) }, worker));
+  const covered: Covered = new Map();
+  for (const f of files) {
+    const p = join(cov, `${key(f)}.lcov`);
+    if (existsSync(p)) covered.set(f, parseLcov(readFileSync(p, 'utf8')));
+  }
+  const pairs = scorePairs(covered, { min, minLines });
+  const rows = pairs.map((p) => [p.containment.toFixed(2), p.jaccard.toFixed(2), p.shared, p.a, p.b, p.top.join(',')].join('\t'));
+  writeFileSync(join(out, 'pairs.tsv'), ['containment\tjaccard\tshared_lines\tfile_a\tfile_b\ttop_shared_sources', ...rows].join('\n') + '\n');
+  console.log(`${covered.size}/${files.length} files measured in ${Math.round((Date.now() - started) / 1000)} s; ${pairs.length} pairs at containment >= ${min}; list: ${join(out, 'pairs.tsv')}`);
+  if (failed.length) console.log(`red or timed out (their coverage may be partial): ${failed.length}, e.g. ${failed.slice(0, 3).join('; ')}`);
+  for (const r of rows.slice(0, top)) console.log(r);
+}
+
+if (process.argv[1] && basename(process.argv[1]) === 'test-overlap.ts') await main();

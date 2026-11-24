@@ -86,6 +86,12 @@ in review.
 
 - **A bug fix adds a row.** Put the failing case in the existing table or test for that
   behaviour; a new test or file is for a new behaviour, not a new bug number.
+- **A new test for what one already covers.** Before keeping a test the diff adds, grep the test folder for the
+  function, route or message it drives (`rg -n -w '<name>' test/`) and read the hits: when an existing test drives the
+  same thing through the same seam (same entry point, same kind of assertion), the new case goes into that test as a
+  row or an extra assert, and a diff that adds a second test is a Should fix naming the one to extend. Not a
+  duplicate: a different seam (a unit test and an end-to-end test over the same code), or a case the old test
+  doesn't reach. A grep, not a coverage run; the monthly audit measures overlap properly (audit-method.md, 3b).
 - **Assert what code reads**: tool names, flags, routes, strings another program parses, and
   the behaviour a prompt drives. Prompt, copy and doc prose stay free to change.
 - **Waits are gates.** Wait on an event, a file, or an injected clock or timeout. A real sleep or

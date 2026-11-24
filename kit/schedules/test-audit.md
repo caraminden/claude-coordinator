@@ -18,6 +18,8 @@ Scope:
 - Otherwise audit only the test files added or changed since the commit that report names (git diff --name-only <commit> main).
 - Either way, re-time the suite from the latest green CI run and say whether the long pole moved.
 
+Run the overlap step (method section 3b) when the whole suite is in scope.
+
 Research only: change no tests and land nothing.
 1. Write reports/test-audit-<YYYY-MM>.md in this scheme's shared folder, naming the commit it audited.
 2. Post one ask_question card for which cut batches to take, your picks marked.

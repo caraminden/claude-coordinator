@@ -1,7 +1,7 @@
 // CI numbers kept per commit, and the step-up flag (#1369, src/ci-numbers.ts).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -187,12 +187,16 @@ test('tests.yml keeps no suite time for a run that overlapped another suite run,
 test('the overlap check flags crossing windows and open recent ones, not disjoint ones (#1811)', () => {
   const yml = readFileSync(new URL('../.github/workflows/tests.yml', import.meta.url), 'utf8');
   const loop = yml.match(/( *)for f in "\$win"\/\*; do\n[\s\S]*?\n\1done\n/)![0];
-  const run = (others: string[]) => {
+  const run = (others: string[], ageMin = 0) => {
     const d = mkdtempSync(join(root, 'ovl-'));
     const win = join(d, 'w');
     mkdirSync(win);
     writeFileSync(join(win, 'me'), '100 200\n');
-    others.forEach((o, i) => writeFileSync(join(win, `o${i}`), `${o}\n`));
+    others.forEach((o, i) => {
+      writeFileSync(join(win, `o${i}`), `${o}\n`);
+      const t = new Date(Date.now() - ageMin * 60000);
+      utimesSync(join(win, `o${i}`), t, t);
+    });
     const out = spawnSync('bash', ['-c', `win=${win}; me=${win}/me; wstart=100; wend=200; RUNNER_TEMP=${d}\n${loop}`]);
     assert.equal(out.status, 0, String(out.stderr));
     return existsSync(join(d, 'suite-overlap'));
@@ -203,4 +207,5 @@ test('the overlap check flags crossing windows and open recent ones, not disjoin
   assert.equal(run(['150 300']), true);
   assert.equal(run(['120 150']), true);
   assert.equal(run(['150 0']), true); // still open, file just written
+  assert.equal(run(['150 0'], 60), false); // open but untouched for an hour: a killed run, not a live one
 });

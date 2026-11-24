@@ -218,15 +218,16 @@ jobs:
           # shared the machine with another suite run reads slow for that reason, not the code's, so the numbers step skips it.
           win=/tmp/citadel-suite-windows-$(id -u); mkdir -p "$win"; find "$win" -type f -mmin +1440 -delete 2>/dev/null || true
           me="$win/${GITHUB_RUN_ID:-0}-$$"; wstart=$(date +%s); echo "$wstart 0" >"$me"
+          trap '[ "$(cut -d" " -f2 "$me" 2>/dev/null)" != 0 ] || echo "$wstart $(date +%s)" >"$me"' EXIT # a cancelled run closes its window too
           started=$SECONDS
           DEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
           wend=$(date +%s); echo "$wstart $wend" >"$me"
-          # Overlapped: another run's window started before this one ended and ended after it began (or is still open, written in the last 2 h).
+          # Overlapped: another run's window started before this one ended and ended after it began (or is still open, written in the last 30 min: a killed run leaves one).
           rm -f "$RUNNER_TEMP/suite-overlap"
           for f in "$win"/*; do
             [ "$f" != "$me" ] || continue
             read -r s e <"$f" || continue
-            [ "$e" != 0 ] || { [ -n "$(find "$f" -mmin -120)" ] && e=$wend || continue; }
+            [ "$e" != 0 ] || { [ -n "$(find "$f" -mmin -30)" ] && e=$wend || continue; }
             if [ "$s" -lt "$wend" ] && [ "$e" -gt "$wstart" ]; then echo "$f" >"$RUNNER_TEMP/suite-overlap"; break; fi
           done
           [ "$rc" != 0 ] || echo "$((SECONDS - started))" >"$RUNNER_TEMP/suite-secs" # a green run's wall time, for the numbers step

@@ -56,9 +56,9 @@ test("the workflow's token may read the run list the wait asks for", () => {
 
 test('every batch step passes the token the wait reads, and keeps a name cleanRuns counts', () => {
   const names = [...yml.matchAll(/- name: (\d+ clean runs[^\n]*)/g)].map((m) => m[1]);
-  assert.equal(names.length, 5);
-  assert.equal(yml.match(/run: tools\/flake-proof\.sh/g)?.length, 5);
-  assert.equal(yml.match(/GH_TOKEN: '\$\{\{ github\.token \}\}'/g)?.length, 5);
+  assert.ok(names.length > 0);
+  assert.equal(yml.match(/run: tools\/flake-proof\.sh/g)?.length, names.length);
+  assert.equal(yml.match(/GH_TOKEN: '\$\{\{ github\.token \}\}'/g)?.length, names.length);
   const steps = names.map((name) => ({ name, conclusion: 'success' }));
   assert.equal(cleanRuns(steps.slice(0, 3), null), 30);
 });

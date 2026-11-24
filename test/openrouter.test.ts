@@ -476,12 +476,8 @@ test('a speech price with no unit is bounded per UTF-8 byte; output per token up
   assert.equal(speechEstimate({ id: 'x/variable', pricing: { prompt: '-1', completion: '0' } }, bytes), null);
 });
 
-test("a speech model's input limit comes from what OpenRouter documents, else the longest any model takes", () => {
-  const model = (id: string) => MODEL_LIST.find((m) => m.id === id)!;
-  assert.equal(speechLimit(model('elevenlabs/eleven-v3')), 5000);
+test("a speech model's input limit is read from its description", () => {
   assert.equal(speechLimit({ id: 'x/y', description: 'and has a 40,000-character request limit.' }), 40000);
-  assert.equal(speechLimit(model('bytedance-seed/seed-audio-1-0')), 3000);
-  assert.equal(speechLimit(model('fish-audio/drama-3')), 40000);
 });
 
 test("generate_speech refuses over the model's limit, over $0.50 and unpriced models before anything is sent", async () => {

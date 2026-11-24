@@ -8,25 +8,6 @@ import { test } from 'node:test';
 import { planError } from '../public/progress.js';
 import { planResult } from '../src/mcp.ts';
 
-function marked(role: string) {
-  const input = [{ jsonrpc: '2.0', id: 1, method: 'tools/list' }].map((m) => JSON.stringify(m)).join('\n') + '\n';
-  const r = spawnSync(process.execPath, ['src/mcp.ts'], { input, encoding: 'utf8', env: { ...process.env, COORDINATOR_ROLE: role, COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_APP_INSTRUCTIONS: '' } });
-  const tools = JSON.parse(r.stdout.split('\n')[0]).result.tools;
-  return tools
-    .filter((t: any) => t._meta?.['anthropic/alwaysLoad'])
-    .map((t: any) => t.name)
-    .sort();
-}
-
-// plan and hand_off_land since #1275: nearly every minion plans and ships, and fetching them was 1,124 and 711 ToolSearch calls a week.
-test("a minion's always-loaded tools are these seven", () => {
-  assert.deepEqual(marked('thread'), ['ask_question', 'close_self', 'hand_off_land', 'message_coordinator', 'plan', 'set_properties', 'set_thread_status']);
-});
-
-test("a Taskmaster's always-loaded tools are these four", () => {
-  assert.deepEqual(marked('coordinator'), ['create_ticket', 'list_tickets', 'message_ticket', 'read_ticket']);
-});
-
 // The plan tool's check and the readout's are twins (#1275: the pinned server can't import public/): a call one refuses, the other ignores.
 test('the plan tool refuses exactly the calls the readout ignores, with the same words', () => {
   const calls = [

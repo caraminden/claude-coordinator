@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import type { TicketKind } from '../src/db.ts';
 import { Runner, unsentSteers } from '../src/runner.ts';
 import { holds, lines, tempRoot, testPins } from './helpers.ts';
 import { until } from './wait.ts';
@@ -53,7 +54,7 @@ function server() {
 }
 
 /** A ticket with a folder of its own, where its fake claude reads and writes. */
-function newTicket(kind: 'thread' | 'coordinator' = 'thread') {
+function newTicket(kind: TicketKind = 'ticket') {
   const t = store.createTicket({ project_id: project.id, kind, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   const dir = join(root, `t${t.id}`);
   mkdirSync(dir);
@@ -239,7 +240,7 @@ test('a reader never sees steer.sent empty or half-written while steers go in', 
     console.log(JSON.stringify({ reads, bad: [...bad] }));
   `]);
   let out = '';
-  reader.stdout.on('data', (d) => (out += d));
+  reader.stdout!.on('data', (d) => (out += d));
   const exited = new Promise((res) => reader.on('exit', res));
   await until("out.includes('ready')", () => out.includes('ready')); // the reader is spinning before the first steer goes in
   // Each steer waits until the wrapper has passed it on (it writes steer.sent then), so every write is read against.

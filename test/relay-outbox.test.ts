@@ -65,7 +65,7 @@ test('a relay is a row; its commit going live delivers it once and the sender ge
   const [from, a, b] = [minion(), minion(), minion()];
   const s = server(before);
   await s.outbox.boot();
-  for (const m of [a, b]) assert.equal((await s.waiters.addRelay({ ticket: from.id, to: { minion: m.id, number: m.number }, text: 'hi', commit: pending })).queued, true);
+  for (const m of [a, b]) assert.equal((await s.waiters.addRelay({ ticket: from.id, to: { minion: m.id, number: m.number! }, text: 'hi', commit: pending })).queued, true);
   assert.equal(rows().length, 2);
   assert.equal(s.waiters.relays(from.id).length, 2);
   assert.equal(await s.waiters.check(before), 0);
@@ -86,7 +86,7 @@ test('a dismissed target and a dismissed sender: the relay still goes out', asyn
   const [from, to] = [minion(), minion()];
   const s = server(before);
   await s.outbox.boot();
-  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: pending });
+  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number! }, text: 'x', commit: pending });
   store.updateTicket(from.id, { status: 'closed' });
   store.updateTicket(to.id, { status: 'closed' });
   await s.waiters.check(pending);
@@ -100,7 +100,7 @@ test('a send that throws is retried; a kill mid-deliver resends once, marked', a
   const [from, to] = [minion(), minion()];
   const s = server(before);
   await s.outbox.boot();
-  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: pending });
+  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number! }, text: 'x', commit: pending });
   s.r.failFirst = true;
   await s.waiters.check(pending);
   await s.outbox.poke({ type: 'tick' });
@@ -145,7 +145,7 @@ test('cancelRelay drops a pending row, only for its sender', async () => {
   const [from, other, to] = [minion(), minion(), minion()];
   const s = server(before);
   await s.outbox.boot();
-  const { relay } = await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: pending });
+  const { relay } = await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number! }, text: 'x', commit: pending });
   assert.equal(s.waiters.cancelRelay(other.id, relay.id), null);
   assert.ok(s.waiters.cancelRelay(from.id, relay.id));
   assert.equal(s.waiters.relays().length, 0);
@@ -157,7 +157,7 @@ test('a re-check while a relay waits in retry backoff never sends it a second ti
   const [from, to] = [minion(), minion()];
   const s = server(before);
   await s.outbox.boot();
-  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: pending });
+  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number! }, text: 'x', commit: pending });
   s.r.failFirst = true;
   await s.waiters.check(pending);
   await s.outbox.poke({ type: 'tick' });
@@ -187,7 +187,7 @@ test('a relay on a branch commit that shipped rebased (new patch) fires once its
   const [from, to] = [minion(), minion()];
   const s = server(base);
   await s.outbox.boot();
-  assert.equal((await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: onBranch })).queued, true);
+  assert.equal((await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number! }, text: 'x', commit: onBranch })).queued, true);
   store.addEvent(from.id, 'note', { text: `Shipped ${shipped.slice(0, 9)} "c${n}": the work. Risk low: tests. Live now.` });
   await s.waiters.check(base);
   await s.outbox.poke({ type: 'tick' });
@@ -207,7 +207,7 @@ test('an earlier ship does not fire a relay on work committed after it (a minion
   const s = server(shipped);
   await s.outbox.boot();
   store.addEvent(from.id, 'note', { text: `Shipped ${shipped.slice(0, 9)} "c${n}": piece one. Risk low: tests. Live now.` });
-  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: next });
+  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number! }, text: 'x', commit: next });
   await s.waiters.check(shipped);
   await s.outbox.poke({ type: 'tick' });
   assert.equal(s.r.delivered.length, 0);
@@ -221,7 +221,7 @@ test('a relay whose minion was dismissed without shipping is dropped with a reas
   const [from, to] = [minion(), minion()];
   const s = server(base);
   await s.outbox.boot();
-  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number }, text: 'x', commit: never });
+  await s.waiters.addRelay({ ticket: from.id, to: { minion: to.id, number: to.number! }, text: 'x', commit: never });
   store.updateTicket(from.id, { status: 'closed' });
   await s.waiters.check(base);
   assert.equal(rows()[0].state, 'waiting', 'a fresh dismissal may still ship (a PR merged later)');

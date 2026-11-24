@@ -76,7 +76,7 @@ test('a third bug minion in a plain scheme starts flagged, one tier up', async (
   procs.push(srv.proc);
   const call = async (path: string, body?: unknown) => {
     const res = await fetch(srv.base + path, { method: body ? 'POST' : 'GET', headers: { Cookie: srv.cookie, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
-    return { status: res.status, data: await res.json() };
+    return { status: res.status, data: (await res.json()) as { id: number; number: number; model: string; effort: string; picked_because: string; notes: string[] } };
   };
   const { data: p } = await call('/api/projects', { name: 'Aura Watch' });
   const start = (title: string, message: string) => call(`/api/projects/${p.id}/tickets`, { title, message, properties: { type: 'bug' } });
@@ -97,5 +97,5 @@ test('a third bug minion in a plain scheme starts flagged, one tier up', async (
 
   const other = await call(`/api/projects/${p.id}/tickets`, { title: 'Same words, a chore', message: slamNow.brief, properties: { type: 'chore' } });
   assert.deepEqual([other.data.model, other.data.effort], [BY_TYPE.chore.model, BY_TYPE.chore.effort], 'only bug minions are checked');
-  store.close?.();
+  (store as Store & { close?: () => void }).close?.();
 });

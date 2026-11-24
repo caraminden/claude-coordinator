@@ -44,7 +44,7 @@ test('a minion shows as running while its turn is live, however stale the row th
   try {
     runner.send(t.id, 'Cara', 'look into it');
     await until('the turn to start', () => runner.isRunning(t.id));
-    const stale = { ...store.getTicket(t.id)!, status: 'new' };
+    const stale = { ...store.getTicket(t.id)!, status: 'new' as const };
     assert.equal(runner.view(stale).status, 'running', 'the row said new, but the turn (and its token) had started');
     assert.equal(runner.view({ ...stale, status: 'idle' }).status, 'running');
     // A closed minion keeps its own status: nothing of its is live, and the list sorts and hides by it.

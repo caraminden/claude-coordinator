@@ -21,7 +21,7 @@ function setup(name: string) {
   const store = new Store(join(root, `${name}.db`));
   const citadel = store.createProject('Citadel', null, null);
   const cara = store.createUser({ name: 'Cara', login: 'cara' });
-  store.createTicket({ project_id: citadel.id, title: 'Taskmaster', permission_mode: 'default', created_by: cara.id, kind: 'coordinator' });
+  store.createTicket({ project_id: citadel.id, title: 'Taskmaster', permission_mode: 'default', created_by: String(cara.id), kind: 'coordinator' });
   const told: string[] = [];
   return { store, citadel, told, deps: (bootAt: number, turns = 0) => ({ store, bootAt, turns: () => turns, ownScheme: () => citadel.id, tell: (_: number, t: string) => void told.push(t) }) };
 }
@@ -159,7 +159,7 @@ test('with no Taskmaster the alarm waits, and wakes one that comes back', () => 
   store.addHostSample({ ...base(NOON), supervisors: 30 });
   checkGrowth(deps, NOON);
   assert.equal(told.length, 0);
-  store.createTicket({ project_id: citadel.id, title: 'Taskmaster', permission_mode: 'default', created_by: store.createUser({ name: 'Cara', login: 'cara' }).id, kind: 'coordinator' });
+  store.createTicket({ project_id: citadel.id, title: 'Taskmaster', permission_mode: 'default', created_by: String(store.createUser({ name: 'Cara', login: 'cara' }).id), kind: 'coordinator' });
   store.addHostSample({ ...base(NOON + STEP), supervisors: 1 });
   checkGrowth(deps, NOON + STEP);
   assert.equal(told.length, 1);

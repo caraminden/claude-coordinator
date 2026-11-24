@@ -16,9 +16,10 @@ export interface MsgSettings {
 export const MSG_DEFAULTS: MsgSettings = { loopLimit: 6, loopMin: 10, coldMin: 55, holdH: 3 };
 /** Inclusive bounds. Cold stays at or under 55: past an hour the prompt cache has lapsed, so holding saves nothing. */
 export const MSG_BOUNDS: Record<keyof MsgSettings, [number, number]> = { loopLimit: [3, 20], loopMin: [5, 60], coldMin: [10, 55], holdH: [1, 12] };
-export const MSG_COLUMNS: Record<keyof MsgSettings, string> = { loopLimit: 'msg_loop_limit', loopMin: 'msg_loop_min', coldMin: 'msg_cold_min', holdH: 'msg_hold_h' };
+type MsgColumn = 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h';
+export const MSG_COLUMNS: Record<keyof MsgSettings, MsgColumn> = { loopLimit: 'msg_loop_limit', loopMin: 'msg_loop_min', coldMin: 'msg_cold_min', holdH: 'msg_hold_h' };
 
-type Row = Partial<Record<(typeof MSG_COLUMNS)[keyof MsgSettings], number>>;
+type Row = Partial<Record<MsgColumn, number>>;
 /** A scheme's settings from its row; a missing or out-of-range column reads as the default. */
 export function msgSettings(project?: Row | null): MsgSettings {
   const out = { ...MSG_DEFAULTS };

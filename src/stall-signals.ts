@@ -140,7 +140,7 @@ export function shipFailed(s: StallState, kind: string): Signal[] {
 export const stallKey = (ticketId: number) => `stall:${ticketId}`;
 /** Every suggestion sent, newest last, for the two-week read (was it taken, did it help). */
 export const SUGGESTIONS_KEY = 'stall-suggestions';
-export interface Suggestion { ticket: number; project: number; number: number; at: number; kind: SignalKind; what: string; from: string; to: string | null }
+export interface Suggestion { ticket: number; project: number; number: number | null; at: number; kind: SignalKind; what: string; from: string; to: string | null }
 
 export interface StallDeps {
   store: Store;

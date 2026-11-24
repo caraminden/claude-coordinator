@@ -79,7 +79,7 @@ test('the tick starts one retro minion in a scheme that is not Citadel, and reco
     newMinion: async (project, m) => {
       made.push({ project: project.id, title: m.title, props: m.props });
       const x = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'default', created_by: 'Citadel' });
-      return { id: x.id, number: x.number };
+      return { id: x.id, number: x.number! };
     },
     runner: { emit: () => {}, send: (id: number, _by: string, text: string) => { sent.push({ id, text }); } } as any,
     note: () => {},
@@ -116,7 +116,7 @@ test('log-only notes the retro it would start, and acting later starts it after 
     newMinion: async (project: any, m: { title: string }) => {
       made.push(m.title);
       const x = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'default', created_by: 'Citadel' });
-      return { id: x.id, number: x.number };
+      return { id: x.id, number: x.number! };
     },
     runner: { emit: () => {}, send: () => {} } as any,
     note: (line: string) => { notes.push(line); },
@@ -150,7 +150,7 @@ test('a start that fails is tried again on later ticks, three times in all (#175
       if (fails-- > 0) throw new Error('no worktree');
       made++;
       const x = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'default', created_by: 'Citadel' });
-      return { id: x.id, number: x.number };
+      return { id: x.id, number: x.number! };
     },
     runner: { emit: () => {}, send: () => {} } as any,
     note: () => {},

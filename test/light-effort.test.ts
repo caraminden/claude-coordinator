@@ -48,7 +48,7 @@ const store = new Store(join(root, 'test.db'));
 const project = store.createProject('Test', null);
 
 function minion() {
-  const t = store.createTicket({ project_id: project.id, kind: 'thread', title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const t = store.createTicket({ project_id: project.id, kind: 'ticket', title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.updateTicket(t.id, { effort: 'high' });
   const dir = join(root, `t${t.id}`);
   mkdirSync(dir);

@@ -403,7 +403,7 @@ test('a typed go is recorded for the scheme when sent, steered or not; a relay n
   assert.equal(runner.approvals.hasGo(project.id), true, 'the turn ended, the go stands');
   assert.equal(new Runner(store, () => {}, () => ({}), fake).approvals.hasGo(project.id), true, 'kept in settings: a restart keeps it');
   assert.deepEqual(store.getSetting<Go[]>(`merge_goes:${project.id}`)!.map((g) => [g.text, g.ticket, g.number, g.branch]), [['fold it', t.id, t.number, 'ticket/1-t']]);
-  store.close?.();
+  (store as Store & { close?: () => void }).close?.();
 });
 
 test("the runner hands a go typed to the Taskmaster to the minion its relay quotes it to, or that it names (#939)", async () => {
@@ -427,7 +427,7 @@ test("the runner hands a go typed to the Taskmaster to the minion its relay quot
   writeFileSync(join(root, 'release'), '');
   await until('the Taskmaster turn ends', () => !runner.isRunning(coordinator.id));
   rmSync(join(root, 'release'), { force: true });
-  store.close?.();
+  (store as Store & { close?: () => void }).close?.();
 });
 
 // ---------- the routes ----------

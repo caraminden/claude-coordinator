@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import type { TicketState } from '../src/db.ts';
 import { listeningPort, tempRoot, TEST_ZONE } from './helpers.ts';
 
 // POST /api/tickets/:id/seen with left:true closes a complete minion the person had open at its last update (#811).
@@ -19,7 +20,7 @@ async function call(who: string, path: string, opts: { method?: string; body?: u
     headers: { Cookie: cookies[who], ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
-  return { status: res.status, data: await res.json() };
+  return { status: res.status, data: (await res.json()) as { id: number; closed?: boolean } };
 }
 
 before(async () => {
@@ -40,7 +41,7 @@ before(async () => {
 test('{left:true} closes a complete minion seen at its last update; a plain mark only records the view', async () => {
   const { data: proj } = await call('Cara', '/api/projects', { method: 'POST', body: { name: 'Seen' } });
   const store = new Store(join(root, 'data', 'coordinator.db'));
-  const made = (state: string | null) => {
+  const made = (state: TicketState | null) => {
     const t = store.createTicket({ project_id: proj.id, kind: 'ticket', title: 'T', permission_mode: 'default', created_by: 'Cara' });
     store.updateTicket(t.id, { state });
     return t.id;

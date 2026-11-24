@@ -11,6 +11,7 @@ import { after, test } from 'node:test';
 import { APP_NAME } from '../src/appname.ts';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/db.ts';
+import type { TicketState } from '../src/db.ts';
 import { READ_WAIT_MS } from '../src/db-writer.ts';
 import { COLD_HOLD_MAX_MS, LOOP_LIMIT, Runner } from '../src/runner.ts';
 import { LiveWaiters, startChained } from '../src/wake.ts';
@@ -44,7 +45,7 @@ const project = store.createProject('P', null);
 const tm = store.createTicket({ project_id: project.id, title: 'Taskmaster', permission_mode: 'default', created_by: 'Cara', kind: 'coordinator' });
 
 /** An idle minion, parked unless `state` says otherwise. */
-function minion(state: string | null = 'parked') {
+function minion(state: TicketState | null = 'parked') {
   const t = store.createTicket({ project_id: project.id, title: 'M', permission_mode: 'default', created_by: 'Cara' });
   const cwd = join(root, `t${t.id}`);
   mkdirSync(cwd, { recursive: true });

@@ -181,6 +181,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the devDep
 | `src/turn-launch.ts` | What a turn is launched with: pinned copies of the server files, hooks, settings, env and tool lists |
 | `src/prompts.ts` | The agent instructions: the minion and Taskmaster prompts, onboarding, and the messages a turn is sent |
 | `src/mcp.ts` | MCP server giving the Taskmaster its minion-management tools |
+| `src/mcp-types.ts` | Types only: the API answers and requests `src/mcp.ts`'s tools read (#1799) |
 | `src/approvals.ts` | Approval rules, plugin folders, and the Approve / Deny cards |
 | `src/inbox.ts`, `public/inbox.js` | The Needs-you inbox: a scheme's open cards and ready/try minions, as a strip at the top of the minions list |
 | `src/memory.ts` | Semantic memory (#331): the memory_chunks table, the background indexer (each person's message with the final reply, and minions' titles and notes; never tool output or person notes) and search by meaning behind `/api/projects/:project/memory` and the `search_memory` MCP tool |

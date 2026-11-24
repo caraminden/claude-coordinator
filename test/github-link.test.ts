@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
+import { blocks } from '../src/claude-events.ts';
 import { Credentials } from '../src/credentials.ts';
 import { Store } from '../src/db.ts';
 import { GithubLink, personGithub, appSlug } from '../src/github-link.ts';
@@ -319,9 +320,9 @@ test('pushKind spots pushes and new pull requests, not the word in passing', () 
 test('GitHub tokens are hidden in what the chat stores: tool output and replies', () => {
   const token = 'gho_' + 'a'.repeat(36);
   const ev = slimEvent({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: `GH_TOKEN=${token}\nPORT=1` }] } });
-  assert.equal(ev.message.content[0].content, 'GH_TOKEN=[GitHub token hidden]\nPORT=1');
+  assert.equal(blocks(ev?.message?.content)[0].content, 'GH_TOKEN=[GitHub token hidden]\nPORT=1');
   const reply = slimEvent({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `it is ${token}` }] } });
-  assert.equal(reply.message.content[0].text, 'it is [GitHub token hidden]');
+  assert.equal(blocks(reply?.message?.content)[0].text, 'it is [GitHub token hidden]');
   assert.equal(hideTokens('ghost_town and gho_short stay'), 'ghost_town and gho_short stay');
 });
 
@@ -340,7 +341,7 @@ test("Citadel's machine tokens, Anthropic and AWS keys and PEM private keys are 
   for (const s of ['ccm_12_short', '-----BEGIN PUBLIC KEY-----', 'ask-ant-farm', 'AKIA is how AWS key ids start']) assert.equal(hideTokens(s), s);
   // In tool output and in a person's message as the chat stores it.
   const ev = slimEvent({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: `TOKEN=${machine}` }] } });
-  assert.equal(ev.message.content[0].content, 'TOKEN=[Citadel machine token hidden]');
+  assert.equal(blocks(ev?.message?.content)[0].content, 'TOKEN=[Citadel machine token hidden]');
 });
 
 // Through the runner: a fake claude that writes its GitHub env, and, asked to, "runs" a push.
@@ -382,7 +383,7 @@ function runner() {
 }
 
 function newTicket() {
-  const t = store.createTicket({ project_id: project.id, kind: 'thread', title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const t = store.createTicket({ project_id: project.id, kind: 'ticket', title: 'T', permission_mode: 'default', created_by: 'Cara' });
   const dir = join(root, `t${t.id}`);
   mkdirSync(dir);
   store.setTicketDir(t.id, dir, null);
@@ -483,7 +484,7 @@ test('a message from someone else waits for its own turn instead of steering; a 
   await finish(r, t);
 
   // The Taskmaster's message speaks for the person its own turn ran for.
-  const tm = store.createTicket({ project_id: project.id, kind: 'thread', title: 'TM', permission_mode: 'default', created_by: 'Cara' });
+  const tm = store.createTicket({ project_id: project.id, kind: 'ticket', title: 'TM', permission_mode: 'default', created_by: 'Cara' });
   store.updateTicket(tm.id, { person_id: josh.id });
   r.send(t.id, 'Taskmaster', 'over to you', [], { from: tm.id });
   await until("seen(t.dir).some((l) => l.includes('over to you'))", () => seen(t.dir).some((l) => l.includes('over to you')));

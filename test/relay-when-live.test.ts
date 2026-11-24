@@ -60,7 +60,7 @@ test('in process: nothing is delivered before the commit is live, then once, and
   const work = commit();
   git('checkout', '-q', 'main');
   const w = mkw(head);
-  const { queued, relay } = await w.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number }, text: 'hello', commit: work });
+  const { queued, relay } = await w.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number! }, text: 'hello', commit: work });
   assert.equal(queued, true);
   await w.check();
   assert.equal(got.length, 0, 'not live yet');
@@ -73,7 +73,7 @@ test('in process: nothing is delivered before the commit is live, then once, and
   await restarted.check();
   assert.equal(got.length, 1, 'sent once');
   // Already live: delivered at once, never stored.
-  const again = await restarted.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number }, text: 'now', commit: work });
+  const again = await restarted.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number! }, text: 'now', commit: work });
   assert.equal(again.queued, false);
   assert.equal(got.length, 2);
   // Cancel.
@@ -81,7 +81,7 @@ test('in process: nothing is delivered before the commit is live, then once, and
   git('checkout', '-q', '-b', 'work2');
   const c2 = commit();
   git('checkout', '-q', 'main');
-  const q = await mkw(head2).addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number }, text: 'x', commit: c2 });
+  const q = await mkw(head2).addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number! }, text: 'x', commit: c2 });
   const w3 = mkw(head2);
   assert.equal(w3.cancelRelay(M2.id, q.relay.id), null, "another minion can't cancel it");
   assert.ok(w3.cancelRelay(M1.id, q.relay.id));
@@ -99,7 +99,7 @@ test('addRelay asks again when a deploy went live while its check ran (late, not
     if (++calls === 1) { w.head = 'head-2'; return false; }
     return true;
   };
-  const { queued } = await w.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number }, text: 'late', commit: 'abc' });
+  const { queued } = await w.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number! }, text: 'late', commit: 'abc' });
   assert.equal(calls, 2);
   assert.equal(queued, false);
   assert.deepEqual(got.map((r) => r.text), ['late']);
@@ -117,8 +117,8 @@ async function tool(from: number, name: string, args: object): Promise<{ text: s
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   try {
-    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout }).once('line', (l) => resolve(JSON.parse(l))));
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+    const reply = new Promise<any>((resolve) => createInterface({ input: child.stdout! }).once('line', (l) => resolve(JSON.parse(l))));
+    child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }) + '\n');
     const { result } = await reply;
     return { text: result.content[0].text, error: !!result.isError };
   } finally {
@@ -165,8 +165,8 @@ test('in process: same-text relays from one minion going out together make one s
   w.deliver = () => {};
   w.sent = (rs) => batches.push(rs);
   const m3 = mk('Third');
-  for (const m of [M2, m3]) await w.addRelay({ ticket: M1.id, to: { minion: m.id, number: m.number }, text: 'same', commit: c });
-  await w.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number }, text: 'other', commit: c });
+  for (const m of [M2, m3]) await w.addRelay({ ticket: M1.id, to: { minion: m.id, number: m.number! }, text: 'same', commit: c });
+  await w.addRelay({ ticket: M1.id, to: { minion: M2.id, number: M2.number! }, text: 'other', commit: c });
   git('merge', '-q', '--ff-only', 'workb');
   await w.check(git('rev-parse', 'HEAD'));
   assert.deepEqual(batches.map((b) => b.map((r) => r.text)).sort(), [['other'], ['same', 'same']]);

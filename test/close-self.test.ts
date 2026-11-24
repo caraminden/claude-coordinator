@@ -177,7 +177,7 @@ test('refuses while a question or plan card waits on people, or the state is try
   store.addEvent(plan, 'plan', { id: 'p1', status: 'pending' });
   assert.match(runner.keptOpen(plan)!, /card is still waiting/);
   const t = newTicket();
-  for (const state of ['try', 'ready']) {
+  for (const state of ['try', 'ready'] as const) {
     store.updateTicket(t, { state });
     assert.match(runner.keptOpen(t)!, new RegExp(`state is ${state}`));
   }
@@ -187,7 +187,7 @@ test('refuses while a question or plan card waits on people, or the state is try
   store.updateTicket(t, { state: 'complete', note: 'read: the report' });
   assert.match(runner.keptOpen(t, true)!, /state is complete: it closes once a member has seen it/);
   assert.match(runner.keptOpen(t)!, /state is complete/);
-  for (const state of [null, 'parked', 'pending-deploy']) {
+  for (const state of [null, 'parked', 'pending-deploy'] as const) {
     store.updateTicket(t, { state });
     assert.equal(runner.keptOpen(t), null);
   }
@@ -228,7 +228,7 @@ test('state ready with no card clears and dismisses (#480)', async () => {
 });
 
 test('a card posted or try/ready set after close_self keeps it open at the turn end', async () => {
-  for (const after of ['ready', 'try', 'card']) {
+  for (const after of ['ready', 'try', 'card'] as const) {
     const id = newTicket();
     runner.send(id, 'Cara', 'ship it');
     assert.equal(runner.closeAfterTurn(id, null), true);

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
+import type { TicketKind } from '../src/db.ts';
 import { KIT_DIR, listSkills, skillTimeline, refreshUsage, cachedUsage, scanSkills, reportFor, forgetUsage, skillDetail, sentenceAround, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
 import { bootServer, stopProcs, stopTurns, until, type Booted } from './helpers.ts';
 
@@ -176,7 +177,7 @@ test('an opened row: where it ran, its type\'s rate and misses with what they op
   const store = new Store(':memory:');
   const a = store.createProject('DA', null);
   const b = store.createProject('DB', null);
-  const mk = (p: number, title: string, type: string | null, kind = 'ticket') => {
+  const mk = (p: number, title: string, type: string | null, kind: TicketKind = 'ticket') => {
     const t = store.createTicket({ project_id: p, title, permission_mode: 'bypassPermissions', created_by: 'Cara', kind });
     if (type) store.props.set('minion', t.id, p, { type }, 'Cara');
     return t;

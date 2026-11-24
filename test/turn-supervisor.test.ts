@@ -97,7 +97,7 @@ function server() {
 const spec = (r: Runner) => (r as any).supervisorSpec();
 
 function newTicket() {
-  const t = store.createTicket({ project_id: project.id, kind: 'thread', title: 'T', permission_mode: 'default', created_by: 'Cara' });
+  const t = store.createTicket({ project_id: project.id, kind: 'ticket', title: 'T', permission_mode: 'default', created_by: 'Cara' });
   const dir = join(root, `t${t.id}`);
   mkdirSync(dir);
   store.setTicketDir(t.id, dir, null);

@@ -139,7 +139,7 @@ function world(fable: 'on' | 'off' = 'on', taskmaster = true) {
   const josh = store.createUser({ name: 'Josh', login: 'josh' });
   const p = store.createProject('Peek Auras', null);
   if (fable === 'off') store.db.prepare('UPDATE projects SET fable_ok = ? WHERE id = ?').run('off', p.id);
-  const t = store.createTicket({ project_id: p.id, title: 'Crop keeps its field', permission_mode: 'default', created_by: josh.id });
+  const t = store.createTicket({ project_id: p.id, title: 'Crop keeps its field', permission_mode: 'default', created_by: String(josh.id) });
   store.updateTicket(t.id, { model: 'claude-opus-5-5', effort: 'medium' });
   const told: string[] = [];
   const notes: string[] = [];

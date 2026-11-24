@@ -495,7 +495,7 @@ function appTiles(a, days, ships, redraw) {
     tile('Who used it', a.turns.people.length ? a.turns.people.slice(0, 2).map((p) => p.name).join(', ') + (a.turns.people.length > 2 ? ` +${a.turns.people.length - 2}` : '') : 'Nobody this week', 'By agent turns this week',
       h('ul', { class: 'st-list' }, ...a.turns.people.slice(0, 6).map((p) => h('li', {}, p.name, h('span', { class: 'muted' }, plural(p.turns, 'turn'))))),
       { key: 'people', chart: a.turns.people.map((p) => `${p.name} ${p.turns}`).join(', ') }),
-    tile('Disk', a.disk?.bytes != null ? bytes(a.disk.bytes) : 'Not measured yet', a.disk ? `Its data folder, measured ${ago(a.disk.at)}${a.disk.warn_gb ? ` · warns at ${a.disk.warn_gb} GB` : ''}` : 'Measured every 30 minutes',
+    tile('Disk', a.disk?.bytes != null ? bytes(a.disk.bytes) : 'Not measured yet', a.disk?.bytes != null ? `Its data folder, measured ${ago(a.disk.at)}${a.disk.warn_gb ? ` · warns at ${a.disk.warn_gb} GB` : ''}` : a.disk ? `Last tried ${ago(a.disk.at)}, it didn't answer` : 'Measured every 30 minutes',
       null, { tone: a.verdict.reasons.some((r) => r.includes('GB')) ? 'warn' : null, key: 'disk' }),
     a.errors.top.length ? tile('Top errors this week', `${a.errors.top[0].count}× ${a.errors.top[0].kind}`, `last ${ago(a.errors.top[0].last_at)}`,
       h('ul', { class: 'st-list st-errors' }, ...a.errors.top.map((e) => h('li', {}, h('span', { class: 'st-err' }, e.sample || e.kind), h('span', { class: 'muted' }, `${e.count}× ${e.kind}`)))),

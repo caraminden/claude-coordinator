@@ -38,7 +38,9 @@ test("a batch with Josh asking and Dana's ride-along message gets Josh's machine
   r.send(t.id, 'Dana', 'from dana');
   setRelease('ok');
   await until('the second turn to start', () => asked.length === 2);
-  await until('both turns to end', () => turnsRun() === 2);
+  // turnsRun counts prompts, written as a turn starts: wait for the Runner to wrap the second one up too, or it writes
+  // into the temp folder after teardown (#1763).
+  await until('both turns to end', () => turnsRun() === 2 && !r.isRunning(t.id) && store.getTicket(t.id)!.status !== 'running');
   assert.deepEqual(asked[0], [eve.id]);
   assert.deepEqual(asked[1], [josh.id], "one asker's machines, not Dana's with them");
 });

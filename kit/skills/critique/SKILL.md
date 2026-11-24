@@ -12,11 +12,8 @@ description: >
 # Critique
 
 The author who made something checks it against what it meant to make, and misses what a person
-then sees at a glance. Delve's art loop found that a blind critic, holding the person's own rubric,
-catches most of it before they look: on a blind trial, an Opus critic caught about 9 of Cara's 13
-notes. This skill is that loop for any scheme, any kind of work. Delve's art-review skill is where it
-came from (Cara, 2026-10-24, Delve thread 168; lifted into the kit 2026-11-08, Citadel #390 and
-#393).
+then sees at a glance. A blind critic holding the person's own rubric catches most of it before they look. This skill is
+that loop for any scheme, any kind of work.
 
 The scheme's rubrics are its review set: Citadel stores them (the scheme's Reviewers and critics
 page, Cara, 2026-11-19) and renders the ones that are on into a folder each turn, named in the turn's

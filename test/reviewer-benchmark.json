@@ -1,9 +1,9 @@
 {
- "hash": "fc78d6d1e64b86db",
+ "hash": "4b3f6fd154480141",
  "parts": {
   "reviewer": "74365b1b33254f33",
   "self-review §2": "d2990a67150f6f0c",
-  "lenses": "2278765ce0f9add3",
+  "lenses": "3c9a62dd530d4906",
   "ponytail-review": "9dd27f8bc79cbdf2"
  },
  "at": "2026-11-24",
@@ -14,44 +14,44 @@
  "passes": 2,
  "planted": {
   "named": [
-   21,
-   19
+   18,
+   20
   ],
   "of": 22,
   "casesNamed": [
-   21,
-   19
+   18,
+   20
   ],
   "controlsWith": [
-   2,
-   2
+   1,
+   1
   ],
   "controls": 5,
   "findings": [
-   46,
-   44
+   36,
+   37
   ]
  },
  "escapes": {
   "named": [
-   4,
-   2
+   2,
+   5
   ],
   "of": 36,
   "casesNamed": [
-   4,
-   2
+   2,
+   5
   ],
   "controlsWith": [
    6,
-   4
+   6
   ],
   "controls": 10,
   "findings": [
-   21,
-   18
+   27,
+   21
   ]
  },
- "cost": 27.33,
+ "cost": 24.67,
  "results": "shared/project/reports/reviewer-benchmark-baseline-2026-11.md"
 }

@@ -1,9 +1,6 @@
 ---
 name: replay
-description: >
-  Rerun kept real app chats against a change to an app agent's prompt or tools, with a blind critic
-  judging each pair. Only when a person asks, or once before shipping a big prompt or tool change to
-  a contraption agent; never for small edits, per fix round, or from self-review on its own.
+description: Rerun kept real app chats against a change to a contraption's in-app agent (its prompt, its tools, or what it tells players), with a blind critic judging each pair, to prove the change didn't make real chats worse. Use when a person asks, and once before shipping a big change to an app agent's prompt or tools; never for small edits, per fix round, or from self-review on its own.
 ---
 
 # Replay real chats against a prompt change

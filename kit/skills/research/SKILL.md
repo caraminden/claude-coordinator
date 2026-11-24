@@ -1,6 +1,10 @@
 ---
 name: research
-description: Research a question outside the repo (a product, service, API, price, paper) with web search and docs, and write the report people decide from. Use for a research minion, "look into", "compare X and Y", and before briefing Grunts to research. Skill surveys are citadel:skills-survey.
+description: >
+  Research a question outside the repo (a product, service, API, price, paper, video or article)
+  with web search and docs, and write the report people decide from. Use for a research minion,
+  "look into", "compare X and Y", "should we adopt the ideas in this video", "can we use X to do Y",
+  and before briefing Grunts to research. Skill surveys are citadel:skills-survey.
 ---
 
 # Research

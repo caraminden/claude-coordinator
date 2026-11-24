@@ -1,10 +1,10 @@
 ---
 name: ponytail-review
 description: >
-  Review written in plain English for a reader who doesn't know the code, of a change or a
-  whole repo: bugs, safety, load, missing tests, speed, what to cut. Use when a person asks for
-  plain English, a whole-repo audit, or the `shortcut:` debt ledger; a bare "review my PR" or
-  "code review" of a minion's own branch is `citadel:self-review`. Reports only, changes nothing.
+  Plain-English review, for a reader who doesn't know the code, of a change, an area or a whole
+  repo, or the `shortcut:` debt ledger. Use when a person asks for plain English, a whole-area or
+  whole-repo audit, or a code health run; a bare "review my branch" is citadel:self-review. Reports
+  only.
 ---
 
 Review a change like the senior developer who will be paged when it breaks.

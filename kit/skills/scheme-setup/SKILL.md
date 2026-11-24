@@ -1,6 +1,6 @@
 ---
 name: scheme-setup
-description: How a setup minion applies an approved onboarding plan to its scheme's repo, from CLAUDE.md with Project facts, the push guard, adapted and new skills and copied rules through to the ship. Use when your brief is an approved setup or tune-up plan.
+description: How a setup minion applies an approved onboarding plan to its scheme's repo, from CLAUDE.md with Project facts, the push guard, adapted and new skills and copied rules through to the ship. Use when your brief is an approved setup or tune-up plan. Not for re-syncing one kit template (land.sh, guard.sh) into a repo.
 ---
 
 # Scheme setup

@@ -3,9 +3,10 @@ name: critique
 description: >
   The blind-critic loop: a citadel:critic Grunt judges finished work against the scheme's rubric,
   the author fixes, citadel:professor teaches on stubborn fails, and a person gets what the rounds
-  can't settle. Use when self-review or docs-and-mocks finds a rubric whose `when:` matches, when a
-  person asks for a critic on some work, when you pick up work whose `critic.md` log has rounds
-  open, when a person's verdict differs from a critic's, and to write or calibrate a rubric.
+  can't settle. Use when a person asks for a critic, when work goes round by round to the look a
+  person calls final, when self-review or docs-and-mocks finds a rubric whose `when:` matches, when
+  you pick up a `critic.md` log with rounds open, when a person's verdict differs from a critic's,
+  and to write or calibrate a rubric.
 ---
 
 # Critique

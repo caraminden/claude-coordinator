@@ -9,6 +9,8 @@ import { HEALTH_KEEP_MS, HOST_SAMPLE_KEEP_MS, Store } from '../src/db.ts';
 import { APP_ERRORS_WARN, STORM_WARN_S, StatusPage, rateTone, lastDays, recordBoot, recordLive, stallSeconds, stallCauseOf } from '../src/status-page.ts';
 import { BOOT_STALL } from '../src/deploy-watch.ts';
 import type { Storm } from '../src/memory-storms.ts';
+import type { EaseNow } from '../src/memory-ease.ts';
+import { pacificStamp } from '../src/pacific.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'status-page-'));
 // A database backup that is never stale for these tests' clocks, so the backups line stays out of their verdicts.
@@ -188,6 +190,29 @@ test('memory-limit storms (#1280): per day with their stalled seconds, the last 
   going = [{ ...JSON.parse(storm(940)) }];
   c = (await page.build(viewer(store, josh.id, true), now + 2)).citadel;
   assert.deepEqual(c.verdict.reasons, [`16 min stalled at a memory limit in the last day`], 'a long stall reads in minutes');
+});
+
+test('memory easing (#1748): spells per day and their minutes, the last with its held turns named, and a warn with why while it is on', async () => {
+  const { store, josh, citadel, peekScheme } = setup('easing');
+  const now = sameDayNow();
+  const mk = (project: number) => store.createTicket({ project_id: project, title: 'A turn', permission_mode: 'bypass', created_by: 'josh' } as any);
+  const ours = mk(citadel.id), theirs = mk(peekScheme.id);
+  const episode = (since: number, minutes: number, slowed: number[]) => JSON.stringify({ since, until: since + minutes * 60_000, peak: slowed.length ? 'tight' : 'easing', why: '5.0 GB free', lowestFree: 2.5e9, peakReclaim: 90_000, peakSwapOut: 3e7, waited: { starts: 1, heavy: 2, nested: 3 }, slowed: slowed.map((t) => ({ unit: `citadel-turn-ab-${t}-1.scope`, ticket: t, bytes: 4e9 })) });
+  store.addHealthEvent('memory-easing', now - 60 * 60_000, 'x', episode(now - 60 * 60_000, 4, []));
+  store.addHealthEvent('memory-easing', now - 20 * 60_000, 'x', episode(now - 20 * 60_000, 6, [ours.id, theirs.id]));
+  store.addHealthEvent('memory-easing', now - 9 * 60_000, 'x', 'not json');
+  let going: EaseNow | null = null;
+  const page = new StatusPage({ store, dataDir: root, bootAt: now - DAY, commit: 'c', ownScheme: () => citadel.id, now: () => now, easing: () => going });
+  let c = (await page.build(viewer(store, josh.id, true))).citadel;
+  assert.equal(c.easing.counts.at(-1), 2);
+  assert.equal(c.easing.minutes.at(-1), 10);
+  assert.deepEqual(c.easing.last?.slowed.map((x) => x.minion), [`#${ours.number}`, `Peek Auras #${theirs.number}`]);
+  assert.equal(c.easing.now, null);
+  assert.deepEqual(c.verdict.reasons, [], 'spells that ended are history, not a warning');
+  going = { level: 'easing', since: now - 5 * 60_000, why: '4.2 GB free (eases under 6.0 GB, back over 8.0 GB)', free: 4.2e9, reclaim: 300, swapOut: 0, lines: { easeFree: 6e9, backFree: 8e9, tightFree: 3e9 }, waiting: { starts: 2, heavy: 1, nested: 0 }, slowed: [{ unit: 'u', ticket: theirs.id, bytes: 3e9, at: now }], episodeSince: now - 5 * 60_000 };
+  c = (await page.build(viewer(store, josh.id, true), now + 1)).citadel;
+  assert.deepEqual(c.verdict.reasons, [`easing off memory since ${pacificStamp(now - 5 * 60_000)}: 4.2 GB free (eases under 6.0 GB, back over 8.0 GB)`]);
+  assert.deepEqual(c.easing.now?.slowed.map((x) => x.minion), [`Peek Auras #${theirs.number}`]);
 });
 
 test('a viewer outside Citadel sees its health but not its CI', async () => {

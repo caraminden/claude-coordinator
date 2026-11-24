@@ -154,11 +154,8 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   }
   if (existsSync(join(MCP_DIR, 'bin', 'heavy-shim'))) {
     mkdirSync(join(MCP_DIR, 'bin', 'heavy'), { recursive: true });
-    for (const cmd of HEAVY_SHIMS) symlinkSync('../heavy-shim', join(MCP_DIR, 'bin', 'heavy', cmd));
-  }
-  if (existsSync(join(MCP_DIR, 'bin', 'claude-pace'))) {
-    mkdirSync(join(MCP_DIR, 'bin', 'heavy'), { recursive: true });
-    symlinkSync('../claude-pace', join(MCP_DIR, 'bin', 'heavy', 'claude'));
+    // One more link in the same loop: claude goes to the pacer (copied with heavy-shim above), the rest to heavy-shim.
+    for (const cmd of [...HEAVY_SHIMS, 'claude']) symlinkSync(cmd === 'claude' ? '../claude-pace' : '../heavy-shim', join(MCP_DIR, 'bin', 'heavy', cmd));
   }
   // node under another name, so ananicy-cpp's stock `node` rule (SCHED_IDLE) misses the wrapper, claude under it and the MCP servers (#506, deploy/priority.md).
   mkdirSync(join(MCP_DIR, 'bin'), { recursive: true });

@@ -453,6 +453,30 @@ test('enough memory room starts at once, and a priority job skips the memory wai
   assert.equal(await p.done, 0);
 });
 
+test('while Citadel eases off memory (#1748) the job waits on the level file, and runs once it says ok', async () => {
+  const { env, dir } = folder(3);
+  const level = join(root, `level-${n++}`);
+  setPressure(level, 'easing\n5.0 GB free (eases under 6.0 GB, back over 8.0 GB)\n');
+  const a = job({ ...env, CITADEL_MEMORY_LEVEL: level }, 'Peek #10', touch(join(root, 'ease-up')));
+  await until('the job to say it waits for memory', () => /waiting for memory: Citadel is easing off \(easing: 5\.0 GB free/.test(a.err()));
+  assert.ok(!existsSync(join(root, 'ease-up')), 'it waits though a slot is free and the memory room check would pass');
+  assert.ok(readdirSync(dir).some((f) => f.startsWith('wait-')), 'it shows as waiting');
+  setPressure(level, 'ok\n\n');
+  assert.equal(await a.done, 0);
+  assert.ok(existsSync(join(root, 'ease-up')));
+});
+
+test('a level file over 60 s old counts as ok: a stopped server never holds a job', async () => {
+  const { env } = folder(3);
+  const level = join(root, `level-${n++}`);
+  setPressure(level, 'tight\n2.0 GB free\n');
+  const old = Date.now() / 1000 - 120;
+  utimesSync(level, old, old);
+  const a = job({ ...env, CITADEL_MEMORY_LEVEL: level }, 'Peek #11', touch(join(root, 'ease-stale')));
+  assert.equal(await a.done, 0);
+  assert.doesNotMatch(a.err(), /memory/);
+});
+
 // Only heavy work waits (#1629): each job is judged light or heavy by its own past runs before it takes a place in line.
 const past = (who: string, what: string, run: number, cpu?: number) =>
   `2026-11-20T10:00:00-0800\t${who}\t${what}\tnone\t0\t${run}\t0\t5${cpu === undefined ? '' : `\t${cpu}`}\n`;

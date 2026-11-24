@@ -194,7 +194,7 @@ async function supervisor(home: string, tag: string): Promise<number> {
   return pid;
 }
 
-test('turn supervisors whose folder is gone or whose ship has ended are stopped with TERM; live ones and running ships\' keep theirs', async () => {
+test('turn supervisors whose folder is gone or whose ship has ended are stopped with TERM (and the unit of one that ignores it); live ones and running ships\' keep theirs', async () => {
   const dir = join(root, 'supervisors');
   const { store } = scheme(dir);
   const landings = join(dir, 'run', 'landings');
@@ -207,15 +207,19 @@ test('turn supervisors whose folder is gone or whose ship has ended are stopped 
   rmSync(join(root, 'deleted-test'), { recursive: true }); // timing-ok: the folder going is the case under test
   writeFileSync(join(landings, '7', 'code'), '0'); // ship 7's land.sh ended; 8's still runs
   const sent: string[] = [];
+  const units: string[] = [];
   const reaper = new Reaper({
-    store, dataDir: dir, termWaitMs: 2000, log: () => {},
-    // This test's own processes only: the box's real supervisors are not the test's to stop.
-    scan: async () => (await scanProcs()).filter((p) => pids.includes(p.pid)),
-    kill: (pid, sig) => { sent.push(`${pid} ${sig}`); process.kill(pid, sig); },
+    store, dataDir: dir, termWaitMs: 500, log: () => {},
+    // This test's own processes only: the box's real supervisors are not the test's to stop. `shipped` runs in its unit.
+    scan: async () => (await scanProcs()).filter((p) => pids.includes(p.pid)).map((p) => (p.pid === shipped ? { ...p, cgroup: '/user.slice/citadel-taskmasters.slice/citadel-supervisor-ab-v1.service' } : p)),
+    // `shipped` ignores TERM, so it is KILLed, and its unit stopped so Restart=on-failure can't bring it back.
+    kill: (pid, sig) => { sent.push(`${pid} ${sig}`); if (pid !== shipped || sig === 'SIGKILL') process.kill(pid, sig); },
+    stopUnit: async (unit) => units.push(unit),
   });
   assert.deepEqual((await reaper.reapSupervisors()).sort(), [gone, shipped].sort());
-  assert.deepEqual(sent.sort(), [`${gone} SIGTERM`, `${shipped} SIGTERM`].sort());
-  await until('both to exit of TERM', async () => !(await alive(gone)) && !(await alive(shipped)));
+  assert.deepEqual(sent.sort(), [`${gone} SIGTERM`, `${shipped} SIGTERM`, `${shipped} SIGKILL`].sort());
+  assert.deepEqual(units, ['citadel-supervisor-ab-v1.service']);
+  await until('both to exit', async () => !(await alive(gone)) && !(await alive(shipped)));
   for (const pid of [live, shipping, notOne]) assert.ok(await alive(pid), `pid ${pid} still runs`);
   store.db.close();
 });

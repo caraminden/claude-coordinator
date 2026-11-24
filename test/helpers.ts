@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Auth } from '../src/auth.ts';
 import { freePort, listeningPort } from '../src/ports.ts';
+import { supervisorHome } from '../src/reaper.ts';
 import { pinTurnFiles, type TurnPins } from '../src/turn-launch.ts';
 import { until } from './wait.ts';
 import { holds } from './holds.ts';
@@ -126,9 +127,9 @@ export async function stopTurns(...dirs: string[]) {
       await settledInProcess(10_000);
       return;
     }
-    for (const [pid, command] of left) {
+    for (const pid of left.keys()) {
       // A turn supervisor gets TERM, which its unit's Restart=on-failure leaves stopped; KILLed, it came back (#1758). KILL after 2 s.
-      const signal = i < 40 && / \S*\/turn-supervisor\.mjs /.test(` ${command} `) ? 'SIGTERM' : 'SIGKILL';
+      const signal = i < 40 && isSupervisor(pid) ? 'SIGTERM' : 'SIGKILL';
       try {
         process.kill(-pid, signal); // claude leads a process group of its own, with its tools in it
       } catch {
@@ -140,6 +141,14 @@ export async function stopTurns(...dirs: string[]) {
     await new Promise((r) => setTimeout(r, 50));
   }
   throw new Error(`Processes under ${dirs.join(', ')} would not exit`);
+}
+
+function isSupervisor(pid: number): boolean {
+  try {
+    return !!supervisorHome(readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'));
+  } catch {
+    return false; // gone meanwhile
+  }
 }
 
 /** This user's live processes with an argument that is, or is inside, one of `dirs`: pid → command line. */

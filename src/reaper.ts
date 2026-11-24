@@ -16,6 +16,8 @@
 //
 // It reads /proc with async calls, off the server's thread (src/runner.ts's wrapperInProc is the synchronous one).
 import { SHIM } from './turn-run.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { readdir, readFile, readlink, stat } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -212,6 +214,8 @@ export interface ReaperOptions {
   guardCgroup?: (cgroup: string) => boolean;
   scan?: () => Promise<Proc[]>;
   kill?: (pid: number, signal: NodeJS.Signals) => void;
+  /** `systemctl --user stop`, for a supervisor's unit whose process ignored TERM. */
+  stopUnit?: (unit: string) => Promise<unknown>;
   /** How long a process has after TERM before KILL. */
   termWaitMs?: number;
   log?: (line: string) => void;
@@ -241,6 +245,7 @@ export class Reaper {
     this.o = {
       store: o.store, dataDir: o.dataDir, commit: o.commit ?? null, selfPid: o.selfPid ?? process.pid, wrapperMark: o.wrapperMark ?? WRAPPER_MARKS,
       guardCgroup: o.guardCgroup ?? guardedCgroup, scan: o.scan ?? scanProcs, kill: o.kill ?? ((pid, sig) => process.kill(pid, sig)),
+      stopUnit: o.stopUnit ?? ((unit) => promisify(execFile)('systemctl', ['--user', 'stop', unit], { timeout: 30_000 })),
       termWaitMs: o.termWaitMs ?? 5000, log: o.log ?? ((l) => console.log(l)),
     };
   }
@@ -311,6 +316,11 @@ export class Reaper {
     }
     if (!found.length) return [];
     const { sent, killed } = await this.stop(found);
+    // KILLed, Restart=on-failure would bring it back from its folder (a finished ship's still has one): stop its unit too.
+    for (const x of sent) {
+      const unit = killed.has(x.proc.pid) && /\/(citadel-supervisor-[^/]+\.service)$/.exec(x.proc.cgroup)?.[1];
+      if (unit) await this.o.stopUnit(unit).catch((err) => this.o.log(`Stopping ${unit} failed: ${(err as Error).message}`));
+    }
     for (const x of sent) this.o.log(`Stopped turn supervisor pid ${x.proc.pid} (${killed.has(x.proc.pid) ? 'KILL' : 'TERM'}): nothing will hand it a turn again, ${x.home}`);
     if (sent.length) this.reapedAt = Date.now();
     return sent.map((x) => x.proc.pid);

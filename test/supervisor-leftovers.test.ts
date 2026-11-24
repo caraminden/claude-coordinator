@@ -49,14 +49,15 @@ function exited(pid: number) {
   }
 }
 const state = (unit: string) => execFileSync('systemctl', ['--user', 'show', '-p', 'ActiveState', '--value', unit], { encoding: 'utf8' }).trim();
-const down = (s: string) => s === 'inactive' || s === 'failed';
+// A clean exit only: a KILLed one waiting out its restart reads `activating`, and one that failed to restart `failed`.
+const down = (s: string) => s === 'inactive';
 
 /** The unit stops for good: one waiting out Restart=on-failure's delay reads `activating`, not down. */
 async function goesAway(unit: string, what: string) {
   await until(what, () => down(state(unit)), 30_000, () => `${unit} is ${state(unit)}`);
 }
 
-test('a test process killed with SIGKILL leaves no supervisor unit once its folder is gone', { skip }, async () => {
+test('a test process killed with SIGKILL leaves no supervisor unit behind', { skip }, async () => {
   const root = tmp.path('killed');
   const out = tmp.path('killed.json');
   const file = tmp.path('killed.test.ts');
@@ -75,9 +76,9 @@ test('boots, then waits to be killed', async () => {
   const { server } = JSON.parse(readFileSync(out, 'utf8'));
   const sup = await supervisorOf(join(root, 'data'));
   run.kill('SIGKILL');
-  // The orphaned server stops what names its folder and exits (#1546); then the folder goes, as a sweep or a ship's prune deletes it.
+  // The orphaned server stops what names its folder and exits (#1546).
   await until('the orphaned server to exit', () => exited(server), 30_000);
-  rmSync(root, { recursive: true, force: true }); // timing-ok: the folder going is the case under test
+  // Its folder still there: a KILL that systemd restarts from it fails this, where a deleted folder would hide it.
   await goesAway(sup.unit, 'the killed test’s supervisor unit to stop');
 });
 

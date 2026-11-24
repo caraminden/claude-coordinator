@@ -662,6 +662,8 @@ const MAX_FILE_BYTES = 200 * 1024 * 1024; // the server's cap (src/uploads.ts)
 // file still uploading must stay on the message, not go with the old composer (#134).
 const attachmentsByChat = new Map();
 function chatAttachments(chatId) {
+  // A strip left in a composer that's off the page would keep that whole page in memory (#1747).
+  for (const a of attachmentsByChat.values()) if (!a.el.isConnected) a.el.remove();
   let attachments = attachmentsByChat.get(chatId);
   if (!attachments) {
     attachments = createAttachments(chatId, (items) => saveDraftImages(chatId, items));

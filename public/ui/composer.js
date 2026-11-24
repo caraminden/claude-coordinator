@@ -160,8 +160,10 @@ function caretIsFree(opening) {
 const takesCaret = (t) => t.isConnected && !t.disabled && !t.closest('[inert]') && t.getClientRects().length > 0;
 
 /** Put the caret in the newest box that can take it, if it is free. */
+const dropGone = () => { for (let i = live.length - 1; i >= 0; i--) if (!live[i].isConnected && live[i].dataset.cuiSeen !== undefined) live.splice(i, 1); };
+
 function autofocus(opening = false) {
-  for (let i = live.length - 1; i >= 0; i--) if (!live[i].isConnected && live[i].dataset.cuiSeen) live.splice(i, 1);
+  dropGone();
   const box = live.findLast(takesCaret);
   if (box && caretIsFree(opening)) box.focus({ preventScroll: true });
 }
@@ -294,6 +296,7 @@ export function mountComposer(el, opts) {
   });
   render();
   if (opts.autofocus !== false) {
+    dropGone(); // each box holds its whole page, so the ones gone go now, not at the next focus
     live.push(textarea);
     listen();
     focusOnceShown(textarea);

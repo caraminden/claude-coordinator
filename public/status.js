@@ -635,8 +635,9 @@ const paintChip = (c, { title, tone }) => {
   c.setAttribute('aria-label', title);
   c.querySelector('.dot').className = `dot ${DOT[tone]}`;
 };
+const dropGoneChips = () => { for (const c of chips) if (!c.isConnected && c.dataset.placed) chips.delete(c); };
 const chipPoll = poller(async () => {
-  for (const c of chips) if (!c.isConnected && c.dataset.placed) chips.delete(c);
+  dropGoneChips();
   if (!chips.size) return false;
   try {
     const data = await api('api/status');
@@ -655,6 +656,7 @@ export function statusChip(projectId = null) {
   const c = h('a', { class: 'ci-chip status-chip', href: projectId ? `#/p/${projectId}/status` : '#/',
     onclick: () => { opening(); c.href = scopedPageHash('status', projectId ?? view?.projectId, localStorage.getItem(LAST_SCHEME) ?? 2); } },
   h('span', { class: 'dot asleep' }), h('span', { class: 'label' }, 'Status'));
+  dropGoneChips(); // one off the page holds that whole page (#1747)
   c.dataset.placed = '1';
   chips.add(c);
   if (chipRead) paintChip(c, chipRead);

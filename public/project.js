@@ -159,6 +159,7 @@ function renderCrumbs(main) {
  * A project page: artifacts and threads on the side, and in the main panel a chat with the
  * coordinator (or the chosen ticket), the artifact browser, or one artifact.
  */
+let phoneWidth = null;
 export async function showProject(projectId, main = { kind: 'chat', number: null }) {
   const seq = routeSeq;
   // Moving between chats of the project already on screen only swaps the chat; the side panels stay.
@@ -251,7 +252,9 @@ export async function showProject(projectId, main = { kind: 'chat', number: null
 
   // Both side panels collapse to a slim tab so the main panel can take their room. On wider
   // screens that choice is remembered; on phones they collapse away above the main panel instead.
-  const narrowQuery = matchMedia('(max-width: 800px)');
+  // One watcher for the page's life, its handler replaced by each draw: a watcher with a handler is never freed, so one
+  // made per draw kept every scheme page ever drawn, and the tab grew until it froze (#1747).
+  const narrowQuery = (phoneWidth ??= matchMedia('(max-width: 800px)'));
   const panelOpen = (name) => !narrowQuery.matches && loadPanelState()[name] !== false;
   // The overview panel: account and usage (standing in for the top bar, which wider screens hide
   // on project pages), the projects, then this project's pinned and recent artifacts.

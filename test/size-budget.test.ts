@@ -21,7 +21,7 @@ export const ALLOWED: Record<string, [number, string]> = {
   'public/machine-agent.mjs': [2337, 'standalone agent a person runs on their own computer: one file so it can be copied alone'],
   'src/routes/projects.ts': [1894, 'every /projects route; split by page is queued'],
   'src/tripwire.ts': [1672, 'the tripwire rules; high risk to edit, so a split waits for its own change'],
-  'src/routes/tickets.ts': [1690, 'every /tickets route; split by page is queued (+13: card types replacing any, #1799)'],
+  'src/routes/tickets.ts': [1696, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799)'],
   'tools/dev-seeds.ts': [1594, 'seed data for dev copies; grows with every table'],
 };
 

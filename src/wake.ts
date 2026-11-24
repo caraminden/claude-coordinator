@@ -1141,7 +1141,7 @@ export class TimedWakes {
  * update_ticket's `start_after: null` (#1823): take sealed `ticket` off its chain, leaving it sealed with its brief as held mail
  * (read when it is unsealed or woken with unpark). `note`: also set its note to say so. False when it isn't chained.
  */
-export function takeOffChain(ticket: Ticket, by: string, { store, runner, waiters }: { store: Store; runner: Pick<Runner, 'emit' | 'send' | 'broadcastTicket'>; waiters: LiveWaiters }, note: boolean): boolean {
+export function takeOffChain(ticket: Pick<Ticket, 'id'>, by: string, { store, runner, waiters }: { store: Store; runner: Pick<Runner, 'emit' | 'send' | 'broadcastTicket'>; waiters: LiveWaiters }, note: boolean): boolean {
   const leader = store.getTicket(waiters.chains().find((c) => c.ticket === ticket.id)?.after ?? 0);
   const gone = waiters.unchain(ticket.id, (c) => (c.message ? runner.send(ticket.id, c.from, c.message, [], { brief: true, hold: true }).event.id : null));
   if (!gone) return false;

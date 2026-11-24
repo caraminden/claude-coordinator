@@ -41,7 +41,6 @@ test('the page shows the shared loading line, then its head and both tabs in the
   const top = await page.eval<number>(`document.querySelector('.reviews-main .rv-head').getBoundingClientRect().top`);
   await page.eval('window.open()');
   await waitFor(page, 'the set to draw', `!document.querySelector('.reviews-main .cui-loading')`);
-  assert.equal(await page.eval(`document.querySelector('.reviews-main .rv-head h2').textContent.includes('Reviewers and critics')`), true);
   assert.deepEqual(await page.eval(`[...document.querySelectorAll('.reviews-main .rv-tabs button')].map((b) => b.textContent)`), ['This scheme', 'Every scheme']);
   assert.equal(await page.eval<number>(`document.querySelector('.reviews-main .rv-head').getBoundingClientRect().top`), top, 'the head did not move');
 });

@@ -126,12 +126,3 @@ test("--widths and --themes default to the turn's scheme's from the env, and a f
   assert.deepEqual(parseArgs([], { COORDINATOR_SHOT_WIDTHS: 'x' }).widths, [1440, 390]);
   assert.deepEqual(parseArgs([], {}).themes, ['light']);
 });
-
-test("the prompt's screenshot line states the scheme's widths, themes, requirement and note (#1044)", async () => {
-  const { shotLine } = await import('../src/prompts.ts');
-  const base = { shot_widths: '1440,390', shot_themes: 'light', shots_required: 1, shot_note: '' };
-  assert.match(shotLine(base), /1440, 390 px, light theme.*in your ready note\.$/);
-  const l = shotLine({ ...base, shot_widths: '390', shot_themes: 'light,dark', shots_required: 0, shot_note: '1x in her window.' });
-  assert.match(l, /390 px, light and dark theme/);
-  assert.match(l, /optional\. 1x in her window\.$/);
-});

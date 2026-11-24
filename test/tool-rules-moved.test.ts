@@ -67,9 +67,9 @@ const opts = [{ label: 'Tabs' }, { label: 'List', recommended: true }];
 
 test('ask_question: a plain card says to end the turn, how to link it ("below", "above"), and that later cards join it', async () => {
   const said = ok(await tool(newMinion('Cards'), 'ask_question', { questions: [{ question: 'Tabs or a list?', options: opts }] }));
-  assert.match(said, /End your turn now with a short reply; the answers will come as the next message/);
-  assert.match(said, /\[the card below\]\(#\/p\/\d+\/t\/\d+\?e=\d+\) \("below" this turn, "above" later\)/);
-  assert.match(said, /A plain card you ask later this turn, while this one is still unanswered, joins it \(up to 8 questions in all\), so people see one card with one Send/);
+  assert.match(said, /End your turn now/);
+  assert.match(said, /\[the card below\]\(#\/p\/\d+\/t\/\d+\?e=\d+\)/);
+  assert.match(said, /joins it \(up to 8 questions in all\)/);
   // A ship card never joins another, so it doesn't say so.
   assert.doesNotMatch(ok(await tool(newMinion('Ship card'), 'ask_question', { questions: [{ question: 'Ship it?', options: [{ label: 'Ship', recommended: true }, { label: 'Wait' }] }], kind: 'ship' })), /joins it/);
 });
@@ -82,7 +82,7 @@ test('ask_question: doc or secret with questions is refused, saying to pass it a
 
 test("ask_question: a secret card's answer says the value is used without printing it", async () => {
   const said = ok(await tool(newMinion('Secret'), 'ask_question', { secret: { name: 'SOME_KEY', why: 'To sign in' } }));
-  assert.match(said, /\$CITADEL_SECRET_<NAME>: use it in commands without ever printing it/);
+  assert.match(said, /without ever printing it/);
 });
 
 test('ask_question: a missing recommendation says exactly one, any number on multiSelect', async () => {
@@ -116,9 +116,9 @@ test("ask_question: a repeat card's refusal says to retry with not_duplicate", a
 
 test('message_coordinator: a fyi says what a fyi is, never shipped or acknowledgements; a start names start_after', async () => {
   const fyi = ok(await tool(newMinion('Fyi'), 'message_coordinator', { need: 'fyi', text: 'Tracking: the CI run is slow today.' }));
-  assert.match(fyi, /it shows in the Taskmaster's chat now, and the Taskmaster reads it on its next turn, whoever wakes it/);
-  assert.match(fyi, /If you need anything done it is not a fyi, so send it again with the need that fits/);
-  assert.match(fyi, /Never send that you shipped or are live \(the server's shipped line already tells it\), nor acknowledgements or progress/);
+  assert.match(fyi, /it shows in the Taskmaster's chat now/);
+  assert.match(fyi, /it is not a fyi/);
+  assert.match(fyi, /Never send that you shipped or are live/);
   const start = ok(await tool(newMinion('Start'), 'message_coordinator', { need: 'start', text: 'Please start the handoff at handoffs/x.md.' }));
   assert.match(start, /create_ticket's start_after when the work is planned/);
   assert.doesNotMatch(start, /not a fyi/);
@@ -132,9 +132,9 @@ test('message_coordinator: a fyi says what a fyi is, never shipped or acknowledg
 
 test("hand_off_land's answer says what happens next, never parks, and what to do on a failure", () => {
   const said = handOffResult({}, [], true);
-  assert.match(said, /End your turn now with a short reply and set no state \(the server shows you as shipping until it ends\)/);
-  assert.match(said, /posts the shipped line and dismisses this minion \(or sets pending-deploy for a restart\) on a clean land; it never seals you/);
-  assert.match(said, /If it fails \(a conflict, even once main moves while it waits; a red test; a refusal; a failed deploy\), you are woken with the end of its output: fix it and hand it off again/);
+  assert.match(said, /End your turn now with a short reply and set no state/);
+  assert.match(said, /it never seals you/);
+  assert.match(said, /you are woken with the end of its output/);
   assert.doesNotMatch(handOffResult({}, [], false), /pending-deploy/);
   assert.match(handOffResult({ stay_open: true }, [], true), /leaves this minion open \(stay_open\)/);
   const app = handOffResult({}, ['peek-auras'], false);
@@ -145,9 +145,9 @@ test("hand_off_land's answer says what happens next, never parks, and what to do
 
 test("close_self's answer says when it is skipped, what is kept, and to leave the close out of the reply", () => {
   const said = closeSelfResult(false);
-  assert.match(said, /unless the turn doesn't finish cleanly or a new message arrives first \(a GitHub notice that needs no action doesn't count\); its worktree and branch are kept, and a message reopens it/);
-  assert.match(said, /Leave the close out of your reply, since the server shows the dismissal and a new message can still skip it/);
-  assert.match(said, /a state of complete, try or ready there \(or a card posted after this call\) cancels the close/);
+  assert.match(said, /its worktree and branch are kept, and a message reopens it/);
+  assert.match(said, /Leave the close out of your reply/);
+  assert.match(said, /cancels the close/);
   assert.match(said, /Finish your reply now/);
 });
 

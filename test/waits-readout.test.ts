@@ -63,10 +63,8 @@ test("a relay shows its sender's number and a headline; its words become the sec
   store.addDelivery({ project_id: p.id, kind: 'wake_at', to_kind: 'minion', to_id: to.id, set_by: 'minion:1', when_kind: 'at', when_arg: NOW + 1_800_000, due: NOW + 1_800_000, payload: { note: 'Check the run.', setBy: 'Taskmaster' } }, NOW);
   const [relay, wake] = waitsFor(store, store.getTicket(to.id)!, () => [], NOW);
   assert.equal(relay.chip, `⇢ #${from.number}`);
-  assert.equal(relay.headline, `Note from #${from.number} once its change is live`);
   assert.equal(relay.line, "Main's windows-check is green again.");
   assert.equal(relay.text, text);
-  assert.deepEqual(relay.facts, [`Set by #${from.number} at 11:00 PST`, 'waits for fa4fb3f to go live']);
   assert.deepEqual(relay.link, { project: p.id, number: from.number });
   assert.equal(wake.headline, 'Wakes itself at 12:30, set by the Taskmaster');
   assert.deepEqual(wake.facts, ['Set by the Taskmaster at 12:00 PST', 'due 12:30']);

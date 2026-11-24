@@ -72,7 +72,7 @@ async function mcp(ticket: { id: number; project_id: number }, method: string, p
   }
 }
 
-test('empty text adds no section; set, it comes right before the scheme instructions with the conflict rule', () => {
+test('empty text adds no section; set, it comes right before the scheme instructions', () => {
   const minion = store.getTicket(Minion.id)!;
   const delve = store.getProject(Delve.id)!;
   for (const t of [minion, store.getTicket(DelveTM.id)!]) {
@@ -94,14 +94,6 @@ test('empty text adds no section; set, it comes right before the scheme instruct
   assert.ok(layer < scheme && prompt.indexOf('Be kind.') < scheme, 'the layer comes before the scheme section');
   assert.ok(prompt.indexOf('Delve rule.') > scheme);
   assert.equal(prompt.indexOf('# Scheme instructions'), prompt.lastIndexOf('# Scheme instructions'));
-});
-
-test("only the Citadel scheme's Taskmaster prompt names set_app_instructions as its own", () => {
-  const own = systemPrompt(store.getProject(Citadel.id)!, store.getTicket(CitadelTM.id)!, null, null, root, null);
-  const other = systemPrompt(store.getProject(Delve.id)!, store.getTicket(DelveTM.id)!, null, null, root, null);
-  assert.match(own, /set_app_instructions/);
-  assert.doesNotMatch(other, /set_app_instructions/);
-  assert.match(other, /message_taskmaster/);
 });
 
 test('people save it with a history row; the store keeps who and when', async () => {

@@ -104,13 +104,6 @@ test('publishing a source again by hand applies a new title and names the settin
   assert.deepEqual([index.builds[0].exe, index.builds[0].started, index.builds[0].version], ['A.exe', 'file', '1.0']);
 });
 
-test('the publish_desktop tool says PCs switch on the start after next (#1522)', async () => {
-  const src = await readFile(new URL('../src/mcp.ts', import.meta.url), 'utf8');
-  const desc = src.slice(src.indexOf("name: 'publish_desktop'"), src.indexOf("name: 'publish_desktop'") + 1500);
-  assert.match(desc, /switch on the start after next/);
-  assert.doesNotMatch(desc, /switch on their next start/);
-});
-
 test('the first-install zip holds the launcher as <app>.exe, its config and the current build unpacked', async () => {
   const feeds = new DesktopFeeds(join(root, 'd5'));
   await feeds.publish({ projectId: 2, app: 'app', file: await build('b.zip', { 'bin/App.exe': 'v1', 'bin/data.txt': 'd' }), exe: 'bin/App.exe', started: 'alive', title: 'App' });

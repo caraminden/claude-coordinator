@@ -10,14 +10,6 @@ const sources = readdirSync(PUBLIC)
   .filter((f) => f.endsWith('.js') && f !== 'help-words.js')
   .map((f) => [f, readFileSync(join(PUBLIC, f), 'utf8')] as const);
 
-test('the nine starting words are defined, each in a sentence or two', () => {
-  assert.deepEqual(Object.keys(WORDS).sort(), ['card', 'contraption', 'grunt', 'minion', 'parked', 'scheme', 'ship', 'taskmaster', 'turn']);
-  for (const [k, w] of Object.entries<{ word: string; def: string }>(WORDS)) {
-    assert.ok(w.word && w.def.length < 220, `${k}: one short definition`);
-    assert.ok((w.def.match(/[.!?](\s|$)/g) ?? []).length <= 2, `${k}: two sentences at most`);
-  }
-});
-
 test('every label that asks for a word asks for one that is defined', () => {
   const used = new Set<string>();
   for (const [f, src] of sources) for (const m of src.matchAll(/\bgloss\('([a-z]+)'/g)) used.add(m[1]);

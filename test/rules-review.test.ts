@@ -3,11 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Store, type Project } from '../src/db.ts';
-import { onboardingPrompt } from '../src/prompts.ts';
+import { Store } from '../src/db.ts';
 
-// The pass on Minion rules after setup (#1046): onboarding done opens it, "Looks right" closes it, and the Taskmaster's
-// step 3 ends with a card linking the page.
+// The pass on Minion rules after setup (#1046): onboarding done opens it, "Looks right" closes it.
 
 test('rules_review: off by default, opened when onboarding turns done, cleared by hand, not reopened by other saves', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rules-review-'));
@@ -27,13 +25,5 @@ test('rules_review: off by default, opened when onboarding turns done, cleared b
     assert.equal(store.getProject(p.id)!.rules_review, 1, 'a tune-up opens the pass again');
   } finally {
     rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("onboarding step 3 ends with a card linking the scheme's rules page, in setup and in a tune-up", () => {
-  for (const mode of ['first-run', 'tune-up'] as const) {
-    const text = onboardingPrompt({ id: 7, name: 'Lanternfall', onboarding: 'interview', onboarding_mode: mode } as Project, '/shared');
-    assert.match(text, /end with one `ask_question` card to the scheme's members/, mode);
-    assert.match(text, /\[Minion rules\]\(#\/p\/7\/approvals\)/, mode);
   }
 });

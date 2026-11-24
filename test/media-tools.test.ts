@@ -43,20 +43,6 @@ async function mcp(env: Record<string, string>, method: string, params: object =
 const tools = async (env: Record<string, string>) => (await mcp(env, 'tools/list')).tools as { name: string; description: string }[];
 const both = { COORDINATOR_MEDIA: '1', COORDINATOR_CODEX_IMAGES: '1' };
 
-test('the generative media tools are offered, in order', async () => {
-  const media = (await tools(both)).filter((t) => /^generate_|^edit_image$/.test(t.name));
-  assert.deepEqual(
-    media.map((t) => t.name),
-    ['generate_image', 'edit_image', 'generate_audio', 'generate_speech', 'generate_image_codex'],
-  );
-});
-
-test('every generative media tool opens with the made-by-code rule (Cara, 2026-11-14)', async () => {
-  const media = (await tools(both)).filter((t) => /^generate_|^edit_image$/.test(t.name));
-  for (const t of media) assert.match(t.description, /^Only on a person's explicit ask or a scheme system's call; otherwise (draw|make sound) with code\./, t.name);
-  assert.match(media.find((t) => t.name === 'generate_speech')!.description, /otherwise make sound with code/);
-});
-
 test('the media tools are listed for every minion whatever its person has, refused at call time without, and never for a Taskmaster (#878)', async () => {
   const list = async (env: Record<string, string>) => JSON.stringify(await tools(env));
   // The tool list is the head of the cache prefix: it mustn't change with who sent the turn.

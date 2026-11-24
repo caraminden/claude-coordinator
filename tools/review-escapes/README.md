@@ -29,6 +29,37 @@ runs `claude -p` on the asker's own Claude login: about $8–10 an arm on Sonnet
   judge, which sees the defect, the fix's commit messages and its non-test diff but not the arm,
   mark each defect named / near / no; writes `report.md` and `verdicts.tsv` in `--out`.
 
+- `planted.json`: the planted set (#1738): 22 real small commits, each with one bug planted (`plant`:
+  the commit's own added text `from`, replaced by `to`, amended into the head), and 5 untouched
+  controls. Kinds: flipped comparison or boundary, missed sibling, dropped `await`, wrong argument
+  order, unescaped value. The reviewer sees the commit with the bug in it; the judge sees the bug and
+  its failing case. `--set all` runs both files, `--set planted` only this one.
+- `bench.ts`: the record of the last benchmark run, `test/reviewer-benchmark.json`.
+
+## When the reviewer changes
+
+`test/reviewer-benchmark.test.ts` goes red when `kit/agents/reviewer.md` (its model and effort are in
+its frontmatter), self-review's section 2, the lenses or `ponytail-review` changed since the last
+recorded run (whitespace doesn't count). To clear it, in the background and not through citadel-heavy:
+
+```bash
+node tools/review-escapes/run.ts run --arms sonnet --set all --jobs 3 --additions <the scheme's pre-ship-review.md> --out $TMPDIR/bench-1
+node tools/review-escapes/run.ts run --arms sonnet --set all --jobs 3 --additions <the scheme's pre-ship-review.md> --out $TMPDIR/bench-2
+node tools/review-escapes/bench.ts record $TMPDIR/bench-1 $TMPDIR/bench-2 --additions <the same file> --results <where you kept the reports>
+```
+
+Two Sonnet passes over both sets cost about $20 (the baseline: see its report). If the mean of planted
+bugs named fell by 2 or more from the last record, `record` says so and writes `drop` into the record:
+the change is high risk and ships only on a member's go (as prompt-eval's "Drop needs a go"). Commit
+`test/reviewer-benchmark.json` with the change. Measure, don't tune: the benchmark checks a reviewer
+change, it isn't a reason to edit the reviewer.
+
+**Lessons** (the scheme's auto-added `pre-ship-review.md`) count as a change once 3 new kinds were added
+since the last run. The test can't see them (they live in the database); `node tools/review-escapes/bench.ts status`
+reads them from the live database, read-only, and says so. Run it when you ship a change to lessons code or
+see lessons arrive. This measures planted catch and control noise; the refuted-findings rate of those
+lessons is the separate review the lessons-measure handoff does.
+
 ## How the set was picked
 
 Escapes come from the reviewer-pairs table in the #1493 deep dive

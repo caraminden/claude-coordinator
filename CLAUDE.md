@@ -59,7 +59,9 @@ skill step is skipped or uses its default.
 - **Agent instructions:** the prompt text in `src/prompts.ts` and the MCP tool descriptions in
   `src/mcp.ts`, besides the kit, `CLAUDE.md` and `.claude/`. A big change to a minion or Taskmaster prompt runs
   `tools/prompt-eval run --base main` (in the background, not through citadel-heavy) once before it ships; 2 or more cases fell makes it high risk
-  (Josh, 2026-11-19, "Drop needs a go"; `tools/prompt-evals/README.md`).
+  (Josh, 2026-11-19, "Drop needs a go"; `tools/prompt-evals/README.md`). A change to the pre-ship reviewer (`kit/agents/reviewer.md`,
+  self-review's section 2, the lenses) makes `test/reviewer-benchmark.test.ts` red until the benchmark is rerun and recorded;
+  planted bugs named falling by 2 or more makes it high risk (`tools/review-escapes/README.md`, "When the reviewer changes"; `bench.ts status` also counts new lessons).
 - **Rule homes:** `src/rule-homes.ts` names each registered rule's one home and the pointer used
   everywhere else; `test/rule-homes.test.ts` fails on a copy in the repo, and the Settings text is
   checked when it is saved.

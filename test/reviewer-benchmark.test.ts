@@ -46,7 +46,7 @@ test('a changed reviewer text, model, lens or brief rule changes the hash; white
         assert.ok(staleReasons({ ...readRecord()!, ...benchHash(ROOT) }, changed)[0]?.includes('changed since'), `${file}: staleReasons says so`);
       } finally { rmSync(changed, { recursive: true, force: true }); }
     }
-    const spaced = copy((_, t) => t.replace(/\n/g, '  \n\n\n'));
+    const spaced = copy((_, t) => t.replace(/\n\n/g, '\n\n\n\n').replace(/\n/g, '  \n'));
     try { assert.equal(benchHash(spaced).hash, benchHash(ROOT).hash, 'trailing spaces and blank-line runs are not a change'); } finally { rmSync(spaced, { recursive: true, force: true }); }
     // Only self-review's section 2 is the reviewer's brief: another section's edit is not a reviewer change.
     const other = copy((f, t) => (f.endsWith('self-review/SKILL.md') ? t.replace('## 4. Label the risk', '## 4. Label the risk\n\nA new sentence.') : t));

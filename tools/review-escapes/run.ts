@@ -113,6 +113,8 @@ function claude(args: string[], input: string, cwd: string, file: string, timeou
       const result = msgs.findLast((m) => m.type === 'result');
       const meta = { cost: Number(result?.total_cost_usd ?? 0), ms: Date.now() - t0, turns: Number(result?.num_turns ?? 0), models: Object.keys(result?.modelUsage ?? {}) };
       if (!result) return done({ ...meta, text: '', error: `claude exited ${code} with no result: ${err.trim().slice(-300)}` });
+      // A usage limit or other failed run comes back as an error result: report it as an error, never as a finished review (#1739).
+      if (result.is_error) return done({ ...meta, text: '', error: String(result.result ?? 'is_error').slice(0, 300) });
       done({ ...meta, text: String(result.result ?? '') });
     });
     p.stdin.end(input);
@@ -134,6 +136,7 @@ async function review(c: Case, arm: Arm, out: string, kit: string): Promise<void
     '--settings', join(dir, 'settings.json'), '--setting-sources', 'project', '--strict-mcp-config',
     '--max-turns', '120', '--max-budget-usd', arg('--budget') ?? '6', '--no-session-persistence'];
   const r = await claude(args, brief, ws, join(dir, 'stream.jsonl'), 30 * 60_000);
+  if (r.error && !r.cost) return console.log(`${arm.name} ${c.id}: not reviewed, rerun to retry: ${r.error}`);
   writeFileSync(join(dir, 'review.md'), r.text);
   const { text, ...meta } = r;
   writeFileSync(join(dir, 'meta.json'), JSON.stringify(meta, null, 1));
@@ -186,6 +189,7 @@ async function verify(c: Case, arm: Arm, out: string, kit: string): Promise<void
   try { execFileSync(process.execPath, [join(dir, 'boot.mjs'), 'stop'], { stdio: 'ignore' }); } catch { /* not started */ }
   const left = leftovers(dir);
   for (const pid of left) try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
+  if (r.error && !r.cost) { execFileSync('rm', ['-rf', dir]); return console.log(`${arm.name} ${c.id}: not run, rerun to retry: ${r.error}`); }
   // Keep the report, the stream, the logs and its screenshots; the clone and the data are big and rebuilt on demand.
   execFileSync('rm', ['-rf', repo, join(dir, 'data'), join(dir, 'scratch')]);
   writeFileSync(join(dir, 'review.md'), r.text);
@@ -231,6 +235,7 @@ async function judge(c: Case, arm: Arm, out: string, model: string): Promise<voi
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--model', model, '--effort', 'medium', '--tools', '', '--max-turns', '1',
     '--setting-sources', 'project', '--strict-mcp-config', '--no-session-persistence'];
   const r = await claude(args, prompt, tmpdir(), join(dir, 'judge-stream.jsonl'), 10 * 60_000);
+  if (r.error && !r.cost) return console.log(`${arm.name} ${c.id}: not judged, rerun to retry: ${r.error}`);
   const m = r.text.match(/\{[\s\S]*\}/);
   let verdicts: Verdict[] = [];
   try { verdicts = JSON.parse(m?.[0] ?? '').verdicts; } catch { /* left empty: the report counts it as unjudged */ }

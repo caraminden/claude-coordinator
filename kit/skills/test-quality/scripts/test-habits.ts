@@ -65,7 +65,14 @@ export function addedWhole(root: string, files: string[]): Added {
   const out: Added = new Map();
   for (const f of files) {
     const rel = relative(root, join(root, f));
-    out.set(rel, { isNew: true, lines: new Map(readFileSync(join(root, rel), 'utf8').split('\n').map((l, i) => [i + 1, l])) });
+    out.set(rel, {
+      isNew: true,
+      lines: new Map(
+        readFileSync(join(root, rel), 'utf8')
+          .split('\n')
+          .map((l, i) => [i + 1, l]),
+      ),
+    });
   }
   return out;
 }
@@ -136,7 +143,14 @@ function seamMatch(file: string, src: string, c: Corpus): { file: string; shared
   const hitsBy = new Map<string, string[]>();
   for (const t of c.tests) {
     const s = c.text.get(t)!;
-    const keys = [...imports(t, s).filter((x) => mine.imp.has(x)).map((x) => `i:${x}`), ...literals(s).filter((x) => mine.lit.has(x)).map((x) => `l:${x}`)];
+    const keys = [
+      ...imports(t, s)
+        .filter((x) => mine.imp.has(x))
+        .map((x) => `i:${x}`),
+      ...literals(s)
+        .filter((x) => mine.lit.has(x))
+        .map((x) => `l:${x}`),
+    ];
     for (const k of keys) df.set(k, (df.get(k) ?? 0) + 1);
     if (keys.length) hitsBy.set(t, keys);
   }
@@ -201,7 +215,10 @@ function copiesOf(d: Def, index: Map<string, Def[]>): { def: Def; same: number }
     for (const x of new Set(ds)) count.set(x, (count.get(x) ?? 0) + 1);
   }
   const need = Math.max(4, Math.ceil(mine.size * 0.6));
-  return [...count].filter(([, n]) => n >= need).map(([def, same]) => ({ def, same })).sort((a, b) => b.same - a.same);
+  return [...count]
+    .filter(([, n]) => n >= need)
+    .map(([def, same]) => ({ def, same }))
+    .sort((a, b) => b.same - a.same);
 }
 
 /** The helper most test files import: where a shared copy should go. */
@@ -242,7 +259,7 @@ export function fixedSleep(line: string): number | null {
   if ((m = /await\s+(?:setTimeout|sleep|delay|pause|wait|idle)\(\s*([\d_.]+[^),]*)/.exec(line))) ms.push(num(m[1]));
   if ((m = /\b(?:waitForTimeout|Thread\.sleep|usleep\(\s*\d+\s*\)\s*;?\s*\/\/)\(\s*([^)]+)\)/.exec(line))) ms.push(num(m[1]));
   if ((m = /\b(?:time|asyncio|trio|gevent)\.sleep\(\s*([\d_.]+)/.exec(line))) ms.push((num(m[1]) ?? 0) * 1000);
-  if ((m = /\btime\.Sleep\(\s*([\d_.]*)\s*\*?\s*time\.(Second|Millisecond)/.exec(line))) ms.push((Number(m[1] || 1)) * (m[2] === 'Second' ? 1000 : 1));
+  if ((m = /\btime\.Sleep\(\s*([\d_.]*)\s*\*?\s*time\.(Second|Millisecond)/.exec(line))) ms.push(Number(m[1] || 1) * (m[2] === 'Second' ? 1000 : 1));
   if ((m = /\bthread::sleep\(\s*Duration::from_(secs|millis)\(\s*([\d_]+)/.exec(line))) ms.push(Number(m[2].replaceAll('_', '')) * (m[1] === 'secs' ? 1000 : 1));
   if ((m = /\b(?:holds|idle|quiet|stays?)\(.*?\bms:\s*([\d_]+)/.exec(line)) && !/\bafter\s*:/.test(line)) ms.push(num(m[1]));
   const hit = ms.filter((x): x is number => x != null && x >= 100);
@@ -258,7 +275,14 @@ const WAIT_HELPER = /^(until|waitFor|waitUntil|eventually|poll\w*|retry\w*|wait_
 function exportsOf(src: string): string[] {
   const out: string[] = [];
   for (const m of src.matchAll(/^export\s+(?:async\s+)?(?:function\*?|const|let|class)\s+(\w+)/gm)) out.push(m[1]);
-  for (const m of src.matchAll(/^export\s*\{([^}]+)\}/gm)) for (const n of m[1].split(',')) out.push(n.trim().split(/\s+as\s+/).pop()!);
+  for (const m of src.matchAll(/^export\s*\{([^}]+)\}/gm))
+    for (const n of m[1].split(','))
+      out.push(
+        n
+          .trim()
+          .split(/\s+as\s+/)
+          .pop()!,
+      );
   for (const m of src.matchAll(/^(?:async\s+)?def\s+(\w+)|^func\s+([A-Z]\w*)|^pub\s+fn\s+(\w+)/gm)) out.push(m[1] ?? m[2] ?? m[3]);
   return out.filter((n) => n && !n.startsWith('_'));
 }
@@ -296,9 +320,14 @@ export function scan(root: string, added: Added, opts: { maxLines?: number; word
       const short = src.split('\n').length <= maxLines;
       if (fixNamed || short) {
         const m = seamMatch(file, src, c);
-        const shared = m?.shared.length ? `shares ${m.shared.slice(0, 3).map((s) => `'${s}'`).join(', ')}` : 'same name';
+        const shared = m?.shared.length
+          ? `shares ${m.shared
+              .slice(0, 3)
+              .map((s) => `'${s}'`)
+              .join(', ')}`
+          : 'same name';
         if (m) hits.push({ file, line: 1, kind: 'seam', text: `${fixNamed ? 'new file named for a fix' : `new ${src.split('\n').length}-line file`}; ${m.file} already drives the same seam (${shared}): add the case there as a row or an assert, unless this file opens a new seam` });
-        else if (fixNamed) hits.push({ file, line: 1, kind: 'seam', text: 'new file named for a fix: a fix\'s case goes into the file that drives that behaviour (grep the test folder for what it calls); a new file is for a new seam' });
+        else if (fixNamed) hits.push({ file, line: 1, kind: 'seam', text: "new file named for a fix: a fix's case goes into the file that drives that behaviour (grep the test folder for what it calls); a new file is for a new seam" });
       }
     }
     let fake = false;
@@ -347,7 +376,14 @@ export function scan(root: string, added: Added, opts: { maxLines?: number; word
   for (const h of hits) (seen.get(`${h.file}\0${h.kind}`) ?? seen.set(`${h.file}\0${h.kind}`, []).get(`${h.file}\0${h.kind}`)!).push(h);
   for (const group of seen.values()) {
     out.push(...group.slice(0, 3));
-    if (group.length > 3) out.push({ ...group[3], text: `+${group.length - 3} more ${group[3].kind} suspects in this file (lines ${group.slice(3).map((h) => h.line).join(', ')})` });
+    if (group.length > 3)
+      out.push({
+        ...group[3],
+        text: `+${group.length - 3} more ${group[3].kind} suspects in this file (lines ${group
+          .slice(3)
+          .map((h) => h.line)
+          .join(', ')})`,
+      });
   }
   return out.sort((x, y) => x.file.localeCompare(y.file) || x.line - y.line);
 }
@@ -358,13 +394,25 @@ function main(argv: string[]) {
     return i >= 0 ? argv[i + 1] : undefined;
   };
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log(readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 16).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+    console.log(
+      readFileSync(new URL(import.meta.url), 'utf8')
+        .split('\n')
+        .slice(1, 16)
+        .map((l) => l.replace(/^\/\/ ?/, ''))
+        .join('\n'),
+    );
     return;
   }
   const root = git(process.cwd(), ['rev-parse', '--show-toplevel']).trim();
   const fi = argv.indexOf('--files');
   const base = arg('--base') ?? 'main';
-  const added = fi >= 0 ? addedWhole(root, argv.slice(fi + 1).map((f) => relative(root, join(process.cwd(), f)))) : addedFromGit(root, base);
+  const added =
+    fi >= 0
+      ? addedWhole(
+          root,
+          argv.slice(fi + 1).map((f) => relative(root, join(process.cwd(), f))),
+        )
+      : addedFromGit(root, base);
   const hits = scan(root, added, { maxLines: Number(arg('--max-lines') ?? 60), words: Number(arg('--words') ?? 4) });
   const n = [...added.keys()].filter(isTest).length;
   console.log(`test-habits: ${hits.length} suspect${hits.length === 1 ? '' : 's'} in ${n} new or changed test file${n === 1 ? '' : 's'}${fi >= 0 ? '' : ` (against ${base})`}`);

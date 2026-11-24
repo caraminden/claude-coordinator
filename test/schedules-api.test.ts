@@ -120,7 +120,7 @@ test("the Taskmaster's schedule tools", async () => {
 
   // The standard audits (#799): the template brings everything, notes re-render, a second copy is refused, a whole brief detaches.
   const audit = await tool('schedule_audit', { template: 'test-audit', notes: 'vitest only.' });
-  assert.match(audit, /^Scheduled\. \[\d+\] Test audit \(Tests\): .*\(`0 7 \d+ \* \*`\), type research, model claude-opus-5-5, effort high; skips under 250 minions; standard audit test-audit with notes; next /);
+  assert.match(audit, /^Scheduled\. \[\d+\] Test audit \(Tests\): .*\(`0 7 \d+ \* \*`\), type research, model claude-opus-5-5, effort high; skips under 250 minions; runs after 400 ships \(0 so far\); standard audit test-audit with notes; next /);
   const aid = Number(audit.match(/\[(\d+)\]/)![1]);
   const brief = async () => (await call(`/api/projects/${p.id}/schedules`)).data.schedules.find((x: any) => x.id === aid).brief;
   assert.match(await brief(), /^Test audit for Tools[\s\S]*\n\nFor Tools:\nvitest only\.$/);

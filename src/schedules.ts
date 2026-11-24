@@ -450,18 +450,21 @@ export class Schedules {
     let next: number | null = null;
     try {
       next = nextRun(s.cron, now);
+      // The calendar is a trigger's fallback (Cara, 2026-11-24): a triggered run takes the coming slot's place.
+      if ('ticketId' in outcome && outcome.triggered) next = nextRun(s.cron, next);
     } catch {}
     if ('ticketId' in outcome || 'skip' in outcome) {
       this.db.prepare('INSERT INTO schedule_runs (schedule_id, at, ticket_id, skip) VALUES (?, ?, ?, ?)').run(id, now, 'ticketId' in outcome ? outcome.ticketId : null, 'skip' in outcome ? outcome.skip : null);
     }
     if ('ticketId' in outcome) {
       const done = !!s.once;
-      this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : outcome.triggered ? s.next_run_at : next, id); // a trigger's run keeps the calendar slot
+      this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : next, id);
     } else if ('skip' in outcome) {
       // The gate was reached, so an older "didn't start" is stale.
       this.db.prepare('UPDATE schedules SET last_skip = ?, last_error = NULL, next_run_at = ? WHERE id = ?').run(outcome.skip, next, id);
     } else {
-      this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next, id);
+      // Never earlier than it was: a triggered run's error keeps the slot that run took.
+      this.db.prepare('UPDATE schedules SET last_error = ?, next_run_at = ? WHERE id = ?').run(outcome.error, next == null ? null : Math.max(next, s.next_run_at ?? 0), id);
     }
   }
 
@@ -694,6 +697,7 @@ export class ScheduledRuns {
   /** A run's minion exists: give it to the maker, pin it, mark the slot ran and send its brief. Safe to repeat up to the ran mark. */
   private async begin(s: Schedule, project: Project, { id, number }: { id: number; number: number }, last: Ticket | null | undefined, minions: number, now: number, triggered: boolean) {
     const { store, runner, by } = this.d;
+    let marked = false;
     try {
       const maker = store.findUser('name', s.created_by);
       store.updateTicket(id, { person_id: maker && !maker.disabled_at ? maker.id : null });
@@ -702,6 +706,7 @@ export class ScheduledRuns {
       await faultPoint('schedule-started'); // a drill's kill between the minion's start and the slot's ran mark (C3)
       const ships = store.schedules.shipsSince(s); // counted from `s`, the row as it was before this run
       store.schedules.ran(s.id, { ticketId: id, triggered }, now);
+      marked = true;
       store.usage.used('schedule', s.name);
       const why = triggered ? `, early: ${s.trigger_kind === 'ships' ? ships : minions} ${s.trigger_kind} since its last run` : '';
       runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}${why}).` });
@@ -713,6 +718,8 @@ export class ScheduledRuns {
       console.log(`Schedule ${s.id} "${s.name}" started #${number}`);
     } catch (err: any) {
       console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);
+      // A trigger's minion exists, so it is the run: unmarked, the next hourly check would make another.
+      if (triggered && !marked) store.schedules.ran(s.id, { ticketId: id, triggered }, now);
       store.schedules.ran(s.id, { error: err.message }, now);
     }
   }

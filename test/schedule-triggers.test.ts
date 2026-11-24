@@ -1,9 +1,9 @@
 // Activity triggers (#1798): a schedule can run early, after N ships to main or N new minions since its last real run,
-// at most once per its minimum gap, never over a working run, with its calendar slot kept as the fallback.
+// at most once per its minimum gap, never over a working run, with its calendar slot as the fallback.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { loadTemplates, runWindow, ScheduledRuns, Schedules, templateFields, templateVars } from '../src/schedules.ts';
+import { loadTemplates, nextRun, runWindow, ScheduledRuns, Schedules, templateFields, templateVars } from '../src/schedules.ts';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -64,7 +64,8 @@ test('a schedule with a ship trigger runs early once the count is hit, and its b
   assert.deepEqual(made, ['Test audit'], 'the third ship brings it forward');
   const after = store.schedules.get(s.id)!;
   assert.equal(after.last_run_at, now);
-  assert.equal(after.next_run_at, slot, 'its calendar slot stays where it was');
+  const coming = nextRun(s.cron, now)!;
+  assert.ok(slot !== coming && after.next_run_at === nextRun(s.cron, coming), 'the calendar is the fallback: the run takes the coming slot (the 1st) and the next is the 1st after');
   assert.match(sends[0].text, /\nTriggered: 3 ships since .+ P[SD]T \(runs after 3\)\. Last real run: never \(scheduled .+\); since then 5 minions and 3 ships in this scheme\.\n/);
 });
 
@@ -116,6 +117,36 @@ test('a triggered schedule still runs on its calendar slot, under its own min_mi
   await runs.run(store.schedules.get(gated.id)!, gated.next_run_at!);
   assert.equal(made.length, 1);
   assert.match(store.schedules.get(gated.id)!.last_skip ?? '', /\(needs 50\)$/, 'the quiet gate still skips a calendar slot');
+});
+
+test("a triggered run's minion that can't get its brief still counts as the run, so the next hourly check makes no second one", async () => {
+  const { store, project, runs, made } = setup();
+  const s = monthly(store, project.id);
+  ships(store, project.id, 3);
+  (runs as any).d.runner.send = () => {
+    throw new Error('the box is gone');
+  };
+  const now = BACK();
+  await runs.runTriggered(now);
+  assert.deepEqual(made, ['Test audit']);
+  const after = store.schedules.get(s.id)!;
+  assert.deepEqual([after.last_run_at, after.last_error], [now, 'the box is gone']);
+  assert.equal(after.next_run_at, nextRun(s.cron, nextRun(s.cron, now)!), 'it took the coming slot like any triggered run');
+  await runs.runTriggered(now + HOUR + 1);
+  assert.deepEqual(made, ['Test audit'], 'no orphan an hour on');
+});
+
+test('a calendar run moves only to its own next slot; a trigger after it waits out the gap', async () => {
+  const { store, project, runs, made } = setup();
+  const s = monthly(store, project.id);
+  const now = BACK();
+  await runs.run(store.schedules.get(s.id)!, now);
+  assert.equal(store.schedules.get(s.id)!.next_run_at, nextRun(s.cron, now), 'no trigger: the slot after now');
+  ships(store, project.id, 3);
+  await runs.runTriggered(now + 23 * HOUR);
+  assert.deepEqual(made, ['Test audit'], 'the calendar run started the gap: at most once a day');
+  await runs.runTriggered(now + DAY + 1);
+  assert.deepEqual(made, ['Test audit', 'Test audit']);
 });
 
 test('a schedule with no trigger behaves as before: activity never starts it early', async () => {

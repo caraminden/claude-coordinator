@@ -22,10 +22,25 @@ const [prevRepo, prev] = ([[live, 'last-good'], [repo, 'last-good'], [repo, 'ori
 const prevDir = join(root, 'prev');
 mkdirSync(prevDir);
 if (prev) execFileSync('sh', ['-c', 'git -C "$1" archive "$2" src public | tar -x -C "$3"', 'sh', prevRepo, prev, prevDir]);
+// A branch whose base is older than the last release has a lower SCHEMA_VERSION; shipping that would be
+// wrong, and the failures that follow look like the change broke compatibility. Say the real cause.
+const staleBase = (ref: string | undefined, releaseVersion: number, branchVersion: number) =>
+  releaseVersion > branchVersion
+    ? `this branch's schema is ${branchVersion}, older than the last release's ${releaseVersion} (${ref}): its base is behind. Rebase onto main.`
+    : undefined;
 const loadPrev = async () => {
   assert.ok(prev, 'no last-good tag or origin/main to find the last release by: fetch origin');
-  return import(join(prevDir, 'src', 'db.ts'));
+  const mod = await import(join(prevDir, 'src', 'db.ts'));
+  const stale = staleBase(prev, mod.SCHEMA_VERSION ?? 0, SCHEMA_VERSION);
+  assert.ok(!stale, stale);
+  return mod;
 };
+
+test('a base older than the last release says to rebase, with both schema numbers', () => {
+  assert.equal(staleBase('last-good', 111, 110), "this branch's schema is 110, older than the last release's 111 (last-good): its base is behind. Rebase onto main.");
+  assert.equal(staleBase('last-good', 110, 110), undefined);
+  assert.equal(staleBase('last-good', 109, 110), undefined);
+});
 
 // The shape a Store gives a new database: every table and index, as SQLite stores them.
 const shape = (S: typeof Store, file: string) => {

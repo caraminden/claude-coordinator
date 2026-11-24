@@ -3,7 +3,8 @@ name: every-scheme
 description: >
   Every scheme, or Citadel only? Open before building or changing a feature, rule, setting, tool, notification
   or page that touches running or managing a scheme (minions, cards, releases, lands, Taskmaster, properties,
-  schedules, shared folder, contraptions), including a small tweak to one that exists.
+  schedules, shared folder, contraptions), including a small tweak to one that exists. Also open before adding a
+  trigger: a schedule or template, CI alert, webhook or other auto-start.
 ---
 
 The default is every scheme. Citadel is also one scheme among many, and a feature built keyed to it leaves the
@@ -39,3 +40,19 @@ Everything else, and every doubt, is every scheme. A part of a feature can be Ci
 Before ready, run the change as a scheme other than Citadel: a test that uses another scheme's project id, or a dev copy (`citadel-dev-copy`) seeded with a second scheme, and look at the page or call the tool there. Put the scheme you used in the ready note. A Citadel-only part says "Citadel-only: <bullet>" in the note instead.
 
 *Done when* the ready note names the non-Citadel scheme you ran it in, or the §1 bullet that makes it Citadel-only.
+
+## 4. Five questions before a new trigger
+
+A trigger is anything that starts minions or work without a person: a schedule (a clock, or a count such as "N ships since the last run"), a CI alert, a webhook, an auto-start. Answer these in the PR or the brief, one line each, before building it:
+
+1. **What starts it?** Name the event, the time, or the count and the line it crosses.
+2. **What does it read and write?** Name the rows, files and channels, and which of them its own output changes.
+3. **What does it start next?** Follow the chain until it ends. A chain that can reach its own start is a loop.
+4. **Where does a person come back in?** Name the card, note or hold that hands the result to someone.
+5. **What stops two runs doing the same work?** Name the guard: a lock, a claim, a "last run" mark moved when the run begins, not when it ends. For a trigger that files minions or tickets, also name what stops it filing the same one twice (search open ones first; the key it dedupes on). A count trigger resets its count at the start of a run, so a crossing fires once.
+
+Then: start a new trigger at a slow rate (a long interval or a high count) and tighten it once its runs look right. This is the trigger's own rate; people's minion starts are never throttled. Cap any retry loop at a few tries, then hand it to a person.
+
+Why: the 2026-11-20 duplicate flake minions came from automatic starts with no answer to question 5.
+
+*Done when* all five answers sit in the PR or brief, and question 5's names a guard a test or a read of the code can confirm.

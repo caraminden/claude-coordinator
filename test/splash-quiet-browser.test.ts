@@ -13,7 +13,12 @@ const stub = `<script>
   window.EventSource = class { addEventListener() {} close() {} };
   if (location.hash === '#stamp') sessionStorage.setItem('cc-no-splash', String(Date.now()));
   if (location.hash === '#old') sessionStorage.setItem('cc-no-splash', String(Date.now() - 60000));
-  document.addEventListener('DOMContentLoaded', () => { window.ready = true; });
+  // Slow head (a starved box, #1802): DOMContentLoaded comes after the splash's 1 s mark, so its lift is due the moment the app draws.
+  if (location.hash === '#slow') { while (performance.now() < 1300) {} }
+  // The title bar's colours as the page's own scripts left them at DOMContentLoaded, read in that same task: the splash's lift
+  // is a timer that fires later, so this is always "while it shows", however long a loaded box takes to get a test's poll in.
+  const bar = () => [...document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')].map((m) => m.content).join(' ');
+  document.addEventListener('DOMContentLoaded', () => { window.whileShowing = { bar: bar(), splash: !!document.getElementById('splash'), gone: !!document.querySelector('#splash.gone') }; window.ready = true; });
 </script>`;
 let app: App;
 let browser: Browser;
@@ -50,11 +55,13 @@ test('a stale stamp (the reload never happened) does not hide a later cold open'
 
 // The installed app's window buttons sit on the theme-color metas' colour: the map's top while the splash shows, so
 // they're no white strip over it, and the page's plain colour once it lifts (#1691).
-test('while the splash shows, the title bar takes the map colour, and gets its plain one back when it lifts', { skip }, async () => {
-  const page = await browser.page(app.base);
-  const bar = `[...document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')].map((m) => m.content).join(' ')`;
-  await waitFor(page, 'the page', 'window.ready');
-  assert.equal(await page.eval(bar), '#f3e9d2 #16142a');
-  await waitFor(page, 'the splash to lift', `document.getElementById('splash')?.classList.contains('gone') ?? true`);
-  assert.equal(await page.eval(bar), '#f6f5f2 #161514');
-});
+for (const [name, hash] of [['', ''], [', when a slow page head makes its lift due at once', '#slow']]) {
+  test(`while the splash shows, the title bar takes the map colour, and gets its plain one back when it lifts${name}`, { skip }, async () => {
+    const page = await browser.page(app.base + hash);
+    const bar = `[...document.querySelectorAll('meta[name=theme-color][media*=window-controls-overlay]')].map((m) => m.content).join(' ')`;
+    await waitFor(page, 'the page', 'window.ready');
+    assert.deepEqual(await page.eval('window.whileShowing'), { bar: '#f3e9d2 #16142a', splash: true, gone: false });
+    await waitFor(page, 'the splash to lift', `document.getElementById('splash')?.classList.contains('gone') ?? true`);
+    assert.equal(await page.eval(bar), '#f6f5f2 #161514');
+  });
+}

@@ -75,7 +75,7 @@ import { handOver, standby } from './src/handover.ts';
 import { keepServing, safely } from './src/safely.ts';
 import { acceptsGzip, connection, framedWithApps, front, HttpError, isSecure, json, ownPath, ownWrites, requestUrl, router, SECURITY_HEADERS, send, writes, type App } from './src/http.ts';
 import { publishLive } from './src/reader-live.ts';
-import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, upgrades, type Statics } from './src/front.ts';
+import { KIT_FILE, listenThroughFront, readyFile, staticAnswer, stampServerTime, upgrades, type Statics } from './src/front.ts';
 import { agentRoutes } from './src/routes/machines.ts';
 import { CiNumbers } from './src/ci-numbers.ts';
 import { ciPublisher, DesktopFeeds } from './src/desktop-feed.ts';
@@ -1910,6 +1910,7 @@ const SETTLED_ROUTE = process.env.CITADEL_TEST_SETTLED === '1';
 
 // Only /apps/ requests and a contraption's own host are upgraded (contraptions' websockets), the same check as the front thread's; anything else asking is served as usual.
 const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS_DOMAIN) }, (req, res) => writes.request.run({ seq: 0 }, async () => {
+  stampServerTime(res);
   if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) acceptsGzip.add(res);
   inFlight.set(res, `${req.method} ${(req.url ?? '').split('?')[0]}`);
   res.once('close', () => inFlight.delete(res));

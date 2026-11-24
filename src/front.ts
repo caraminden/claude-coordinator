@@ -258,6 +258,20 @@ export function listenThroughFront(server: Server, opts: FrontOptions, on: { lis
 
 if (!isMainThread && workerData?.front) runFront(workerData.front as FrontOptions & { sock: string; posted: Int32Array });
 
+/**
+ * Every answer carries the server's own time (#1752): `Server-Timing: app;dur=<ms>`, from the request's arrival to its
+ * head going out, so the page's slow-load recorder (public/slow-moments.js) can tell server time from network and tab
+ * time. The front thread stamps all it answers (its files, readers' answers, main's, whose own stamp it replaces); the
+ * main thread stamps its own for when it listens alone (CITADEL_FRONT=0).
+ */
+export function stampServerTime(res: ServerResponse, t0 = performance.now()): void {
+  const writeHead = res.writeHead;
+  res.writeHead = function (this: ServerResponse, ...args: unknown[]) {
+    if (!this.headersSent) this.setHeader('Server-Timing', `app;dur=${(performance.now() - t0).toFixed(1)}`);
+    return (writeHead as (...a: unknown[]) => ServerResponse).apply(this, args);
+  } as ServerResponse['writeHead'];
+}
+
 /** Bodies up to this size are read whole before going to the main thread (pass, in runFront). */
 const SMALL_BODY = 1024 * 1024;
 
@@ -276,7 +290,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
 
   const pass = (req: IncomingMessage, res: ServerResponse) => {
     const up = request({ agent: toMain, socketPath: opts.sock, method: req.method, path: req.url, headers: mainHeaders(req) }, (r) => {
-      const headers: IncomingHttpHeaders = Object.fromEntries(Object.entries(r.headers).filter(([k]) => !HOP.has(k)));
+      const headers: IncomingHttpHeaders = Object.fromEntries(Object.entries(r.headers).filter(([k]) => !HOP.has(k) && k !== 'server-timing'));
       if (/\bclose\b/i.test(r.headers.connection ?? '')) headers.connection = 'close'; // the main thread ends this connection: so does the front
       res.writeHead(r.statusCode ?? 502, r.statusMessage, headers as Record<string, string | string[]>);
       res.flushHeaders(); // a live stream's headers go now, before its first event
@@ -419,6 +433,7 @@ function runFront(opts: FrontOptions & { sock: string; posted: Int32Array }) {
 
   let released = false; // a warm handover's: every request goes to the main thread, which passes it on
   const front = createServer({ shouldUpgradeCallback: (req) => upgrades(req, opts.appsDomain) }, (req, res) => {
+    stampServerTime(res);
     try {
       if (released) pass(req, res);
       else if (forReader(req)) ask(req, res);

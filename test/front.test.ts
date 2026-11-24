@@ -80,10 +80,12 @@ const signIn = async (srv: Booted, name: string, password: string) => {
   const res = await fetch(`${srv.base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, password }) });
   return res.headers.get('set-cookie')!.split(';')[0];
 };
-type Got = { status: number; body: string; reader: boolean };
+type Got = { status: number; body: string; reader: boolean; timed: boolean };
+/** One stamp of the server's own time (#1752), never two: a main answer the front passes on carries the front's alone. */
+const TIMED = /^app;dur=\d+(\.\d)?$/;
 const get = async (srv: Booted, path: string, cookie?: string): Promise<Got> => {
   const res = await fetch(srv.base + path, { headers: cookie ? { Cookie: cookie } : {} });
-  return { status: res.status, body: await res.text(), reader: res.headers.get('x-citadel-answered') === 'reader' };
+  return { status: res.status, body: await res.text(), reader: res.headers.get('x-citadel-answered') === 'reader', timed: TIMED.test(res.headers.get('server-timing') ?? '') };
 };
 /** Each caller's answer to each path. */
 async function answers(srv: Booted) {
@@ -108,6 +110,8 @@ test('with readers off, the main thread answers everything (the reference answer
     store.addMember(A.id, store.findUser('name', 'Max')!.id);
     viaMain = await answers(srv);
     assert.ok(Object.values(viaMain).every((g) => !g.reader));
+    // The main thread listening alone stamps its own time on each answer, refusals too (#1752).
+    for (const [key, got] of Object.entries(viaMain)) assert.ok(got.timed, `main's answer to ${key} carries Server-Timing`);
     // The world is what the comparison needs: Cara and Max see M1, Olive and the signed-out don't.
     assert.equal(viaMain[`max /api/tickets/${M1.id}/events/${events[1].id}`].status, 200);
     assert.equal(viaMain[`olive /api/tickets/${M1.id}/events/${events[1].id}`].status, 404);
@@ -136,7 +140,9 @@ test('through the front thread, readers give every caller the same answers and r
   for (const [key, got] of Object.entries(viaReaders)) {
     const bound = BOOT_BOUND.has(key.split(' ')[1]);
     assert.deepEqual({ status: got.status, body: bound ? '' : unclocked(got.body) }, { status: viaMain[key].status, body: bound ? '' : unclocked(viaMain[key].body) }, key);
+    assert.ok(got.timed, `the answer to ${key} carries Server-Timing`);
   }
+  assert.ok(Object.values(viaReaders).some((g) => g.reader && g.timed), 'a reader\'s answer carries Server-Timing');
   // All at once, so a route a reader hands back shows with every other.
   assert.deepEqual(Object.entries(viaReaders).filter(([, got]) => !got.reader).map(([key]) => key), [], 'a reader answered them all');
   // Agents' calls stay on the main thread, where their nonces are.
@@ -212,12 +218,12 @@ test('a reader that hangs: its request goes to the main thread, and the thread i
 });
 
 /** One raw answer (no fetch, which would undo the gzip): status, the headers both threads should agree on, the bytes. */
-const raw = (path: string, headers: Record<string, string> = {}, method = 'GET') => new Promise<{ status: number; headers: Record<string, unknown>; body: Buffer; front: boolean }>((resolve, reject) => {
+const raw = (path: string, headers: Record<string, string> = {}, method = 'GET') => new Promise<{ status: number; headers: Record<string, unknown>; body: Buffer; front: boolean; timed: boolean }>((resolve, reject) => {
   const req = request(`${srv.base}${path}`, { method, headers }, (res) => {
     const parts: Buffer[] = [];
     res.on('data', (c) => parts.push(c)).on('end', () => {
-      const { date, connection, 'keep-alive': _k, 'x-citadel-answered': by, ...rest } = res.headers;
-      resolve({ status: res.statusCode!, headers: rest, body: Buffer.concat(parts), front: by === 'front' });
+      const { date, connection, 'keep-alive': _k, 'x-citadel-answered': by, 'server-timing': timing, ...rest } = res.headers;
+      resolve({ status: res.statusCode!, headers: rest, body: Buffer.concat(parts), front: by === 'front', timed: TIMED.test(String(timing)) });
     });
   });
   req.on('error', reject).end();
@@ -263,6 +269,7 @@ test("front-end files come from the front thread, the bytes and headers main sen
     const main = await raw(viaMainThread(path), headers, method), front = await raw(path, headers, method);
     const key = `${method ?? 'GET'} ${path} ${JSON.stringify(headers)}`;
     assert.ok(front.front && !main.front, key);
+    assert.ok(front.timed && main.timed, `${key}: both carry Server-Timing (#1752)`);
     assert.deepEqual({ ...front, front: true }, { ...main, front: true }, key);
   }
   assert.equal((await raw('/c/', { 'Accept-Encoding': 'gzip' })).headers['content-encoding'], 'gzip');
@@ -297,6 +304,7 @@ test("front-end files come from the front thread, the bytes and headers main sen
 test('everything else passes through: a POST, a live stream, the password check', { timeout: 60_000 }, async () => {
   const wrong = await fetch(`${srv.base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Cara', password: `${PASSWORD}x` }) });
   assert.equal(wrong.status, 401);
+  assert.match(wrong.headers.get('server-timing') ?? '', TIMED, 'a passed-on answer carries the front\'s stamp alone (#1752)');
   const me = await srv.call('/api/me');
   assert.equal(me.status, 200);
   const ctl = new AbortController();

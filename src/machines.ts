@@ -19,6 +19,7 @@ import { seal, unseal } from './credentials.ts';
 import type { Machine, Store } from './db.ts';
 import { type AgentJobMessage, cleanOffer, storedOffer, storedSettings } from './machine-jobs.ts';
 import { every } from './every.ts';
+import { thrown } from './thrown.ts';
 import { asData } from './quote.ts';
 
 /** Machine names double as MCP server names, so tools read mcp__<name>__<tool>. */
@@ -59,11 +60,12 @@ const GPU_OFF_WHO = 'the GPU jobs switch on the Machines page';
 export type FoundServer = { name: string; from: 'claude' | 'file' };
 
 /** A lend as a person's PATCH or machines.lend gives it, or null when it isn't one. */
-export function cleanLend(v: any): Lend | null {
-  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
+export function cleanLend(input: unknown): Lend | null {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return null;
+  const v = input as { server?: unknown; workspaces?: unknown; gpu_off?: unknown; before_ticks?: unknown };
   if (v.server !== null && !(typeof v.server === 'string' && SERVER_NAME.test(v.server))) return null;
   if (!Array.isArray(v.workspaces) || v.workspaces.length > 50 || !v.workspaces.every((w: unknown) => typeof w === 'string' && WORKSPACE_NAME.test(w))) return null;
-  return { server: v.server, workspaces: [...new Set<string>(v.workspaces)], ...(v.gpu_off === true ? { gpu_off: true as const } : {}), ...(v.before_ticks === true ? { before_ticks: true as const } : {}) };
+  return { server: v.server as string | null, workspaces: [...new Set<string>(v.workspaces)], ...(v.gpu_off === true ? { gpu_off: true as const } : {}), ...(v.before_ticks === true ? { before_ticks: true as const } : {}) };
 }
 
 function storedLend(m: Machine): Lend | null {
@@ -213,10 +215,11 @@ export type ScreenState = { holder: ScreenUser | null; line: ScreenUser[] };
 
 /** The screen a beat reports, cut to size; null when it says nothing usable. */
 export function cleanScreen(v: unknown): ScreenState | null {
-  const s = v as any;
+  type Raw = { what?: unknown; who?: unknown; since?: unknown } | null | undefined;
+  const s = v as { holder?: Raw; line?: Raw[] } | null;
   if (!s || typeof s !== 'object' || !Array.isArray(s.line)) return null;
-  const user = (u: any): ScreenUser | null => (u && typeof u === 'object'
-    ? { what: String(u.what ?? '').slice(0, 200), who: String(u.who ?? '').slice(0, 200), since: Number.isFinite(u.since) ? u.since : null }
+  const user = (u: Raw): ScreenUser | null => (u && typeof u === 'object'
+    ? { what: String(u.what ?? '').slice(0, 200), who: String(u.who ?? '').slice(0, 200), since: Number.isFinite(u.since) ? u.since as number : null }
     : null);
   return { holder: user(s.holder), line: s.line.slice(0, 50).map(user).filter((u: ScreenUser | null): u is ScreenUser => !!u) };
 }
@@ -274,14 +277,16 @@ export const JOB_WORDS = {
   gone: /^No job \S+ here/,
 };
 const { queued: QUEUED_JOB, running: RUNNING_JOB, ended: ENDED_JOB, gone: NO_JOB } = JOB_WORDS;
-const replyText = (reply: any): string => String(reply?.result?.content?.[0]?.text ?? reply?.error?.message ?? '');
+/** A JSON-RPC reply from a machine's MCP server, as far as Citadel reads it. */
+type RpcReply = { id?: unknown; result?: { content?: { type?: string; text?: unknown }[]; tools?: { name?: unknown }[] }; error?: { message?: string } } | null | undefined;
+const replyText = (reply: RpcReply): string => String(reply?.result?.content?.[0]?.text ?? reply?.error?.message ?? '');
 /** A job reply's head, without the output tail, which can quote any of JOB_WORDS. */
 const replyHead = (text: string): string => text.split('\n--- ')[0];
 const watchKey = (w: Pick<BoxWatch, 'machine' | 'job'>) => `${w.machine}:${w.job}`;
 
 function cleanWatches(v: unknown): BoxWatch[] {
-  return (Array.isArray(v) ? v : []).flatMap((w: any) => (Number.isInteger(w?.machine) && Number.isInteger(w?.ticket) && typeof w?.job === 'string' && /^[0-9a-f]{1,32}$/.test(w.job) && Number.isFinite(w?.since)
-    ? [{ machine: w.machine, job: w.job, ticket: w.ticket, what: String(w.what ?? 'a task').slice(0, 200), since: w.since, ...(w.started ? { started: true as const } : {}) }]
+  return (Array.isArray(v) ? v : []).flatMap((w: { machine?: number; ticket?: number; job?: string; what?: unknown; since?: number; started?: unknown } | null) => (Number.isInteger(w?.machine) && Number.isInteger(w?.ticket) && typeof w?.job === 'string' && /^[0-9a-f]{1,32}$/.test(w.job) && Number.isFinite(w?.since)
+    ? [{ machine: w!.machine!, job: w!.job, ticket: w!.ticket!, what: String(w!.what ?? 'a task').slice(0, 200), since: w!.since!, ...(w.started ? { started: true as const } : {}) }]
     : []));
 }
 
@@ -299,19 +304,19 @@ function within<T>(p: Promise<T>, ms: number): Promise<T> {
 function cleanWorkspaces(v: unknown): { name: string }[] {
   const text = (x: unknown, max = 500) => (typeof x === 'string' ? x.slice(0, max) : '');
   const list = (x: unknown) => (Array.isArray(x) ? x.slice(0, 50) : []);
-  return list(v).map((w: any) => ({
+  return list(v).map((w: { name?: unknown; path?: unknown; read?: unknown; git_sync?: unknown; tasks?: unknown } | null) => ({
     name: text(w?.name, 40),
     path: text(w?.path),
     read: list(w?.read).map((r) => text(r)),
     git_sync: w?.git_sync !== false,
-    tasks: list(w?.tasks).map((t: any) => ({ name: text(t?.name, 40), run: list(t?.run).map((a) => text(a)), about: text(t?.about), args: t?.args === true })),
+    tasks: list(w?.tasks).map((t: { name?: unknown; run?: unknown; about?: unknown; args?: unknown } | null) => ({ name: text(t?.name, 40), run: list(t?.run).map((a) => text(a)), about: text(t?.about), args: t?.args === true })),
   }));
 }
 
 /** The MCP servers an agent says it found, cut down to valid names, each once. */
 function cleanFound(v: unknown): FoundServer[] {
   const seen = new Set<string>();
-  return (Array.isArray(v) ? v.slice(0, 50) : []).flatMap((f: any) => {
+  return (Array.isArray(v) ? v.slice(0, 50) : []).flatMap((f: { name?: unknown; from?: unknown } | null) => {
     if (typeof f?.name !== 'string' || !SERVER_NAME.test(f.name) || seen.has(f.name)) return [];
     seen.add(f.name);
     return [{ name: f.name, from: f.from === 'file' ? 'file' : 'claude' } as FoundServer];
@@ -563,7 +568,7 @@ export class MachineRelay {
     const offer = cleanOffer(body.jobs);
     this.store.updateMachine(machine.id, { jobs: offer ? JSON.stringify(offer) : null });
     const known = Array.isArray(body.known_jobs)
-      ? body.known_jobs.slice(0, 100).flatMap((k: any) => (Number.isInteger(k?.id) && typeof k.state === 'string' ? [{ id: k.id as number, state: k.state.slice(0, 20) as string }] : []))
+      ? body.known_jobs.slice(0, 100).flatMap((k: { id?: unknown; state?: unknown } | null) => (Number.isInteger(k?.id) && typeof k!.state === 'string' ? [{ id: k!.id as number, state: k!.state.slice(0, 20) as string }] : []))
       : null;
     if (offer || machine.jobs || known) this.jobHooks?.info(this.store.getMachine(machine.id)!, known, agent.since);
     if (agent.managed) {
@@ -713,7 +718,7 @@ export class MachineRelay {
       const list = await ask(2, 'tools/list', {});
       if (list?.error) throw new Error(`tools/list failed: ${list.error.message ?? JSON.stringify(list.error)}`);
       if (!Array.isArray(list?.result?.tools)) throw new Error(`tools/list sent no tools: ${JSON.stringify(list).slice(0, 300)}`);
-      return list.result.tools.map((t: any) => String(t?.name));
+      return list.result.tools.map((t) => String(t?.name));
     });
   }
 
@@ -820,12 +825,12 @@ export class MachineRelay {
   private tell(w: BoxWatch, text: string) {
     try {
       this.wake?.(w.ticket, text);
-    } catch (err: any) {
-      console.error(`[machines] couldn't tell ${this.minionName(w.ticket)} about job ${w.job}: ${err.message}`);
+    } catch (err) {
+      console.error(`[machines] couldn't tell ${this.minionName(w.ticket)} about job ${w.job}: ${thrown(err).message}`);
     }
   }
 
-  private async followJob(w: LiveWatch, ask: (id: number, method: string, params: object) => Promise<any>): Promise<string[]> {
+  private async followJob(w: LiveWatch, ask: (id: number, method: string, params: object) => Promise<RpcReply>): Promise<string[]> {
     const box = this.machineName(w.machine);
     const cancelled = new Promise<never>((_, fail) => {
       w.cancel = () => fail(new Error('Citadel stopped following it'));
@@ -857,7 +862,7 @@ export class MachineRelay {
   }
 
   /** A minion heard of a job (#1425): one waiting for the screen gets a watch, and the reply says so; one it saw start or end needs no message for that. */
-  private heardJob(s: Session, reply: any): any {
+  private heardJob(s: Session, reply: RpcReply): RpcReply {
     if (s.ticketId === null || !this.wake || reply?.error) return reply;
     const text = replyHead(replyText(reply));
     const queued = QUEUED_JOB.exec(text)?.[1];
@@ -867,9 +872,9 @@ export class MachineRelay {
       if (had) return reply; // already followed: said once, in the reply that queued it
       if (!this.watch({ machine: s.machineId, job: queued, ticket: s.ticketId, what, since: Date.now() })) return reply;
       const note = `\n\nCitadel is following job ${queued} for you, which keeps its place in line: you can end your turn now. A message comes to this chat when it gets the screen and again when it ends, with its exit code and last lines. Calling job yourself still works too.`;
-      const content = [...reply.result.content];
+      const content = [...reply!.result!.content!];
       content[0] = { ...content[0], text: `${content[0].text}${note}` };
-      return { ...reply, result: { ...reply.result, content } };
+      return { ...reply, result: { ...reply!.result, content } };
     }
     const job = RUNNING_JOB.exec(text)?.[1] ?? ENDED_JOB.exec(text)?.[1];
     const w = job && this.watches.get(watchKey({ machine: s.machineId, job }));
@@ -884,12 +889,12 @@ export class MachineRelay {
   }
 
   /** Open a session on a machine's server as a turn's proxy does, initialize it, run `talk`, and close it. */
-  private converse(machineId: number, holder: SessionHolder, server: MachineServer, who: string, timeoutMs: number, talk: (ask: (id: number, method: string, params: object) => Promise<any>) => Promise<string[]>): Promise<CheckResult> {
+  private converse(machineId: number, holder: SessionHolder, server: MachineServer, who: string, timeoutMs: number, talk: (ask: (id: number, method: string, params: object) => Promise<RpcReply>) => Promise<string[]>): Promise<CheckResult> {
     const started = Date.now();
     return new Promise((resolve) => {
       // Stands in for the proxy's stream: the session id, then the machine's replies, as server-sent events.
       const sink = new EventEmitter() as EventEmitter & { writeHead(): void; write(chunk: string): boolean; end(): void };
-      const waiting = new Map<number, (reply: any) => void>();
+      const waiting = new Map<number, (reply: RpcReply) => void>();
       let session = '';
       let done = false;
       let ended = false;
@@ -920,7 +925,7 @@ export class MachineRelay {
       };
       const timer = setTimeout(() => finish(false, [], `no answer in ${Math.round(timeoutMs / 1000)}s`), timeoutMs);
       const send = (message: object) => this.fromSession(session, holder, { jsonrpc: '2.0', ...message }) || finish(false, [], 'the machine went offline');
-      const ask = (id: number, method: string, params: object) => new Promise<any>((res) => {
+      const ask = (id: number, method: string, params: object) => new Promise<RpcReply>((res) => {
         waiting.set(id, res);
         send({ id, method, params });
       });
@@ -962,7 +967,7 @@ export class MachineRelay {
       this.endSession(sessionId, false);
       return true;
     }
-    const reply = body.message as any;
+    const reply = body.message as RpcReply;
     if (s.gpuAsks?.delete(reply?.id)) {
       // The agent's report of a job that outlasted the call's wait: "... still running after 50 s (job 1a2b3c4d).",
       // or one still waiting in the screen's line (#1422): "... is waiting in line for the screen (job 1a2b3c4d)".
@@ -1005,7 +1010,7 @@ export class MachineRelay {
   fromSession(sessionId: string, holder: SessionHolder, message: unknown): boolean {
     const s = this.sessions.get(sessionId);
     if (!s || s.holder !== holderKey(holder)) return false;
-    const call = message as any;
+    const call = message as { id?: unknown; method?: string; params?: { name?: string; arguments?: { task?: string } } } | null | undefined;
     if (s.server === 'ws' && call?.method === 'tools/call' && call.params?.name === 'run_task' && call.params?.arguments?.task === GPU_TASK) {
       const machine = this.store.getMachine(s.machineId);
       if (machine && storedLend(machine)?.gpu_off) {
@@ -1015,7 +1020,7 @@ export class MachineRelay {
       }
       (s.gpuAsks ??= new Set()).add(call.id);
     }
-    if (s.server === 'ws' && s.ticketId !== null && call?.method === 'tools/call' && ['run_task', 'job', 'stop_job'].includes(call.params?.name)) (s.jobAsks ??= new Set()).add(call.id);
+    if (s.server === 'ws' && s.ticketId !== null && call?.method === 'tools/call' && ['run_task', 'job', 'stop_job'].includes(call.params?.name as string)) (s.jobAsks ??= new Set()).add(call.id);
     const agent = this.agents.get(s.machineId);
     if (!agent) return false;
     if (agent.res.writableLength > MAX_BACKLOG) {

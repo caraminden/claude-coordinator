@@ -6,10 +6,11 @@ import { createInterface } from 'node:readline';
 import { APP_NAME } from './appname.ts';
 import { cardText, type CardLink } from './card-links.ts';
 import { liveState } from './live-state.ts';
+import { thrown } from './thrown.ts';
 import { instructionCost } from './prompt-cost.ts';
 import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
 import { callEnv, callCwd } from './pool-context.ts';
-import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText, RISKS, money, scheduleLine } from './mcp-text.ts';
+import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText, RISKS, money, scheduleLine, type DeployInfo, type ServiceInfo, type ContraptionInfo, type CheckResult, type MachineInfo, type ScheduleInfo, type MemoryHit, type PastHit, type IdeaRow, type DecisionRow } from './mcp-text.ts';
 export { usageSplitText } from './mcp-text.ts';
 export { NOT_DEFAULT } from './mcp-media.ts';
 
@@ -171,7 +172,7 @@ export function closeSelfResult(cleared: boolean): string {
 }
 
 /** hand_off_land's answer: what happens next, the deploy, and what to do on a failure (its description's rules since #1575). */
-export function handOffResult(args: Record<string, any>, contraptions: string[], deploys: boolean): string {
+export function handOffResult(args: Record<string, unknown>, contraptions: string[], deploys: boolean): string {
   const deploy = contraptions.length && args.deploy !== false && !args.into ? `, then deploys ${contraptions.join(', ')}; the shipped line says if it went live, so never call deploy_contraption or ask for a redeploy` : '';
   const end = args.stay_open === true ? 'leaves this minion open (stay_open)' : `dismisses this minion${deploys ? ' (or sets pending-deploy for a restart)' : ''}`;
   return `Handed off: the server runs tools/land.sh now, behind any landings in line${deploy}. End your turn now with a short reply and set no state (the server shows you as shipping until it ends): the server posts the shipped line and ${end} on a clean land; it never seals you. `
@@ -983,10 +984,10 @@ const CONTRAPTION_FIELDS = {
 /** Wait up to an hour for the deploy at `path` (builds take minutes), then hand back so the turn can follow again. */
 async function followDeploy(path: string): Promise<string> {
   const until = Date.now() + 60 * 60_000;
-  let d = await call('GET', path);
+  let d = await call<DeployInfo | null>('GET', path);
   while (d?.state === 'running' && Date.now() < until) {
     await sleep(5000);
-    d = await call('GET', path);
+    d = await call<DeployInfo | null>('GET', path);
   }
   return d?.state === 'running' ? `${deployText(d)}\nStill running after an hour: call deploy_contraption again with follow: true to keep waiting.` : deployText(d);
 }
@@ -1160,10 +1161,10 @@ const DEPLOY_CONTRAPTION = () => ({
 /** Putting an item in the asking person's Mandate (#268): every minion and Taskmaster; the server checks whom for. */
 /** The scheme's review set (src/review-set.ts, Build 4): read it, or save what a person's verdict taught a critic (citadel:critique step 9). */
 /** The fields of a review entry the Taskmaster sets besides its text: only those passed, so a save never blanks the rest (the store checks them). */
-export const reviewFields = (args: Record<string, any>) => Object.fromEntries(['kind', 'name', 'when', 'model', 'effort', 'panel', 'on_fail', 'context'].filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
+export const reviewFields = (args: Record<string, unknown>) => Object.fromEntries(['kind', 'name', 'when', 'model', 'effort', 'panel', 'on_fail', 'context'].filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
 
 /** The kinds of refuted finding a scheme is counting (#1158), one line each: what a minion reads to reuse their words. */
-const countedText = (ls: { kind: string; count: number; last: number; why: string }[]) =>
+const countedText = (ls: Counted[]) =>
   ls.length ? ls.map((l) => `- ${l.kind}: ${l.count}${l.count >= 3 ? ' (a lesson)' : ''}, last ${pacificDay(l.last)}: ${l.why}`).join('\n') : '(none yet)';
 
 const REVIEW_SET = {
@@ -1273,7 +1274,7 @@ const CONTRAPTION_TURNS = () => ({
   },
 });
 const AUDIT_CUT = 400;
-function turnText(t: any, whole: boolean): string {
+function turnText(t: AuditTurn, whole: boolean): string {
   const at = pacificStamp(t.at);
   const verdict = t.verdict === 'pass' ? 'passed' : t.verdict === 'fallback' ? 'fell back' : 'no verdict';
   const head = [`Turn ${t.id}`, t.contraption, `for ${t.person ?? 'someone removed'}`, at, t.model, t.blind && 'blind', t.outcome && t.outcome !== 'end' && t.outcome, verdict + (t.verdict_reason ? `: ${t.verdict_reason}` : '')];
@@ -1345,14 +1346,54 @@ async function openTwins(title: string, message: string): Promise<{ number: numb
   // One try, not call()'s two minutes of retries: a down embedding service mustn't hold up a new minion.
   const res = await fetch(`${C().API}/api/projects/${C().PROJECT}/memory?${q}`, { headers: { Authorization: `Bearer ${C().TOKEN}` }, signal: AbortSignal.timeout(30_000) }).catch(() => null);
   if (!res?.ok) return [];
-  const { hits } = (await res.json().catch(() => ({}))) as { hits?: any[] };
+  const { hits } = (await res.json().catch(() => ({}))) as { hits?: { twin?: boolean; number: number; title: string; status: string; score: number; owner: string | null }[] };
   return (hits ?? []).filter((h) => h.twin);
 }
 
 /** How long a call keeps trying while the app restarts: the turn outlives the server, its calls wait for the next one. */
 const RETRY_MS = 120_000;
 
-async function call(method: string, path: string, body?: object): Promise<any> {
+/** A minion as the API's views send it: the fields these tools read. */
+interface TicketView {
+  id: number; number: number; title: string; properties?: Record<string, unknown>; build?: number | string | null; model?: string | null; effort?: string | null;
+  workflow?: unknown; plugin_dirs?: string; status: string; state?: string; asleep?: { by: string } | null; queued?: number; closing?: boolean; note?: string;
+  branch?: string; worktree?: string; cwd?: string; created_by: string; parent?: number | null; last_activity?: string; cost?: number;
+  budget?: { usd: number; estimate: boolean; basis: string; ask: number; wake: number; card: number };
+  open_cards?: CardLink[]; notes?: string[];
+}
+/** A stored event: its data is a JSON string. */
+interface StoredEvent { kind: string; data: string; created_at: number }
+interface UltraBatch { for?: string; refused?: { name?: string; index: number; error: string }[]; rows: { name: string; state: string; pr?: { number?: number; url?: string }; size: { lines: number; files: number }; error?: string }[] }
+interface ArtifactRow { shared?: boolean; id?: number | string; title?: string; name?: string; display_path?: string; ticket_kind?: string; ticket_number?: number; pinned_at?: number | null; pinned_by?: string; missing?: boolean }
+interface ClaimView { name: string; minion?: number | null; holder_name: string; taken_by: string; since_text: string; note?: string | null; queue?: { number: number; state: string; after?: number }[] | null; done: number; total: number; estimate?: { left_ms: number; of: number } }
+interface ToolDef { name: string; inputSchema: { properties: Record<string, { type?: unknown } | undefined> }; _meta?: Record<string, unknown> }
+interface RpcRequest { id?: unknown; method?: string; params?: { protocolVersion?: string; name?: string; arguments?: Record<string, unknown> } }
+interface CiFile { kind: string; name: string; size: number; workflow: string; run_id: number; run_attempt: number; sha: string; target?: string; published_to?: string; created_at: number; path: string; url: string }
+interface CiJob { op: string; machine: string; ok: boolean | null; count?: number; os?: string; by: string; text: string }
+interface QueuedJob { id: number; kind: { name: string }; machine: string; state: string; waits?: string; paused_by?: string; error?: string; run_s: number; limit_s: number; gpu_busy_s: number; gpu_pct: number | null; vram_mb?: number; exit_code: number | null; outputs: { path: string; size: number; uploaded?: boolean; why?: string }[]; upload_bytes?: number; log_tail?: string }
+interface PropertyValue { value: string; aliases: string[]; status: string; reviewed?: boolean }
+interface PropertyKey { key: string; status: string; value_kind?: string; multi?: boolean; scope: string; description?: string; values: PropertyValue[] }
+/** The registry calls' answers: warnings, notes and the properties after the change. */
+interface RegistryReply { warnings?: string[]; notes?: string[]; properties?: Record<string, unknown>; status?: string }
+/** A scheme's own fields, as GET and PATCH /api/projects/:id send them. */
+interface ProjectView {
+  name: string; instructions?: string; instructions_updated_by?: string; approval_rules: string; plugin_dirs: string; optional_plugin_dirs: string; ci_quiet?: string; ci_watch?: string;
+  default_effort?: string; ship_path: string; go_from: string; try_first: string; land_mode?: string; fable_ok?: string; builds: unknown; grill: unknown; gh_runners: unknown;
+  shot_widths: unknown; shot_themes: unknown; shots_required?: boolean; shot_note?: string; onboarding?: unknown; onboarding_mode?: unknown; repo_url?: string;
+}
+interface ErrorsDay { day: string; total: number; apps: { title: string; count: number }[]; file: string }
+interface Counted { kind: string; count: number; last: number; why: string }
+interface ReviewEntry {
+  slug: string; kind?: string; enabled?: boolean; kit?: boolean; file?: string; trial?: boolean; gate?: string; panel?: string; extends?: string; calibrated?: string; calibration?: string; rate?: number | null;
+  when?: string; version?: number; name?: string; what?: string; body?: string; lessons?: Counted[]; agent?: { text: string }; updated_by?: string; text?: string;
+}
+/** A contraption turn in the audit (list_contraption_turns): the fields turnText reads. */
+interface AuditTurn { id: number; at: number; verdict?: string; verdict_reason?: string; contraption?: string; person?: string; model?: string; blind?: boolean; outcome?: string; system: string; prompt: string; output: string; images?: number }
+interface ShipLesson { id: number; number?: number | null; at: number; taken_at?: number | null; taken_note?: string; lines: string; files: string[] }
+/** A Claude event's data, as the stream-json line sends it. */
+interface EventData { author?: string; comment?: { about: string }; text?: string; tool?: string; input?: unknown; state?: string; by?: string; via?: { scheme?: string; text: string; ticket?: number | null; to?: number | null; [k: string]: unknown }; type?: string; replaced?: unknown; message?: { content?: { type?: string; text?: string }[] }; parent_tool_use_id?: unknown; is_error?: boolean; [k: string]: unknown }
+
+async function call<T = Record<string, unknown>>(method: string, path: string, body?: object): Promise<T> {
   const started = Date.now();
   let res!: Response;
   for (let wait = 500; ; wait = Math.min(wait * 2, 5000)) {
@@ -1366,16 +1407,16 @@ async function call(method: string, path: string, body?: object): Promise<any> {
         body: body ? JSON.stringify(body) : undefined,
       });
       retry = method === 'GET' && (res.status === 502 || res.status === 503);
-    } catch (err: any) {
-      if (!(err?.cause?.code === 'ECONNREFUSED' || method === 'GET') || Date.now() - started > RETRY_MS) throw err;
+    } catch (err) {
+      if (!((thrown(err).cause as { code?: string } | undefined)?.code === 'ECONNREFUSED' || method === 'GET') || Date.now() - started > RETRY_MS) throw err;
       retry = true;
     }
     if (!retry || Date.now() - started > RETRY_MS) break;
     await sleep(wait);
   }
-  const data = await res.json().catch(() => ({}));
+  const data = await res.json().catch(() => ({})) as { error?: string };
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  return data as T;
 }
 
 function clip(s: string): string {
@@ -1387,11 +1428,11 @@ function propertyText(props: Record<string, unknown> | undefined): string {
   return Object.entries(props ?? {}).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; ');
 }
 
-function registryText(keys: any[]): string {
-  const kind = (k: any) => (k.value_kind === 'integer' ? 'a whole number' : k.value_kind === 'user' ? "a person's login name" : k.value_kind === 'text' ? 'free text' : k.multi ? 'one or more of' : 'one of');
-  const line = (k: any) => {
-    const shown = k.values.filter((v: any) => v.status !== 'archived');
-    const values = shown.map((v: any) => `${v.value}${v.aliases.length ? ` (${v.aliases.join(', ')})` : ''}${v.status === 'proposed' ? ' [proposed]' : !v.reviewed ? ' [new, unreviewed]' : ''}`);
+function registryText(keys: PropertyKey[]): string {
+  const kind = (k: PropertyKey) => (k.value_kind === 'integer' ? 'a whole number' : k.value_kind === 'user' ? "a person's login name" : k.value_kind === 'text' ? 'free text' : k.multi ? 'one or more of' : 'one of');
+  const line = (k: PropertyKey) => {
+    const shown = k.values.filter((v) => v.status !== 'archived');
+    const values = shown.map((v) => `${v.value}${v.aliases.length ? ` (${v.aliases.join(', ')})` : ''}${v.status === 'proposed' ? ' [proposed]' : !v.reviewed ? ' [new, unreviewed]' : ''}`);
     return `- ${k.key}${k.status === 'proposed' ? ' [proposed key, not usable yet]' : ''}: ${kind(k)}${values.length ? ` ${values.join(', ')}` : ''}${k.description ? `\n  ${k.description.replace(/\n+/g, ' ')}` : ''}`;
   };
   const live = keys.filter((k) => k.status !== 'archived');
@@ -1401,12 +1442,12 @@ function registryText(keys: any[]): string {
 }
 
 /** A registry call's answer: what happened, plus any warnings or follow-ups for the caller. */
-function registryReply(r: any, done: string): string {
+function registryReply(r: RegistryReply, done: string): string {
   if (r.warnings?.length) return `Nothing changed; it looks like a near-duplicate:\n${r.warnings.map((w: string) => `- ${w}`).join('\n')}`;
   return [done, ...(r.notes ?? [])].join('\n');
 }
 
-function ticketLine(t: any): string {
+function ticketLine(t: TicketView): string {
   return [
     `#${t.number} ${t.title}`,
     t.properties && Object.keys(t.properties).length ? propertyText(t.properties) : '',
@@ -1430,20 +1471,20 @@ function ticketLine(t: any): string {
 }
 
 /** Turn stored events into a readable transcript, skipping tool calls. */
-function transcript(events: any[]): string[] {
+function transcript(events: StoredEvent[]): string[] {
   const out: string[] = [];
   for (const ev of events) {
-    const data = JSON.parse(ev.data);
-    if (ev.kind === 'user_message') out.push(`[${data.author}${data.comment ? ` on ${data.comment.about}` : ''}]: ${clip(data.text)}`);
+    const data: EventData = JSON.parse(ev.data);
+    if (ev.kind === 'user_message') out.push(`[${data.author}${data.comment ? ` on ${data.comment.about}` : ''}]: ${clip(data.text!)}`);
     else if (ev.kind === 'note') out.push(`(note) ${data.text}`);
-    else if (ev.kind === 'error') out.push(`(error) ${clip(data.text)}`);
+    else if (ev.kind === 'error') out.push(`(error) ${clip(data.text!)}`);
     else if (ev.kind === 'approval') out.push(`(asked for approval) ${data.tool}: ${clip(JSON.stringify(data.input))}`);
     else if (ev.kind === 'approval_result') out.push(data.state === 'expired' ? '(approval expired)' : data.via?.scheme ? `(allowed on ${data.by}'s go "${clip(data.via.text)}"${data.via.ticket == null ? ` in the Taskmaster chat${data.via.to != null ? `, for #${data.via.to}` : ''}` : ` in #${data.via.ticket}`})` : `(${data.state} by ${data.by})`);
     // A reply the link check sent back that its rewrite replaced (#281) shows only as the rewrite.
     else if (ev.kind === 'claude' && data.type === 'assistant' && !data.replaced) {
       const text = (data.message?.content ?? [])
-        .filter((b: any) => b.type === 'text' && b.text.trim())
-        .map((b: any) => b.text.trim())
+        .filter((b) => b.type === 'text' && b.text!.trim())
+        .map((b) => b.text!.trim())
         .join('\n');
       // A Grunt's report (a subagent's words) collapses to its first line, as it does in the chat. Not
       // public/grunts.js: this file runs as a pinned copy that only carries ./ imports (turn-launch.ts pinnedCopy).
@@ -1458,17 +1499,17 @@ function transcript(events: any[]): string[] {
 }
 
 /** Tickets are numbered per project; the API addresses them by their global id. */
-async function id(args: any, scheme = C().PROJECT): Promise<number> {
+async function id(args: Record<string, unknown>, scheme = C().PROJECT): Promise<number> {
   const n = Number(args.ticket_id);
   if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
-  const { tickets } = await call('GET', `/api/projects/${scheme}?number=${n}`); // one minion's view, not the whole scheme's (#609)
-  const ticket = tickets.find((t: any) => t.number === n);
+  const { tickets } = await call<{ tickets: TicketView[] }>('GET', `/api/projects/${scheme}?number=${n}`); // one minion's view, not the whole scheme's (#609)
+  const ticket = tickets.find((t) => t.number === n);
   if (!ticket) throw new Error(`There is no minion #${n} in ${scheme === C().PROJECT ? 'this' : 'that'} scheme`);
   return ticket.id;
 }
 
 /** The scheme list_tickets or read_ticket reads: this one, or for the Citadel scheme's Taskmaster another (#656). */
-function schemeOf(args: any): number {
+function schemeOf(args: Record<string, unknown>): number {
   if (args.scheme == null) return C().PROJECT;
   const n = Number(args.scheme);
   if (!C().APP_INSTRUCTIONS) throw new Error(`Only the ${APP_NAME} scheme's Taskmaster reads other schemes' minions: ask that scheme's Taskmaster with message_taskmaster`);
@@ -1479,7 +1520,7 @@ function schemeOf(args: any): number {
 const otherScheme = (name: string) => `Scheme ${name}: these are its minions, not this scheme's; write each as "${name} #N".`;
 
 /** The label fields a call sets; ones left out stay as they are. */
-function labelFields(args: any) {
+function labelFields(args: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
   for (const k of ['title', 'state', 'note', 'replies', 'build']) if (args[k] !== undefined) out[k] = args[k];
   return out;
@@ -1589,7 +1630,7 @@ export const PLAN = {
 };
 
 /** What a plan call answers: it checks the shape and returns no state (the readout replays the calls). */
-export function planResult(args: any): string {
+export function planResult(args: Record<string, unknown> | null): string {
   // public/progress.js planError's twin, since a pinned server can't import from public/ (#1043); test/mcp-always-load.test.ts holds them equal.
   const steps = args?.steps;
   if (!Array.isArray(steps) || !steps.length) throw new Error('steps is required: a list of { n, … }, one per step to add or change.');
@@ -1779,28 +1820,28 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * click. Answers in the shape Claude Code expects from a permission-prompt tool. Anything other
  * than a person's Approve, including errors and expired cards, denies.
  */
-async function approve(args: any): Promise<string> {
-  let decision: any;
+async function approve(args: Record<string, unknown>): Promise<string> {
+  let decision: { state: string; by?: string; reason?: string } | undefined;
   try {
-    const { id, refused } = await call('POST', `/api/tickets/${C().TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {} });
+    const { id, refused } = await call<{ id: string; refused?: string }>('POST', `/api/tickets/${C().TICKET}/approvals`, { tool_name: args.tool_name, input: args.input ?? {} });
     if (refused) return JSON.stringify({ behavior: 'deny', message: refused });
     // Each request waits up to half a minute on the server; keep asking until the card is settled.
     for (let failures = 0; !decision || decision.state === 'pending';) {
       try {
-        decision = await call('GET', `/api/tickets/${C().TICKET}/approvals?id=${encodeURIComponent(id)}`);
+        decision = await call<{ state: string; by?: string; reason?: string }>('GET', `/api/tickets/${C().TICKET}/approvals?id=${encodeURIComponent(id)}`);
         failures = 0;
       } catch (err) {
         if (++failures >= 5) throw err;
         await sleep(2000);
       }
     }
-  } catch (err: any) {
-    decision = { state: 'expired', reason: `The approval card failed: ${err.message}` };
+  } catch (err) {
+    decision = { state: 'expired', reason: `The approval card failed: ${thrown(err).message}` };
   }
-  if (decision.state === 'allowed') return JSON.stringify({ behavior: 'allow', updatedInput: args.input ?? {} });
-  const message = decision.state === 'denied'
-    ? `${decision.by} denied this in the chat. It was not run. Do not retry it or work around it; say what you needed it for, carry on with anything that does not need it, and hand the commands it needed to a person in your reply.`
-    : `Nobody approved this, so it was not run (${decision.reason ?? 'the card expired'}).`;
+  if (decision!.state === 'allowed') return JSON.stringify({ behavior: 'allow', updatedInput: args.input ?? {} });
+  const message = decision!.state === 'denied'
+    ? `${decision!.by} denied this in the chat. It was not run. Do not retry it or work around it; say what you needed it for, carry on with anything that does not need it, and hand the commands it needed to a person in your reply.`
+    : `Nobody approved this, so it was not run (${decision!.reason ?? 'the card expired'}).`;
   return JSON.stringify({ behavior: 'deny', message });
 }
 
@@ -1809,24 +1850,24 @@ async function approve(args: any): Promise<string> {
  * what already says the new words. Like a Settings save's Sonnet check, its own Sonnet Grunt judges the hits (Josh,
  * 2026-11-20: "Yes, its own Grunt"), and repeats_ok saves past them only with the Grunt's verdicts as `overlaps`.
  */
-async function repeatsFirst(scope: 'citadel' | 'scheme', args: any): Promise<string> {
+async function repeatsFirst(scope: 'citadel' | 'scheme', args: Record<string, unknown>): Promise<string> {
   const text = wholeText(args);
-  const judged: string[] = Array.isArray(args.overlaps) ? args.overlaps.filter((l: any) => typeof l === 'string' && l.trim()).map((l: string) => l.trim().slice(0, 300)) : [];
-  let found: any[];
+  const judged: string[] = Array.isArray(args.overlaps) ? args.overlaps.filter((l: unknown): l is string => typeof l === 'string' && !!l.trim()).map((l: string) => l.trim().slice(0, 300)) : [];
+  let found: { label: string; line?: number; href?: string; excerpt: string; why: string }[];
   // Like a Settings save, a check that fails never blocks the save: it says so instead.
-  try { ({ found } = await call('POST', `/api/projects/${C().PROJECT}/instructions/overlaps`, { scope, text })); } catch (err: any) { return ` The repeat check didn't run (${err.message}), so nothing was checked.`; }
+  try { ({ found } = await call<{ found: typeof found }>('POST', `/api/projects/${C().PROJECT}/instructions/overlaps`, { scope, text })); } catch (err) { return ` The repeat check didn't run (${thrown(err).message}), so nothing was checked.`; }
   if (!found.length) return '';
   if (args.repeats_ok === true && judged.length >= found.length) return `\nSaved past ${found.length} flagged place${found.length > 1 ? 's' : ''} on your Grunt's word; tell the person what it found:\n${judged.map((l) => `- ${l}`).join('\n')}`;
-  const place = (o: any) => `${o.label}${o.line ? `, line ${o.line}` : ''}${o.href && /^https:/.test(o.href) ? ` (${o.href})` : ''}`;
+  const place = (o: (typeof found)[number]) => `${o.label}${o.line ? `, line ${o.line}` : ''}${o.href && /^https:/.test(o.href) ? ` (${o.href})` : ''}`;
   throw new Error([
     args.repeats_ok === true ? `repeats_ok needs your Grunt's verdict on each place as overlaps (${found.length} listed, ${judged.length} given). Nothing was saved.` : `Nothing was saved: a word matcher flagged places that may already say the new words.`,
-    ...found.map((o: any) => `- ${place(o)}: "${o.excerpt}" It ${o.why}.`),
+    ...found.map((o) => `- ${place(o)}: "${o.excerpt}" It ${o.why}.`),
     `First have a Sonnet Grunt judge each against the new words (for a registered rule, against its home): repeats, conflicts, or fine (only shared wording). Put what it marks where it is already said, or point there in a few words. To save anyway, call again with repeats_ok: true and its verdicts as overlaps, one line per place.`,
   ].join('\n'));
 }
 
 /** The text of a replace-it-all tool. Only an explicit string counts: a missing or misnamed argument must never mean "clear". */
-function wholeText(args: any): string {
+function wholeText(args: Record<string, unknown>): string {
   if (typeof args.instructions !== 'string') {
     throw new Error(`instructions is required and must be text: send the whole new text. Nothing was changed. To clear it on purpose, pass instructions: "" (an empty string).`);
   }
@@ -1851,36 +1892,36 @@ function sharedFilesExist(text: unknown, then: string): void {
 }
 
 /** A set/update tool that was given nothing to set did nothing; say so rather than "Updated". */
-function needOne(args: any, fields: string[], tool: string): void {
+function needOne(args: Record<string, unknown>, fields: string[], tool: string): void {
   if (!fields.some((k) => args[k] !== undefined)) throw new Error(`${tool}: pass at least one of ${fields.join(', ')}. Nothing was changed.`);
 }
 
-async function runTool(name: string, args: any): Promise<string> {
+async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
   // Each role may only call its own tools.
-  const tool: any = toolList().find((t) => t.name === name);
+  const tool = toolList().find((t) => t.name === name);
   if (!tool) throw new Error(`Unknown tool ${name}`);
   // Models often send the string "null" for null (#481): read it as null where the schema takes null.
   for (const [k, v] of Object.entries(args)) if (v === 'null' && [tool.inputSchema?.properties?.[k]?.type].flat().includes('null')) args[k] = null;
   switch (name) {
     case 'list_tickets': {
       const at = schemeOf(args);
-      const { tickets, scheme, errors } = await call('GET', `/api/projects/${at}/tickets${args.include_closed ? '?include_closed=1' : ''}`);
+      const { tickets, scheme, errors } = await call<{ tickets: TicketView[]; scheme: string; errors?: ErrorsDay }>('GET', `/api/projects/${at}/tickets${args.include_closed ? '?include_closed=1' : ''}`);
       const head = at === C().PROJECT ? [] : [otherScheme(scheme)];
       // The morning count (#835): yesterday's contraption errors and the shared-folder file that lists them.
-      if (errors) head.push(`Contraption errors yesterday (${errors.day}): ${errors.total}, ${errors.apps.map((a: any) => `${a.title} ${a.count}`).join(', ')}. Grouped with a sample each in the shared folder's ${errors.file}.`);
-      const claims = at === C().PROJECT ? (await call('GET', `/api/projects/${at}/claims`)).claims : [];
+      if (errors) head.push(`Contraption errors yesterday (${errors.day}): ${errors.total}, ${errors.apps.map((a) => `${a.title} ${a.count}`).join(', ')}. Grouped with a sample each in the shared folder's ${errors.file}.`);
+      const claims = at === C().PROJECT ? (await call<{ claims: ClaimView[] }>('GET', `/api/projects/${at}/claims`)).claims : [];
       return [...head, tickets.length ? tickets.map(ticketLine).join('\n') : 'No minions.', ...(claims.length ? ['Claims:', ...claims.map(claimLine)] : [])].join('\n');
     }
     case 'claim': {
-      const r = await call('POST', `/api/projects/${C().PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null, queue: args.queue ?? null });
+      const r = await call<{ claim: ClaimView }>('POST', `/api/projects/${C().PROJECT}/claims`, { name: args.name, minion: args.minion ?? null, note: args.note ?? null, queue: args.queue ?? null });
       return `${args.queue && args.minion == null ? 'Queue set' : 'Claimed'}: ${claimLine(r.claim)}`;
     }
     case 'release': {
-      const r = await call('DELETE', `/api/projects/${C().PROJECT}/claims/${encodeURIComponent(String(args.name ?? ''))}`);
+      const r = await call<{ released?: ClaimView; claim?: ClaimView }>('DELETE', `/api/projects/${C().PROJECT}/claims/${encodeURIComponent(String(args.name ?? ''))}`);
       return r.released ? `Released: ${claimLine(r.released)}${r.claim ? `\nNow: ${claimLine(r.claim)}` : ''}` : `Nobody held ${args.name}.`;
     }
     case 'list_claims': {
-      const { claims } = await call('GET', `/api/projects/${C().PROJECT}/claims`);
+      const { claims } = await call<{ claims: ClaimView[] }>('GET', `/api/projects/${C().PROJECT}/claims`);
       return claims.length ? claims.map(claimLine).join('\n') : 'No claims: every duty is free.';
     }
     case 'read_ticket': {
@@ -1888,7 +1929,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const n = await id(args, at);
       const last = Math.min(Math.max(Number(args.last) || 10, 1), 50);
       // The whole history (?after=0), not a chat page: the skipped count needs every entry.
-      const [{ ticket, project }, events] = await Promise.all([call('GET', `/api/tickets/${n}`), call('GET', `/api/tickets/${n}/events?after=0`)]);
+      const [{ ticket, project }, events] = await Promise.all([call<{ ticket: TicketView; project: { name: string } }>('GET', `/api/tickets/${n}`), call<StoredEvent[]>('GET', `/api/tickets/${n}/events?after=0`)]);
       const head = at === C().PROJECT ? [] : [otherScheme(project.name)];
       if (args.live === true) return [...head, ticketLine(ticket), ...liveState(ticket, events)].join('\n');
       const lines = transcript(events);
@@ -1898,7 +1939,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'create_ticket': {
       // A session that loaded an older schema may leave out properties (or its type); a missing type
       // must not stop it starting minions, so it gets `other` and is told.
-      const properties = args.properties && typeof args.properties === 'object' && !Array.isArray(args.properties) ? { ...args.properties } : {};
+      const properties = args.properties && typeof args.properties === 'object' && !Array.isArray(args.properties) ? { ...args.properties } as Record<string, unknown> : {};
       const untyped = !Object.keys(properties).some((k) => k.toLowerCase() === 'type');
       if (untyped) properties.type = 'other';
       // A chained minion's brief waits for its leader, which may be the one writing the file.
@@ -1911,7 +1952,7 @@ async function runTool(name: string, args: any): Promise<string> {
           'If one is, message it instead (message_ticket). If not, call create_ticket again with not_duplicate: true.',
         ].join('\n');
       }
-      const t = await call('POST', `/api/projects/${C().PROJECT}/tickets`, {
+      const t = await call<TicketView>('POST', `/api/projects/${C().PROJECT}/tickets`, {
         title: args.title,
         properties,
         message: args.message,
@@ -1938,7 +1979,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return [r.everywhere && `${r.name}'s instructions for everywhere:\n\n${r.everywhere}`, r.scheme && `${r.name}'s instructions for this scheme (after the ones for everywhere):\n\n${r.scheme}`].filter(Boolean).join('\n\n');
     }
     case 'list_properties': {
-      const { keys } = await call('GET', `/api/projects/${C().PROJECT}/properties`);
+      const { keys } = await call<{ keys: PropertyKey[] }>('GET', `/api/projects/${C().PROJECT}/properties`);
       return registryText(keys);
     }
     case 'set_properties': {
@@ -1946,28 +1987,28 @@ async function runTool(name: string, args: any): Promise<string> {
         throw new Error('properties is required: an object of key: value (null clears a key). Nothing was changed.');
       }
       const target = C().ROLE === 'thread' ? C().TICKET : await id(args);
-      const r = await call('PUT', `/api/tickets/${target}/properties`, { properties: args.properties, file: args.file ?? null });
+      const r = await call<RegistryReply>('PUT', `/api/tickets/${target}/properties`, { properties: args.properties, file: args.file ?? null });
       // A minion that just made itself a feature reads the done-lines rule here (#1574).
       const feature = C().ROLE === 'thread' && !args.file && r.properties?.type === 'feature' && Object.keys(args.properties).some((k) => k.toLowerCase() === 'type');
       return registryReply(r, `Set. ${propertyText(r.properties) || '(no properties)'}${feature ? `\n${DONE_LINES}` : ''}`);
     }
     case 'register_property_values': {
-      const r = await call('POST', `/api/projects/${C().PROJECT}/properties/values`, { key: args.key, values: args.values, force: !!args.force });
+      const r = await call<RegistryReply & { added: string[]; updated: string[]; unreviewed?: string[] }>('POST', `/api/projects/${C().PROJECT}/properties/values`, { key: args.key, values: args.values, force: !!args.force });
       const parts = [r.added.length ? `Added ${r.added.map((v: string) => `${args.key}: ${v}`).join(', ')}` : '', r.updated.length ? `updated ${r.updated.join(', ')}` : ''].filter(Boolean).join('; ');
       return registryReply(r, `${parts || 'No change'}.${r.unreviewed?.length ? ` ${r.unreviewed.join(', ')} ${r.unreviewed.length === 1 ? 'is' : 'are'} live but unreviewed: tell people in your reply what you added, so they can approve or correct it.` : ''}`);
     }
     case 'register_property_key': {
-      const r = await call('POST', `/api/projects/${C().PROJECT}/properties/keys`, args);
+      const r = await call<RegistryReply>('POST', `/api/projects/${C().PROJECT}/properties/keys`, args);
       return registryReply(r, r.status === 'active' ? `Registered ${args.key}: your approved setup plan lists it, so it is live with no further approval.` : `Proposed ${args.key}; it waits for a person to approve it in Orders → Properties. Tell people in your reply.`);
     }
     case 'get_project_instructions': {
-      const { project } = await call('GET', `/api/projects/${C().PROJECT}?tickets=none`); // the scheme's fields, not every minion's view (#1514)
+      const { project } = await call<{ project: ProjectView }>('GET', `/api/projects/${C().PROJECT}?tickets=none`); // the scheme's fields, not every minion's view (#1514)
       if (!project.instructions) return 'This scheme has no instructions yet.';
       const by = project.instructions_updated_by ? ` (last changed by ${project.instructions_updated_by})` : '';
       return `Scheme instructions${by}:\n\n${project.instructions}`;
     }
     case 'get_project_settings': {
-      const { project } = await call('GET', `/api/projects/${C().PROJECT}?tickets=none`); // the scheme's fields, not every minion's view (#1514)
+      const { project } = await call<{ project: ProjectView }>('GET', `/api/projects/${C().PROJECT}?tickets=none`); // the scheme's fields, not every minion's view (#1514)
       const show = (text: string) => (text ? text.split('\n').map((l) => `- ${l}`).join('\n') : '(none)');
       return `Approval rules (need a person's OK):\n${show(project.approval_rules)}\n\nPlugin folders (every minion):\n${show(project.plugin_dirs)}\n\nOptional plugin folders (only minions that pick them, with plugin_folders on create_ticket or update_ticket):\n${show(project.optional_plugin_dirs)}\n\nQuiet CI workflows (their red scheduled or dispatched runs don't message the Taskmaster):\n${show(project.ci_quiet ?? '')}\n\nWatched CI workflows (their first red run on the default branch in a streak wakes the Taskmaster):\n${show(project.ci_watch ?? '')}\n\nDefault effort: ${project.default_effort || "Claude Code's default"}\n\nShipping: ship_path ${project.ship_path}; a person's go from: ${project.go_from}; try it first: ${project.try_first}\n\nFast mode (land now, test behind): ${project.land_mode === 'fast' ? 'on' : 'off'}\n\nFable: ${project.fable_ok === 'off' ? 'off' : 'on'}; numbered builds: ${project.builds}; grill before code: ${project.grill}; GitHub's own runners: ${project.gh_runners}\n\nScreenshots: widths ${project.shot_widths}, themes ${project.shot_themes}, ${project.shots_required ? 'required in the ready note' : 'not required'}${project.shot_note ? `, note: ${project.shot_note}` : ''}`;
     }
@@ -1994,24 +2035,24 @@ async function runTool(name: string, args: any): Promise<string> {
         if (args.replace_repo === true) body.replace_repo = true;
       }
       if (!Object.keys(body).length) throw new Error('Pass approval_rules, plugin_folders, optional_plugin_folders, quiet_workflows, watch_workflows, default_effort, land_mode, fable_ok, builds, grill, gh_runners, screenshot_widths, screenshot_themes, screenshots_required, screenshot_note, ship_path, go_from, try_first, onboarding, onboarding_mode, name, repo_url or a mix');
-      const project = await call('PATCH', `/api/projects/${C().PROJECT}`, body);
+      const project = await call<ProjectView>('PATCH', `/api/projects/${C().PROJECT}`, body);
       const n = (text: string) => (text ? text.split('\n').length : 0);
       return `Saved: ${n(project.approval_rules)} approval rule(s), ${n(project.plugin_dirs)} plugin folder(s), ${n(project.optional_plugin_dirs)} optional plugin folder(s), ${n(project.ci_quiet ?? '')} quiet CI workflow(s), ${n(project.ci_watch ?? '')} watched CI workflow(s), default effort ${project.default_effort || "Claude Code's default"}, fast mode ${project.land_mode === 'fast' ? 'on' : 'off'}, Fable ${project.fable_ok}, builds ${project.builds}, grill ${project.grill}, GitHub runners ${project.gh_runners}, screenshots ${project.shot_widths} px in ${project.shot_themes}, shipping ${project.ship_path} with a go from ${project.go_from} and try first ${project.try_first}, onboarding ${project.onboarding} (${project.onboarding_mode}). They apply from each minion's next turn.${args.repo_url !== undefined ? ` Repo recorded as ${project.repo_url}: nothing was cloned, so a person still clones it into the repo folder, sets up the push guard and gives Citadel GitHub access. With a checkout already there, the URL reverts at the next restart until the checkout's origin is re-pointed.` : ''}`;
     }
     case 'approve':
       return approve(args);
     case 'get_app_instructions': {
-      const app = await call('GET', '/api/app/instructions');
+      const app = await call<{ text: string; by?: string }>('GET', '/api/app/instructions');
       if (!app.text) return `The ${APP_NAME}-wide instructions are empty.`;
       return `${APP_NAME}-wide instructions${app.by ? ` (last changed by ${app.by})` : ''}:\n\n${app.text}`;
     }
     case 'set_app_instructions': {
       const unchecked = await repeatsFirst('citadel', args);
-      const app = await call('PUT', '/api/app/instructions', { text: wholeText(args) });
+      const app = await call<{ text: string }>('PUT', '/api/app/instructions', { text: wholeText(args) });
       return (app.text ? `Saved (${app.text.length} characters). ${instructionCost(app.text)}` : `Cleared the ${APP_NAME}-wide instructions.`) + unchecked;
     }
     case 'list_contraptions': {
-      const all = await call('GET', '/api/contraptions');
+      const all = await call<ContraptionInfo[]>('GET', '/api/contraptions');
       return all.length ? all.map(contraptionText).join('\n') : 'No contraptions registered yet.';
     }
     case 'make_app': {
@@ -2019,27 +2060,27 @@ async function runTool(name: string, args: any): Promise<string> {
       return `Made ${m.name}: #${m.minion} ships it and builds the idea (its branch already holds the app, ${m.files} files${m.workflow ? ', its CI workflow included' : ', no CI workflow: this scheme has no runner'}). It is registered on port ${m.port}, deploys from apps/${m.name}/, and is on for this scheme's members. Name the minion as #${m.minion} in your reply.`;
     }
     case 'adopt_app': {
-      const a = await call('POST', `/api/projects/${C().PROJECT}/apps/adopt`, { name: args.name, title: args.title, folder: args.folder ?? '', repo: args.repo });
+      const a = await call<{ name: string; port: number; subdir?: string; icon?: string; deployError?: string }>('POST', `/api/projects/${C().PROJECT}/apps/adopt`, { name: args.name, title: args.title, folder: args.folder ?? '', repo: args.repo });
       const head = `Adopted ${a.name}: registered on port ${a.port}, deployed from ${a.subdir ?? 'the repo root'}, icon ${a.icon || 'left empty for the deploy to fill'}, on for this scheme's members.`;
       if (a.deployError) return `${head}\nIt did not deploy: ${a.deployError}\nIt stays registered: call deploy_contraption for ${a.name} to try again.`;
       return `${head}\n${await followDeploy(`/api/contraptions/${encodeURIComponent(a.name)}/deploy`)}`;
     }
     case 'set_app_person': {
       if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
-      const r = await call('PUT', `/api/projects/${C().PROJECT}/apps/${encodeURIComponent(String(args.name))}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
+      const r = await call<{ name: string; people: string[] }>('PUT', `/api/projects/${C().PROJECT}/apps/${encodeURIComponent(String(args.name))}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
       return `${args.enabled ? 'On' : 'Off'} for ${args.login}. ${r.name} is on for: ${r.people.join(', ') || 'no one'}.`;
     }
     case 'register_contraption': {
-      const c = await call('POST', '/api/contraptions', args);
+      const c = await call<ContraptionInfo>('POST', '/api/contraptions', args);
       return `Registered. Its service reads its keys from the key folder.${c.icon ? '' : `\n${NO_ICON}`}\n${contraptionText(c)}`;
     }
     case 'update_contraption': {
       const { name, ...fields } = args;
-      return `Saved.\n${contraptionText(await call('PATCH', contraptionPath(args), fields))}`;
+      return `Saved.\n${contraptionText(await call<ContraptionInfo>('PATCH', contraptionPath(args), fields))}`;
     }
     case 'set_contraption_person': {
       if (typeof args.login !== 'string' || !args.login) throw new Error('login is required');
-      const c = await call('PUT', `${contraptionPath(args)}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
+      const c = await call<ContraptionInfo>('PUT', `${contraptionPath(args)}/people/${encodeURIComponent(`@${args.login}`)}`, { enabled: args.enabled });
       return `${args.enabled ? 'Enabled' : 'Disabled'} for ${args.login}.\n${contraptionText(c)}`;
     }
     case 'review_set': {
@@ -2048,18 +2089,18 @@ async function runTool(name: string, args: any): Promise<string> {
         return `Added ${e.slug} (on trial): ${e.when}.`;
       }
       if (!args.slug) {
-        const { entries } = await call('GET', `/api/projects/${C().PROJECT}/reviews`);
-        return entries.length ? entries.map((e: any) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.kit ? ', kit' : ''}${e.file ? `, agent_file ${e.file}` : ''}${e.trial ? ', trial' : ''}${e.gate === 'block' && !e.trial ? ', blocks' : ''}${e.panel ? `, panel ${e.panel}` : ''}${e.extends ? `, on kit ${e.extends}` : ''}${e.calibrated ? `, calibrated ${e.calibrated}` : ''}${e.rate != null ? `, ${e.rate}% first-round pass` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
+        const { entries } = await call<{ entries: ReviewEntry[] }>('GET', `/api/projects/${C().PROJECT}/reviews`);
+        return entries.length ? entries.map((e) => `${e.slug} (${e.kind}, ${e.enabled ? 'on' : 'off'}${e.kit ? ', kit' : ''}${e.file ? `, agent_file ${e.file}` : ''}${e.trial ? ', trial' : ''}${e.gate === 'block' && !e.trial ? ', blocks' : ''}${e.panel ? `, panel ${e.panel}` : ''}${e.extends ? `, on kit ${e.extends}` : ''}${e.calibrated ? `, calibrated ${e.calibrated}` : ''}${e.rate != null ? `, ${e.rate}% first-round pass` : ''}): ${e.when}`).join('\n') : 'This scheme has no reviewers or critics in its set yet.';
       }
       const slug = encodeURIComponent(String(args.slug));
       if (args.run !== undefined) {
-        const r = await call('POST', `/api/projects/${C().PROJECT}/reviews/${slug}/runs`, { round: args.run?.round, verdict: args.run?.verdict });
+        const r = await call('POST', `/api/projects/${C().PROJECT}/reviews/${slug}/runs`, { round: (args.run as { round?: unknown; verdict?: unknown } | null)?.round, verdict: (args.run as { round?: unknown; verdict?: unknown } | null)?.verdict });
         return `Recorded round ${r.round} of ${args.slug}: ${r.verdict}.`;
       }
       if (args.refuted !== undefined) {
         if (args.slug !== 'pre-ship-review') throw new Error('refuted goes with slug pre-ship-review: the lessons are for its reviewer');
-        const r = await call('POST', `/api/projects/${C().PROJECT}/reviews/pre-ship-review/refutes`, { refuted: args.refuted });
-        return `Recorded ${args.refuted.length} refuted finding${args.refuted.length === 1 ? '' : 's'}. Kinds counting (3 makes a lesson the reviewer reads):\n${countedText(r.counted)}`;
+        const r = await call<{ counted: Counted[] }>('POST', `/api/projects/${C().PROJECT}/reviews/pre-ship-review/refutes`, { refuted: args.refuted });
+        return `Recorded ${(args.refuted as unknown[]).length} refuted finding${(args.refuted as unknown[]).length === 1 ? '' : 's'}. Kinds counting (3 makes a lesson the reviewer reads):\n${countedText(r.counted)}`;
       }
       if (args.calibration !== undefined) {
         const e = await call('PATCH', `/api/projects/${C().PROJECT}/reviews/${slug}`, { calibration: args.calibration });
@@ -2068,8 +2109,8 @@ async function runTool(name: string, args: any): Promise<string> {
       if (args.extends !== undefined) throw new Error('extends is only for add: true; a save cannot change what an entry builds on');
       const extra = reviewFields(args);
       if (args.body === undefined && args.enabled === undefined && args.trial === undefined && !Object.keys(extra).length) {
-        const { entries } = await call('GET', `/api/projects/${C().PROJECT}/reviews`);
-        const e = entries.find((x: any) => x.slug === args.slug);
+        const { entries } = await call<{ entries: ReviewEntry[] }>('GET', `/api/projects/${C().PROJECT}/reviews`);
+        const e = entries.find((x) => x.slug === args.slug);
         if (!e) throw new Error(`No entry named ${args.slug}; review_set with no slug lists them`);
         if (e.kit) return `${e.slug}, version ${e.version}, the kit's ${e.name} (${e.enabled ? 'on' : 'off'} here): ${e.what} Its text is the kit's; this scheme's additions, what a save replaces:\n\n${e.body || '(none)'}${e.lessons ? `\n\nRefuted kinds counting (3 makes a lesson the reviewer reads; record with refuted, reusing a kind's words when it is the same mistake):\n${countedText(e.lessons)}` : ''}`;
         if (e.file) return `${e.slug}, version ${e.version}, agent_file ${e.file} (${e.enabled ? 'on' : 'off'} here): ${e.agent ? `${e.what ?? ''} Its text is the file's:\n\n${e.agent.text}\n----` : 'Its file is gone from the repo.'} This scheme's additions, what a save replaces:\n\n${e.body || '(none)'}`;
@@ -2100,7 +2141,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'generate_speech': {
       // Offered to every minion so the tool list doesn't follow the sender (#878); refused here when this turn's person has no key.
       if (!C().MEDIA) throw new Error("Not on this turn: the person it runs for hasn't connected OpenRouter on their account page. Make it with code instead, or ask them to connect it.");
-      const r = await call('POST', `/api/tickets/${C().TICKET}/openrouter`, { tool: name, args });
+      const r = await call<{ model: string; paths: string[]; cost_usd: unknown; month_usd: unknown; cap_usd: unknown; left_usd: unknown; warnings?: string[]; over_cap?: boolean }>('POST', `/api/tickets/${C().TICKET}/openrouter`, { tool: name, args });
       if (r.model === 'azure-speech') return `Wrote ${r.paths.join(', ')} with Azure Speech for about $${Number(r.cost_usd).toFixed(4)} (booked to the scheme: $${Number(r.month_usd).toFixed(2)} outside spend this month${r.cap_usd === null ? '' : ` of the $${Number(r.cap_usd).toFixed(2)} cap${r.over_cap ? ', over it' : ''}`}).`;
       return `Wrote ${r.paths.join(', ')} with ${r.model} for $${Number(r.cost_usd).toFixed(4)}; $${Number(r.left_usd).toFixed(2)} left this month.${r.warnings ? `\n${r.warnings.join('\n')}` : ''}`;
     }
@@ -2108,23 +2149,23 @@ async function runTool(name: string, args: any): Promise<string> {
       if (!C().CODEX_IMAGES) throw new Error('Not on this turn: the person it runs for has no Codex login a turn can reach. Use generate_image (OpenRouter) for this one if it is on this turn.');
       return codexImage(args, callEnv(), callCwd());
     case 'ship_risk':
-      return (await call('GET', `/api/tickets/${C().TICKET}/ship-risk?weeks=${Number(args.weeks) || 4}`)).text;
+      return (await call<{ text: string }>('GET', `/api/tickets/${C().TICKET}/ship-risk?weeks=${Number(args.weeks) || 4}`)).text;
     case 'usage_split':
-      return usageSplitText(await call('GET', '/api/costs/mine'));
+      return usageSplitText(await call<Parameters<typeof usageSplitText>[0]>('GET', '/api/costs/mine'));
     case 'log_learned': {
-      const r = await call('POST', `/api/tickets/${C().TICKET}/learned`, { learned: args.learned });
+      const r = await call<{ lines?: string; id: number; files: number }>('POST', `/api/tickets/${C().TICKET}/learned`, { learned: args.learned });
       return r.lines ? `Logged ${r.lines.split('\n').length} line${r.lines.includes('\n') ? 's' : ''} (lesson #${r.id}, ${r.files} file${r.files === 1 ? '' : 's'} touched) in the scheme's ship lessons queue.` : `Logged "nothing" (lesson #${r.id}): it still counts as this ship's answer.`;
     }
     case 'ship_lessons': {
       if (args.take !== undefined) {
         if (typeof args.note !== 'string' || !args.note.trim()) throw new Error('take goes with note: what became of these lines');
-        const { taken } = await call('POST', `/api/projects/${C().PROJECT}/ship-lessons/take`, { ids: args.take, note: args.note });
-        return `Marked ${taken.length} taken${taken.length ? `: #${taken.join(', #')}` : ''}${taken.length < args.take.length ? ' (the rest were already taken or not this scheme\'s)' : ''}.`;
+        const { taken } = await call<{ taken: number[] }>('POST', `/api/projects/${C().PROJECT}/ship-lessons/take`, { ids: args.take, note: args.note });
+        return `Marked ${taken.length} taken${taken.length ? `: #${taken.join(', #')}` : ''}${taken.length < (args.take as unknown[]).length ? ' (the rest were already taken or not this scheme\'s)' : ''}.`;
       }
       const q = new URLSearchParams({ ...(args.days ? { days: String(args.days) } : {}), ...(args.taken ? { taken: '1' } : {}) });
-      const r = await call('GET', `/api/projects/${C().PROJECT}/ship-lessons?${q}`);
+      const r = await call<{ week: { ships: number; withLines: number }; window: { ships: number; withLines: number }; days: number; lessons: ShipLesson[] }>('GET', `/api/projects/${C().PROJECT}/ship-lessons?${q}`);
       const head = `This week: ${r.week.ships} ship${r.week.ships === 1 ? '' : 's'} answered, ${r.week.withLines} with lines. Last ${r.days} days: ${r.window.ships} answered, ${r.window.withLines} with lines.`;
-      const rows = r.lessons.map((l: any) => `lesson ${l.id} · #${l.number ?? '?'} · ${pacificDay(l.at)}${l.taken_at ? ` · taken: ${l.taken_note}` : ''}\n${l.lines.split('\n').map((x: string) => `  - ${x}`).join('\n')}${l.files.length ? `\n  files: ${l.files.join(', ')}` : ''}`);
+      const rows = r.lessons.map((l) => `lesson ${l.id} · #${l.number ?? '?'} · ${pacificDay(l.at)}${l.taken_at ? ` · taken: ${l.taken_note}` : ''}\n${l.lines.split('\n').map((x: string) => `  - ${x}`).join('\n')}${l.files.length ? `\n  files: ${l.files.join(', ')}` : ''}`);
       return [head, ...(rows.length ? rows : [`No ${args.taken ? '' : 'open '}lines in that window.`])].join('\n');
     }
     case 'report_spend': {
@@ -2134,16 +2175,16 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'search_memory': {
       if (typeof args.query !== 'string' || !args.query.trim()) throw new Error('query is required');
       const q = new URLSearchParams({ q: args.query, ...(args.scope ? { scope: String(args.scope) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
-      return memoryText((await call('GET', `/api/projects/${C().PROJECT}/memory?${q}`)).hits);
+      return memoryText((await call<{ hits: MemoryHit[] }>('GET', `/api/projects/${C().PROJECT}/memory?${q}`)).hits);
     }
     case 'search_decisions': {
-      const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '', scope: ['all', 'scheme', 'citadel'].includes(args.scope) ? args.scope : 'all' });
-      const r = await call('GET', `/api/projects/${C().PROJECT}/decisions?${q}`);
+      const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '', scope: ['all', 'scheme', 'citadel'].includes(args.scope as string) ? String(args.scope) : 'all' });
+      const r = await call<Parameters<typeof decisionsText>[0]>('GET', `/api/projects/${C().PROJECT}/decisions?${q}`);
       return decisionsText(r, Math.min(Math.max(Number(args.limit) || 10, 1), 50));
     }
     case 'search_minions': {
       const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '', ...(args.since ? { since: String(args.since) } : {}), ...(args.limit ? { limit: String(args.limit) } : {}) });
-      return pastMinionsText((await call('GET', `/api/projects/${C().PROJECT}/past-minions?${q}`)).hits);
+      return pastMinionsText((await call<{ hits: PastHit[] }>('GET', `/api/projects/${C().PROJECT}/past-minions?${q}`)).hits);
     }
     case 'ideas': {
       if (args.id != null) {
@@ -2151,12 +2192,12 @@ async function runTool(name: string, args: any): Promise<string> {
         if (args.set_status !== undefined) body.status = args.set_status;
         if (args.minion !== undefined) body.ticket = args.minion === null || args.minion === 'auto' ? args.minion : Number(String(args.minion).replace(/^#/, ''));
         if (!Object.keys(body).length) return 'Give set_status and/or minion with id.';
-        const r = await call('POST', `/api/projects/${C().PROJECT}/ideas/${Number(args.id)}`, body);
+        const r = await call<{ idea: IdeaRow & { number?: number } }>('POST', `/api/projects/${C().PROJECT}/ideas/${Number(args.id)}`, body);
         return `Row ${r.idea.id} is now ${r.idea.status}${r.idea.status_manual ? ' (set by hand)' : ''}${r.idea.number ? `, built by #${r.idea.number}` : ''}.`;
       }
       const q = new URLSearchParams({ q: typeof args.query === 'string' ? args.query : '' });
       if (typeof args.status === 'string') q.set('status', args.status);
-      const r = await call('GET', `/api/projects/${C().PROJECT}/ideas?${q}`);
+      const r = await call<Parameters<typeof ideasText>[0]>('GET', `/api/projects/${C().PROJECT}/ideas?${q}`);
       return ideasText(r, Math.min(Math.max(Number(args.limit) || 30, 1), 200));
     }
     case 'contraption_turns': {
@@ -2165,29 +2206,29 @@ async function runTool(name: string, args: any): Promise<string> {
       // One turn: the page just above it, so its first row is the turn if it is this scheme's.
       if (args.turn) q.set('before', String(Number(args.turn) + 1));
       else if (args.before) q.set('before', String(Number(args.before)));
-      const r = await call('GET', `/api/projects/${C().PROJECT}/contraption-turns?${q}`);
+      const r = await call<{ turns: AuditTurn[]; keep_days: number; more?: boolean }>('GET', `/api/projects/${C().PROJECT}/contraption-turns?${q}`);
       if (args.turn) {
         const t = r.turns[0];
         return t?.id === Number(args.turn) ? turnText(t, true) : `No turn ${args.turn} in this scheme's audit (kept ${r.keep_days} days).`;
       }
       if (!r.turns.length) return `No turns in the last ${r.keep_days} days.`;
-      return r.turns.map((t: any) => turnText(t, false)).join('\n\n') + (r.more ? `\n\nOlder turns: before: ${r.turns.at(-1).id}.` : '');
+      return r.turns.map((t) => turnText(t, false)).join('\n\n') + (r.more ? `\n\nOlder turns: before: ${r.turns.at(-1)!.id}.` : '');
     }
     case 'contraption_read': {
       if (typeof args.app !== 'string' || !args.app) throw new Error('app is required, like mandate');
-      const r = await call('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
-      return readText(args.app, args.command, r);
+      const r = await call<Parameters<typeof readText>[2]>('POST', `/api/contraption-read/${encodeURIComponent(args.app)}`, { command: args.command, args: args.args });
+      return readText(args.app, args.command as string | undefined, r);
     }
     case 'make_release_key': {
       const { href } = await call('POST', `/api/tickets/${C().TICKET}/release-key`, { contraption: args.contraption });
       return `The release key card is in the chat; its link is ${href}. Link every mention of it, e.g. [the key card below](${href}). Any member of this scheme can approve it, and the answer comes as a message. Keep working on what doesn't depend on it.`;
     }
     case 'publish_desktop':
-      return (await call('POST', `/api/projects/${C().PROJECT}/desktop/publish`, { app: args.app, path: args.path, ci_file: args.ci_file, exe: args.exe, started: args.started, title: args.title, version: args.version })).said;
+      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/desktop/publish`, { app: args.app, path: args.path, ci_file: args.ci_file, exe: args.exe, started: args.started, title: args.title, version: args.version })).said;
     case 'order_ship_line':
-      return (await call('POST', `/api/projects/${C().PROJECT}/releases/ship-line`, { ship: args.ship, before: args.before, reason: args.reason })).said;
+      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/releases/ship-line`, { ship: args.ship, before: args.before, reason: args.reason })).said;
     case 'publish_release':
-      return (await call('POST', `/api/projects/${C().PROJECT}/releases/publish`, { contraption: args.contraption })).said;
+      return (await call<{ said: string }>('POST', `/api/projects/${C().PROJECT}/releases/publish`, { contraption: args.contraption })).said;
     case 'deploy_contraption': {
       const path = `${contraptionPath(args)}/deploy`;
       if (args.follow !== true) await call('POST', path, {});
@@ -2195,16 +2236,16 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'contraption_service': {
       const path = `${contraptionPath(args)}/service`;
-      if (args.action === 'status') return serviceText(await call('GET', path));
-      if (args.action === 'logs') return (await call('GET', `${path}/logs?lines=${Number(args.lines) || 100}`)).log || 'No journal lines.';
-      const r = await call('POST', path, { action: args.action, replace: args.replace === true, ...(args.confirm ? { confirm: args.confirm } : {}) });
+      if (args.action === 'status') return serviceText(await call<ServiceInfo>('GET', path));
+      if (args.action === 'logs') return (await call<{ log: string }>('GET', `${path}/logs?lines=${Number(args.lines) || 100}`)).log || 'No journal lines.';
+      const r = await call<{ said: string[]; status: ServiceInfo }>('POST', path, { action: args.action, replace: args.replace === true, ...(args.confirm ? { confirm: args.confirm } : {}) });
       return `${r.said.join('\n')}\n${serviceText(r.status)}`;
     }
     case 'rotate_contraption_keys':
       return `New keys written; the old ones stopped working. Restart its service so it reads them.\n${contraptionText(await call('POST', `${contraptionPath(args)}/keys`, {}))}`;
     case 'set_project_instructions': {
       const unchecked = await repeatsFirst('scheme', args);
-      const project = await call('PATCH', `/api/projects/${C().PROJECT}`, { instructions: wholeText(args) });
+      const project = await call<{ instructions: string }>('PATCH', `/api/projects/${C().PROJECT}`, { instructions: wholeText(args) });
       return (project.instructions ? `Saved (${project.instructions.length} characters). ${instructionCost(project.instructions)}` : 'Cleared the scheme instructions.') + unchecked;
     }
     case 'message_ticket': {
@@ -2212,12 +2253,12 @@ async function runTool(name: string, args: any): Promise<string> {
       sharedFilesExist(args.text ?? args.message, 'Send this');
       // Unseal (#718; start_now is its old name): the server unseals it first if it's sealed, and this message wakes it.
       const unpark = args.unpark === true || args.start_now === true;
-      const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(unpark ? { unpark: true } : {}) });
+      const t = await call<TicketView & { held?: boolean | string }>('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(unpark ? { unpark: true } : {}) });
       if (t.held === 'parked') return `Held for #${t.number}: it is sealed or waits for its start card, so the message shows in its chat now and reaches it when it is unsealed or woken (its deploy wait or chained start). Do not resend it; message_ticket with \`unpark\` wakes a sealed one now, but one waiting on its start card starts only on a person's answer.\n${ticketLine(t)}`;
       return t.held ? `${HELD()} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
-      const r = await call('POST', '/api/taskmaster', { scheme: args.scheme, ...(args.person ? { person: args.person } : {}), text: args.text ?? args.message, saw: args.saw, checked: args.checked, wanted: args.wanted, by: args.by, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.file ? { file: args.file } : {}) });
+      const r = await call<{ file?: string; held?: unknown; scheme: unknown; woke?: unknown; left: number }>('POST', '/api/taskmaster', { scheme: args.scheme, ...(args.person ? { person: args.person } : {}), text: args.text ?? args.message, saw: args.saw, checked: args.checked, wanted: args.wanted, by: args.by, need: args.need, ...(args.wake === false ? { wake: false } : {}), ...(args.file ? { file: args.file } : {}) });
       const copied = r.file ? ` The file is at ${r.file} in its shared folder.` : '';
       const ask = 'If you have a good reason to keep going, ask people with ask_question, saying why; their answer (or anything a person writes in your chat) continues it.';
       if (r.held) return `${heldToolText(C().MSG, `you and the Taskmaster of ${r.scheme}`)}${copied} ${ask}`;
@@ -2226,7 +2267,7 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'update_ticket':
       needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
-      return `Updated. ${ticketLine(await call('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, pick_reason: args.reason, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
+      return `Updated. ${ticketLine(await call<TicketView>('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, pick_reason: args.reason, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
     case 'ask_question': {
       const direct = args.to ? { to: args.to } : {};
       if (args.doc != null && args.questions == null) {
@@ -2256,7 +2297,7 @@ async function runTool(name: string, args: any): Promise<string> {
       return `The question card (id ${questionId}) is in ${args.for_everyone === true ? "the Overlord's chat, for everyone" : 'the chat'}${args.to ? ` for ${args.to}` : ''}${href ? `; its link is ${href}. Link every mention of it, in this reply and later ones, e.g. [${args.for_everyone === true ? "the card in the Overlord's chat" : 'the card below'}](${href})${args.for_everyone === true ? '' : ' ("below" this turn, "above" later)'}` : ''}. End your turn now with a short reply; the answers will come as ${args.to ? `a message from ${args.to}` : 'the next message'}.${args.kind ? '' : ' A plain card you ask later this turn, while this one is still unanswered, joins it (up to 8 questions in all), so people see one card with one Send.'}`;
     }
     case 'settle_question': {
-      const { settled } = await call('POST', `/api/tickets/${C().TICKET}/settle`, { questionId: args.question_id ?? null });
+      const { settled } = await call<{ settled: unknown[] }>('POST', `/api/tickets/${C().TICKET}/settle`, { questionId: args.question_id ?? null });
       return settled.length ? `Settled ${settled.join(', ')}: shown as answered (a plan-type card as withdrawn) in the chat.` : 'No card of yours was open.';
     }
     case 'strike_text':
@@ -2265,17 +2306,17 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'ci_files': {
       const q = new URLSearchParams();
       for (const k of ['workflow', 'kind', 'target', 'name', 'run', 'commit']) if (args[k] !== undefined && args[k] !== '') q.set(k, String(args[k]));
-      const { files, usage } = await call('GET', `/api/projects/${C().PROJECT}/ci-files?${q}`);
+      const { files, usage } = await call<{ files: CiFile[]; usage: { scheme: number } }>('GET', `/api/projects/${C().PROJECT}/ci-files?${q}`);
       if (!files.length) return 'No file in the CI store matches.';
-      const line = (f: any) => `${f.kind} ${f.name} (${f.size.toLocaleString('en')} bytes) from ${f.workflow} run ${f.run_id}${f.run_attempt > 1 ? ` attempt ${f.run_attempt}` : ''}, commit ${f.sha.slice(0, 8)}${f.target ? `, target ${f.target}` : ''}${f.published_to ? `, published to ${f.published_to}` : ''}, uploaded ${new Date(f.created_at).toISOString()}\n  path: ${f.path}\n  url: ${f.url}`;
+      const line = (f: CiFile) => `${f.kind} ${f.name} (${f.size.toLocaleString('en')} bytes) from ${f.workflow} run ${f.run_id}${f.run_attempt > 1 ? ` attempt ${f.run_attempt}` : ''}, commit ${f.sha.slice(0, 8)}${f.target ? `, target ${f.target}` : ''}${f.published_to ? `, published to ${f.published_to}` : ''}, uploaded ${new Date(f.created_at).toISOString()}\n  path: ${f.path}\n  url: ${f.url}`;
       if (args.latest === true) return line(files[0]);
       return `${files.slice(0, 50).map(line).join('\n')}${files.length > 50 ? `\n… and ${files.length - 50} older` : ''}\n${(usage.scheme / 1024 ** 2).toFixed(1)} MiB in this scheme's store.`;
     }
     case 'ci_runners': {
-      const started = await call('POST', `/api/projects/${C().PROJECT}/ci-runners`, { op: args.op, ...(args.count !== undefined ? { count: args.count } : {}), ...(args.os !== undefined ? { os: args.os } : {}) });
+      const started = await call<CiJob>('POST', `/api/projects/${C().PROJECT}/ci-runners`, { op: args.op, ...(args.count !== undefined ? { count: args.count } : {}), ...(args.os !== undefined ? { os: args.os } : {}) });
       let job = started;
       for (const end = Date.now() + 10 * 60_000; job.ok === null && Date.now() < end; ) {
-        const now = await call('GET', `/api/projects/${C().PROJECT}/ci-runners?wait=50`);
+        const now = await call<{ job?: CiJob }>('GET', `/api/projects/${C().PROJECT}/ci-runners?wait=50`);
         // The server restarted mid-job: the agent carries on, and its answer has nowhere to go.
         if (!now.job) return `${started.op} on ${started.machine}: ${APP_NAME} restarted while it ran, so its outcome is lost; ci_runners list shows what is on the PC now.`;
         job = now.job;
@@ -2285,46 +2326,46 @@ async function runTool(name: string, args: any): Promise<string> {
       return `${head}: ${job.ok ? 'done' : 'FAILED'}.\n${job.text}`;
     }
     case 'list_machines': {
-      const { machines, others } = await call('GET', `/api/projects/${C().PROJECT}/machines`);
+      const { machines, others } = await call<{ machines: MachineInfo[]; others?: { name: string; owner_name?: string | null }[] }>('GET', `/api/projects/${C().PROJECT}/machines`);
       return [...(machines.length ? machines.map(machineText) : ['No machines this scheme can see.']),
-        ...(others?.length ? [`Not lent here (propose_machine_lend asks for one): ${others.map((o: any) => (o.owner_name ? `${o.name} (${o.owner_name}'s own)` : o.name)).join(', ')}`] : [])].join('\n\n');
+        ...(others?.length ? [`Not lent here (propose_machine_lend asks for one): ${others.map((o) => (o.owner_name ? `${o.name} (${o.owner_name}'s own)` : o.name)).join(', ')}`] : [])].join('\n\n');
     }
     case 'check_machine': {
       if (typeof args.name !== 'string' || !/^[a-z0-9-]{1,30}$/i.test(args.name)) throw new Error('name is required: the machine name, as list_machines shows it');
-      const { machine, results } = await call('POST', `/api/projects/${C().PROJECT}/machines/${args.name.toLowerCase()}/check`);
+      const { machine, results } = await call<{ machine: MachineInfo & { minions_get_it?: boolean }; results: CheckResult[] }>('POST', `/api/projects/${C().PROJECT}/machines/${args.name.toLowerCase()}/check`);
       if (!machine.online) return `${machine.name}: FAIL, offline (last seen ${ago(machine.last_seen_at)}). Its agent isn't connected: on that computer, check machine-agent.mjs is running and its token is current.`;
       if (!results.length) return `${machine.name}: online, but it offers nothing a turn would get (${machine.managed ? 'nothing it found is ticked on the Machines page' : machine.servers.includes('ws') ? 'workspace tools are switched off and it lends no MCP server' : 'no MCP server and no workspace tools'}).`;
-      const pass = results.every((r: any) => r.ok);
+      const pass = results.every((r) => r.ok);
       const reach = machine.minions_get_it ? '' : `Note: this scheme's minions don't get ${machine.name} (this scheme isn't on its list, or it is someone's own and this turn isn't their ask), so a pass here doesn't mean they can use it.`;
       return [`${machine.name}: ${pass ? 'PASS' : 'FAIL'}`, ...checkLines(results), reach].filter(Boolean).join('\n');
     }
     case 'list_catalogue': {
-      const { items } = await call('GET', '/api/catalogue');
+      const { items } = await call<{ items: { kind: string; name: string; source: string; in_kit?: boolean; description?: string }[] }>('GET', '/api/catalogue');
       if (!items.length) return 'Nothing in the catalogue.';
-      return items.map((c: any) => `${c.kind} ${c.name} (${c.source})${c.in_kit && c.source !== 'kit' ? ' [kit has one]' : ''}: ${c.description || 'no description'}`).join('\n');
+      return items.map((c) => `${c.kind} ${c.name} (${c.source})${c.in_kit && c.source !== 'kit' ? ' [kit has one]' : ''}: ${c.description || 'no description'}`).join('\n');
     }
     case 'queue_job': {
-      const j = await call('POST', `/api/tickets/${C().TICKET}/jobs`, { machine: args.machine, kind: args.kind, inputs: args.inputs, limit_min: args.limit_min, when: args.when, reason: args.reason });
+      const j = await call<{ id: number; state: string; machine: string; waits?: string }>('POST', `/api/tickets/${C().TICKET}/jobs`, { machine: args.machine, kind: args.kind, inputs: args.inputs, limit_min: args.limit_min, when: args.when, reason: args.reason });
       return `Job #${j.id} is ${j.state === 'needs-go' ? `waiting on ${j.machine}'s owner's go: the card is in this chat` : `queued (${j.waits ?? 'starting'})`}. You are woken when it ends or is refused; end your turn when nothing else needs doing.`;
     }
     case 'job_status': {
-      const { jobs } = await call('GET', `/api/tickets/${C().TICKET}/jobs`);
-      const pick = args.id === undefined ? jobs : jobs.filter((j: any) => j.id === args.id);
+      const { jobs } = await call<{ jobs: QueuedJob[] }>('GET', `/api/tickets/${C().TICKET}/jobs`);
+      const pick = args.id === undefined ? jobs : jobs.filter((j) => j.id === args.id);
       if (!pick.length) return args.id === undefined ? 'This minion has queued no jobs.' : `No job #${args.id} of this minion's.`;
       const min = (s: number) => `${Math.round(s / 60)} min`;
-      return pick.map((j: any) => [
+      return pick.map((j) => [
         `#${j.id} ${j.kind.name} on ${j.machine}: ${j.state}${j.waits ? ` (${j.waits})` : ''}${j.paused_by ? ` (paused by ${j.paused_by})` : ''}${j.error ? `; ${j.error}` : ''}`,
         `  ran ${min(j.run_s)} of ${min(j.limit_s)}, GPU busy ${min(j.gpu_busy_s)}${j.gpu_pct !== null ? `, GPU ${j.gpu_pct}% ${j.vram_mb ?? '?'} MB now` : ''}${j.exit_code !== null ? `, exit ${j.exit_code}` : ''}`,
-        ...(j.outputs.length ? [`  outputs: ${j.outputs.map((o: any) => `${o.path} (${o.size} B${o.uploaded ? '' : `, not uploaded${o.why ? `: ${o.why}` : ''}, still in job folder ${j.id}/out/ on the machine`})`).join(', ')}${j.upload_bytes ? ` in the shared folder's jobs/${j.id}/` : ''}`] : []),
+        ...(j.outputs.length ? [`  outputs: ${j.outputs.map((o) => `${o.path} (${o.size} B${o.uploaded ? '' : `, not uploaded${o.why ? `: ${o.why}` : ''}, still in job folder ${j.id}/out/ on the machine`})`).join(', ')}${j.upload_bytes ? ` in the shared folder's jobs/${j.id}/` : ''}`] : []),
         ...(args.id !== undefined && j.log_tail ? [`  log:\n${j.log_tail}`] : []),
       ].join('\n')).join('\n');
     }
     case 'stop_job': {
-      const j = await call('POST', `/api/tickets/${C().TICKET}/jobs/${Number(args.id)}/stop`, {});
+      const j = await call<{ id: number; state: string }>('POST', `/api/tickets/${C().TICKET}/jobs/${Number(args.id)}/stop`, {});
       return `Job #${j.id} is ${j.state === 'stopped' ? 'stopped' : 'being stopped on the machine; you are woken when it ends'}.`;
     }
     case 'edit_instructions': {
-      const r = await call('POST', `/api/tickets/${C().TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits, overlaps: Array.isArray(args.overlaps) ? args.overlaps : [] });
+      const r = await call<{ held?: number; found?: string[]; href: string; id: number; saved: string; edits: number; length: number }>('POST', `/api/tickets/${C().TICKET}/edit-instructions`, { scope: args.scope, edits: args.edits, overlaps: Array.isArray(args.overlaps) ? args.overlaps : [] });
       if (r.held) return `Nothing saved yet: the edit repeats what ${r.held === 1 ? 'one place already says' : `${r.held} places already say`}${r.found?.length ? ` (${r.found.join('; ')})` : ''}. A card asks the person to save anyway, work it in or cancel; its link is ${r.href}. Link every mention of it, e.g. [the card below](${r.href}). Its id is ${r.id}: if the edit is no longer wanted (you work it in another way, or a later edit replaces it), withdraw the card with settle_question question_id ${r.id}, or a person may still save it. End your turn; the answer comes as a message.`;
       return `Saved the ${r.saved} Settings text (${r.edits} edit${r.edits === 1 ? '' : 's'}, ${r.length} characters). It shows in Settings and its history, and applies from each minion's next turn. Self-review it and label its risk like any instruction change.`;
     }
@@ -2354,7 +2395,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'set_thread_status':
       needOne(args, ['title', 'state', 'note', 'replies', 'build'], 'set_thread_status');
     {
-      const t = await call('PATCH', `/api/tickets/${C().TICKET}`, labelFields(args));
+      const t = await call<TicketView & { close_cancelled?: string }>('PATCH', `/api/tickets/${C().TICKET}`, labelFields(args));
       const cancelled = t.close_cancelled ? `close_self is cancelled: ${t.close_cancelled}, so this minion stays open after this turn. If nothing is left for people, set another state and call close_self again. ` : '';
       return `Updated. ${cancelled}${ticketLine(t)}`;
     }
@@ -2385,16 +2426,16 @@ async function runTool(name: string, args: any): Promise<string> {
       if (C().ROLE === 'thread') {
         const n = Number(args.ticket_id);
         if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
-        return (await call('GET', `/api/tickets/${C().TICKET}/facts?number=${n}`)).text;
+        return (await call<{ text: string }>('GET', `/api/tickets/${C().TICKET}/facts?number=${n}`)).text;
       }
       const at = schemeOf(args);
-      const { text, facts } = await call('GET', `/api/tickets/${await id(args, at)}/facts`);
+      const { text, facts } = await call<{ text: string; facts: { scheme: string } }>('GET', `/api/tickets/${await id(args, at)}/facts`);
       return at === C().PROJECT ? text : `${otherScheme(facts.scheme)}\n${text}`;
     }
     case 'read_minion': {
       const n = Number(args.ticket_id);
       if (!Number.isInteger(n) || n <= 0) throw new Error('ticket_id must be a minion number');
-      const r = await call('GET', `/api/tickets/${C().TICKET}/peer?number=${n}&last=${Number(args.last) || 10}`);
+      const r = await call<{ ticket: TicketView; skipped?: number; events: StoredEvent[] }>('GET', `/api/tickets/${C().TICKET}/peer?number=${n}&last=${Number(args.last) || 10}`);
       return [ticketLine(r.ticket), r.skipped ? `(${r.skipped} earlier entries omitted)` : '', ...transcript(r.events)].filter(Boolean).join('\n\n');
     }
     case 'start_preview': {
@@ -2404,7 +2445,7 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'host_check': {
       const body: Record<string, unknown> = {};
       for (const k of ['what', 'sql', 'unit', 'lines', 'since', 'grep'] as const) if (args[k] !== undefined) body[k] = args[k];
-      return (await call('POST', '/api/host-check', body)).output;
+      return (await call<{ output: string }>('POST', '/api/host-check', body)).output;
     }
     case 'hand_off_land': {
       const body: Record<string, unknown> = {};
@@ -2420,14 +2461,14 @@ async function runTool(name: string, args: any): Promise<string> {
       for (const k of ['into', 'files', 'full', 'build'] as const) if (args[k] !== undefined) body[k] = args[k];
       if (args.fix === true) body.fix = true;
       if (args.outage === true) body.outage = true;
-      let r = await call('POST', `/api/tickets/${C().TICKET}/land`, body);
+      let r = await call<{ code: number | null; output?: unknown }>('POST', `/api/tickets/${C().TICKET}/land`, body);
       while (r.code === null) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         try {
-          r = await call('GET', `/api/tickets/${C().TICKET}/land`);
-        } catch (err: any) {
+          r = await call<{ code: number | null; output?: unknown }>('GET', `/api/tickets/${C().TICKET}/land`);
+        } catch (err) {
           // A landing's folder outlives restarts (src/land.ts); this is a server from before that, or one whose folder went.
-          if (!/No landing has started|Nothing has started shipping/.test(err.message)) throw err;
+          if (!/No landing has started|Nothing has started shipping/.test(thrown(err).message!)) throw err;
           return "tools/land.sh ended, then Citadel restarted (most likely the deploy it ran) before its result was read, so its exit code and output are lost. Check `git log main` for your commits.";
         }
       }
@@ -2436,12 +2477,12 @@ async function runTool(name: string, args: any): Promise<string> {
     case 'plan':
       return planResult(args);
     case 'close_self': {
-      let closed: any;
+      let closed: { cleared?: boolean } | undefined;
       try {
-        closed = await call('POST', `/api/tickets/${C().TICKET}/close`, { reason: args.reason ?? null });
-      } catch (err: any) {
+        closed = await call<{ cleared?: boolean }>('POST', `/api/tickets/${C().TICKET}/close`, { reason: args.reason ?? null });
+      } catch (err) {
         // A server from before close_self refuses the route with its generic "only itself" error.
-        if (/only update itself|Not found/.test(err.message)) {
+        if (/only update itself|Not found/.test(thrown(err).message!)) {
           throw new Error(`The ${APP_NAME} server running now predates close_self, so it cannot dismiss minions yet; it will after its next restart. Say in your reply that the work is finished and nothing is left for people.`);
         }
         throw err;
@@ -2450,73 +2491,73 @@ async function runTool(name: string, args: any): Promise<string> {
     }
     case 'wake_when_live': {
       const target = C().ROLE === 'thread' ? C().TICKET : await id(args);
-      const r = await call('POST', `/api/tickets/${target}/wake`, { commit: args.commit ?? null, reason: args.reason });
+      const r = await call<{ commit?: string; waiting?: boolean; merged?: boolean; head?: unknown }>('POST', `/api/tickets/${target}/wake`, { commit: args.commit ?? null, reason: args.reason });
       const what = r.commit ? `\`${r.commit.slice(0, 7)}\`` : 'the next deploy';
       if (!r.waiting && r.merged) return `${what} is on the scheme's main already, so there is nothing to wait for.`;
       if (!r.waiting) return `${what} is live already (the server runs \`${String(r.head).slice(0, 7)}\`), so there is nothing to wait for.`;
       return `Waiting for ${what}: ${APP_NAME} sends ${C().ROLE === 'thread' ? 'you' : 'the minion'} a message once it is ${r.merged ? "on the scheme's main" : 'live'}.${C().ROLE === 'thread' ? ' Set state sealed and end your turn.' : ''}`;
     }
     case 'relay_when_live': {
-      const r = await call('POST', `/api/tickets/${C().TICKET}/relay-when-live`, { to: args.to ?? null, text: args.text, commit: args.commit ?? null, cancel: args.cancel ?? null });
-      const lines = r.relays.map((o: any) => `#${o.id} to ${o.to}, once \`${String(o.commit).slice(0, 7)}\` is live: ${o.text.length > 120 ? o.text.slice(0, 120) + '…' : o.text}`);
+      const r = await call<{ relays: { id: number; to: string; commit: string; text: string }[]; cancelled?: number; id?: number; queued?: boolean; ids: number[]; to?: string; commit: string }>('POST', `/api/tickets/${C().TICKET}/relay-when-live`, { to: args.to ?? null, text: args.text, commit: args.commit ?? null, cancel: args.cancel ?? null });
+      const lines = r.relays.map((o) => `#${o.id} to ${o.to}, once \`${String(o.commit).slice(0, 7)}\` is live: ${o.text.length > 120 ? o.text.slice(0, 120) + '…' : o.text}`);
       if (r.cancelled) return `Cancelled relay #${r.cancelled}. ${lines.length ? `Pending:\n${lines.join('\n')}` : 'None left.'}`;
       if (r.id) return r.queued ? `Queued as #${r.id}${r.ids?.length > 1 ? ` (relays #${r.ids.join(', #')}, one per recipient)` : ''}: ${APP_NAME} leaves it as held mail for ${r.to} once \`${r.commit.slice(0, 7)}\` is live, and your Taskmaster has the full text. If the land fails it stays queued: fix it, or cancel it. Do not ask the Taskmaster to relay it.` : `\`${r.commit.slice(0, 7)}\` was live already, so the note went to ${r.to} now.`;
       return lines.length ? `Pending relays:\n${lines.join('\n')}` : 'No relays pending.';
     }
     case 'prep_ultra_reviews': {
       const path = `/api/tickets/${C().TICKET}/ultrareview/batch`;
-      const r = Array.isArray(args.areas) && args.areas.length ? await call('POST', path, { areas: args.areas }) : await call('GET', path);
-      const rows = r.rows.map((x: any) => `${x.name}: ${x.state}${x.pr?.number ? `, draft PR #${x.pr.number}${x.pr.url ? ` ${x.pr.url}` : ''}` : ''} (${x.size.lines} lines, ${x.size.files} files)${x.error ? `: ${x.error}` : ''}`);
-      const refused = (r.refused ?? []).map((x: any) => `Refused ${x.name || `area ${x.index + 1}`}: ${x.error}`);
+      const r = Array.isArray(args.areas) && args.areas.length ? await call<UltraBatch>('POST', path, { areas: args.areas }) : await call<UltraBatch>('GET', path);
+      const rows = r.rows.map((x) => `${x.name}: ${x.state}${x.pr?.number ? `, draft PR #${x.pr.number}${x.pr.url ? ` ${x.pr.url}` : ''}` : ''} (${x.size.lines} lines, ${x.size.files} files)${x.error ? `: ${x.error}` : ''}`);
+      const refused = (r.refused ?? []).map((x) => `Refused ${x.name || `area ${x.index + 1}`}: ${x.error}`);
       const head = r.for ? `Prepped for ${r.for}: the rows wait in this chat's Ultra review dialog for their Start; tell them so in your reply. You cannot start one.` : '';
       return [head, ...refused, rows.length ? `Rows:\n${rows.join('\n')}` : 'No prepped ultra reviews in this chat.'].filter(Boolean).join('\n');
     }
     case 'wake_at': {
-      const r = await call('POST', `/api/tickets/${C().TICKET}/wake-at`, { at: args.at ?? null, note: args.note, cancel: args.cancel ?? null });
-      const lines = r.wakes.map((w: any) => `#${w.id} ${w.when}: ${w.note}`);
+      const r = await call<{ wakes: { id: number; when: string; note: string }[]; set?: { when: string }; cancelled?: number }>('POST', `/api/tickets/${C().TICKET}/wake-at`, { at: args.at ?? null, note: args.note, cancel: args.cancel ?? null });
+      const lines = r.wakes.map((w) => `#${w.id} ${w.when}: ${w.note}`);
       if (r.set) return `Wake set for ${r.set.when}: ${APP_NAME} sends you the note then.\n${lines.join('\n')}`;
       if (r.cancelled) return `Cancelled #${r.cancelled}. ${lines.length ? `Pending:\n${lines.join('\n')}` : 'None left.'}`;
       return lines.length ? `Pending wakes:\n${lines.join('\n')}` : 'No wakes pending.';
     }
     case 'wake_when_runners_back': {
-      const r = await call('POST', `/api/tickets/${C().TICKET}/wake-runners`, { reason: args.reason });
+      const r = await call<{ labels?: string[]; label: string }>('POST', `/api/tickets/${C().TICKET}/wake-runners`, { reason: args.reason });
       return `Waiting for a runner labelled ${(r.labels ?? [r.label]).join(', ').replace(/, ([^,]*)$/, ' or $1')} to be online: ${APP_NAME} looks every 5 minutes and sends you a message then. Set state sealed and end your turn.`;
     }
     case 'list_artifacts': {
-      const [artifacts, shared] = await Promise.all([call('GET', `/api/projects/${C().PROJECT}/artifacts?titles`), call('GET', `/api/projects/${C().PROJECT}/shared?titles`)]);
+      const [artifacts, shared] = await Promise.all([call<ArtifactRow[]>('GET', `/api/projects/${C().PROJECT}/artifacts?titles`), call<ArtifactRow[]>('GET', `/api/projects/${C().PROJECT}/shared?titles`)]);
       const all = [...artifacts, ...shared];
-      const shown = all.filter((a: any) => !args.pinned_only || a.pinned_at);
+      const shown = all.filter((a) => !args.pinned_only || a.pinned_at);
       return shown.length ? shown.map(artifactLine).join('\n') : args.pinned_only ? 'Nothing pinned.' : 'No artifacts in this scheme yet.';
     }
     case 'artifact_data': {
-      const r = await call('POST', `/api/projects/${C().PROJECT}/artifact-data`, { artifact: args.artifact ?? null, path: args.path ?? null, entries: args.entries ?? null });
+      const r = await call<{ file: string; entries: { key: string; value: unknown; by: string; at: number }[] }>('POST', `/api/projects/${C().PROJECT}/artifact-data`, { artifact: args.artifact ?? null, path: args.path ?? null, entries: args.entries ?? null });
       const head = `${r.file}: ${r.entries.length} key${r.entries.length === 1 ? '' : 's'}${args.entries ? ' after your write' : ''}.`;
-      return [head, ...r.entries.map((e: any) => `${e.key} = ${JSON.stringify(e.value)} (${e.by}, ${new Date(e.at).toISOString().slice(0, 16)}Z)`)].join('\n');
+      return [head, ...r.entries.map((e) => `${e.key} = ${JSON.stringify(e.value)} (${e.by}, ${new Date(e.at).toISOString().slice(0, 16)}Z)`)].join('\n');
     }
     case 'list_schedules': {
-      const { schedules } = await call('GET', `/api/projects/${C().PROJECT}/schedules`);
+      const { schedules } = await call<{ schedules: ScheduleInfo[] }>('GET', `/api/projects/${C().PROJECT}/schedules`);
       return schedules.length ? schedules.map(scheduleLine).join('\n') : 'Nothing scheduled.';
     }
     case 'schedule_minion': {
-      const s = await call('POST', `/api/projects/${C().PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once, category: args.category, trigger_count: args.trigger_count, trigger_kind: args.trigger_kind, trigger_gap_hours: args.trigger_gap_hours });
+      const s = await call<ScheduleInfo>('POST', `/api/projects/${C().PROJECT}/schedules`, { name: args.name, cron: args.cron, brief: args.brief, type: args.type, model: args.model, effort: args.effort, min_minions: args.min_minions, gate_scope: args.gate_scope, once: args.once, category: args.category, trigger_count: args.trigger_count, trigger_kind: args.trigger_kind, trigger_gap_hours: args.trigger_gap_hours });
       return `Scheduled. ${scheduleLine(s)}`;
     }
     case 'schedule_audit': {
-      const s = await call('POST', `/api/projects/${C().PROJECT}/schedules`, { template: args.template, notes: args.notes });
+      const s = await call<ScheduleInfo>('POST', `/api/projects/${C().PROJECT}/schedules`, { template: args.template, notes: args.notes });
       return `Scheduled. ${scheduleLine(s)}`;
     }
     case 'update_schedule': {
       const { schedule_id, ...patch } = args;
       needOne(patch, ['name', 'cron', 'brief', 'type', 'model', 'effort', 'min_minions', 'gate_scope', 'once', 'paused', 'template', 'notes', 'category', 'trigger_count', 'trigger_kind', 'trigger_gap_hours'], 'update_schedule');
-      return `Updated. ${scheduleLine(await call('PATCH', `/api/schedules/${Number(schedule_id)}`, patch))}`;
+      return `Updated. ${scheduleLine(await call<ScheduleInfo>('PATCH', `/api/schedules/${Number(schedule_id)}`, patch))}`;
     }
     case 'delete_schedule':
       await call('DELETE', `/api/schedules/${Number(args.schedule_id)}`);
       return 'Deleted.';
     case 'close_ticket':
-      return `Closed. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
+      return `Closed. ${ticketLine(await call<TicketView>('POST', `/api/tickets/${await id(args)}/status`, { status: 'closed' }))}`;
     case 'reopen_ticket':
-      return `Reopened. ${ticketLine(await call('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
+      return `Reopened. ${ticketLine(await call<TicketView>('POST', `/api/tickets/${await id(args)}/status`, { status: 'idle' }))}`;
     case 'fresh_session':
       await call('POST', `/api/tickets/${C().TICKET}/fresh-session`, { summary: args.summary, ...(C().ROLE === 'thread' ? { carry_on: args.carry_on !== false } : {}) });
       return C().ROLE === 'thread' && args.carry_on !== false
@@ -2531,7 +2572,7 @@ async function runTool(name: string, args: any): Promise<string> {
   }
 }
 
-function artifactLine(a: any): string {
+function artifactLine(a: ArtifactRow): string {
   return [
     `[${a.shared ? 'shared' : a.id}] ${a.title ?? a.name}`,
     a.display_path,
@@ -2542,9 +2583,9 @@ function artifactLine(a: any): string {
 }
 
 /** "pipeline-lane: #580 Fix land.sh, taken by Josh since Nov 17, 10:14 PST (land retry)" (#921). */
-function claimLine(c: any) {
-  const chip = (q: any) => `#${q.number}${q.state === 'chained' ? ` (after #${q.after})` : q.state === 'new' ? ' (not started)' : q.state === 'working' ? ' (working)' : ''}`;
-  const waiting = (c.queue ?? []).filter((q: any) => q.state !== 'done');
+function claimLine(c: ClaimView) {
+  const chip = (q: NonNullable<ClaimView['queue']>[number]) => `#${q.number}${q.state === 'chained' ? ` (after #${q.after})` : q.state === 'new' ? ' (not started)' : q.state === 'working' ? ' (working)' : ''}`;
+  const waiting = (c.queue ?? []).filter((q) => q.state !== 'done');
   const left = c.estimate ? `, about ${Math.round(c.estimate.left_ms / 3_600_000 * 10) / 10} h left (an estimate from the last ${c.estimate.of} holders)` : '';
   const line = waiting.length ? `; queue: ${waiting.map(chip).join(', ')}; ${c.done} of ${c.total} done${left}` : '';
   return `${c.name}: ${c.holder_name}, taken by ${c.taken_by} ${c.since_text}${c.note ? ` (${c.note})` : ''}${line}`;
@@ -2552,7 +2593,7 @@ function claimLine(c: any) {
 
 /** list_tickets, read_ticket and live_facts with a scheme, for the Citadel scheme's Taskmaster (#656): read-only, no other tool crosses schemes. */
 const SCHEME_ARG = { scheme: { type: 'integer', description: "Another scheme's number (as your instructions list them), to read its minions instead of this scheme's. Read-only, and only on a turn a Citadel member or admin asked for; leave it out for this scheme." } };
-const withScheme = (t: any) => (t.name === 'list_tickets' || t.name === 'read_ticket' || t.name === 'live_facts' ? { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, ...SCHEME_ARG } } } : t);
+const withScheme = (t: ToolDef) => (t.name === 'list_tickets' || t.name === 'read_ticket' || t.name === 'live_facts' ? { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, ...SCHEME_ARG } } } : t);
 
 /**
  * Tools every turn of a role uses (#710): Claude Code defers MCP tools behind ToolSearch, a whole round trip each, and again
@@ -2563,7 +2604,7 @@ export const ALWAYS_LOAD = {
   thread: ['set_thread_status', 'set_properties', 'message_coordinator', 'ask_question', 'close_self', 'plan', 'hand_off_land'],
   taskmaster: ['create_ticket', 'read_ticket', 'message_ticket', 'list_tickets'],
 };
-const withAlwaysLoad = (tools: any[]) => {
+const withAlwaysLoad = (tools: ToolDef[]) => {
   const names = ALWAYS_LOAD[C().ROLE === 'thread' ? 'thread' : 'taskmaster'];
   return tools.map((t) => (names.includes(t.name) ? { ...t, _meta: { ...t._meta, 'anthropic/alwaysLoad': true } } : t));
 };
@@ -2582,7 +2623,7 @@ function toolListAll() {
 }
 
 /** One JSON-RPC request's answer, or null for a notification: a turn's own helper writes it to stdout, the shared tool server (src/mcp-pool.ts) sends it over HTTP. */
-export async function handle(req: any): Promise<object | null> {
+export async function handle(req: RpcRequest): Promise<object | null> {
   const { id: rid, method, params } = req;
   if (rid === undefined) return null; // notification
   const reply = (msg: object) => ({ jsonrpc: '2.0', ...msg });
@@ -2600,18 +2641,18 @@ export async function handle(req: any): Promise<object | null> {
       return reply({ id: rid, result: { tools: await toolsForTurn(toolList(), callEnv()) } });
     } else if (method === 'tools/call') {
       try {
-        const text = await runTool(params?.name, params?.arguments ?? {});
+        const text = await runTool(params?.name!, params?.arguments ?? {});
         return reply({ id: rid, result: { content: [{ type: 'text', text }] } });
-      } catch (err: any) {
-        return reply({ id: rid, result: { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true } });
+      } catch (err) {
+        return reply({ id: rid, result: { content: [{ type: 'text', text: `Error: ${thrown(err).message}` }], isError: true } });
       }
     } else if (method === 'ping') {
       return reply({ id: rid, result: {} });
     } else {
       return reply({ id: rid, error: { code: -32601, message: `Method not found: ${method}` } });
     }
-  } catch (err: any) {
-    return reply({ id: rid, error: { code: -32603, message: err.message } });
+  } catch (err) {
+    return reply({ id: rid, error: { code: -32603, message: thrown(err).message } });
   }
 }
 

@@ -6,6 +6,7 @@ import { oomKilled } from './host-job.ts';
 import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
 import { appendFileSync, close, existsSync, fstatSync, open, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { access, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
@@ -3400,7 +3401,7 @@ export class Runner {
       // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
       // A file, not an argument: a scheme's minion list outgrows a command line.
       const refsFile = join(dir, 'scheme-refs.json');
-      this.writeRefs(refsFile, ticket);
+      this.writeRefs(refsFile, ticket, undefined, true);
       // A host turn has no Codex hook, so the server login's Codex reviews run in its Codex container (#398): woken
       // (by the caller) if it stopped (a reboot) without replacing one a review may be running in.
       const codexAt = place.host && person !== null ? this.codexPlaceFor?.(person) ?? null : null;
@@ -4692,15 +4693,56 @@ export class Runner {
     return { project: this.store.getProject(projectId)!, projects: this.store.listProjects(), tickets, openOf, links, settled: this.settledCards(projectId, open) };
   }
 
-  /** Write a turn's scheme-refs snapshot (scheme-refs.ts) for `ticket`, with its scheme's cards waiting on people. */
-  private writeRefs(file: string, ticket: Ticket, shared = this.refsShared(ticket.project_id)) {
+  /**
+   * Write a turn's scheme-refs snapshot (scheme-refs.ts) for `ticket`, with its scheme's cards waiting on people. `now`
+   * writes it before returning (a launch: the turn reads it from its first reply); a refresh goes through putRefs.
+   */
+  private writeRefs(file: string, ticket: Ticket, shared = this.refsShared(ticket.project_id), now = false) {
     const { project, projects, tickets, openOf, links, settled } = shared;
     // Only the turn's own cards say where each sits (`placed`).
     const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => t.id === ticket.id ? this.cardLinks(t, true, openOf.get(t.id)) : links.get(t.id)!) };
     const refs = { ...schemeRefs(project, projects, tickets, cards), settled };
-    // Whole or not at all: the link check may read it mid-turn.
-    writeFileSync(`${file}.new`, JSON.stringify(refs));
-    renameSync(`${file}.new`, file);
+    const text = JSON.stringify(refs);
+    if (now) {
+      // Whole or not at all: the link check may read it mid-turn.
+      writeFileSync(`${file}.new`, text);
+      renameSync(`${file}.new`, file);
+    } else this.putRefs(file, text);
+  }
+
+  /** Per snapshot file: the newest text still to write (null once taken), and its writes' end. */
+  private refsWrites = new Map<string, { text: string | null; done: Promise<void> }>();
+
+  /**
+   * Writes a running turn's snapshot off the server's thread (#1768): on a busy disk the write and rename each held
+   * every request for up to a second (Nov 24, six holds). One write per file at a time, the newest text winning, whole
+   * or not at all, and only over a snapshot that is still there: a turn that ended took its folder with it.
+   */
+  private putRefs(file: string, text: string) {
+    const held = this.refsWrites.get(file);
+    if (held) { held.text = text; return; }
+    const w = { text: text as string | null, done: Promise.resolve() };
+    this.refsWrites.set(file, w);
+    w.done = (async () => {
+      try {
+        while (w.text !== null) {
+          const next = w.text;
+          w.text = null;
+          await access(file);
+          await writeFile(`${file}.new`, next);
+          await rename(`${file}.new`, file);
+        }
+      } catch {
+        // A stale snapshot only means a card goes unchecked.
+      } finally {
+        this.refsWrites.delete(file);
+      }
+    })();
+  }
+
+  /** Resolves once every snapshot write under way has reached its file. */
+  async refsWritten(): Promise<void> {
+    while (this.refsWrites.size) await Promise.all([...this.refsWrites.values()].map((w) => w.done));
   }
 
   /** The least time between two refreshes of a scheme's snapshots (refreshRefs). */
@@ -4741,11 +4783,10 @@ export class Runner {
     for (const [id, turn] of this.turns) {
       if (only !== undefined && id !== only) continue;
       const t = this.store.getTicket(id);
-      const file = join(turn.dir, 'scheme-refs.json');
-      if (t?.project_id !== projectId || !existsSync(file)) continue;
+      if (t?.project_id !== projectId) continue;
       if (!shared && only === undefined) this.refsLast.set(projectId, { at: this.clock.now() });
       try {
-        this.writeRefs(file, t, shared ??= this.refsShared(projectId));
+        this.writeRefs(join(turn.dir, 'scheme-refs.json'), t, shared ??= this.refsShared(projectId));
       } catch {
         // A stale snapshot only means a card goes unchecked.
       }

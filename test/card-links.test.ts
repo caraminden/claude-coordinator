@@ -78,7 +78,7 @@ test('the link check sends a reply back once with the card\'s link, then lets th
   assert.equal(await check({ last_assistant_message: '#394 has a card.', prompt_id: 'p2' }, cfg), null);
 });
 
-test('a minion\'s view lists its waiting cards with links, and a card posted mid-turn reaches running turns\' snapshots', () => {
+test('a minion\'s view lists its waiting cards with links, and a card posted mid-turn reaches running turns\' snapshots', async () => {
   const fake = join(root, 'claude');
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
@@ -106,21 +106,22 @@ test('a minion\'s view lists its waiting cards with links, and a card posted mid
   writeFileSync(join(dir, 'scheme-refs.json'), '{}');
   (runner as any).turns.set(tm.id, { dir });
   const plan = runner.emit(minion.id, 'plan', { id: 'p1', summary: 'Build it', plan: 'x', status: 'pending' });
-  const snap = (): SchemeRefs => JSON.parse(readFileSync(join(dir, 'scheme-refs.json'), 'utf8'));
-  const hasPlan = () => snap().cards!.some((c) => c.kind === 'plan' && c.minion === minion.number && c.href === `${at}?e=${plan.id}`);
-  assert.equal(snap().self, tm.number);
-  assert.ok(hasPlan());
+  // The refresh is written off the server's thread (#1768): wait for it to reach the file.
+  const snap = async (): Promise<SchemeRefs> => (await runner.refsWritten(), JSON.parse(readFileSync(join(dir, 'scheme-refs.json'), 'utf8')));
+  const hasPlan = async () => (await snap()).cards!.some((c) => c.kind === 'plan' && c.minion === minion.number && c.href === `${at}?e=${plan.id}`);
+  assert.equal((await snap()).self, tm.number);
+  assert.ok(await hasPlan());
   // A person's answer settles it there too: within 2 s of the last refresh, once the gap has passed (#1562).
   runner.emit(minion.id, 'user_message', { author: 'Cara', text: 'Approved', plan: { planId: 'p1' } });
-  assert.ok(hasPlan());
+  assert.ok(await hasPlan());
   clock.advance(1_999);
-  assert.ok(hasPlan());
+  assert.ok(await hasPlan());
   clock.advance(1);
-  assert.ok(!hasPlan());
+  assert.ok(!(await hasPlan()));
   (runner as any).turns.delete(tm.id);
 });
 
-test('a scheme\'s snapshots refresh at most once per 2 s, from one open-cards query however many minions it has (#1562)', () => {
+test('a scheme\'s snapshots refresh at most once per 2 s, from one open-cards query however many minions it has (#1562)', async () => {
   const fake = join(root, 'claude-1562');
   writeFileSync(fake, '#!/bin/sh\nexit 0\n');
   chmodSync(fake, 0o755);
@@ -144,28 +145,29 @@ test('a scheme\'s snapshots refresh at most once per 2 s, from one open-cards qu
   store.openCardsOf = (id) => (perMinion++, openCardsOf.call(store, id));
   store.openCards = (id) => (perScheme++, openCards.call(store, id));
   const cards = (f: string) => (JSON.parse(readFileSync(f, 'utf8')) as SchemeRefs).cards?.length ?? 0;
+  const counts = async () => (await runner.refsWritten(), files.map(cards));
   // The first card reaches every running turn at once, from one query.
   runner.emit(minions[10].id, 'question', { id: 'a', questions: [{ header: 'A', question: '?' }] });
-  assert.deepEqual(files.map(cards), [1, 1, 1]);
+  assert.deepEqual(await counts(), [1, 1, 1]);
   assert.deepEqual([perScheme, perMinion], [1, 0]);
   // Five more within the gap, from minions with no turn running, share one refresh at its end.
   for (let i = 0; i < 5; i++) runner.emit(minions[11 + i].id, 'question', { id: `b${i}`, questions: [{ header: 'B', question: '?' }] });
-  assert.deepEqual(files.map(cards), [1, 1, 1]);
+  assert.deepEqual(await counts(), [1, 1, 1]);
   assert.equal(perScheme, 1);
   assert.deepEqual(clock.pending().map((t) => t.in), [2_000]);
   // A running minion's own card reaches its own snapshot at once, gap or not: its reply's link check may read it now.
   clock.advance(1_000);
   runner.emit(minions[1].id, 'question', { id: 'own', questions: [{ header: 'O', question: '?' }] });
-  assert.deepEqual(files.map(cards), [1, 7, 1]);
+  assert.deepEqual(await counts(), [1, 7, 1]);
   assert.equal(perScheme, 2);
   assert.deepEqual(clock.pending().map((t) => t.in), [1_000]);
   clock.advance(1_000);
-  assert.deepEqual(files.map(cards), [7, 7, 7]);
+  assert.deepEqual(await counts(), [7, 7, 7]);
   assert.deepEqual([perScheme, perMinion], [3, 0]);
   // Past the gap, the next card goes at once again.
   clock.advance(2_000);
   runner.emit(minions[20].id, 'question', { id: 'c', questions: [{ header: 'C', question: '?' }] });
-  assert.deepEqual(files.map(cards), [8, 8, 8]);
+  assert.deepEqual(await counts(), [8, 8, 8]);
   assert.deepEqual(clock.pending(), []);
   for (const m of minions.slice(0, 3)) (runner as any).turns.delete(m.id);
 });
@@ -222,7 +224,7 @@ test('a turn\'s snapshot marks its own cards below until a person writes or the 
   const other = store.createTicket({ project_id: p.id, title: 'Other', permission_mode: 'bypassPermissions', created_by: 'Cara' });
   const file = join(root, 'refs-412.json');
   const snap = (t = minion) => {
-    (runner as any).writeRefs(file, store.getTicket(t.id)!);
+    (runner as any).writeRefs(file, store.getTicket(t.id)!, undefined, true);
     return (JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs).cards!.map((c) => [c.minion, c.kind, c.below]);
   };
   // Asked mid-turn, then more work: still below the turn's words.
@@ -314,7 +316,7 @@ test('a turn\'s snapshot lists the scheme\'s recently settled cards with who set
   const allowed = store.listEvents(a.id).find((e) => e.kind === 'approval_result')!;
 
   const file = join(root, 'refs-531.json');
-  (runner as any).writeRefs(file, store.getTicket(tm.id)!);
+  (runner as any).writeRefs(file, store.getTicket(tm.id)!, undefined, true);
   const snap = JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs;
   const at = (t: typeof a, e: { id: number }) => `#/p/${p.id}/t/${t.number}?e=${e.id}`;
   assert.deepEqual(snap.cards!.map((c) => c.href), [at(a, open)]);
@@ -343,7 +345,7 @@ test('a later snapshot sees replies and results that came after the last one, an
   const approval = store.listEvents(a.id).find((e) => e.kind === 'approval')!;
   const file = join(root, 'refs-622.json');
   const settled = () => {
-    (runner as any).writeRefs(file, store.getTicket(tm.id)!);
+    (runner as any).writeRefs(file, store.getTicket(tm.id)!, undefined, true);
     return Object.fromEntries((JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs).settled!.map((c) => [c.label, c.how]));
   };
   assert.deepEqual(settled(), {});
@@ -396,7 +398,7 @@ test('an unrelated message does not settle a card; its own answer does, and is t
   runner.emit(a.id, 'user_message', { author: 'Cara', text: 'I just heard about code mode…' });
   const file = join(root, 'refs-812.json');
   const snap = () => {
-    (runner as any).writeRefs(file, store.getTicket(tm.id)!);
+    (runner as any).writeRefs(file, store.getTicket(tm.id)!, undefined, true);
     return JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs;
   };
   assert.equal(snap().cards!.length, 1, 'still waiting after an unrelated message');

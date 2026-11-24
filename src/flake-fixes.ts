@@ -6,7 +6,6 @@
 //  3. A fix is held only once the flake-proof workflow (50 runs of the file, 5 batches of 10 copies at once, on the desktop runner) is green on the fix
 //     minion's branch; the Test health tab shows the clean runs so far.
 // No test is skipped or quarantined (Cara, 2026-11-10: "Keep failing, log it").
-import { readdirSync, readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TIERS, pickFor } from '../public/model-table.js';
@@ -72,13 +71,13 @@ export class FlakeFixes {
     if (!dir) return 0;
     const root = join(dir, 'retro-log');
     let days: string[];
-    try { days = readdirSync(root).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
+    try { days = (await readdir(root)).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
     const since = now - FLAKE_WINDOW_MS;
     const fresh: { file: string; at: number; source: string; branch?: string }[] = [];
     for (const day of days) {
       if (Date.parse(`${day}T23:59:59Z`) < since) continue;
       let md: string;
-      try { md = readFileSync(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+      try { md = await readFile(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
       for (const s of parseRetroFlakes(md, day)) {
         if (s.at >= since && s.at <= now + 60_000 && !this.d.store.hasFlakeNear(project.id, s.file, s.at, SAME_SIGHTING_MS)) fresh.push(s);
       }
@@ -106,13 +105,13 @@ export class FlakeFixes {
     if (!dir || !this.d.wake) return 0;
     const root = join(dir, 'retro-log');
     let days: string[];
-    try { days = readdirSync(root).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
+    try { days = (await readdir(root)).filter((n) => /^\d{4}-\d\d-\d\d$/.test(n)).sort(); } catch { return 0; }
     const since = now - 2 * ALARM_QUIET_MS;
     const byFile = new Map<string, { at: number; branch?: string }[]>();
     for (const day of days) {
       if (Date.parse(`${day}T23:59:59Z`) < since) continue;
       let md: string;
-      try { md = readFileSync(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
+      try { md = await readFile(join(root, day, 'land.md'), 'utf8'); } catch { continue; }
       for (const s of parseRetroFlakes(md, day)) if (s.at >= since && s.at <= now) byFile.set(s.file, [...(byFile.get(s.file) ?? []), s]);
     }
     let woke = 0;

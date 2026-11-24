@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { type ChildProcess } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
@@ -180,15 +180,16 @@ test('the sweep reaps every closed minion\'s leftovers, skips one reopened while
 /** A stand-in turn supervisor: its command line as supervisor-client starts one (`<node> <home>/turn-supervisor.mjs <home> <version>`). */
 async function supervisor(home: string, tag: string): Promise<number> {
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, 'turn-supervisor.mjs'), 'setInterval(() => {}, 1000);\n');
+  // It says when it has loaded: a folder deleted before node reads the script would end it with "module not found".
+  writeFileSync(join(home, 'turn-supervisor.mjs'), `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(join(root, `${tag}.ready`))}, '');\nsetInterval(() => {}, 1000);\n`);
   const pidFile = join(root, `${tag}.pid`);
   const sh: ChildProcess = tmp.spawn('sh', ['-c', `"$0" "$1/turn-supervisor.mjs" "$1" v1 & echo $! > "$2"`, process.execPath, home, pidFile], { detached: true, stdio: 'ignore' });
   await new Promise((r) => sh.on('exit', r));
   const pid = await until(`${tag} to run`, async () => {
     try {
       const p = Number(readFileSync(pidFile, 'utf8').trim());
-      return p && (await startOf(p)) ? p : null;
-    } catch { return null; } // not written yet
+      return p && existsSync(join(root, `${tag}.ready`)) ? p : null;
+    } catch { return null; } // not written yet, or gone
   });
   pids.push(pid);
   return pid;

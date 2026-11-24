@@ -143,6 +143,16 @@ export const addMemoryCurator = (store: Store, dataDir: string, projectId: numbe
 export const addShipLessons = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
   addOnce(store, dataDir, projectId, 'ship-lessons', `ship_lessons_check:${projectId}`, templates, now);
 
+/** The monthly glossary drift check (kit/schedules/glossary-drift.md, #1774) for a scheme: every scheme gets one, as the memory curator does; the run skips at no cost when the scheme is quiet and says so in one line when it has no glossary. */
+export const addGlossaryDrift = (store: Store, dataDir: string, projectId: number, templates: Map<string, ScheduleTemplate> = loadTemplates(), now = Date.now()) =>
+  addOnce(store, dataDir, projectId, 'glossary-drift', `glossary_drift:${projectId}`, templates, now);
+
+/** At boot: every scheme gets its glossary drift check (once each, as above). */
+export function addGlossaryDrifts(store: Store, dataDir: string): string[] {
+  const templates = loadTemplates();
+  return store.listProjects().map((p) => addGlossaryDrift(store, dataDir, p.id, templates)).filter((l): l is string => !!l);
+}
+
 /** At boot: every scheme gets its memory curator (once each, as above). */
 export function addMemoryCurators(store: Store, dataDir: string): string[] {
   const templates = loadTemplates();

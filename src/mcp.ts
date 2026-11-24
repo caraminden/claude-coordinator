@@ -178,7 +178,7 @@ export function handOffResult(args: Record<string, any>, contraptions: string[],
     + 'If it fails (a conflict, even once main moves while it waits; a red test; a refusal; a failed deploy), you are woken with the end of its output: fix it and hand it off again.';
 }
 
-export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns', 'memory-curator', 'ship-lessons'] as const;
+export const SCHEDULE_TEMPLATES = ['code-health', 'test-audit', 'monthly-retro', 'upstream-check', 'app-turns', 'memory-curator', 'ship-lessons', 'glossary-drift'] as const;
 const SCHEDULE_GATE = {
   min_minions: { type: ['integer', 'null'], minimum: 1, description: 'Skip a due slot unless at least this many minions were made since the last real run (Taskmasters and schedule-started minions not counted); null always runs' },
   gate_scope: { type: 'string', enum: ['scheme', 'all'], description: "Whose minions min_minions counts: this scheme's (default) or every scheme's, for a sweep across schemes" },

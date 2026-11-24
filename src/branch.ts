@@ -289,6 +289,7 @@ export function shipLine(s: BranchStatus | null, interruptible: number, failure:
   if (!s.merged && s.build) return { stage: 'branch', text: `On its branch: ${plural(s.build.ahead, 'commit')} not in build/${s.build.n}${and}`, commit };
   if (!s.merged) return { stage: 'branch', text: `On its branch: ${plural(s.ahead, 'commit')} not on ${s.base ?? 'main'}${and}`, commit };
   // Another scheme's repo: landed is as far as it goes here.
+  // public/threadstate.js refBucket reads "Shipped to " as final (shown as deployed): keep the words in step.
   if (!s.deploy) return { stage: 'main', text: `Shipped to ${s.base ?? 'main'}`, commit };
   if (s.deploy.live) return { stage: 'live', text: 'Live', commit };
   if (failure) {

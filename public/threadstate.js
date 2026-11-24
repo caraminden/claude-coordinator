@@ -150,13 +150,16 @@ export const REF_WORDS = { waiting: 'waiting', working: 'working', deployed: 'de
  *   working:  its turn runs or is queued, the server is landing it, it is deploying (state pending-deploy, or dismissed with its release on its way)
  *   waiting:  a card, approval or replies wait on people, state try/ready/complete/blocked/outside/parked/limited, a failed turn,
  *             the ship line, or a release or deploy that is stuck or failed
- *   deployed: its change is live, open and idle or dismissed
+ *   deployed: its change is live, open and idle or dismissed (or shipped to main where nothing deploys it)
  *   neutral:  anything else, or no row (another scheme's list isn't loaded)
  * `t` carries `release` (releases.js pendingRelease) when its change is on its way, as the sidebar adds it.
  */
 export function refBucket(t) {
   if (!t || isCoordinator(t)) return 'neutral';
-  const stage = t.ship?.stage;
+  // Shipped to main in a scheme this server doesn't deploy (src/branch.ts shipLine, "Shipped to main"): main is as far as it goes,
+  // so it's done (TripPresenter #73 stayed blue after it closed, 2026-11-23). Citadel's own reads "On main, not deployed" till it deploys.
+  // A release still on its way (an APK, a desktop build, a contraption deploy) comes in as `release` and stays working.
+  const stage = t.ship?.stage === 'main' && /^Shipped to /.test(t.ship.text ?? '') ? 'live' : t.ship?.stage;
   if (t.status === 'closed') {
     if (t.release) return t.release.stuck ? 'waiting' : 'working';
     if (stage === 'live') return 'deployed';

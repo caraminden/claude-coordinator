@@ -502,7 +502,11 @@ test('refBucket: a minion link in chat is waiting, working, deployed or neutral 
     [{ ship: { stage: 'failed' } }, 'waiting'],
     [{ status: 'closed' }, 'neutral'], // dismissed without shipping
     [{ status: 'closed', ship: live }, 'deployed'],
-    [{ status: 'closed', ship: { stage: 'main' } }, 'working'],
+    [{ status: 'closed', ship: { stage: 'main', text: 'On main, not deployed' } }, 'working'], // Citadel's own: a deploy still to come
+    // Another scheme's repo (TripPresenter #73, 2026-11-23): shipped to main is as far as it goes, so it's done, not working forever.
+    [{ status: 'closed', ship: { stage: 'main', text: 'Shipped to main' } }, 'deployed'],
+    [{ ship: { stage: 'main', text: 'Shipped to main' } }, 'deployed'],
+    [{ status: 'closed', ship: { stage: 'main', text: 'Shipped to main' }, release: { stuck: false } }, 'working'], // an APK or contraption release on its way
     [{ status: 'closed', ship: live, release: { stuck: false } }, 'working'], // its release is still on its way
     [{ status: 'closed', release: { stuck: true } }, 'waiting'],
   ];

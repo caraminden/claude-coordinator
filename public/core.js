@@ -768,6 +768,7 @@ async function resync() {
     if (view !== v) return; // you went to another view meanwhile; its own load is fresh
     view.coordinator = coordinator;
     view.tickets = mergeOpen(tickets, dismissed); // the dismissed rows already read stay (closedlist.js)
+    schedulePaintRefs(); // links already in the chat take the fresh states
     view.seen = seen ?? view.seen;
     view.personNotes = person_notes ?? view.personNotes;
     view.pins = pins ?? view.pins;

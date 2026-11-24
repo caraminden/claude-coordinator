@@ -506,6 +506,12 @@ test('refBucket: a minion link in chat is waiting, working, deployed or neutral 
     // Another scheme's repo (TripPresenter #73, 2026-11-23): shipped to main is as far as it goes, so it's done, not working forever.
     [{ status: 'closed', ship: { stage: 'main', text: 'Shipped to main' } }, 'deployed'],
     [{ ship: { stage: 'main', text: 'Shipped to main' } }, 'deployed'],
+    // A contraption scheme (TripPresenter #72, #73): pending-deploy while its deploy runs, then dismissed once healthy.
+    [{ state: 'pending-deploy', ship: { stage: 'main', text: 'Shipped to main' } }, 'working'],
+    [{ status: 'closed', state: 'pending-deploy', note: 'Deployed trippresenter at f001fc5dc, healthy', ship: { stage: 'main', text: 'Shipped to main' } }, 'deployed'],
+    // A release target (APK, desktop): working while its release is on its way, stuck waits, released is deployed.
+    [{ status: 'closed', ship: { stage: 'main', text: 'Shipped to main' }, release: { stuck: false } }, 'working'],
+    [{ status: 'closed', ship: { stage: 'main', text: 'Shipped to main' }, release: { stuck: true } }, 'waiting'],
     [{ status: 'closed', ship: { stage: 'main', text: 'Shipped to main' }, release: { stuck: false } }, 'working'], // an APK or contraption release on its way
     [{ status: 'closed', ship: live, release: { stuck: false } }, 'working'], // its release is still on its way
     [{ status: 'closed', release: { stuck: true } }, 'waiting'],

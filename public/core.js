@@ -414,7 +414,7 @@ function connectStream(catchUp = false) {
       }
       assetVersion ??= msg.version;
       // Each connect's own hello (it carries usage; a deploy's broadcast one doesn't), so a reconnect catches up (#626).
-      if ('usage' in msg) loadReleases().then((rows) => rows && view?.kind === 'project' && scheduleSidebar());
+      if ('usage' in msg) loadReleases().then((rows) => { schedulePaintRefs(); if (rows && view?.kind === 'project') scheduleSidebar(); });
       if (msg.stream) {
         presenceHello(msg.stream);
         if (view?.kind === 'project') scheduleSidebar();

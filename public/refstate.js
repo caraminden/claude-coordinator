@@ -3,7 +3,7 @@
 // colour and a glyph from it, in thread.css) and the state in words in the hover title.
 import { view } from './base.js';
 import { REF_WORDS, refBucket, refTitle } from './threadstate.js';
-import { pendingRelease } from './releases.js';
+import { pendingRelease, releasesLoaded } from './releases.js';
 
 const TARGET = 'a.thread-ref[href], a[data-pr-url][href]';
 const THREAD_HREF = /^#\/p\/(\d+)\/t\/(\d+)$/;
@@ -19,7 +19,8 @@ export function paintRefs(root = document) {
     if (!m) continue;
     const t = Number(m[1]) === view.projectId ? byNumber.get(Number(m[2])) : null;
     const release = t && t.status === 'closed' ? pendingRelease(t) : null;
-    const bucket = refBucket(release ? { ...t, release } : t);
+    // A dismissed minion's release may still be on its way: until the releases are known, say nothing rather than guess green.
+    const bucket = t?.status === 'closed' && !releasesLoaded() ? 'neutral' : refBucket(release ? { ...t, release } : t);
     if (a.dataset.baseTitle === undefined) a.dataset.baseTitle = a.getAttribute('title') ?? '';
     const word = REF_WORDS[bucket];
     if (word) { if (a.dataset.refState !== bucket) a.dataset.refState = bucket; } else delete a.dataset.refState;

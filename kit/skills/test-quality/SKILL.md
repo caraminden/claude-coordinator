@@ -82,7 +82,9 @@ needs a written reason (`// timing-ok: <why>`) so a reviewer sees it.
 
 These can go red, but they pay for it in lines, seconds or false alarms (Citadel's audit, #739,
 2026-11-15: about 5% of its test lines). Write the shape each line names; flag the other shape
-in review.
+in review. `scripts/test-habits.ts` lists four of them in your branch's added tests (a seam an existing file
+drives, a prose pin, a fixed sleep, a copied harness), each with the file or helper to use instead; the
+pre-ship reviewer runs it too.
 
 - **A bug fix adds a row.** Put the failing case in the existing table or test for that
   behaviour; a new test or file is for a new behaviour, not a new bug number.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { until } from './wait.ts';
@@ -64,7 +64,9 @@ test("a job's TMPDIR is on disk in its folder, not perigee's RAM-backed /tmp; on
     await until('the job writes its exit code', () => existsSync(join(dir, 'code')));
     return readFileSync(join(dir, 'output.log'), 'utf8').trim();
   };
-  const onDisk = join(homedir(), '.cache'); // not under tmpdir(): CI has none set, so that is /tmp
+  // Only the path's name decides (onDisk() reads the string), so a made-up disk path is never created or touched; not
+  // under tmpdir(): CI has none set, so that is /tmp.
+  const onDisk = '/srv/host-job-lost-never-made/tmp';
   assert.equal(await run('tmpfs', { TMPDIR: '/tmp' }), `${join(root, 'tmpfs', 'tmp')} ${join(root, 'tmpfs', 'tmp')} ${join(root, 'tmpfs', 'tmp')}`);
   assert.match(await run('unset', {}), new RegExp(`^${join(root, 'unset', 'tmp')} `));
   assert.match(await run('disk', { TMPDIR: onDisk }), new RegExp(`^${onDisk}\\s*$`));

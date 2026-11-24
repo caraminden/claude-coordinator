@@ -440,10 +440,12 @@ test('scans of one minion run one at a time, and schedule() coalesces calls with
   assert.equal(scans, 1);
 });
 
-test('after a run, tool results wait out the gap, while a soon request (a linking reply, a turn end) runs at once (#1542)', async () => {
+test('after a run, tool results wait out the gap, while a soon request (a linking reply, a turn end) runs at once (#1542)', async (t) => {
+  // A mocked clock (Date and setTimeout): absence is proved by ticking past the moment, not by idling on a real one.
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
   const runs: number[] = [];
   const timers = new ScanTimers((id) => void runs.push(id), 0, 150);
-  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const wait = async (ms: number) => t.mock.timers.tick(ms);
   timers.schedule(1);
   await wait(20);
   assert.deepEqual(runs, [1], 'the first tool result runs at once');

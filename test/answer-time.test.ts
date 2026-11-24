@@ -43,15 +43,20 @@ test('three windows outside the line raise once; three inside clear, busy window
 test('the probe makes a real request on a fresh connection each time, and a slow answer does not delay the next probe', async () => {
   const sockets = new Set<unknown>();
   let hits = 0;
+  let slow: (() => void) | null = null;
   const server = createServer((req, res) => {
     sockets.add(req.socket);
-    if (++hits === 1) return void setTimeout(() => res.end('ok'), 700); // the first answer is slow
-    res.end('ok');
+    ++hits;
+    // The first answer is held until seven more probes have come in (at least 700 ms on the probe's 100 ms clock);
+    // after that nothing answers, so the slow one is the last to land and stays the newest reading.
+    if (hits === 1) slow = () => res.end('ok');
+    else if (hits < 8) res.end('ok');
+    else if (hits === 8) slow?.();
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const probe = new AnswerProbe({ everyMs: 100, lookMs: 20 });
   probe.start((server.address() as { port: number }).port);
-  await new Promise((r) => setTimeout(r, 1200)); // timing-ok: the probe's own clock (every 100 ms) is what is measured
+  await until('the slow answer lands', () => probe.lastMs != null && probe.lastMs >= 650, 30_000, () => `hits ${hits}, last ${probe.lastMs}`);
   const w = probe.take(1, 1)!;
   probe.stop();
   server.close();

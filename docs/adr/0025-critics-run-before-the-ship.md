@@ -38,3 +38,8 @@ Cara, 2026-11-24, on the retro #1795's card: "Skip comment-only edits". After th
 and kept help lines out of front-end files to avoid a critic round, and comment-only edits still needed one though the
 screenshots could show nothing (`docs/retros/2026-11-10-24.md`, fix 3). A changed file whose changed lines are all
 blank or comments (`//`, block or HTML comments) no longer counts toward a critic's match; any code line in it does.
+
+A line counts as comment only when nothing but comment is on it. A run of changed lines that opens or closes a
+block comment without the other end counts as code, because wrapping untouched lines in a new `/* */` or
+`<!-- -->` hides them. Known gap, accepted: a line inside a template literal or `<pre>` that looks like a
+comment, or a wrapped multiplication starting with `* `, reads as a comment.

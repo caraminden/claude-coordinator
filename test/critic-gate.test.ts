@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { criticRefusal, matchedFiles, missingCritics } from '../src/critic-gate.ts';
+import { commentOnlyFiles, criticRefusal, matchedFiles, missingCritics } from '../src/critic-gate.ts';
 import { parseWhen, ReviewSet, whenText } from '../src/review-set.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'critic-gate-'));
@@ -101,4 +101,21 @@ test('a change that only touches comments or blank lines in a file asks no criti
   git('add', '.'); git('commit', '-qm', 'a universal selector is code, not a comment');
   assert.match((await criticRefusal(set, ticket, [], false)) ?? '', /UI critic \(`ui`, \d+ lines in public\/app\.css\)/, 'the code file still asks; the comment-only one is left out');
   assert.doesNotMatch((await criticRefusal(set, ticket, [], false)) ?? '', /app\.js/);
+});
+
+test('a comment with code beside it, or a new /* */ wrapped round untouched code, is code: it can hide what a page draws', () => {
+  const patch = (name: string, hunk: string) => `diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n${hunk}`;
+  const only = (p: string) => [...commentOnlyFiles(p)];
+  // Whole comments, a multi-line block included, and blank lines skip.
+  assert.deepEqual(only(patch('a.css', '@@ -1,0 +1,4 @@\n+/* new\n+ * note\n+ */\n+\n')), ['a.css']);
+  assert.deepEqual(only(patch('a.js', '@@ -3 +3 @@\n-// old\n+// new\n')), ['a.js']);
+  assert.deepEqual(only(patch('a.html', '@@ -2,0 +2 @@\n+<!-- note -->\n')), ['a.html']);
+  // Code after a comment on the same line.
+  assert.deepEqual(only(patch('b.css', '@@ -1,0 +1 @@\n+/* x */ .hide{display:none}\n')), []);
+  assert.deepEqual(only(patch('b.html', '@@ -1,0 +1 @@\n+<!-- x --><script src=a.js></script>\n')), []);
+  // Lone delimiters added round untouched lines: two hunks, each leaving a comment open or closing one it never opened.
+  assert.deepEqual(only(patch('c.css', '@@ -4,0 +5 @@\n+/*\n@@ -9,0 +11 @@\n+*/\n')), []);
+  assert.deepEqual(only(patch('c.html', '@@ -4,0 +5 @@\n+<!--\n@@ -9,0 +11 @@\n+-->\n')), []);
+  // A removed content line "-- x" shows as "--- x": the hunk's counts read it as a change, not a header.
+  assert.deepEqual(only(patch('d.js', '@@ -1,2 +1 @@\n--- x\n-/* y */\n+/* z */\n')), []);
 });

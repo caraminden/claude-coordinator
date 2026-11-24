@@ -12,23 +12,60 @@ import type { ReviewEntry, ReviewSet } from './review-set.ts';
  */
 export type DiffFile = { path: string; lines: number; comments?: boolean };
 
-/** A changed line that can't change what a page draws: blank, or a `//`, block or HTML comment line. */
-export function isCommentLine(line: string): boolean {
-  const t = line.trim();
-  if (!t || /^(\/\/|\/\*|\*\/|<!--|-->)/.test(t)) return true;
-  // A block comment's middle line ("* text"), but not CSS's universal selector or a wrapped multiplication.
-  return /^\*(\s|$)/.test(t) && !/[{};=()]/.test(t);
+// One changed line, read in its comment state: `open` says a block comment ('*/' or '-->' closes it) is
+// already open from an earlier line of the same run. Returns whether the line holds only comment or
+// blank, and the state after it. A line with code before or after a comment is code, and so is a lone
+// closer with no opener in the run: wrapping untouched code in a new /* */ hides it, so it counts.
+export function readCommentLine(line: string, open: string | null): { comment: boolean; open: string | null } {
+  let t = line.trim();
+  if (open) {
+    const i = t.indexOf(open);
+    if (i < 0) return { comment: true, open };
+    t = t.slice(i + open.length).trim();
+    if (!t) return { comment: true, open: null };
+    open = null;
+  }
+  if (!t || t.startsWith('//')) return { comment: true, open: null };
+  for (const [start, end] of [['/*', '*/'], ['<!--', '-->']]) {
+    if (!t.startsWith(start)) continue;
+    const j = t.indexOf(end, start.length);
+    if (j < 0) return { comment: true, open: end };
+    return { comment: !t.slice(j + end.length).trim(), open: null };
+  }
+  // A block comment's middle line ("* text") edited alone, but not CSS's universal selector.
+  return { comment: /^\*(\s|$)/.test(t) && !/[{};=()]/.test(t), open: null };
 }
 
-/** The files of a `git diff -U0` patch whose changed lines are all comments or blank. */
+/** Whether a changed line holds only a comment or blank, read alone. */
+export function isCommentLine(line: string): boolean {
+  const r = readCommentLine(line, null);
+  return r.comment && !r.open;
+}
+
+// The files in a `git diff -U0` patch whose every changed line is a comment or blank. Each hunk's removed
+// and added lines are read as two runs, by the hunk header's counts (so a "--- x" content line is never a
+// header); a run that leaves a block comment open is code, since it opens or closes one around untouched lines.
 export function commentOnlyFiles(patch: string): Set<string> {
   const code = new Map<string, boolean>();
   let file: string | null = null;
-  for (const l of patch.split('\n')) {
+  const lines = patch.split('\n');
+  for (let k = 0; k < lines.length; k++) {
+    const l = lines[k];
     if (l.startsWith('diff --git ')) { file = null; continue; }
     if (l.startsWith('+++ ')) { file = l === '+++ /dev/null' ? null : l.slice(6); if (file) code.set(file, code.get(file) ?? false); continue; }
-    if (l.startsWith('--- ') || !file) continue;
-    if ((l[0] === '+' || l[0] === '-') && !isCommentLine(l.slice(1))) code.set(file, true);
+    const h = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(l);
+    if (!h || !file) continue;
+    let left = Number(h[1] ?? 1) + Number(h[2] ?? 1);
+    const open: Record<string, string | null> = { '-': null, '+': null };
+    for (; left > 0 && k + 1 < lines.length; left--) {
+      const c = lines[++k];
+      if (c.startsWith('\\')) { left++; continue; } // "\ No newline at end of file"
+      const side = c[0] === '-' ? '-' : '+';
+      const r = readCommentLine(c.slice(1), open[side]);
+      open[side] = r.open;
+      if (!r.comment) code.set(file, true);
+    }
+    if (open['-'] || open['+']) code.set(file, true);
   }
   return new Set([...code].filter(([, c]) => !c).map(([f]) => f));
 }

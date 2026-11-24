@@ -46,3 +46,8 @@ test('every word the wording check sends back is a retired or restricted word in
     assert.ok(retired.some((x) => x.terms.includes(r.term.toLowerCase())), `wording.ts sends back "${r.term}", which the glossary's retired words lack: add it there`);
   }
 });
+
+test("every state a minion can be in is a glossary term, under its code name", async () => {
+  const { TICKET_STATES } = await import('../src/db.ts');
+  for (const st of TICKET_STATES) assert.ok(words.some((e) => e.code.includes(st)), `src/db.ts has the state "${st}", which no glossary entry names on its Code line`);
+});

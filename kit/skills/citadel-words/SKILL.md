@@ -166,9 +166,33 @@ Wake a sealed minion.
 Code: `unpark`
 _Avoid_: unpark
 
-**Ready**, **Try**, **Complete**, **Blocked**, **Outside**, **Pending deploy**:
-Where a turn leaves a minion: a person has to act, try it, read it, it is stuck outside, waiting on work elsewhere (such as CI), or deployed and waiting to go live.
-Code: `ready`, `try`, `complete`, `blocked`, `outside`, `pending-deploy`
+**Ready**:
+A person has to act: ship it, pick it up or answer.
+Code: `ready`
+
+**Try**:
+Ready for people to try out.
+Code: `try`
+
+**Complete**:
+No work left; a deliverable waits to be read, and it closes once a member has seen it.
+Code: `complete`
+
+**Blocked**:
+Stuck on something outside the minion that isn't a person's answer.
+Code: `blocked`
+
+**Outside**:
+Work still running somewhere the minion can't wait on, such as CI.
+Code: `outside`
+
+**Pending deploy**:
+Deployed and waiting to go live, with nothing else left.
+Code: `pending-deploy`
+
+**Limited**:
+Its last turn hit the Claude account's usage limit; Citadel sets it, not the minion.
+Code: `limited`
 
 **Close**:
 End a minion once nothing is left for a person.

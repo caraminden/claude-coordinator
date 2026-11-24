@@ -365,7 +365,6 @@
   "test/previews.test.ts": [9, 1],
   "test/progress-reporter.test.ts": [0, 1],
   "test/prompt-budget.test.ts": [4, 11],
-  "test/prompt-done-when.test.ts": [0, 2],
   "test/prompt-evals.test.ts": [2, 2],
   "test/prompt-hashes.test.ts": [0, 1],
   "test/prompt-hold.test.ts": [2, 1],

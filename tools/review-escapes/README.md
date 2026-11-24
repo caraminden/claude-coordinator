@@ -2,7 +2,8 @@
 
 Replays the pre-ship reviewer (`citadel:reviewer`, briefed the way `citadel:self-review` briefs it)
 on changes that shipped with a defect a later minion had to fix, plus same-size changes nobody
-fixed, and has a blind judge say whether each review named the defect (#1505).
+fixed, and has a blind judge say whether each review named the defect (#1505). The `verifier` arm
+(#1740) runs a Grunt that boots each change as shipped and drives it, instead of reading its diff.
 
 ```bash
 node tools/review-escapes/run.ts run --jobs 4                        # all arms, all 40 cases (in the background)
@@ -10,7 +11,7 @@ node tools/review-escapes/run.ts report                              # the table
 node tools/review-escapes/run.ts check                               # rebuild workspaces, look for leaks
 ```
 
-`run` takes `--arms sonnet,opus,lens`, `--case <regex>`, `--out <dir>` (default
+`run` takes `--arms sonnet,opus,lens` (the default; `verifier` only when named), `--case <regex>`, `--out <dir>` (default
 `$TMPDIR/review-escapes`), `--kit <dir>`, `--judge-model` and `--budget` (per review, USD). A case
 already reviewed or judged in `--out` is skipped, so a stopped run picks up where it left off. It
 runs `claude -p` on the asker's own Claude login: about $8–10 an arm on Sonnet, $47 on Opus, plus $2 of judging. One pass can swing by 3 named bugs, so run an arm twice before believing a gap.
@@ -28,6 +29,14 @@ runs `claude -p` on the asker's own Claude login: about $8–10 an arm on Sonnet
   reach; runs each arm under a read-only guard hook (`tools/prompt-evals/guard.ts`); has an Opus
   judge, which sees the defect, the fix's commit messages and its non-test diff but not the arm,
   mark each defect named / near / no; writes `report.md` and `verdicts.tsv` in `--out`.
+- `verifier.md`, `verifier-boot.mjs`, `verifier-guard.ts`, `briefs.json` (#1740): an arm with
+  `"mode": "verify"` gives each case its own folder: a clone of the change, today's `tools/ui-shot.ts`,
+  `boot.mjs` (boots that clone's server.ts in preview mode on empty data, signed in as the admin),
+  stubs for systemctl, gh, podman and the like, and a guard that keeps reads and writes in the folder
+  and off the network, the live Citadel and today's state. Its brief is `verifier.md` with the
+  origin minion's opening message (and the handoff it named) from `briefs.json`, nothing about the
+  fix. The judge is also asked whether the report shows the bug happening ("Made to happen"). About
+  $0.40 a case on Sonnet medium, 2 minutes median; three at once is fine on perigee.
 
 - `planted.json`: the planted set (#1738): 22 real small commits, each with one bug planted (`plant`:
   the commit's own added text `from`, replaced by `to`, amended into the head), and 5 untouched

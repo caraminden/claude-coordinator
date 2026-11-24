@@ -333,7 +333,7 @@ async function main() {
   const re = new RegExp(arg('--case') ?? '.');
   const cases = SET.filter((c) => re.test(c.id));
   const names = arg('--arms')?.split(',');
-  const arms = names ? names.map((n) => ARMS.find((a) => a.name === n) ?? (() => { throw new Error(`no arm ${n} in arms.json`); })()) : ARMS;
+  const arms = names ? names.map((n) => ARMS.find((a) => a.name === n) ?? (() => { throw new Error(`no arm ${n} in arms.json`); })()) : ARMS.filter((a) => a.mode !== 'verify'); // the verifier boots servers: only when named
   mkdirSync(out, { recursive: true });
   if (cmd === 'check') {
     for (const c of cases) {

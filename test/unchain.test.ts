@@ -17,13 +17,13 @@ test('start_after: null drops the chain, keeps the minion sealed with its brief 
   const { base, cookie, stop } = await bootServer({ root: join(root, 'server') });
   try {
     const auth = new Auth(PASSWORD, SECRET);
-    const call = async (path: string, body?: unknown, method?: string, as?: number) => {
+    const call = async <T = { id: number; number: number; state: string | null; text: string; ticket: { state: string | null }; coordinator: { id: number } }>(path: string, body?: unknown, method?: string, as?: number) => {
       const res = await fetch(base + path, {
         method: method ?? (body === undefined ? 'GET' : 'POST'),
         headers: { ...(as ? { Authorization: `Bearer ${auth.agentToken(as)}` } : { Cookie: cookie }), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-      return { status: res.status, data: (await res.json()) as any };
+      return { status: res.status, data: (await res.json()) as T };
     };
     // A scheme that isn't Citadel's.
     const { data: p } = await call('/api/projects', { name: 'Other Scheme' });
@@ -47,8 +47,8 @@ test('start_after: null drops the chain, keeps the minion sealed with its brief 
     const after = await facts();
     assert.doesNotMatch(after, /work (is live|has shipped)/, 'no chain left');
     assert.match(after, /sealed on: nothing wakes it by itself/);
-    const said = (await call(`/api/tickets/${f}/events?after=0`)).data.filter((e: any) => e.kind === 'user_message').map((e: any) => JSON.parse(e.data));
-    assert.ok(said.some((m: any) => m.text === 'build part two' && m.parked), 'its brief is held mail');
+    const said = (await call<{ kind: string; data: string }[]>(`/api/tickets/${f}/events?after=0`)).data.filter((e) => e.kind === 'user_message').map((e) => JSON.parse(e.data));
+    assert.ok(said.some((m: { text: string; parked?: boolean }) => m.text === 'build part two' && m.parked), 'its brief is held mail');
     assert.equal((await call(`/api/tickets/${f}`, { start_after: null }, 'PATCH', taskmaster)).status, 409, 'no chain left');
     assert.equal((await call(`/api/tickets/${f}`)).data.ticket.state, 'parked');
   } finally {

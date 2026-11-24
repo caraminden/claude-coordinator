@@ -183,6 +183,7 @@ export const BUILT_INS: { slug: string; name: string; kind: string; source: stri
     ['access-and-secrets', 'Access and secrets', 'auth or access-control files, or code that reads a secret'],
     ['smells', 'Smells', 'a new module, or over about 100 new lines of logic'],
     ['agent-instructions', 'Agent instructions', 'text an agent reads as instructions: the kit, CLAUDE.md, prompts, tool descriptions'],
+    ['added-without-a-remove', 'Added without a remove', 'a listener, timer, growing map or cache, spawn, systemd-run or tmp folder added'],
     ['check-claims', 'Check claims', 'a check added or changed: a test, lint, audit or count'],
     ['ui-findings', 'UI findings', 'a front-end file'],
   ] as const).map(([slug, name, when]) => ({ slug: `lens-${slug}`, name: `Lens: ${name}`, kind: 'reviewer', source: 'kit:citadel:self-review/references/lenses.md', when, what: `One of the pre-ship review's lenses: the reviewer Grunt reads the diff for ${name.toLowerCase()} when it has ${when}.` })),

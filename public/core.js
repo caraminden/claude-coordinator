@@ -1224,21 +1224,79 @@ function renderLogin() {
   const form = document.getElementById('login-form');
   // A saved login that is really the site's address (filled in by a phone's password manager) is dropped.
   try { const saved = localStorage.getItem('cc-login') || ''; form.login.value = /^https?\W|\//i.test(saved) ? '' : saved; } catch {}
+  const desk = desktopLogin(form);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const err = document.getElementById('login-error');
     try {
       await api('api/login', { method: 'POST', body: { login: form.login.value, password: form.password.value } });
       try { localStorage.setItem('cc-login', form.login.value.trim()); } catch {}
+      await desk.signedIn();
       // A contraption's page sent here by /apps/'s login gate (src/apps.ts) goes back to it.
       const next = new URLSearchParams(location.search).get('next');
       if (next && /^\/apps\/[a-z0-9-]+\//.test(next)) return void location.assign(next);
       start(await api('api/me'));
     } catch (ex) {
+      desk.refused(ex);
       err.textContent = ex.message;
       err.hidden = false;
     }
   });
+}
+
+/**
+ * The desktop app's saved password (#1754; Cara, 2026-11-24, "Citadel's own sign-in"): a Remember tick saves it in Windows'
+ * locked storage for this Windows account (desktop/saved-login.cjs), and the next sign-in page fills it and waits for the
+ * click, never signing in by itself ("if I log out and want to log back in, like to test the sign in page"). Signing out
+ * keeps it; Forget, or signing in unticked, drops it, and so does the server refusing it. A browser or phone sees none of this.
+ */
+function desktopLogin(form) {
+  const bridge = window.citadelDesktop;
+  const none = { signedIn: async () => {}, refused: () => {} };
+  if (!bridge?.savedLogin) return none;
+  let filled = null; // the saved password, while the box still holds it
+  const tick = h('input', { type: 'checkbox', name: 'remember' });
+  const forget = h('button', { type: 'button', class: 'link', hidden: true }, 'Forget');
+  const row = h('div', { class: 'login-remember', hidden: true },
+    h('label', {}, tick, ' Remember my password on this PC'), forget);
+  form.querySelector('#login-error').before(row);
+  const drop = () => {
+    filled = null;
+    forget.hidden = true;
+    tick.checked = false;
+    return bridge.forgetLogin().catch(() => {});
+  };
+  forget.addEventListener('click', () => {
+    if (form.password.value === filled) form.password.value = '';
+    drop();
+    toast('Saved password forgotten on this PC');
+    form.password.focus();
+  });
+  bridge.savedLogin().then((r) => {
+    if (!r?.canSave || !form.isConnected) return;
+    row.hidden = false;
+    if (!r.login) return;
+    // What she's already typing wins over the fill.
+    if (form.login.value && form.login.value !== r.login) return;
+    if (form.password.value) return;
+    form.login.value = r.login;
+    form.password.value = filled = r.password;
+    tick.checked = true;
+    forget.hidden = false;
+  }, () => {});
+  return {
+    async signedIn() {
+      if (row.hidden) return;
+      if (tick.checked) await bridge.saveLogin(form.login.value, form.password.value).catch(() => {});
+      else if (!forget.hidden) await drop();
+    },
+    /** A saved password the server turned down (not a lockout or a network failure) is dropped; the form shows as usual. */
+    refused(ex) {
+      if (ex?.status !== 401 || filled === null || form.password.value !== filled) return;
+      drop();
+      form.password.value = '';
+    },
+  };
 }
 
 /** The page an invite or reset link opens: it names who the link is for and sets their password. */

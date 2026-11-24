@@ -195,6 +195,12 @@ html { --top-inset: env(safe-area-inset-top, 0px); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }
 .login { max-width: 360px; margin: 10vh auto; }
 .login h1 { margin-top: 0; font-size: 1.3rem; }
+/* The desktop app's Remember tick and Forget (core.js desktopLogin, #1754). */
+.login-remember { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+.login-remember[hidden] { display: none; }
+.login-remember label { display: flex; align-items: center; gap: 0.4rem; margin: 0; }
+.login-remember label input { margin: 0; }
+.login-remember button.link { padding: 0; min-height: 0; border: 0; background: none; color: var(--accent); font: inherit; font-size: 0.9em; text-decoration: underline; cursor: pointer; }
 .error { color: var(--error); }
 .muted { color: var(--muted); }
 .row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }

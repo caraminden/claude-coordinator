@@ -38,6 +38,7 @@ tools/suite-runner.ts
 tools/ci-progress.ts
 tools/citadel-node
 tools/citadel-node.cjs
+tools/ci-runner/win-ports.sh
 src/land.ts
 .github/workflows/tests.yml
 kit/skills/scheme-setup/templates/
@@ -76,6 +77,7 @@ test/scheme-setup-land-early.test.ts
 test/scheme-setup-land-hooks.test.ts
 test/scheme-setup-land-merges.test.ts
 test/kit-land-drift.test.ts
+test/win-ports.test.ts
 # Not test/run-tests.test.ts: its leak test loads the real test/leak-guard.ts, which imports src/ through helpers.ts.
 test/run-tests-scope.test.ts
 test/citadel-wait.test.ts

@@ -180,3 +180,16 @@ export function machineText(m: any): string {
     m.page ? `  change it: propose_machine_lend; on the page: [${m.name} on the Machines page](${m.page})` : '',
   ].filter(Boolean).join('\n');
 }
+
+/** A schedule for list_schedules and its edits: when, how it runs, its gate and trigger (#1798), next and last run. */
+export function scheduleLine(s: any): string {
+  const at = (ms: number) => new Date(ms).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
+  const next = s.paused ? 'paused' : `next ${at(s.next_run_at)}`;
+  const last = s.last_run_at ? `last run ${at(s.last_run_at)}${s.last_number != null ? ` (#${s.last_number})` : ''}` : 'no run yet';
+  // A schedule from before #698 may name neither; its runs take the model table's pick for its type (src/schedules.ts runMinion).
+  const runsAs = `model ${s.model ?? `the table's pick for a ${s.type}`}, effort ${s.effort ?? `the table's pick for a ${s.type}`}`;
+  const gate = s.min_minions != null ? `; skips under ${s.min_minions} minions${s.gate_scope === 'all' ? ' across all schemes' : ''}` : '';
+  const trigger = s.trigger_count != null ? `; ${s.trigger_text} (${s.trigger_so_far ?? 0} so far)` : '';
+  const kind = s.template ? `; standard audit ${s.template}${s.notes ? ' with notes' : ''}` : '';
+  return `[${s.id}] ${s.name}${s.category ? ` (${s.category})` : ''}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${trigger}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
+}

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { loadTemplates, runWindow, ScheduledRuns, templateFields, templateVars } from '../src/schedules.ts';
+import { loadTemplates, runWindow, ScheduledRuns, Schedules, templateFields, templateVars } from '../src/schedules.ts';
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -184,7 +184,12 @@ test('standard audits carry their template trigger, and opening a database from 
   assert.deepEqual([row.trigger_kind, row.trigger_count], [templates.get('test-audit')!.trigger_kind, templates.get('test-audit')!.trigger_count], 'a new row takes it from the template');
   const old = store.schedules.create({ project_id: p.id, name: 'Code health', cron: '0 5 * * *', brief: 'b', type: 'chore', template: 'code-health', created_by: 'Cara' });
   const custom = store.schedules.create({ project_id: p.id, name: 'Custom', cron: '0 5 * * *', brief: 'b', type: 'chore', created_by: 'Cara' });
-  store.schedules.fillTriggers(templates);
-  assert.equal(store.schedules.get(old.id)!.trigger_count, templates.get('code-health')!.trigger_count, "an existing templated row gets its template's trigger");
-  assert.equal(store.schedules.get(custom.id)!.trigger_count, null, 'a custom schedule keeps none');
+  // The database from before #1798: no trigger columns. Opening it adds them and fills the standard audits' rows.
+  for (const c of ['trigger_kind', 'trigger_count', 'trigger_gap_hours']) store.db.exec(`ALTER TABLE schedules DROP COLUMN ${c}`);
+  const reopened = new Schedules(store.db);
+  assert.equal(reopened.get(old.id)!.trigger_count, templates.get('code-health')!.trigger_count, "an existing templated row gets its template's trigger");
+  assert.equal(reopened.get(old.id)!.trigger_gap_hours, templates.get('code-health')!.trigger_gap_hours);
+  assert.equal(reopened.get(custom.id)!.trigger_count, null, 'a custom schedule keeps none');
+  reopened.update(old.id, { trigger_count: null });
+  assert.equal(new Schedules(store.db).get(old.id)!.trigger_count, null, 'once only: a person clearing it sticks');
 });

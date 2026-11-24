@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
-import { loadTemplates, Schedules } from './schedules.ts';
+import { Schedules } from './schedules.ts';
 import { scheduleFirstWeek } from './first-week.ts';
 import { ReviewSet } from './review-set.ts';
 import type { GruntRow } from './grunts.ts';
@@ -1948,14 +1948,6 @@ export class Store {
     this.dropEarlyPeekAurasBuilds();
     this.closedAtFromNotes();
     if ((this.getSetting<number>('schema_version') ?? 0) < 82) this.schedules.categorize();
-    if ((this.getSetting<number>('schema_version') ?? 0) < 115) {
-      // A broken kit template mustn't keep the server from starting; the rows just keep no trigger.
-      try {
-        this.schedules.fillTriggers(loadTemplates());
-      } catch (err) {
-        console.error("Schedules: standard audits didn't get their triggers:", err);
-      }
-    }
     this.shippingFromRules();
     this.lendingLists();
     this.noteSchemaVersion();

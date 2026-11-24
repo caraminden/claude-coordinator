@@ -340,6 +340,14 @@ export class Schedules {
     const cols = (db.prepare('PRAGMA table_info(schedules)').all() as { name: string }[]).map((c) => c.name);
     const added = { model: 'TEXT', effort: 'TEXT', min_minions: 'INTEGER', gate_scope: "TEXT NOT NULL DEFAULT 'scheme'", last_skip: 'TEXT', once: 'INTEGER NOT NULL DEFAULT 0', template: 'TEXT', notes: "TEXT NOT NULL DEFAULT ''", category: "TEXT NOT NULL DEFAULT ''", trigger_kind: 'TEXT', trigger_count: 'INTEGER', trigger_gap_hours: 'INTEGER' };
     for (const [c, ddl] of Object.entries(added)) if (!cols.includes(c)) db.exec(`ALTER TABLE schedules ADD COLUMN ${c} ${ddl}`);
+    // A database from before triggers (schema 115, #1798): its standard audits take their template's, this once.
+    if (!cols.includes('trigger_count')) {
+      try {
+        this.fillTriggers(loadTemplates());
+      } catch (err) {
+        console.error("Schedules: standard audits didn't get their triggers:", err); // a broken template mustn't stop the start
+      }
+    }
   }
 
   /** Every schedule's name in every scheme, for the usage ledger's list of known items. */

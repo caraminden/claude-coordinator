@@ -9,7 +9,7 @@ import { liveState } from './live-state.ts';
 import { instructionCost } from './prompt-cost.ts';
 import { CODEX_IMAGE_TOOL, codexImage, MEDIA_TOOL_LIST } from './mcp-media.ts';
 import { callEnv, callCwd } from './pool-context.ts';
-import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText, RISKS, money } from './mcp-text.ts';
+import { memoryText, pastMinionsText, ideasText, decisionsText, readText, NO_ICON, deployText, serviceText, contraptionText, contraptionPath, ago, checkLines, machineText, usageSplitText, RISKS, money, scheduleLine } from './mcp-text.ts';
 export { usageSplitText } from './mcp-text.ts';
 export { NOT_DEFAULT } from './mcp-media.ts';
 
@@ -2534,18 +2534,6 @@ function artifactLine(a: any): string {
     a.pinned_at ? `pinned by ${a.pinned_by}` : '',
     a.missing ? 'missing (file gone)' : '',
   ].filter(Boolean).join(' | ');
-}
-
-function scheduleLine(s: any): string {
-  const at = (ms: number) => new Date(ms).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
-  const next = s.paused ? 'paused' : `next ${at(s.next_run_at)}`;
-  const last = s.last_run_at ? `last run ${at(s.last_run_at)}${s.last_number != null ? ` (#${s.last_number})` : ''}` : 'no run yet';
-  // A schedule from before #698 may name neither; its runs take the model table's pick for its type (src/schedules.ts runMinion).
-  const runsAs = `model ${s.model ?? `the table's pick for a ${s.type}`}, effort ${s.effort ?? `the table's pick for a ${s.type}`}`;
-  const gate = s.min_minions != null ? `; skips under ${s.min_minions} minions${s.gate_scope === 'all' ? ' across all schemes' : ''}` : '';
-  const trigger = s.trigger_count != null ? `; ${s.trigger_text} (${s.trigger_so_far ?? 0} so far)` : '';
-  const kind = s.template ? `; standard audit ${s.template}${s.notes ? ' with notes' : ''}` : '';
-  return `[${s.id}] ${s.name}${s.category ? ` (${s.category})` : ''}: ${s.when} (\`${s.cron}\`), type ${s.type}, ${runsAs}${gate}${trigger}${kind}${s.once ? '; runs once' : ''}; ${next}; ${last}${s.last_skip ? `; ${s.last_skip}` : ''}${s.last_error ? `; last slot didn't start: ${s.last_error}` : ''}`;
 }
 
 /** "pipeline-lane: #580 Fix land.sh, taken by Josh since Nov 17, 10:14 PST (land retry)" (#921). */

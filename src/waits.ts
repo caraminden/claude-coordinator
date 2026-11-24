@@ -590,15 +590,18 @@ export class Waits {
 
   /** Read the land line and heavy folder with no blocking file call (#1807), then apply them. */
   async poll() {
+    const gen = ++this.reads;
     const [land, heavy] = await Promise.all([
       this.d.deployState ? readLandLineA(this.d.deployState, this.d.alive) : null,
       readHeavyA(this.d.heavyDir, this.now(), this.d.held),
     ]);
-    this.apply(land, heavy);
+    if (gen === this.reads) this.apply(land, heavy); // a newer poll or setOrder read since: this snapshot is old
   }
+  private reads = 0;
 
   /** poll for a person's own action (setOrder), which must have the line before it returns: it reads in the thread. */
   private pollNow() {
+    this.reads++;
     this.apply(this.d.deployState ? readLandLine(this.d.deployState, this.d.alive) : null, readHeavy(this.d.heavyDir, this.now(), this.d.held));
   }
 

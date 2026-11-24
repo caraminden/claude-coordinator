@@ -251,7 +251,7 @@ function memoryBody(card, ticketId) {
   const deletes = [...(card.plan ?? '').matchAll(/^- \*\*delete\*\* `([^`]+)`/gm)].map((m) => m[1]);
   return [
     h('div', {}, 'Approve all and the curator applies it in its next turn, or pick change by change on ', h('a', { href: `#/p/${card.memory.project}/memory` }, 'the Memory page'), '. Either can be put back there for 30 days.'),
-    deletes.length ? h('div', { class: 'pwarn' }, `Approve all keeps ${deletes.length === 1 ? 'the note' : `the ${deletes.length} notes`} it proposes to delete (${deletes.join(', ')}): to delete, tick ${deletes.length === 1 ? 'it' : 'them'} on the Memory page instead.`) : null,
+    deletes.length ? h('div', { class: 'pwarn' }, `Approve all skips ${deletes.length === 1 ? 'the delete' : `the ${deletes.length} deletes`} (${deletes.join(', ')}): tick ${deletes.length === 1 ? 'it' : 'them'} on the Memory page.`) : null,
     h('details', {}, h('summary', {}, 'Every change'), markdown(card.plan, ticketId)),
   ];
 }

@@ -117,7 +117,7 @@ dialog.ultra-review { --cui-dialog-width: 520px; }
 .pcard .pbody { border-left: 3px solid color-mix(in srgb, var(--running) 35%, var(--line)); padding-left: 0.75rem; overflow-wrap: anywhere; }
 .pcard .pbody > div > :first-child { margin-top: 0; }
 .pcard .pbody > div > :last-child { margin-bottom: 0; }
-.pcard .pwarn { margin: 0.45rem 0; font-size: 0.9em; font-weight: 600; color: var(--waiting); }
+.pcard .pwarn { margin: 0.45rem 0; font-size: 0.9em; color: var(--waiting); }
 .pcard .pnotes { width: 100%; box-sizing: border-box; font: inherit; resize: vertical; }
 .pcard.answered { border-color: var(--line); }
 .pcard.answered > .who, .pcard.answered .chip { color: var(--muted); border-color: var(--line); }

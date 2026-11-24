@@ -100,6 +100,8 @@ export class GrowthStop {
       const live = new Set(scopes.map((s) => s.unit));
       for (const unit of [...this.seen.keys()]) if (!live.has(unit)) this.seen.delete(unit);
       for (const unit of [...this.held.keys()]) if (!live.has(unit)) this.held.delete(unit);
+      // Lifted by someone else (the old server in a handover): no longer ours to show or lift.
+      for (const s of scopes) if (s.high === null) this.held.delete(s.unit);
       for (const s of scopes) {
         const h = (this.seen.get(s.unit) ?? []).filter((r) => now - r.at <= STOP.windowMs);
         h.push({ at: now, current: s.current });

@@ -20,6 +20,7 @@ import { stopEvent, type StopMark } from './sd-watchdog.ts';
 import { appBackup, readBackups, backupProblems, type BackupInfo } from './backup-freshness.ts';
 import { SLOW_P90_S, shipTargets, type ShipTarget } from './ship-time.ts';
 import { parseStorm, type Storm } from './memory-storms.ts';
+import { parseEpisode, type EaseNow, type Episode } from './memory-ease.ts';
 import { BOOT_STALL } from './deploy-watch.ts';
 import { every, jobList, type JobRow, type Job } from './every.ts';
 import { CacheSampler, dbCold, COLD_SAMPLES } from './cache-health.ts';
@@ -188,6 +189,8 @@ export interface StatusDeps {
   mem?: () => Promise<{ total: number; avail: number; swap?: number }>;
   /** Memory-limit storms still going (#1280, src/memory-storms.ts); the ones that ended are 'memory-high' health events. */
   storms?: () => Storm[];
+  /** Memory easing now (#1748, src/memory-ease.ts), null while the box is fine; the stretches that ended are 'memory-easing' health events. */
+  easing?: () => EaseNow | null;
   disk?: (dir: string) => Promise<{ total: number; free: number }>;
   /** The CPU ledger reading (#1332); the real cgroups unless a test says otherwise. */
   cpuLedger?: () => Promise<unknown>;
@@ -293,6 +296,13 @@ export class StatusPage {
   }
 
   /** The Answer time tile's numbers: each window of the last day, the newest probe, the line and the target. */
+  /** A turn's minion as people name it: "#12" in Citadel's scheme, "Delve #12" in another; null when it's gone. */
+  private minionLabel(ticket: number | null): string | null {
+    const t = ticket == null ? null : this.deps.store.getTicket(ticket);
+    if (!t || t.number == null) return null;
+    return t.project_id === this.deps.ownScheme() ? `#${t.number}` : `${this.deps.store.getProject(t.project_id)?.name ?? 'scheme'} #${t.number}`;
+  }
+
   private answerData(samples: HostSample[], now: number) {
     const rows = samples.filter((r) => r.at >= now - DAY_MS).flatMap((r) => { const w = parseWindow(r.answer_time); return w ? [[r.at, w] as [number, AnswerWindow]] : []; });
     return { rows: rows.map(([at, w]) => [at, w.p50, w.p95, w.p99, w.max, w.over, w.load, w.turns]), latest: rows.at(-1) ? { at: rows.at(-1)![0], ...rows.at(-1)![1] } : null, now: this.deps.answer?.probe.lastMs ?? null, reader: this.deps.answer?.probe.readerMs ?? null, probing: !!this.deps.answer, line: this.answerLine(), target: TARGET, alert: this.deps.store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1)?.kind === 'answer-slow' };
@@ -460,6 +470,20 @@ export class StatusPage {
       stormStalled[d] += s.stalled;
     }
     const stormsNow = this.deps.storms?.() ?? [];
+    // Memory easing (#1748): stretches per day, minutes eased, the last one, and one going now.
+    const eased = store.healthEventsSince(['memory-easing'], since).flatMap((e) => {
+      const ep = parseEpisode(e.detail);
+      return ep ? [{ ...ep, slowed: ep.slowed.map((x) => ({ ...x, minion: this.minionLabel(x.ticket) })) }] : [];
+    });
+    const easeCount = blank();
+    const easeMinutes = blank();
+    for (const ep of eased) {
+      const d = dayOf(ep.since);
+      if (!(d in easeCount)) continue;
+      easeCount[d]++;
+      easeMinutes[d] += Math.round(((ep.until ?? ep.since) - ep.since) / 60_000);
+    }
+    const easeNow = this.deps.easing?.() ?? null;
     // Memory and disk: the hourly worst (least free), and the newest reading.
     const samples = store.hostSamples(since);
     const hourly = new Map<number, HostSample>();
@@ -538,6 +562,7 @@ export class StatusPage {
     if (longStall >= STALL_WARN_S) reasons.push(['warn', `a ${longStall.toFixed(1)} s stall in the last day`, 'stalls']);
     const stormS = storms.filter((s) => s.at >= dayAgo).reduce((n, s) => n + s.stalled, 0) + stormsNow.reduce((n, s) => n + s.stalled, 0);
     if (stormS >= STORM_WARN_S) reasons.push(['warn', `${stormS < 90 ? `${Math.round(stormS)} s` : `${Math.round(stormS / 60)} min`} stalled at a memory limit in the last day`, 'memory-limits']);
+    if (easeNow) reasons.push(['warn', `easing off memory since ${pacificStamp(easeNow.since)}: ${easeNow.why}`, 'easing']);
     const cold = store.healthEventsSince(['cache-cold'], dayAgo).at(-1);
     if (cold) reasons.push(['warn', `the database fell out of memory ${pacificStamp(cold.at)}: ${cold.detail}`, 'cache']);
     const slow = store.healthEventsSince(['answer-slow', 'answer-ok'], now - 8 * DAY_MS).at(-1);
@@ -560,6 +585,7 @@ export class StatusPage {
       stalls: { counts: days.map((d) => stallCount[d]), afterBoot: days.map((d) => stallBoot[d]), longest: days.map((d) => Math.round(stallLongest[d] * 10) / 10), last: lastStall ? { at: lastStall.at, seconds: stallSeconds(lastStall.detail), cause: stallCauseOf(lastStall.detail), work: stallWorkOf(lastStall.detail), afterBoot: lastStall.kind === BOOT_STALL, detail: lastStall.detail.slice(0, 700) } : null },
       host: { answer: this.answerData(samples, now), series, cache: [...cacheHours.values()], latest: latest && { ...latest, cpu_ledger: null }, sampledFrom: samples[0]?.at ?? null, cores, cpuWarn: cores * CPU_WARN_PER_CORE, cpuWarnMin: CPU_WARN_MS / 60_000, peak: peak && { at: peak.at, load1: Math.round(peak.load1 * 10) / 10 }, cpu: { windows: cpuWindows, hours: cpuHours(cpuSteps), groups: CPU_GROUPS } },
       storms: { counts: days.map((d) => stormCount[d]), stalled: days.map((d) => stormStalled[d]), last: storms.at(-1) ?? null, now: stormsNow },
+      easing: { counts: days.map((d) => easeCount[d]), minutes: days.map((d) => easeMinutes[d]), last: eased.at(-1) ?? null, now: easeNow && { ...easeNow, slowed: easeNow.slowed.map((x) => ({ ...x, minion: this.minionLabel(x.ticket) })) } },
       ciVisible,
       // Every periodic job (#1311), for those who see Citadel's scheme.
       jobs: ciVisible ? jobList(now, this.deps.jobs?.()) : [],
@@ -680,6 +706,8 @@ export interface CitadelStatus {
     cpu: { windows: { hour: CpuWindow; day: CpuWindow; week: CpuWindow }; hours: CpuHour[]; groups: { key: string; label: string }[] } };
   /** Memory-limit storms (#1280): per day, their count and seconds stalled; the last that ended; those going now. */
   storms: { counts: number[]; stalled: number[]; last: (Storm & { at: number }) | null; now: Storm[] };
+  /** Memory easing (#1748): per day, its stretches and minutes; the last that ended; one going now. A held turn's minion is "#12" or "Delve #12". */
+  easing: { counts: number[]; minutes: number[]; last: (Episode & { slowed: { minion: string | null }[] }) | null; now: (EaseNow & { slowed: { minion: string | null }[] }) | null };
   /** Every periodic job (#1311): empty for a viewer who can't see Citadel's scheme. */
   jobs: (JobRow & { overdue: boolean; slow: boolean })[];
   /** The standing checks' broken promises now (#1415): null for a viewer who can't see Citadel's scheme. */

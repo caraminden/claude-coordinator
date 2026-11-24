@@ -104,6 +104,8 @@ import { GithubLink, schemeGithub } from './src/github-link.ts';
 import { RepoAccess } from './src/repo-access.ts';
 import { RunnerJobs, RunnerTokens, runnerLabel } from './src/ci-runner.ts';
 import { pressure } from './src/pressure.ts';
+import { MemoryEase } from './src/memory-ease.ts';
+import { GrowthStop } from './src/growth-stop.ts';
 import { ArtifactSweep } from './src/artifact-sweep.ts';
 import { addRunnerWaiter, CiHealth, taskmastersFor, registerRunnersBack, runnerWaiters, type Run } from './src/ci-health.ts';
 import { repoSlug } from './src/prlinks.ts';
@@ -887,6 +889,22 @@ if (!BOOT_CHECK && !PREVIEW) every('effort retros', 10 * 60_000, () => effortRet
 // A closed minion that went past twice its budget or had its model stepped up gets one post-mortem, in every scheme (#1796).
 const troubleRetros = new TroubleRetros({ store, newMinion, runner, by: APP_NAME, note: (line, p) => judgeNote(() => p.id)(line) });
 if (!BOOT_CHECK && !PREVIEW) every('trouble post-mortems', 10 * 60_000, () => troubleRetros.tick());
+// Memory easing (#1748): as the box's free memory runs low, held starts, background passes, heavy jobs and nested
+// Claude sessions wait, and while it's tight the fastest-growing big turn is held at its size. Nothing is killed. Only the
+// real server reads it: a preview or dev copy would otherwise hold the live turns too.
+const growthStop = new GrowthStop();
+const memoryEase = new MemoryEase({
+  heavyDir: join(DATA_DIR, 'projects', '.heavy'),
+  record: (at, episode) => store.addHealthEvent('memory-easing', at, BOOT_COMMIT ?? null, JSON.stringify(episode)),
+  waiting: () => {
+    const { waiters } = readHeavy(join(DATA_DIR, 'projects', '.heavy'));
+    return { starts: heldStarts.list().length, heavy: waiters.filter((w) => w.reason === 'memory').length, nested: waiters.filter((w) => w.reason === 'ease').length };
+  },
+  slowed: () => growthStop.slowed(),
+  after: (level) => growthStop.tick(level),
+});
+pressure.useEase(() => memoryEase.get());
+if (!BOOT_CHECK) memoryEase.start();
 // Idle Taskmasters with a long context start fresh sessions while their prompt cache is still warm (#406).
 if (!BOOT_CHECK && !PREVIEW) warmUsage(store);
 if (!BOOT_CHECK && !PREVIEW) every('fresh sessions', 60_000, () => runner.freshSweep());
@@ -1837,6 +1855,7 @@ const answerProbe = new AnswerProbe();
 const status = new StatusPage({
   warm: () => dbWarmer?.stats() ?? null,
   storms: () => memoryStorms.current(),
+  easing: () => memoryEase.current(),
   store, dataDir: DATA_DIR, bootAt: BOOT_AT, commit: BOOT_COMMIT ?? '', ownScheme: () => ownScheme()?.id ?? null,
   ciSnapshot: (canSee) => ciHealth.snapshot(canSee), desktops: () => ciLoad.views(), diskUse: (row) => services.diskUse(row),
   unitStates: PREVIEW ? undefined : (units) => services.unitStates(units),
@@ -2146,6 +2165,8 @@ function stopWork() {
   runner.detachAll();
   store.usage.flush();
   memoryStorms.stop(); // records a storm still going, which the next server would otherwise only see from its middle
+  memoryEase.stop(); // records a stretch of easing still going
+  void growthStop.stop(); // no turn stays held once the server watching it is gone
 }
 // Stop taking requests, end the ones that never finish, and exit once the rest are answered.
 function closeDown(why: string) {

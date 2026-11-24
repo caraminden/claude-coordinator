@@ -302,13 +302,14 @@ function citadelTiles(c, days, now, ships, redraw) {
       dayBars(days, c.stalls.counts, { tip: (i) => `${plural(c.stalls.counts[i], 'stall')}${c.stalls.afterBoot?.[i] ? ` (${c.stalls.afterBoot[i]} just after a start)` : ''}${c.stalls.counts[i] ? `, longest ${c.stalls.longest[i]} s` : ''}`, label: 'event-loop stalls a day' }),
       { key: 'stalls', chart: `stalls a day, those just after a start included: ${perDay(days, c.stalls.counts)}; of them just after a start: ${perDay(days, c.stalls.afterBoot ?? days.map(() => 0))}; longest a day (s): ${perDay(days, c.stalls.longest)}` }),
     stormTile(c.storms, days, now),
+    easeTile(c.easing, days, now),
     ...(c.jobs?.length ? [jobsTile(c.jobs, now)] : []),
     ...(c.checks ? [checksTile(c.checks, now)] : []),
     ...(c.host.cpu ? [cpuTile(c.host.cpu, now)] : []),
     answerTile(c.host.answer, now),
     ...(c.slow ? [slowTile(c.slow)] : []),
     cacheTile(c.host, now, c.verdict),
-    tile('Starved', host?.cpu_psi == null ? 'No reading yet' : `CPU ${host.cpu_psi}% · memory ${host.mem_psi ?? 0}%`, 'How long work waited for a core or for memory over the last minute; background passes pause at 50% CPU or 20% memory',
+    tile('Starved', host?.cpu_psi == null ? 'No reading yet' : `CPU ${host.cpu_psi}% · memory ${host.mem_psi ?? 0}%`, 'How long work waited for a core or for memory over the last minute; background passes pause at 50% CPU or 20% memory, or while Citadel eases off memory',
       hourLine(c.host.series.filter((s) => s[4] != null), 4, { from, to: now, label: 'CPU pressure each hour, at its highest', rule: 50, tip: (v) => `CPU pressure ${v}% at its highest` }),
       { tone: host?.cpu_psi != null && (host.cpu_psi >= 50 || (host.mem_psi ?? 0) >= 20) ? 'warn' : null, key: 'pressure', chart: `CPU pressure %, hourly highest: ${perHour(c.host.series, 4)}; memory pressure %: ${perHour(c.host.series, 5)}` }),
     tile('Disk', disk === null ? 'No reading yet' : `${disk}% used`, host ? `${bytes(host.disk_free)} free of ${bytes(host.disk_total)}` : 'Read every 5 minutes',
@@ -438,6 +439,26 @@ function stormTile(s, days, now) {
     live ? s.now.map(one).join('; ') : s.last ? `The last ${ago(s.last.at)}: ${one(s.last)}` : 'No slice or container at its limit this week',
     dayBars(days, s.stalled, { tip: (i) => `${plural(s.counts[i], 'storm')}${s.counts[i] ? `, ${secs(s.stalled[i])} stalled` : ''}`, label: 'seconds stalled at a memory limit a day' }),
     { tone: live || stalledToday >= 60 ? 'warn' : null, key: 'memory-limits', chart: `seconds stalled a day: ${perDay(days, s.stalled)}; storms a day: ${perDay(days, s.counts)}` });
+}
+
+/**
+ * Memory easing (#1748): while the box's free memory runs low, scheduled starts, heavy jobs and nested Claude sessions
+ * wait and the fastest-growing big turn is held at its size; nothing is killed. Now: why, what waits and who is held.
+ */
+function easeTile(e, days, now) {
+  if (!e) return '';
+  const today = days.length - 1;
+  const n = e.now;
+  const waits = (w) => [w.starts && plural(w.starts, 'scheduled start'), w.heavy && plural(w.heavy, 'heavy job'), w.nested && plural(w.nested, 'nested session')].filter(Boolean).join(', ');
+  const held = (s) => s.map((x) => `${x.minion ? `${x.minion}'s turn` : 'a turn'} held at ${bytes(x.bytes)}`).join(', ');
+  const sub = n
+    ? [`Since ${when(n.since)}: ${n.why} (eases under ${bytes(n.lines.easeFree)} free, back over ${bytes(n.lines.backFree)})`,
+      waits(n.waiting) ? `waiting: ${waits(n.waiting)}` : 'nothing waiting yet', n.slowed.length ? `slowed: ${held(n.slowed)}` : ''].filter(Boolean).join(' · ')
+    : e.last ? `The last ${ago(e.last.since)}, ${span((e.last.until ?? e.last.since) - e.last.since)}${e.last.peak === 'tight' ? ', reached tight' : ''}: ${e.last.why}${e.last.lowestFree !== null ? ` · lowest ${bytes(e.last.lowestFree)} free` : ''}${waits(e.last.waited) ? ` · at most ${waits(e.last.waited)} waited` : ''}${e.last.slowed.length ? ` · ${held(e.last.slowed)}` : ''}`
+    : 'Free memory stayed above the line all week';
+  return tile('Memory easing', n ? (n.level === 'tight' ? 'Tight now' : 'Easing off now') : e.counts[today] ? `${plural(e.counts[today], 'spell')} today` : 'None today', sub,
+    dayBars(days, e.minutes, { tip: (i) => `${plural(e.counts[i], 'spell')}${e.counts[i] ? `, ${e.minutes[i]} min` : ''}`, label: 'minutes eased off a day' }),
+    { tone: n ? 'warn' : null, key: 'easing', chart: `minutes eased off a day: ${perDay(days, e.minutes)}; spells a day: ${perDay(days, e.counts)}` });
 }
 
 /** Backup freshness (#1142): the last database backup, the last off-box pull, and each app yes or no. Red when a night is missing. */

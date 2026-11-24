@@ -6,7 +6,7 @@ import { Store } from '../src/db.ts';
 import { TroubleRetros, troubleKey, SINCE_KEY, postMortemOfKey } from '../src/effort-retros.ts';
 
 const H = 3_600_000;
-const T0 = 1_800_000_000_000;
+const T0 = Date.now(); // updateTicket stamps closed_at with the real clock
 
 function setup(mode: 'act' | 'log-only' = 'act') {
   const store = new Store(':memory:');
@@ -46,6 +46,8 @@ test('a minion past twice its budget gets exactly one post-mortem once it has cl
   assert.equal(s.made[0].effort, 'medium');
   assert.match(s.made[0].title, new RegExp(`Post-mortem: #${x.number}`));
   assert.match(s.sent[0], /Expected cost: ~\$3/);
+  const pm = s.store.listTickets(s.peek.id).find((t) => t.title.startsWith('Post-mortem'))!;
+  assert.equal(s.store.getSetting<{ estimate: number }>(budgetKey(pm.id))?.estimate, 3, 'its budget alarms count from $3, the cap');
   assert.match(s.sent[0], /past twice its budget/);
   assert.deepEqual(await s.retros.tick(), [], 'a second tick starts nothing');
   assert.equal(s.made.length, 1);

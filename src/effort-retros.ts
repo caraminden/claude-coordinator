@@ -237,7 +237,8 @@ export class TroubleRetros {
       (line, project) => this.d.note(line, project), mode);
     for (const project of store.listProjects()) {
       for (const t of store.listTickets(project.id)) {
-        if (t.kind === 'coordinator' || t.status !== 'closed' || family(t.model ?? t.last_model) == null) continue;
+        // Trouble comes before closing, so a minion closed before the trigger began has none to chase (and the scan stays small).
+        if (t.kind === 'coordinator' || t.status !== 'closed' || (t.closed_at ?? 0) < since || family(t.model ?? t.last_model) == null) continue;
         if (store.getSetting(postMortemOfKey(t.id)) != null) continue;
         const kinds = this.due(t, since, mode);
         if (!kinds.length) continue;
@@ -268,6 +269,8 @@ export class TroubleRetros {
     const owner = typeof assigned === 'string' ? assigned : null;
     const made = await this.d.newMinion(project, { title: `Post-mortem: #${t.number} ${t.title}`.slice(0, 120), model: 'claude-sonnet-5-5', effort: 'medium', props: { type: 'research', ...(owner ? { assigned: owner } : {}) } }, by);
     store.setSetting(postMortemOfKey(made.id), t.number);
+    // Its cap: the create route sets the estimate, and this path doesn't go through it, so its alarms would count from the usual cost.
+    store.setSetting(budgetKey(made.id), { estimate: 3 } satisfies BudgetState);
     store.updateTicket(made.id, { person_id: t.person_id ?? null });
     for (const k of v.kinds) store.setSetting(troubleKey(t.id, k), { act: 'start', why: v.why, at: this.d.now?.() ?? Date.now(), ticket: made.number });
     runner.emit(made.id, 'note', { text: `Started by the trouble trigger: #${t.number} ${v.why}.` });

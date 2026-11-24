@@ -72,7 +72,10 @@ export function scorePairs(covered: Covered, opts: { min?: number; minLines?: nu
     const j = pk % names.length;
     const containment = v / Math.min(weight[i], weight[j]);
     if (containment < min) continue;
-    const top = [...perFile.get(pk)!].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([f]) => f);
+    const top = [...perFile.get(pk)!]
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, 3)
+      .map(([f]) => f);
     pairs.push({ a: names[i], b: names[j], containment, jaccard: v / (weight[i] + weight[j] - v), shared: shared.get(pk)!, top });
   }
   return pairs.sort((x, y) => y.containment - x.containment || y.jaccard - x.jaccard || y.shared - x.shared);

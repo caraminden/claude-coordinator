@@ -1,8 +1,9 @@
 // The escape set (#1505): replay the pre-ship reviewer on past changes whose defect a later minion fixed, and on
-// same-size changes nobody had to fix, then have a blind judge say whether each review named the defect.
+// same-size changes nobody had to fix, then have a blind judge say whether each review named the defect. An arm with
+// `"mode": "verify"` runs a verifier instead (#1740): it boots the change as shipped and drives it (verifier.md).
 // README.md beside this file; `node tools/review-escapes/run.ts --help`.
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -16,15 +17,16 @@ type Plant = { file: string; from: string; to: string };
 // (`head`, on `base` its parent) with `plant` applied to it: one diff-visible bug a reviewer reading the diff should name (#1738).
 type Case = { id: string; kind: 'escape' | 'clean' | 'planted' | 'control'; origin: number; title: string; lines: number; base: string; head?: string; picks?: string[]; defects?: Defect[]; taught?: string; plant?: Plant[]; plantKind?: string; set?: string };
 const hasDefects = (c: Case) => c.kind === 'escape' || c.kind === 'planted';
-type Arm = { name: string; model: string; effort: string; lens?: string };
+type Arm = { name: string; model: string; effort: string; lens?: string; mode?: 'verify' };
 type Meta = { cost: number; ms: number; turns: number; models: string[]; error?: string };
-type Verdict = { fix: number; verdict: 'named' | 'near' | 'no'; finding: number | null; why: string };
+type Verdict = { fix: number; verdict: 'named' | 'near' | 'no'; finding: number | null; why: string; ran?: boolean };
 
 /** `--set escapes|planted|all` (default all), or the path of a set file (its cases are tallied as the planted group). */
 function loadSet(which: string): Case[] {
   const files = which === 'all' ? ['set.json', 'planted.json'] : which === 'escapes' ? ['set.json'] : which === 'planted' ? ['planted.json'] : [resolve(which)];
   return files.flatMap((f) => (JSON.parse(readFileSync(resolve(HERE, f), 'utf8')).cases as Case[]).map((c) => ({ ...c, set: f === 'set.json' ? 'escapes' : 'planted' })));
 }
+const BRIEFS: Record<string, string> = JSON.parse(readFileSync(join(HERE, 'briefs.json'), 'utf8')).briefs;
 const ARMS: Arm[] = JSON.parse(readFileSync(join(HERE, 'arms.json'), 'utf8')).arms;
 const GRUNT_LINE = 'Citadel, Scheme, Taskmaster, Minion and Grunt are playful names for how the work is organised, not a comment on ability. Work as a careful, senior engineer: think things through, check your work, and push back when something looks wrong.';
 
@@ -95,11 +97,11 @@ function workspace(c: Case, out: string): string {
 }
 
 /** One `claude -p`: the stream to `file`, its final text and cost. */
-function claude(args: string[], input: string, cwd: string, file: string, timeoutMs: number): Promise<Meta & { text: string }> {
+function claude(args: string[], input: string, cwd: string, file: string, timeoutMs: number, extraEnv: Record<string, string> = {}): Promise<Meta & { text: string }> {
   const tmp = join(dirname(file), 'tmp'); mkdirSync(tmp, { recursive: true });
   const t0 = Date.now();
   return new Promise((done) => {
-    const p = spawn('claude', args, { cwd, env: cleanEnv(tmp), stdio: ['pipe', 'pipe', 'pipe'] });
+    const p = spawn('claude', args, { cwd, env: { ...cleanEnv(tmp), ...extraEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '', err = '';
     const timer = setTimeout(() => p.kill('SIGTERM'), timeoutMs);
     p.stdout.on('data', (d) => (out += d));
@@ -138,6 +140,60 @@ async function review(c: Case, arm: Arm, out: string, kit: string): Promise<void
   console.log(`${arm.name} ${c.id}: $${meta.cost.toFixed(2)} ${Math.round(meta.ms / 1000)}s ${countFindings(text)} findings${meta.error ? ' ERROR ' + meta.error : ''}`);
 }
 
+// What the box's services would do, refused: a verifier and the old server it boots reach none of them.
+const SHIMMED = ['systemctl', 'loginctl', 'journalctl', 'systemd-run', 'gh', 'podman', 'docker', 'tailscale', 'crontab', 'sudo'];
+
+/** Processes still running from a case's folder (its server, a browser, a script it left behind), by pid. */
+function leftovers(dir: string): number[] {
+  const pids: number[] = [];
+  for (const p of readdirSync('/proc').filter((x) => /^\d+$/.test(x))) {
+    try { const cwd = readlinkSync(`/proc/${p}/cwd`); if (cwd === dir || cwd.startsWith(dir + '/')) pids.push(Number(p)); } catch { /* gone or not ours */ }
+  }
+  return pids;
+}
+
+/** The verifier arm: its own clone of the case, a dev copy it boots from there, and today's ui-shot to drive pages. */
+async function verify(c: Case, arm: Arm, out: string, kit: string): Promise<void> {
+  const dir = join(out, arm.name, c.id);
+  if (existsSync(join(dir, 'meta.json'))) return;
+  const ws = workspace(c, out);
+  execFileSync('rm', ['-rf', dir]);
+  mkdirSync(join(dir, 'scratch'), { recursive: true });
+  const repo = join(dir, 'repo');
+  git('clone', '-q', '--shared', ws, repo);
+  git('-C', repo, 'branch', '-q', 'main', 'origin/main');
+  git('-C', repo, 'remote', 'remove', 'origin');
+  copyFileSync(join(HERE, 'verifier-boot.mjs'), join(dir, 'boot.mjs'));
+  mkdirSync(join(dir, 'tools'));
+  copyFileSync(join(REPO, 'tools/ui-shot.ts'), join(dir, 'tools/ui-shot.ts'));
+  // ui-shot starts its browser through heavy-unit, whose systemd-run is stubbed here: run it in place, in this case's tree.
+  writeFileSync(join(dir, 'tools/heavy-unit'), '#!/bin/sh\nwhile [ "$1" = --exec ] || [ "$1" = --what ]; do [ "$1" = --what ] && shift; shift; done\nexec "$@"\n', { mode: 0o755 });
+  mkdirSync(join(dir, 'kit/skills/critique/scripts'), { recursive: true });
+  copyFileSync(join(REPO, 'kit/skills/critique/scripts/ui-measure.mjs'), join(dir, 'kit/skills/critique/scripts/ui-measure.mjs'));
+  mkdirSync(join(dir, 'shims'));
+  for (const s of SHIMMED) writeFileSync(join(dir, 'shims', s), `#!/bin/sh\necho "${s}: stubbed in this verifier case (#1740)" >&2\nexit 1\n`, { mode: 0o755 });
+  const brief = `${GRUNT_LINE}\n\n${readFileSync(join(HERE, 'verifier.md'), 'utf8')}`
+    .replaceAll('{origin}', String(c.origin)).replaceAll('{repo}', repo).replaceAll('{root}', dir).replace('{brief}', () => BRIEFS[c.id] ?? c.title);
+  writeFileSync(join(dir, 'brief.md'), brief);
+  const chrome = join(process.env.HOME ?? '', '.cache/ms-playwright');
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*',
+    hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'verifier-guard.ts')}' '${dir}' '${kit}' '${chrome}' '${dirname(dirname(process.execPath))}'`, timeout: 10 }] }] } }));
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions',
+    '--model', arm.model, '--effort', arm.effort, '--disallowedTools', 'Agent,Task,WebFetch,WebSearch',
+    '--settings', join(dir, 'settings.json'), '--setting-sources', 'project', '--strict-mcp-config',
+    '--max-turns', '150', '--max-budget-usd', arg('--budget') ?? '4', '--no-session-persistence'];
+  const r = await claude(args, brief, repo, join(dir, 'stream.jsonl'), 35 * 60_000, { PATH: `${join(dir, 'shims')}:${process.env.PATH}` });
+  try { execFileSync(process.execPath, [join(dir, 'boot.mjs'), 'stop'], { stdio: 'ignore' }); } catch { /* not started */ }
+  const left = leftovers(dir);
+  for (const pid of left) try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
+  // Keep the report, the stream, the logs and its screenshots; the clone and the data are big and rebuilt on demand.
+  execFileSync('rm', ['-rf', repo, join(dir, 'data'), join(dir, 'scratch')]);
+  writeFileSync(join(dir, 'review.md'), r.text);
+  const { text, ...meta } = r;
+  writeFileSync(join(dir, 'meta.json'), JSON.stringify({ ...meta, leftovers: left.length }, null, 1));
+  console.log(`${arm.name} ${c.id}: $${meta.cost.toFixed(2)} ${Math.round(meta.ms / 1000)}s ${countFindings(text)} findings${left.length ? ` (${left.length} leftover processes stopped)` : ''}${meta.error ? ' ERROR ' + meta.error : ''}`);
+}
+
 /** Numbered Must fix and Should fix findings in a review (Nice to have doesn't count as an alarm). */
 const countFindings = (text: string) => (text.match(/^\s*\**\d+\.?\**[.)]?\s*\**\s*(Must fix|Should fix)/gim) ?? []).length;
 
@@ -159,12 +215,18 @@ For each defect, answer one of:
 
 Be strict: the same file or area is not enough for named. Reply with JSON only, no fence: {"verdicts":[{"fix":<number>,"verdict":"named|near|no","finding":<the finding's number or null>,"why":"<one sentence>"}]}`;
 
+// The same judge, told the report came from someone who ran the change, and asked whether it made the defect happen.
+const VERIFY_JUDGE_RULES = JUDGE_RULES
+  .replace('whether a code review, written before a change shipped,', 'whether a report from someone who ran a change before it shipped')
+  .replace("You don't know who wrote the review or how.", "You don't know who wrote the report or how. Its findings are its numbered lines; its flows-run and not-exercised lists are not findings.")
+  .replace('"why":"<one sentence>"}', '"ran":<true when the report shows this wrong behaviour actually happening when the change was run, false when it only describes or traces it>,"why":"<one sentence>"}');
+
 async function judge(c: Case, arm: Arm, out: string, model: string): Promise<void> {
   const dir = join(out, arm.name, c.id);
   if (!hasDefects(c) || existsSync(join(dir, 'judge.json')) || !existsSync(join(dir, 'review.md'))) return;
   const reviewText = readFileSync(join(dir, 'review.md'), 'utf8').trim() || '(the review returned nothing)';
   const defects = c.defects!.map((d) => `### ${c.kind === 'planted' ? 'Planted defect' : `Defect fixed by #${d.fix}`}: ${d.title}\nWhat went wrong: ${d.why}\n\n${fixShape(d, c)}`).join('\n\n');
-  const prompt = `${JUDGE_RULES}\n\n## The change reviewed\n#${c.origin}: ${c.title}\n\n## Defects found after it shipped\n\n${defects}\n\n## The review\n\n${reviewText}\n`;
+  const prompt = `${arm.mode === 'verify' ? VERIFY_JUDGE_RULES : JUDGE_RULES}\n\n## The change reviewed\n#${c.origin}: ${c.title}\n\n## Defects found after it shipped\n\n${defects}\n\n## The review\n\n${reviewText}\n`;
   writeFileSync(join(dir, 'judge-prompt.md'), prompt);
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--model', model, '--effort', 'medium', '--tools', '', '--max-turns', '1',
     '--setting-sources', 'project', '--strict-mcp-config', '--no-session-persistence'];
@@ -181,7 +243,7 @@ async function pool<T>(items: T[], jobs: number, fn: (t: T) => Promise<void>) {
 }
 
 /** The numbers of one arm on one group of cases (escapes, planted); `summary.json` keeps them for tools/review-escapes/bench.ts. */
-export type Tally = { reviews: number; defects: number; named: number; near: number; cases: number; casesNamed: number; findings: number; controls: number; controlsWith: number; controlFindings: number; cost: number; judgeCost: number; unjudged: number; medianSec: number };
+export type Tally = { reviews: number; defects: number; named: number; near: number; cases: number; casesNamed: number; findings: number; controls: number; controlsWith: number; controlFindings: number; cost: number; judgeCost: number; unjudged: number; medianSec: number; ran?: number };
 
 function tally(out: string, arm: Arm, group: string): { t: Tally; per: string[] } {
   const read = (p: string) => existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : undefined;
@@ -201,7 +263,10 @@ function tally(out: string, arm: Arm, group: string): { t: Tally; per: string[] 
     let any = false;
     for (const d of c.defects!) {
       t.defects++;
-      const v = j.verdicts.find((x: Verdict) => x.fix === d.fix)?.verdict ?? 'no';
+      const jv: Verdict | undefined = j.verdicts.find((x: Verdict) => x.fix === d.fix);
+      const v = jv?.verdict ?? 'no';
+      // A verifier's named bug it showed happening, not just traced (#1740).
+      if (v === 'named' && arm.mode === 'verify' && jv?.ran) t.ran = (t.ran ?? 0) + 1;
       if (v === 'named') { t.named++; any = true; } else if (v === 'near') t.near++;
       per.push(`${arm.name}\t${c.id}\t#${d.fix}\t${v}${c.taught ? '\ttaught' : ''}`);
     }
@@ -221,7 +286,7 @@ function report(out: string, arms: Arm[]): string {
     if (!t.reviews) continue;
     per.push(...p);
     (summary[arm.name] ??= {})[group] = t;
-    rows.push(`| ${arm.name} | ${group} | ${t.reviews} | ${t.named} of ${t.defects} | ${t.near} | ${t.casesNamed} of ${t.cases - t.unjudged} | ${t.cases ? (t.findings / t.cases).toFixed(1) : '-'} | ${t.controlsWith} of ${t.controls} | ${t.controlFindings} | $${t.cost.toFixed(2)} | $${t.judgeCost.toFixed(2)} | ${t.named ? '$' + (t.cost / t.named).toFixed(2) : '-'} | ${t.medianSec} s |${t.unjudged ? ` (${t.unjudged} unjudged)` : ''}`);
+    rows.push(`| ${arm.name} | ${group} | ${t.reviews} | ${t.named} of ${t.defects} | ${t.near} | ${t.casesNamed} of ${t.cases - t.unjudged} | ${t.cases ? (t.findings / t.cases).toFixed(1) : '-'} | ${t.controlsWith} of ${t.controls} | ${t.controlFindings} | $${t.cost.toFixed(2)} | $${t.judgeCost.toFixed(2)} | ${t.named ? '$' + (t.cost / t.named).toFixed(2) : '-'} | ${t.medianSec} s |${t.unjudged ? ` (${t.unjudged} unjudged)` : ''}${arm.mode === 'verify' ? ` (${t.ran ?? 0} made to happen)` : ''}`);
   }
   writeFileSync(join(out, 'verdicts.tsv'), per.join('\n') + '\n');
   writeFileSync(join(out, 'summary.json'), JSON.stringify(summary, null, 1));
@@ -278,7 +343,7 @@ async function main() {
   if (cmd === 'run') {
     for (const c of cases) workspace(c, out); // serially: clones and cherry-picks share the repo's lock
     const jobs = Number(arg('--jobs') ?? 3);
-    await pool(arms.flatMap((a) => cases.map((c) => [a, c] as const)), jobs, ([a, c]) => review(c, a, out, kit));
+    await pool(arms.flatMap((a) => cases.map((c) => [a, c] as const)), jobs, ([a, c]) => (a.mode === 'verify' ? verify : review)(c, a, out, kit));
     await pool(arms.flatMap((a) => cases.map((c) => [a, c] as const)), jobs, ([a, c]) => judge(c, a, out, arg('--judge-model') ?? 'opus'));
   } else if (cmd !== 'report') return console.log(HELP);
   console.log(report(out, arms));

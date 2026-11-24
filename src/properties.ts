@@ -302,6 +302,16 @@ export class Registry {
     return all;
   }
 
+  /** Every minion in `projectId` carrying global text key `key`, with its value (the effort trigger, src/effort-retros.ts). */
+  minionsWith(projectId: number, key: string): { id: number; value: string }[] {
+    return this.db
+      .prepare(
+        `SELECT p.target_id AS id, p.value FROM properties p JOIN property_keys k ON k.id = p.key_id JOIN tickets t ON t.id = p.target_id
+         WHERE p.target_type = 'minion' AND k.scope IS NULL AND k.key = ? AND t.project_id = ?`,
+      )
+      .all(key, projectId) as { id: number; value: string }[];
+  }
+
   // ── Setting ────────────────────────────────────────────────────────────
 
   /**

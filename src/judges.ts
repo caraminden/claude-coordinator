@@ -165,6 +165,12 @@ export const JUDGES: Judge[] = [
     pins: [{ path: 'kit/hooks/big-read.ts', symbols: ['bigReadHook'] }],
     callers: ['kit/hooks/big-read.ts'],
   },
+  {
+    id: 'effort-retros', name: 'Effort retros (#1751)', mode: 'log-only', replay: true,
+    acts: "starts a citadel:retro minion in a scheme when every minion of a named effort (3+) or an unnamed start_after chain (4+) has closed for 6 hours, unless a major build's retro covers it",
+    pins: [{ path: 'src/effort-retros.ts', symbols: ['NAMED_FLOOR', 'CHAIN_FLOOR', 'QUIET_MS', 'AUTO', 'effortsDue', 'EffortRetros.tick'] }],
+    callers: ['src/effort-retros.ts'],
+  },
 ];
 
 export const judge = (id: string): Judge | undefined => JUDGES.find((j) => j.id === id);

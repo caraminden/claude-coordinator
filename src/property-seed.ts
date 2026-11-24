@@ -59,6 +59,13 @@ export const GLOBAL_SEED: SeedKey[] = [
     multi: false,
     value_kind: 'user',
   },
+  {
+    key: 'effortName',
+    label: 'Effort',
+    description: "The multi-minion effort the minion belongs to: one goal worked by several minions (e.g. `CI speed-up`). Name it when starting an effort's first minion; minions started after it (start_after) or from it (parent) carry it by themselves, and an unnamed start_after chain gets `chain from #N`. When every minion of an effort has closed (3 or more, 4 for an unnamed chain, and not mostly one major build), the server starts its retro (#1751).",
+    multi: false,
+    value_kind: 'text',
+  },
 ];
 
 /** Delve's own keys, for the scheme named Delve. Ranger + Void has no name yet, so it isn't a class. */

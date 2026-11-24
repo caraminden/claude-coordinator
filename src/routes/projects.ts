@@ -46,6 +46,7 @@ import { postPlan } from '../plan-cards.ts';
 import { cardHref } from '../card-links.ts';
 import { inScope, searchDecisions } from '../decisions.ts';
 import { chainIs, type Chain } from '../wake.ts';
+import { EFFORT_KEY, effortFor } from '../effort-retros.ts';
 import { chainsOf, type Chain as ChainView, type WaitLink } from '../chains.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { briefWarning, namedFiles } from '../brief-lint.ts';
@@ -1333,6 +1334,11 @@ export const projectRoutes: Route[] = [
       }
       // Its build: the one the create sets (null: none), as `build` or the build property; else its parent's, else its start_after leader's.
       const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : parent?.build ?? leader?.build ?? null;
+      // Its effort (#1751, src/effort-retros.ts): its own, else its leader's, else its parent's; an unnamed chain is named after its leader.
+      const effortOf = (t: Ticket | null | undefined) => (t ? (store.props.forTarget('minion', t.id)[EFFORT_KEY] as string | undefined) ?? null : null);
+      const joins = given(EFFORT_KEY) ? null : effortFor(null, leader ? { number: leader.number, effort: effortOf(leader) } : null, effortOf(parent));
+      if (joins?.name) props[EFFORT_KEY] = joins.name;
+      if (joins?.stampLeader && leader) store.props.set('minion', leader.id, project.id, { [EFFORT_KEY]: joins.name }, session.name);
       // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
       const owner = body.build_owner === true;
       if (owner && !build && !given('build')) throw new HttpError(400, 'build_owner needs a build: pass build (the scheme\'s highest build number plus one for a new one)');

@@ -256,8 +256,11 @@ export function replyList(v: unknown): string | null {
   return JSON.stringify(v.map((r) => str(r, 'Reply', 40)));
 }
 
-export function str(v: unknown, field: string, max = 200): string {
-  if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required`);
+/** What a hand_off_land refusal for a missing summary says to do (#1820), so the second call is right first time. */
+export const HANDOFF_FIX = ': call hand_off_land again with summary (what ships, one line), risk (low, medium or high), risk_reason (one line) and learned';
+
+export function str(v: unknown, field: string, max = 200, fix = ''): string {
+  if (typeof v !== 'string' || !v.trim()) throw new HttpError(400, `${field} is required${fix}`);
   if (v.length > max) throw new HttpError(400, `${field} is too long: ${v.length.toLocaleString('en')} characters, at most ${max.toLocaleString('en')}`);
   return v.trim();
 }

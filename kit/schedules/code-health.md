@@ -3,6 +3,8 @@ name: Code health
 type: research
 model: claude-opus-5-5
 effort: medium
+trigger: 100 ships
+trigger_gap: 12h
 min_minions: 40
 cron: 0 5 * * *
 stagger: 10m within 120m

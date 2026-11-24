@@ -2,7 +2,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
-import { Schedules } from './schedules.ts';
+import { loadTemplates, Schedules } from './schedules.ts';
 import { scheduleFirstWeek } from './first-week.ts';
 import { ReviewSet } from './review-set.ts';
 import type { GruntRow } from './grunts.ts';
@@ -1819,6 +1819,7 @@ export const SCHEMA_HISTORY = [
   [112, 'contraptions.restart_risk, restart_note and contraption_runs (#1682)'],
   [113, 'slow_moments (#1752)'],
   [114, 'host_samples open_fds, supervisors, tmp_used, app_mem (#1762)'],
+  [115, "schedules.trigger_kind, trigger_count, trigger_gap_hours; standard audits' rows take their template's trigger (#1798)"],
 ] as const;
 export const SCHEMA_VERSION = SCHEMA_HISTORY.at(-1)![0];
 
@@ -1901,7 +1902,7 @@ export class Store {
       this.db.exec(`PRAGMA ${CHAT}.synchronous = NORMAL; PRAGMA ${CHAT}.journal_size_limit = 16777216;`);
       if (!opts.reader && eventsHome(this.db) === CHAT) this.db.exec(cardFatesTrigger(CHAT)); // a TEMP trigger is this connection's own
       this.props = new Registry(this.db);
-      this.schedules = new Schedules(this.db);
+      this.schedules = new Schedules(this.db, (at) => this.eventIdAt(at));
       this.reviews = new ReviewSet(this.db);
       this.claims = new Claims(this.db);
     this.lessons = new ShipLessons(this.db);
@@ -1933,7 +1934,7 @@ export class Store {
     this.props = new Registry(this.db);
     this.props.seed();
     this.settleBuilds();
-    this.schedules = new Schedules(this.db);
+    this.schedules = new Schedules(this.db, (at) => this.eventIdAt(at));
     this.reviews = new ReviewSet(this.db);
     this.claims = new Claims(this.db);
     this.lessons = new ShipLessons(this.db);
@@ -1947,6 +1948,14 @@ export class Store {
     this.dropEarlyPeekAurasBuilds();
     this.closedAtFromNotes();
     if ((this.getSetting<number>('schema_version') ?? 0) < 82) this.schedules.categorize();
+    if ((this.getSetting<number>('schema_version') ?? 0) < 115) {
+      // A broken kit template mustn't keep the server from starting; the rows just keep no trigger.
+      try {
+        this.schedules.fillTriggers(loadTemplates());
+      } catch (err) {
+        console.error("Schedules: standard audits didn't get their triggers:", err);
+      }
+    }
     this.shippingFromRules();
     this.lendingLists();
     this.noteSchemaVersion();

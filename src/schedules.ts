@@ -12,6 +12,10 @@ import { pacific } from './pacific.ts';
 import { projectSharedDir } from './workspace.ts';
 import { faultPoint } from './fault-points.ts';
 
+/** What an activity trigger counts (#1798): ships to main, or minions made. */
+export type TriggerKind = 'ships' | 'minions';
+const HOUR = 3_600_000;
+
 export interface Schedule {
   id: number;
   project_id: number;
@@ -48,6 +52,11 @@ export interface Schedule {
   notes: string;
   /** The group it shows under on the Schedules page (#1083): chosen when it's made, guessed from its name if not (guessCategory). */
   category: string;
+  /** The activity trigger (#1798): run early once this many ships to main or new minions (counted as the gate counts, in gate_scope) since the last real run; null has none. */
+  trigger_kind: TriggerKind | null;
+  trigger_count: number | null;
+  /** A trigger's floor: never runs within this many hours of the last real run; null is a day. */
+  trigger_gap_hours: number | null;
   created_by: string;
   created_at: number;
 }
@@ -74,6 +83,9 @@ CREATE TABLE IF NOT EXISTS schedules (
   template TEXT,
   notes TEXT NOT NULL DEFAULT '',
   category TEXT NOT NULL DEFAULT '',
+  trigger_kind TEXT,
+  trigger_count INTEGER,
+  trigger_gap_hours INTEGER,
   created_by TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
@@ -202,6 +214,10 @@ export interface ScheduleTemplate {
   model: string;
   effort: string;
   min_minions: number | null;
+  /** Its activity trigger (#1798), from `trigger: <n> ships|minions` and `trigger_gap: <h>h`; none leaves both null. */
+  trigger_kind: TriggerKind | null;
+  trigger_count: number | null;
+  trigger_gap_hours: number | null;
   /** The base cron; each scheme runs it shifted by its slot (staggerCron). */
   cron: string;
   /** "<n>m within <w>m" shifts the time, "<n>d within <w>d" the day of the month. */
@@ -222,7 +238,15 @@ export function loadTemplates(dir = TEMPLATE_DIR): Map<string, ScheduleTemplate>
     if (!m) throw new Error(`kit/schedules/${file} has no frontmatter`);
     const f = Object.fromEntries(m[1].split('\n').map((l) => l.match(/^(\w+):\s*(.*)$/)).filter(Boolean).map((x) => [x![1], x![2].trim()]));
     for (const k of ['name', 'type', 'model', 'effort', 'cron', 'stagger', 'applies']) if (!f[k]) throw new Error(`kit/schedules/${file} has no ${k}`);
-    out.set(slug, { slug, name: f.name, type: f.type, model: f.model, effort: f.effort, min_minions: f.min_minions ? Number(f.min_minions) : null, cron: f.cron, stagger: f.stagger, applies: f.applies, body: m[2].trim() });
+    const trig = f.trigger ? f.trigger.match(/^(\d+) (ships|minions)$/) : null;
+    if (f.trigger && !trig) throw new Error(`kit/schedules/${file}: can't read the trigger "${f.trigger}" (e.g. "150 ships" or "300 minions")`);
+    const gap = f.trigger_gap ? f.trigger_gap.match(/^(\d+)h$/) : null;
+    if (f.trigger_gap && (!gap || !trig)) throw new Error(`kit/schedules/${file}: trigger_gap "${f.trigger_gap}" needs a trigger and hours, e.g. "12h"`);
+    out.set(slug, {
+      slug, name: f.name, type: f.type, model: f.model, effort: f.effort, min_minions: f.min_minions ? Number(f.min_minions) : null,
+      trigger_kind: trig ? (trig[2] as TriggerKind) : null, trigger_count: trig ? Number(trig[1]) : null, trigger_gap_hours: gap ? Number(gap[1]) : null,
+      cron: f.cron, stagger: f.stagger, applies: f.applies, body: m[2].trim(),
+    });
   }
   return out;
 }
@@ -266,6 +290,7 @@ export function renderTemplate(t: ScheduleTemplate, notes: string, v: TemplateVa
 export function templateFields(t: ScheduleTemplate, project: Pick<Project, 'id' | 'name'>, notes: string, v: TemplateVars) {
   return {
     name: t.name, type: t.type, model: t.model, effort: t.effort, min_minions: t.min_minions,
+    trigger_kind: t.trigger_kind, trigger_count: t.trigger_count, trigger_gap_hours: t.trigger_gap_hours,
     cron: staggerCron(t.cron, t.stagger, project.id - 1), template: t.slug, notes: notes.trim(), brief: renderTemplate(t, notes, v),
   };
 }
@@ -304,13 +329,16 @@ export function guessCategory(s: Pick<Schedule, 'name'> & { template?: string | 
 
 export class Schedules {
   private db: DatabaseSync;
+  /** The first event id at or after a time (Store.eventIdAt), so a ship count reads only its window's notes. */
+  private eventIdAt: (at: number) => number;
 
-  constructor(db: DatabaseSync) {
+  constructor(db: DatabaseSync, eventIdAt: (at: number) => number = () => 0) {
     this.db = db;
+    this.eventIdAt = eventIdAt;
     db.exec(SCHEDULES_SCHEMA);
-    // Columns added after the table (#387, #745, #799, #1083), for databases created before them.
+    // Columns added after the table (#387, #745, #799, #1083, #1798), for databases created before them.
     const cols = (db.prepare('PRAGMA table_info(schedules)').all() as { name: string }[]).map((c) => c.name);
-    const added = { model: 'TEXT', effort: 'TEXT', min_minions: 'INTEGER', gate_scope: "TEXT NOT NULL DEFAULT 'scheme'", last_skip: 'TEXT', once: 'INTEGER NOT NULL DEFAULT 0', template: 'TEXT', notes: "TEXT NOT NULL DEFAULT ''", category: "TEXT NOT NULL DEFAULT ''" };
+    const added = { model: 'TEXT', effort: 'TEXT', min_minions: 'INTEGER', gate_scope: "TEXT NOT NULL DEFAULT 'scheme'", last_skip: 'TEXT', once: 'INTEGER NOT NULL DEFAULT 0', template: 'TEXT', notes: "TEXT NOT NULL DEFAULT ''", category: "TEXT NOT NULL DEFAULT ''", trigger_kind: 'TEXT', trigger_count: 'INTEGER', trigger_gap_hours: 'INTEGER' };
     for (const [c, ddl] of Object.entries(added)) if (!cols.includes(c)) db.exec(`ALTER TABLE schedules ADD COLUMN ${c} ${ddl}`);
   }
 
@@ -339,10 +367,10 @@ export class Schedules {
     return next;
   }
 
-  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'> & Partial<Pick<Schedule, 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes' | 'category'>> & { once?: boolean }, now = Date.now()): Schedule {
+  create(s: Pick<Schedule, 'project_id' | 'name' | 'cron' | 'brief' | 'type' | 'created_by'> & Partial<Pick<Schedule, 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes' | 'category' | 'trigger_kind' | 'trigger_count' | 'trigger_gap_hours'>> & { once?: boolean }, now = Date.now()): Schedule {
     const r = this.db
-      .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, model, effort, min_minions, gate_scope, once, template, notes, category, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, s.model ?? null, s.effort ?? null, s.min_minions ?? null, s.gate_scope ?? 'scheme', Number(!!s.once), s.template ?? null, s.notes ?? '', s.category ?? guessCategory(s), this.next(s.cron, now), s.created_by, now);
+      .prepare('INSERT INTO schedules (project_id, name, cron, brief, type, model, effort, min_minions, gate_scope, once, template, notes, category, trigger_kind, trigger_count, trigger_gap_hours, next_run_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(s.project_id, s.name, s.cron.trim(), s.brief, s.type, s.model ?? null, s.effort ?? null, s.min_minions ?? null, s.gate_scope ?? 'scheme', Number(!!s.once), s.template ?? null, s.notes ?? '', s.category ?? guessCategory(s), s.trigger_count == null ? null : s.trigger_kind ?? null, s.trigger_count ?? null, s.trigger_count == null ? null : s.trigger_gap_hours ?? null, this.next(s.cron, now), s.created_by, now);
     return this.get(Number(r.lastInsertRowid))!;
   }
 
@@ -351,7 +379,7 @@ export class Schedules {
    * templated row, without notes, detaches it into a custom copy (#799); notes come with their rendered brief, and a
    * template with its fields attaches one.
    */
-  update(id: number, patch: Partial<Pick<Schedule, 'name' | 'cron' | 'brief' | 'type' | 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes' | 'category'>> & { paused?: boolean; once?: boolean }, now = Date.now()): Schedule {
+  update(id: number, patch: Partial<Pick<Schedule, 'name' | 'cron' | 'brief' | 'type' | 'model' | 'effort' | 'min_minions' | 'gate_scope' | 'template' | 'notes' | 'category' | 'trigger_kind' | 'trigger_count' | 'trigger_gap_hours'>> & { paused?: boolean; once?: boolean }, now = Date.now()): Schedule {
     const old = this.get(id);
     if (!old) throw new ScheduleError('No such schedule');
     const detach = old.template && patch.brief !== undefined && patch.notes === undefined;
@@ -360,8 +388,8 @@ export class Schedules {
     if (patch.cron !== undefined) this.next(s.cron, now);
     const next = s.paused ? null : patch.cron !== undefined || (old.paused && !s.paused) ? this.next(s.cron, now) : old.next_run_at;
     this.db
-      .prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, model = ?, effort = ?, min_minions = ?, gate_scope = ?, once = ?, template = ?, notes = ?, category = ?, paused = ?, next_run_at = ? WHERE id = ?')
-      .run(s.name, s.cron, s.brief, s.type, s.model, s.effort, s.min_minions, s.gate_scope, s.once, s.template, s.notes, s.category, s.paused, next, id);
+      .prepare('UPDATE schedules SET name = ?, cron = ?, brief = ?, type = ?, model = ?, effort = ?, min_minions = ?, gate_scope = ?, once = ?, template = ?, notes = ?, category = ?, trigger_kind = ?, trigger_count = ?, trigger_gap_hours = ?, paused = ?, next_run_at = ? WHERE id = ?')
+      .run(s.name, s.cron, s.brief, s.type, s.model, s.effort, s.min_minions, s.gate_scope, s.once, s.template, s.notes, s.category, s.trigger_count == null ? null : s.trigger_kind, s.trigger_count, s.trigger_count == null ? null : s.trigger_gap_hours, s.paused, next, id);
     return this.get(id)!;
   }
 
@@ -379,6 +407,20 @@ export class Schedules {
     }
   }
 
+  /** Schema 115 (#1798): each standard audit's row takes its template's trigger, once, as min_minions reached them when made. */
+  fillTriggers(templates: Map<string, ScheduleTemplate>) {
+    const set = this.db.prepare('UPDATE schedules SET trigger_kind = ?, trigger_count = ?, trigger_gap_hours = ? WHERE id = ?');
+    for (const s of this.db.prepare('SELECT id, template FROM schedules WHERE template IS NOT NULL AND trigger_count IS NULL').all() as unknown as Schedule[]) {
+      const t = templates.get(s.template!);
+      if (t?.trigger_count != null) set.run(t.trigger_kind, t.trigger_count, t.trigger_gap_hours, s.id);
+    }
+  }
+
+  /** Schedules with a trigger whose floor has passed: not paused, and no real run within their gap (a day unless set). */
+  triggerable(now = Date.now()): Schedule[] {
+    return this.db.prepare(`SELECT * FROM schedules WHERE paused = 0 AND trigger_count IS NOT NULL AND COALESCE(last_run_at, created_at) <= ? - COALESCE(trigger_gap_hours, 24) * ${HOUR} ORDER BY id`).all(now) as unknown as Schedule[];
+  }
+
   remove(id: number): boolean {
     this.db.prepare('DELETE FROM schedule_runs WHERE schedule_id = ?').run(id);
     return this.db.prepare('DELETE FROM schedules WHERE id = ?').run(id).changes > 0;
@@ -394,7 +436,7 @@ export class Schedules {
    * run counts from now. Only a started minion moves last_run_at, so a skip leaves the gate's window growing; a one-off
    * pauses after it.
    */
-  ran(id: number, outcome: { ticketId: number } | { error: string } | { skip: string }, now = Date.now()) {
+  ran(id: number, outcome: { ticketId: number; triggered?: boolean } | { error: string } | { skip: string }, now = Date.now()) {
     const s = this.get(id);
     if (!s) return;
     let next: number | null = null;
@@ -406,7 +448,7 @@ export class Schedules {
     }
     if ('ticketId' in outcome) {
       const done = !!s.once;
-      this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : next, id);
+      this.db.prepare('UPDATE schedules SET last_run_at = ?, last_ticket_id = ?, last_error = NULL, last_skip = NULL, paused = ?, next_run_at = ? WHERE id = ?').run(now, outcome.ticketId, done ? 1 : s.paused, done ? null : outcome.triggered ? s.next_run_at : next, id); // a trigger's run keeps the calendar slot
     } else if ('skip' in outcome) {
       // The gate was reached, so an older "didn't start" is stale.
       this.db.prepare('UPDATE schedules SET last_skip = ?, last_error = NULL, next_run_at = ? WHERE id = ?').run(outcome.skip, next, id);
@@ -457,6 +499,19 @@ export class Schedules {
     const args = s.gate_scope === 'all' ? [] : [s.project_id];
     return Number((this.db.prepare(`SELECT COUNT(*) AS n FROM tickets WHERE kind != 'coordinator' AND created_by != ? AND created_at > ? ${scope}`).get(by, this.since(s), ...args) as { n: number }).n);
   }
+
+  /**
+   * Ships to main since the last real run, in the schedule's scheme or every scheme: the minions with a "Shipped <commit>"
+   * note (Store.shippedNotes), each once, since a busy minion's follow-ups post several. A merge into a build branch
+   * ("Merged …") and a ship whose push failed don't count.
+   */
+  shipsSince(s: Schedule): number {
+    const since = this.since(s);
+    const scope = s.gate_scope === 'all' ? '' : 'AND t.project_id = ?';
+    const args = s.gate_scope === 'all' ? [] : [s.project_id];
+    return Number((this.db.prepare(`SELECT COUNT(DISTINCT e.ticket_id) AS n FROM events e JOIN tickets t ON t.id = e.ticket_id WHERE e.id >= ? AND e.created_at > ? AND e.kind = 'note'
+      AND e.data LIKE '{"text":"Shipped %' AND e.data NOT LIKE '%not pushed to origin: the push failed.%' ${scope}`).get(this.eventIdAt(since), since, ...args) as { n: number }).n);
+  }
 }
 
 /**
@@ -482,11 +537,20 @@ export function runMinion(s: Schedule, maker: Pick<User, 'name' | 'disabled_at'>
 
 export { pacific };
 
-/** The run's window, for its brief: when the last real run was and how many minions were made since (#745). */
-export function runWindow(s: Schedule, lastNumber: number | null, minions: number): string {
+/** The run's window, for its brief: when the last real run was and how many minions were made and ships made since (#745), led by what triggered it (#1798). */
+export function runWindow(s: Schedule, lastNumber: number | null, minions: number, ships: number, triggered = false): string {
   const where = s.gate_scope === 'all' ? 'across all schemes' : 'in this scheme';
   const last = s.last_run_at ? `${pacific(s.last_run_at)}${lastNumber != null ? ` (#${lastNumber})` : ''}` : `never (scheduled ${pacific(s.created_at)})`;
-  return `Last real run: ${last}; since then ${minions} minion${minions === 1 ? '' : 's'} ${where}.`;
+  const count = s.trigger_kind === 'ships' ? ships : minions;
+  const lead = triggered ? `Triggered: ${count} ${s.trigger_kind} since ${pacific(s.last_run_at ?? s.created_at)} (runs after ${s.trigger_count}). ` : '';
+  return `${lead}Last real run: ${last}; since then ${minions} minion${minions === 1 ? '' : 's'} and ${ships} ship${ships === 1 ? '' : 's'} ${where}.`;
+}
+
+/** What a schedule's trigger says, for the page and list_schedules: "runs after 150 ships" (across all schemes, at most every 12 h). */
+export function describeTrigger(s: Pick<Schedule, 'trigger_kind' | 'trigger_count' | 'trigger_gap_hours' | 'gate_scope'>): string | null {
+  if (s.trigger_count == null || !s.trigger_kind) return null;
+  const gap = s.trigger_gap_hours == null ? '' : `, at most every ${s.trigger_gap_hours} h`;
+  return `runs after ${s.trigger_count} ${s.trigger_count === 1 ? s.trigger_kind.slice(0, -1) : s.trigger_kind}${s.gate_scope === 'all' ? ' across all schemes' : ''}${gap}`;
 }
 
 /** The first message of a run's minion: what it is, its window, how to file itself away when there is nothing to report, then the brief. */
@@ -525,6 +589,8 @@ export interface ScheduledRunDeps {
  */
 export class ScheduledRuns {
   private scheduling = false;
+  /** When runDue last looked at the activity triggers (#1798): once an hour is soon enough for a count in the hundreds. */
+  private triggersAt = 0;
 
   private d: ScheduledRunDeps;
 
@@ -532,26 +598,38 @@ export class ScheduledRuns {
     this.d = d;
   }
 
-  async run(s: Schedule, now = Date.now()) {
-    await this.start(s, now);
+  /** Start a run: its calendar slot came, or (`triggered`) its activity trigger's count was hit (#1798). */
+  async run(s: Schedule, now = Date.now(), triggered = false) {
+    await this.start(s, now, triggered);
     this.d.broadcast({ type: 'schedules', projectId: s.project_id });
   }
 
-  private async start(s: Schedule, now: number) {
+  /** Start each schedule whose trigger count was hit since its last real run, once its gap has passed. */
+  async runTriggered(now = Date.now()) {
+    const { store, by } = this.d;
+    for (const s of store.schedules.triggerable(now)) {
+      const count = s.trigger_kind === 'ships' ? store.schedules.shipsSince(s) : store.schedules.minionsSince(s, by);
+      if (count >= s.trigger_count!) await this.run(s, now, true);
+    }
+  }
+
+  private async start(s: Schedule, now: number, triggered = false) {
     const { store, runner, by } = this.d;
     const project = store.getProject(s.project_id);
     const last = s.last_ticket_id ? store.getTicket(s.last_ticket_id) : null;
     if (!project) return store.schedules.remove(s.id);
     // A kill after this slot's minion was made and before its ran mark (C3, #1406): finish that start, not a second one.
-    const cut = store.schedules.cutOff(s, by);
+    const cut = triggered ? null : store.schedules.cutOff(s, by);
     if (cut?.status === 'closed') return store.schedules.ran(s.id, { ticketId: cut.id }, now);
-    if (cut) return this.begin(s, project, cut, last, store.schedules.minionsSince(s, by), now);
+    if (cut) return this.begin(s, project, cut, last, store.schedules.minionsSince(s, by), now, false);
     // Two runs at once would step on each other (and double the cost), so a slot is skipped while the last run works,
     // or waits to resume after a usage limit, an outage or a kill. Not state 'limited': a run that gave up keeps it for good.
-    if (last && (last.status === 'running' || runner.limitWait(last.id) || runner.netWait(last.id) || runner.killWait(last.id))) return store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
-    // The activity gate (#745): a quiet stretch costs nothing, no minion and no note, and the window keeps growing.
+    // A trigger just waits for the next hourly check, quietly: no slot of the calendar's was missed.
+    if (last && (last.status === 'running' || runner.limitWait(last.id) || runner.netWait(last.id) || runner.killWait(last.id))) return triggered ? undefined : store.schedules.ran(s.id, { error: `#${last.number}, the run before, was still working, so this slot was skipped` }, now);
+    // The activity gate (#745): a quiet stretch costs nothing, no minion and no note, and the window keeps growing. It
+    // gates calendar slots; a trigger's own count was just met.
     const minions = store.schedules.minionsSince(s, by);
-    if (s.min_minions != null && minions < s.min_minions) {
+    if (!triggered && s.min_minions != null && minions < s.min_minions) {
       const skip = `Skipped ${pacific(now)}: ${minions} minion${minions === 1 ? '' : 's'} since ${pacific(store.schedules.since(s))} (needs ${s.min_minions})`;
       console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
       return store.schedules.ran(s.id, { skip }, now);
@@ -562,7 +640,7 @@ export class ScheduledRuns {
       if (!newest || newest.at <= store.schedules.since(s)) {
         const skip = `Skipped ${pacific(now)}: no app turns since ${pacific(store.schedules.since(s))}`;
         console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
-        return store.schedules.ran(s.id, { skip }, now);
+        return triggered ? undefined : store.schedules.ran(s.id, { skip }, now);
       }
     }
     // Ship lessons (#1119) skips, as free, a stretch with no new lines or too few open ones to repeat.
@@ -572,7 +650,7 @@ export class ScheduledRuns {
       if (!newest || newest <= store.schedules.since(s) || open < 2) {
         const skip = `Skipped ${pacific(now)}: ${open < 2 ? `${open} open ship lesson${open === 1 ? '' : 's'}, too few to repeat` : `no new ship lessons since ${pacific(store.schedules.since(s))}`}`;
         console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
-        return store.schedules.ran(s.id, { skip }, now);
+        return triggered ? undefined : store.schedules.ran(s.id, { skip }, now);
       }
     }
     let memoryDir: { dir: string; notes: number } | null | undefined;
@@ -584,7 +662,7 @@ export class ScheduledRuns {
       if (why) {
         const skip = `Skipped ${pacific(now)}: ${why}`;
         console.log(`Schedule ${s.id} "${s.name}": ${skip}`);
-        return store.schedules.ran(s.id, { skip }, now);
+        return triggered ? undefined : store.schedules.ran(s.id, { skip }, now);
       }
     }
     try {
@@ -598,7 +676,7 @@ export class ScheduledRuns {
       // Its turns run for whoever made the schedule (their GitHub), or the scheme's owner once they're gone; it's theirs.
       const maker = store.findUser('name', s.created_by);
       const made = await this.d.newMinion(project, runMinion(s, maker), by);
-      await this.begin(s, project, made, last, minions, now);
+      await this.begin(s, project, made, last, minions, now, triggered);
     } catch (err: any) {
       console.error(`Schedule ${s.id} "${s.name}" didn't start:`, err);
       store.schedules.ran(s.id, { error: err.message }, now);
@@ -606,7 +684,7 @@ export class ScheduledRuns {
   }
 
   /** A run's minion exists: give it to the maker, pin it, mark the slot ran and send its brief. Safe to repeat up to the ran mark. */
-  private async begin(s: Schedule, project: Project, { id, number }: { id: number; number: number }, last: Ticket | null | undefined, minions: number, now: number) {
+  private async begin(s: Schedule, project: Project, { id, number }: { id: number; number: number }, last: Ticket | null | undefined, minions: number, now: number, triggered: boolean) {
     const { store, runner, by } = this.d;
     try {
       const maker = store.findUser('name', s.created_by);
@@ -614,10 +692,12 @@ export class ScheduledRuns {
       const pinnedFor = pinForOwner(store, id);
       if (pinnedFor) this.d.broadcast({ type: 'ticket_pin', name: pinnedFor, projectId: project.id, ticketId: id, pinned: true });
       await faultPoint('schedule-started'); // a drill's kill between the minion's start and the slot's ran mark (C3)
-      store.schedules.ran(s.id, { ticketId: id }, now);
+      const ships = store.schedules.shipsSince(s); // counted from `s`, the row as it was before this run
+      store.schedules.ran(s.id, { ticketId: id, triggered }, now);
       store.usage.used('schedule', s.name);
-      runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}).` });
-      const message = runBrief(s, pacific(now), runWindow(s, last?.number ?? null, minions));
+      const why = triggered ? `, early: ${s.trigger_kind === 'ships' ? ships : minions} ${s.trigger_kind} since its last run` : '';
+      runner.emit(id, 'note', { text: `Started by the schedule "${s.name}" (${describeCron(s.cron)}${why}).` });
+      const message = runBrief(s, pacific(now), runWindow(s, last?.number ?? null, minions, ships, triggered));
       const opts = { brief: true, schedule: s.name };
       const send = () => runner.send(id, by, message, [], opts);
       // The minion exists either way; while the box is starved its brief waits (up to 10 minutes) as a sealed row.
@@ -629,11 +709,15 @@ export class ScheduledRuns {
     }
   }
 
-  async runDue() {
+  async runDue(now = Date.now()) {
     if (this.scheduling) return;
     this.scheduling = true;
     try {
-      for (const s of this.d.store.schedules.due()) await this.run(s);
+      for (const s of this.d.store.schedules.due(now)) await this.run(s, now);
+      if (now - this.triggersAt >= HOUR) {
+        this.triggersAt = now;
+        await this.runTriggered(now);
+      }
     } finally {
       this.scheduling = false;
     }

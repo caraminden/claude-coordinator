@@ -28,15 +28,21 @@ function setup() {
   return { store, project, runs, made, sends };
 }
 
-/** A monthly schedule made two days back, so its calendar slot is weeks away. */
+/** A monthly schedule made ten days back, its calendar slot a month away whatever today's date. */
 function monthly(store: Store, projectId: number, extra: object = {}) {
-  return store.schedules.create({ project_id: projectId, name: 'Test audit', cron: '0 7 1 * *', brief: 'b', type: 'chore', created_by: 'Cara', trigger_kind: 'ships', trigger_count: 3, ...extra }, Date.now() - 2 * DAY);
+  const s = store.schedules.create({ project_id: projectId, name: 'Test audit', cron: '0 7 1 * *', brief: 'b', type: 'chore', created_by: 'Cara', trigger_kind: 'ships', trigger_count: 3, ...extra }, Date.now() - 10 * DAY);
+  store.db.prepare('UPDATE schedules SET next_run_at = ? WHERE id = ?').run(Date.now() + 30 * DAY, s.id);
+  return store.schedules.get(s.id)!;
 }
+// Runs in the gap and overlap tests happen days back, so ships made since (at the real clock) fall after them.
+const BACK = () => Date.now() - 5 * DAY;
 
-/** A minion in `projectId` that shipped to main `n` times. */
+/** `n` minions in `projectId` that each shipped to main. */
 function ships(store: Store, projectId: number, n: number, text = 'Shipped abc1234: a fix. Risk low: tests.') {
-  const t = store.createTicket({ project_id: projectId, title: 'work', permission_mode: 'bypassPermissions', created_by: 'Cara' });
-  for (let i = 0; i < n; i++) store.addEvent(t.id, 'note', { text });
+  for (let i = 0; i < n; i++) {
+    const t = store.createTicket({ project_id: projectId, title: 'work', permission_mode: 'bypassPermissions', created_by: 'Cara' });
+    store.addEvent(t.id, 'note', { text });
+  }
 }
 
 test('a schedule with a ship trigger runs early once the count is hit, and its brief says what triggered it', async () => {
@@ -44,6 +50,8 @@ test('a schedule with a ship trigger runs early once the count is hit, and its b
   const s = monthly(store, project.id);
   const slot = s.next_run_at!;
   ships(store, project.id, 2);
+  // A minion's second ship (a follow-up) is still one shipped minion.
+  store.addEvent(store.listTickets(project.id).at(-1)!.id, 'note', { text: 'Shipped abc1235: a follow-up. Risk low: tests.' });
   // Neither a merge into a build branch nor a ship whose push failed is a ship to main; another scheme's ship isn't ours.
   ships(store, project.id, 1, 'Merged def5678 into build/3: a feeder. Risk low: tests.');
   ships(store, project.id, 1, 'Shipped abc1237 "x": a push. Risk low. Shipped locally, not pushed to origin: the push failed.');
@@ -57,7 +65,7 @@ test('a schedule with a ship trigger runs early once the count is hit, and its b
   const after = store.schedules.get(s.id)!;
   assert.equal(after.last_run_at, now);
   assert.equal(after.next_run_at, slot, 'its calendar slot stays where it was');
-  assert.match(sends[0].text, /\nTriggered: 3 ships since .+ P[SD]T \(runs after 3\)\. Last real run: never \(scheduled .+\); since then 4 minions and 3 ships in this scheme\.\n/);
+  assert.match(sends[0].text, /\nTriggered: 3 ships since .+ P[SD]T \(runs after 3\)\. Last real run: never \(scheduled .+\); since then 5 minions and 3 ships in this scheme\.\n/);
 });
 
 test('a triggered schedule does not run again inside its minimum gap, one day unless set', async () => {
@@ -65,7 +73,7 @@ test('a triggered schedule does not run again inside its minimum gap, one day un
   const daily = monthly(store, project.id);
   const short = monthly(store, project.id, { name: 'Code health', trigger_gap_hours: 2 });
   ships(store, project.id, 3);
-  const now = Date.now() + 1000;
+  const now = BACK();
   await runs.runTriggered(now);
   assert.deepEqual(made.sort(), ['Code health', 'Test audit']);
   ships(store, project.id, 5);
@@ -75,7 +83,7 @@ test('a triggered schedule does not run again inside its minimum gap, one day un
   assert.deepEqual(made.slice(2), ['Code health'], 'a 2-hour gap is over, a day is not');
   ships(store, project.id, 3);
   await runs.runTriggered(now + DAY + 1);
-  assert.deepEqual(made.slice(3), ['Test audit'], 'a day on, the default gap is over');
+  assert.deepEqual(made.slice(3).sort(), ['Code health', 'Test audit'], 'a day on, the default gap is over too');
   assert.equal(store.schedules.get(daily.id)!.last_run_at, now + DAY + 1);
   assert.equal(store.schedules.get(short.id)!.trigger_gap_hours, 2);
 });
@@ -84,7 +92,7 @@ test('a trigger never starts a run over a working one, and says nothing about it
   const { store, project, runs, made } = setup();
   const s = monthly(store, project.id);
   ships(store, project.id, 3);
-  const now = Date.now() + 1000;
+  const now = BACK();
   await runs.runTriggered(now);
   const first = store.schedules.get(s.id)!;
   store.updateTicket(first.last_ticket_id!, { status: 'running' });
@@ -119,7 +127,7 @@ test('a schedule with no trigger behaves as before: activity never starts it ear
   assert.deepEqual(made, []);
   await runs.run(store.schedules.get(s.id)!, s.next_run_at!);
   assert.deepEqual(made, ['Test audit']);
-  assert.match(sends[0].text, /\nLast real run: never \(scheduled .+\); since then 1 minion and 50 ships in this scheme\.\n/);
+  assert.match(sends[0].text, /\nLast real run: never \(scheduled .+\); since then 50 minions and 50 ships in this scheme\.\n/);
   assert.doesNotMatch(sends[0].text, /Triggered/);
 });
 

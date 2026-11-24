@@ -3,6 +3,7 @@ name: Monthly retro
 type: research
 model: claude-opus-5-5
 effort: medium
+trigger: 600 minions
 min_minions: 40
 cron: 0 7 1,16 * *
 stagger: 1d within 12d

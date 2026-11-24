@@ -3,6 +3,7 @@ name: Test audit
 type: research
 model: claude-opus-5-5
 effort: high
+trigger: 400 ships
 min_minions: 250
 cron: 0 7 1 * *
 stagger: 1d within 28d

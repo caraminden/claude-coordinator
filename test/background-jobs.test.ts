@@ -161,7 +161,7 @@ test('the activity gate skips a quiet slot at no cost, then runs once enough min
   s = store.schedules.get(sch.id)!;
   assert.deepEqual(made, ['Weekly audit']);
   assert.deepEqual([s.last_skip, s.last_run_at], [null, now + 60_000]);
-  assert.match(sends[0].text, /\nLast real run: never \(scheduled .+ P[SD]T\); since then 3 minions in this scheme\.\n/);
+  assert.match(sends[0].text, /\nLast real run: never \(scheduled .+ P[SD]T\); since then 3 minions and 0 ships in this scheme\.\n/);
 
   // The next window opens at that run: a skip later doesn't move it, so minions made before the skip still count.
   madeAt(store, project.id, now + 90_000);
@@ -172,7 +172,7 @@ test('the activity gate skips a quiet slot at no cost, then runs once enough min
   madeAt(store, project.id, now + 160_000);
   await runs.run(store.schedules.get(sch.id)!, now + 180_000);
   assert.deepEqual(made, ['Weekly audit', 'Weekly audit'], 'the minion from before the skip counts toward the run after it');
-  assert.match(sends[1].text, new RegExp(`Last real run: .+ P[SD]T \\(#${store.getTicket(s.last_ticket_id!)!.number}\\); since then 3 minions in this scheme`));
+  assert.match(sends[1].text, new RegExp(`Last real run: .+ P[SD]T \\(#${store.getTicket(s.last_ticket_id!)!.number}\\); since then 3 minions and 0 ships in this scheme`));
 });
 
 test("the gate doesn't count Taskmasters or minions Citadel started, and counts other schemes only with gate_scope all", async () => {

@@ -1,7 +1,7 @@
 // The desktop app's saved sign-in (desktop/saved-login.cjs, #1754): kept encrypted by Windows (safeStorage) in the
 // Windows account's own %APPDATA%, handed only to Citadel's own top page, dropped only when asked.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -29,14 +29,20 @@ test('a saved sign-in comes back, and the file on disk holds no clear password',
   assert.ok(!readFileSync(join(d, 'saved-login.bin')).toString('utf8').includes('hunter2'));
 });
 
-test('forget deletes it; signing in again without saving leaves nothing to fill', () => {
+test('forget deletes it and says so; forgetting twice is fine', () => {
   const d = dir();
   const s = savedLogin(d, box());
   s.save('cara', 'pw-1234567890');
-  s.forget();
+  assert.equal(s.forget(), true);
   assert.equal(existsSync(join(d, 'saved-login.bin')), false);
   assert.equal(s.get(), null);
-  s.forget(); // forgetting twice is fine
+  assert.equal(s.forget(), true); // nothing there is already forgotten
+});
+
+test('forget says false when the file can\'t be deleted, so the page doesn\'t claim it was', () => {
+  const d = dir();
+  mkdirSync(join(d, 'saved-login.bin')); // a folder where the file goes: deleting it fails
+  assert.equal(savedLogin(d, box()).forget(), false);
 });
 
 test('no Windows encryption: nothing is saved, never in the clear', () => {

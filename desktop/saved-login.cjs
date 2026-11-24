@@ -29,7 +29,8 @@ function savedLogin(dir, box) {
       if (!login || login.length > 64 || !password || password.length > MAX || !available()) return false;
       try { writeFileSync(file, box.encryptString(JSON.stringify({ login, password }))); return true; } catch { return false; }
     },
-    forget() { try { rmSync(file, { force: true }); } catch {} },
+    /** Deletes it; false only when Windows refused (a file that isn't there is already forgotten). */
+    forget() { try { rmSync(file, { force: true }); return true; } catch { return false; } },
   };
 }
 

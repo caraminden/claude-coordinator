@@ -1228,16 +1228,18 @@ function renderLogin() {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const err = document.getElementById('login-error');
+    const body = { login: form.login.value, password: form.password.value };
+    const sent = desk.sent(body); // what was sent, so an edit while it's on its way isn't what gets saved
     try {
-      await api('api/login', { method: 'POST', body: { login: form.login.value, password: form.password.value } });
-      try { localStorage.setItem('cc-login', form.login.value.trim()); } catch {}
-      await desk.signedIn();
+      await api('api/login', { method: 'POST', body });
+      try { localStorage.setItem('cc-login', body.login.trim()); } catch {}
+      await sent.signedIn();
       // A contraption's page sent here by /apps/'s login gate (src/apps.ts) goes back to it.
       const next = new URLSearchParams(location.search).get('next');
       if (next && /^\/apps\/[a-z0-9-]+\//.test(next)) return void location.assign(next);
       start(await api('api/me'));
     } catch (ex) {
-      desk.refused(ex);
+      sent.refused(ex);
       err.textContent = ex.message;
       err.hidden = false;
     }
@@ -1248,52 +1250,66 @@ function renderLogin() {
  * The desktop app's saved password (#1754; Cara, 2026-11-24, "Citadel's own sign-in"): a Remember tick saves it in Windows'
  * locked storage for this Windows account (desktop/saved-login.cjs), and the next sign-in page fills it and waits for the
  * click, never signing in by itself ("if I log out and want to log back in, like to test the sign in page"). Signing out
- * keeps it; Forget, or signing in unticked, drops it, and so does the server refusing it. A browser or phone sees none of this.
+ * keeps it, and so does signing in as another login to test the page; Forget, signing in as the saved login unticked, or
+ * the server refusing it drops it. A browser or phone sees none of this.
  */
 function desktopLogin(form) {
   const bridge = window.citadelDesktop;
-  const none = { signedIn: async () => {}, refused: () => {} };
-  if (!bridge?.savedLogin) return none;
+  if (!bridge?.savedLogin) return { sent: () => ({ signedIn: async () => {}, refused: () => {} }) };
+  let saved = null; // the saved login's name, while one is saved
   let filled = null; // the saved password, while the box still holds it
   const tick = h('input', { type: 'checkbox', name: 'remember' });
   const forget = h('button', { type: 'button', class: 'link', hidden: true }, 'Forget');
-  const row = h('div', { class: 'login-remember', hidden: true },
-    h('label', {}, tick, ' Remember my password on this PC'), forget);
+  // Shown at once, so the button doesn't jump when the saved one arrives; hidden only if Windows can't encrypt.
+  const row = h('div', { class: 'login-remember' }, h('label', {}, tick, ' Remember my password on this PC'), forget);
   form.querySelector('#login-error').before(row);
-  const drop = () => {
-    filled = null;
+  const drop = async () => {
+    if (!(await bridge.forgetLogin().catch(() => false))) {
+      toast("Windows couldn't delete the saved password on this PC. Try again.", { tone: 'warn', ms: 8000 });
+      return false;
+    }
+    saved = filled = null;
     forget.hidden = true;
     tick.checked = false;
-    return bridge.forgetLogin().catch(() => {});
+    return true;
   };
-  forget.addEventListener('click', () => {
-    if (form.password.value === filled) form.password.value = '';
-    drop();
+  forget.addEventListener('click', async () => {
+    const was = filled;
+    if (!(await drop())) return;
+    if (was !== null && form.password.value === was) form.password.value = '';
     toast('Saved password forgotten on this PC');
     form.password.focus();
   });
+  // Typing another login (a test account) unticks, so signing in as it neither saves over nor drops the saved one.
+  form.login.addEventListener('input', () => { if (saved && form.login.value.trim() !== saved) tick.checked = false; });
   bridge.savedLogin().then((r) => {
-    if (!r?.canSave || !form.isConnected) return;
-    row.hidden = false;
-    const saved = r.login;
+    if (!form.isConnected) return;
+    if (!r?.canSave) return void (row.hidden = true);
+    saved = r.login?.login || null;
+    forget.hidden = !saved;
     // What she's already typing wins over the fill.
-    if (!saved || form.password.value || (form.login.value && form.login.value.trim() !== saved.login)) return;
-    form.login.value = saved.login;
-    form.password.value = filled = saved.password;
+    if (!saved || form.password.value || (form.login.value && form.login.value.trim() !== saved)) return;
+    form.login.value = saved;
+    form.password.value = filled = r.login.password;
     tick.checked = true;
-    forget.hidden = false;
-  }, () => {});
+  }, () => { row.hidden = true; });
   return {
-    async signedIn() {
-      if (row.hidden) return;
-      if (tick.checked) await bridge.saveLogin(form.login.value, form.password.value).catch(() => {});
-      else if (!forget.hidden) await drop();
-    },
-    /** A saved password the server turned down (not a lockout or a network failure) is dropped; the form shows as usual. */
-    refused(ex) {
-      if (ex?.status !== 401 || filled === null || form.password.value !== filled) return;
-      drop();
-      form.password.value = '';
+    sent({ login, password }) {
+      const remember = !row.hidden && tick.checked;
+      const asSaved = saved !== null && login.trim() === saved;
+      return {
+        async signedIn() {
+          if (remember) {
+            const ok = await bridge.saveLogin(login, password).catch(() => false);
+            if (!ok) toast("Signed in, but Windows couldn't save your password on this PC.", { tone: 'warn', ms: 8000 });
+          } else if (asSaved) await drop();
+        },
+        /** The saved password turned down (not a lockout or a network failure) is dropped; the form shows as usual. */
+        refused(ex) {
+          if (ex?.status !== 401 || !asSaved || filled === null || password !== filled) return;
+          drop().then((ok) => { if (ok && form.password.value === password) form.password.value = ''; });
+        },
+      };
     },
   };
 }

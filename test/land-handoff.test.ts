@@ -855,6 +855,8 @@ test('a high bug fix with fix_proof ships without a go and its line says so; wit
     assert.match((await handOff({ ...body, fix_proof: { ...proof, test: 'tools/land.sh' } })).error, /neither changed by your branch nor a test file/, 'any file is no test');
     assert.match((await handOff({ ...body, fix_proof: { ...proof, review: '2 findings left' } })).error, /starts with "clean"/);
     assert.match((await handOff({ ...body, fix_proof: { ...proof, red_output: undefined } })).error, /red_output is required/);
+    assert.match((await handOff({ ...body, summary: undefined })).error, /Summary is required: call hand_off_land again with summary .*risk_reason/, 'a missing summary names the fix (#1820)');
+    assert.match((await handOff({ ...body, risk_reason: undefined })).error, /Risk reason is required: call hand_off_land again with risk_reason/, 'a missing risk reason names the fix (#1820)');
     store.setProjectSettings(project.id, { go_from: 'all' });
     assert.match((await handOff(body)).error, /every change ships only on a person's go: name who gave it and when in go, or ask with a ship card \(kind ship\) first$/, 'where every change waits, a fix waits too');
     store.setProjectSettings(project.id, { go_from: 'high' });

@@ -6,6 +6,7 @@
  * call, the definition or CLAUDE_CODE_EFFORT_LEVEL. Built-ins (general-purpose, Explore, Plan) have no definition, so
  * they need both on the call. Forks run on the parent's model by design and pass. The reason quotes the job table in
  * citadel:subagents (the one place its rows live). Fails open: an agent it can't find or read goes through.
+ * A call with a model but no effort on Explore or general-purpose gets the job table's default effort for it (#1820).
  * A call it lets through without `run_in_background` gets `false` (#1031): Claude Code backgrounds a Grunt by
  * default, and a turn that ends on "started it" reads as its answer until the result wakes it. A call that
  * sets it either way keeps its choice.
@@ -18,6 +19,8 @@ import type { HookInput } from './hook-input.ts';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILT_INS = new Set(['general-purpose', 'Explore', 'Plan']);
+/** The job-table row whose effort stands in for a call that leaves it out. */
+const DEFAULT_ROW: Record<string, RegExp> = { Explore: /^`Explore` sweep/, 'general-purpose': /^Known-shape worker \(/ };
 
 /** A definition file's model, effort and name from its frontmatter, or null when it can't be read. */
 function frontmatter(file: string): Record<string, string> | null {
@@ -89,7 +92,8 @@ export function gruntModelHook(input: HookInput): string | null {
   if (input?.tool_name !== 'Agent' && input?.tool_name !== 'Task') return null;
   const ti = input?.tool_input ?? {};
   // Only a plugin's hook may change a call's input; Claude Code refuses the call if a user's settings hook tries.
-  const pass = () => (ti.run_in_background === undefined ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...ti, run_in_background: false } } }) : null);
+  const filled = { effort: false };
+  const pass = () => (ti.run_in_background === undefined || filled.effort ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...ti, run_in_background: ti.run_in_background ?? false } } }) : null);
   const type = String(ti.subagent_type || 'general-purpose');
   if (type === 'fork') return pass();
   let def: Record<string, string> | null = {};
@@ -98,7 +102,16 @@ export function gruntModelHook(input: HookInput): string | null {
     if (!def) return pass();
   }
   const hasModel = Boolean(ti.model) || Boolean(def.model && def.model !== 'inherit');
-  const hasEffort = Boolean(ti.effort) || Boolean(def.effort) || Boolean(process.env.CLAUDE_CODE_EFFORT_LEVEL);
+  let hasEffort = Boolean(ti.effort) || Boolean(def.effort) || Boolean(process.env.CLAUDE_CODE_EFFORT_LEVEL);
+  // A missing effort on Explore or general-purpose is the job table's default for it (#1820): still chosen, by the table. A model is never filled in.
+  if (hasModel && !hasEffort && DEFAULT_ROW[type]) {
+    const row = jobTable().find((r) => DEFAULT_ROW[type].test(r.job));
+    if (row && /^(low|medium|high)$/.test(row.effort)) {
+      ti.effort = row.effort;
+      filled.effort = true;
+      hasEffort = true;
+    }
+  }
   if (hasModel && hasEffort) return pass();
   const missing = [!hasModel && 'no model', !hasEffort && 'no effort'].filter(Boolean).join(' and ');
   const rows = jobTable();

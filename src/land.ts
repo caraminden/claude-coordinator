@@ -79,7 +79,7 @@ export function landArgs(body: { into?: unknown; files?: unknown; full?: unknown
   }
   // Only a missing into is a plain land: an empty or wrong one is refused, never read as main.
   if (into === undefined || into === null) {
-    if (full || list.length) throw new Error('full and files go with into: build/<n>');
+    if (full || list.length) throw new Error("full and files go with into: build/<n> (a feeder's or build minion's merge). For a plain ship to main, drop full and files and call again with just summary, risk, risk_reason, go and learned.");
     return [];
   }
   if (!/^build\/[1-9][0-9]{0,5}$/.test(into)) throw new Error(`into must be a build branch, build/<n>, not ${JSON.stringify(into.slice(0, 80))}`);

@@ -432,12 +432,19 @@ test('grunt-model guard: sends back an Agent call with no deliberate model or ef
   const ran = (out: string | null) => !!out && (!JSON.parse(out).hookSpecificOutput.permissionDecision && JSON.parse(out).hookSpecificOutput.updatedInput.run_in_background === false);
 
   // A bare call (general-purpose by default) and built-ins with half a choice are sent back, pointing at the table.
-  for (const ti of [{}, { subagent_type: 'general-purpose' }, { subagent_type: 'Explore', model: 'sonnet' }, { subagent_type: 'Plan', effort: 'high' }]) assert.ok(denied(call(ti)), JSON.stringify(ti));
+  for (const ti of [{}, { subagent_type: 'general-purpose' }, { subagent_type: 'Explore', effort: 'low' }, { subagent_type: 'Plan', effort: 'high' }, { subagent_type: 'Plan', model: 'opus' }]) assert.ok(denied(call(ti)), JSON.stringify(ti));
   const bare = reason(call({}));
   assert.match(bare, /citadel:subagents/);
   assert.match(bare, /Known-shape worker.*sonnet.*medium/, 'quotes the table rows');
   assert.match(reason(call({ subagent_type: 'Explore' })), /Row for Explore: .*sonnet, low/, 'names the row when the agent type has one');
-  assert.match(reason(call({ subagent_type: 'Explore', model: 'sonnet' })), /no effort/);
+  assert.match(reason(call({ subagent_type: 'Explore', effort: 'low' })), /no model/);
+  // A model with no effort on Explore or general-purpose gets the job table's default (#1820); the model is never filled in.
+  const filled = (ti: object) => JSON.parse(call(ti)!).hookSpecificOutput.updatedInput;
+  assert.equal(filled({ subagent_type: 'Explore', model: 'sonnet' }).effort, 'low');
+  assert.equal(filled({ model: 'sonnet' }).effort, 'medium', 'general-purpose: the known-shape worker row');
+  assert.equal(filled({ subagent_type: 'Explore', model: 'sonnet', run_in_background: true }).run_in_background, true, 'a filled call keeps its background choice');
+  assert.equal(filled({ model: 'opus', effort: 'high' }).effort, 'high', 'a chosen effort is kept');
+  assert.ok(denied(call({ subagent_type: 'Plan', model: 'opus' })), 'Plan still needs its effort chosen');
   // Both on the call, a definition that pins both, or a definition plus the missing half on the call go through.
   assert.ok(ran(call({ subagent_type: 'general-purpose', model: 'sonnet', effort: 'medium' })));
   assert.ok(ran(call({ model: 'haiku', effort: 'low' })));

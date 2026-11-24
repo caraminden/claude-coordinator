@@ -1422,9 +1422,19 @@ export const ticketRoutes: Route[] = [
       // No risk label is high (Q10, Build 4): a scheme whose pre-ship review is off, with nothing else giving the label, has every ship wait for a person's go.
       const labeller = app.store.reviews.labelGiver(ticket.project_id);
       const unlabelled = labeller ? '' : "this scheme's pre-ship review is off and nothing else gives the risk label";
+      // A missing field names its fix, so the second call is right first time (#1820).
+      const need = <T,>(f: () => T, hint: string): T => {
+        try {
+          return f();
+        } catch (e) {
+          if (e instanceof HttpError && /is required$/.test(e.message)) throw new HttpError(e.status, `${e.message}: call hand_off_land again with ${hint}`);
+          throw e;
+        }
+      };
+      const SUMMARY = 'summary (what ships, one line), risk (low, medium or high), risk_reason (one line) and learned';
       const h: Handoff = unlabelled
-        ? { summary: str(body.summary, 'Summary', 300), risk: 'high', reason: `No risk label: ${unlabelled}${typeof body.risk_reason === 'string' && body.risk_reason.trim() ? `. ${body.risk_reason.trim()}` : ''}`.slice(0, 300) }
-        : { summary: str(body.summary, 'Summary', 300), risk: oneOf(body.risk, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: str(body.risk_reason, 'Risk reason', 300) };
+        ? { summary: need(() => str(body.summary, 'Summary', 300), SUMMARY), risk: 'high', reason: `No risk label: ${unlabelled}${typeof body.risk_reason === 'string' && body.risk_reason.trim() ? `. ${body.risk_reason.trim()}` : ''}`.slice(0, 300) }
+        : { summary: need(() => str(body.summary, 'Summary', 300), SUMMARY), risk: oneOf(body.risk, ['low', 'medium', 'high'], 'Risk') as Handoff['risk'], reason: need(() => str(body.risk_reason, 'Risk reason', 300), 'risk_reason: one line on why that label, plus what you chose not to fix') };
       // The scheme's go threshold (#1043, Shipping in Minion rules): from that label up, a change ships only on a person's go.
       // A feeder's merge into its build branch is covered by the build's go card (buildLines in prompts.ts).
       const project = app.store.getProject(ticket.project_id);

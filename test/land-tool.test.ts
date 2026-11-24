@@ -219,7 +219,7 @@ test('landArgs gives land.sh only the shapes it accepts, files as paths inside t
     refused({ into: 'build/7', full: true, files: ['test/a.test.ts'] }, /name no files/);
     refused({ into: 'build/7', full: 'yes' }, /full must be/);
     refused({ files: ['test/a.test.ts'] }, /go with into/);
-    refused({ full: true }, /go with into/);
+    refused({ full: true }, /go with into.*drop full and files/);
     refused({ build: true, into: 'build/7' }, /build takes nothing more/);
     refused({ build: true, files: ['test/a.test.ts'] }, /build takes nothing more/);
     refused({ build: 'true' }, /build must be/);

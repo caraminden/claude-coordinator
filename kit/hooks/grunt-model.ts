@@ -105,7 +105,7 @@ export function gruntModelHook(input: HookInput): string | null {
   let hasEffort = Boolean(ti.effort) || Boolean(def.effort) || Boolean(process.env.CLAUDE_CODE_EFFORT_LEVEL);
   // A missing effort on Explore or general-purpose is the job table's default for it (#1820): still chosen, by the table. A model is never filled in.
   if (hasModel && !hasEffort && DEFAULT_ROW[type]) {
-    const row = jobTable().find((r) => DEFAULT_ROW[type].test(r.job));
+    const row = (() => { try { return jobTable(); } catch { return []; } })().find((r) => DEFAULT_ROW[type].test(r.job));
     if (row && /^(low|medium|high)$/.test(row.effort)) {
       ti.effort = row.effort;
       filled.effort = true;

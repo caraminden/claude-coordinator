@@ -14,7 +14,7 @@ const lines = (p: string[], m = map) => affected(m, p, tracked, repo);
 
 // Tests that read the repo (a snapshot, a budget, a lint over many files) instead of one module: a change anywhere can
 // break them. shortcut: a hand-kept list, so a new repo-wide test must be added here; upgrade to detecting by what it reads.
-const REPO_WIDE = ['access-matrix', 'prompt-budget', 'schema-compat', 'pipeline-files', 'db-setup', 'host-check', 'ui-contract', 'hand-built-parts', 'relative-urls', 'theme', 'sw', 'ps1-lint', 'raw-log-read', 'one-until', 'skill-evals'].map((n) => `test/${n}.test.ts`);
+const REPO_WIDE = ['access-matrix', 'prompt-budget', 'schema-compat', 'pipeline-files', 'db-setup', 'host-check', 'ui-contract', 'hand-built-parts', 'relative-urls', 'theme', 'sw', 'ps1-lint', 'raw-log-read', 'one-until', 'skill-evals', 'format'].map((n) => `test/${n}.test.ts`);
 
 test('globs: * stays in a folder, ** crosses them, **/ may be no folder', () => {
   assert.ok(globRe('public/**').test('public/ui/chat.js'));

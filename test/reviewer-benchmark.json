@@ -1,0 +1,57 @@
+{
+ "hash": "fc78d6d1e64b86db",
+ "parts": {
+  "reviewer": "74365b1b33254f33",
+  "self-review §2": "d2990a67150f6f0c",
+  "lenses": "2278765ce0f9add3",
+  "ponytail-review": "9dd27f8bc79cbdf2"
+ },
+ "at": "2026-11-24",
+ "model": "sonnet/medium",
+ "lessons": [
+  "race with no wrong outcome"
+ ],
+ "passes": 2,
+ "planted": {
+  "named": [
+   21,
+   19
+  ],
+  "of": 22,
+  "casesNamed": [
+   21,
+   19
+  ],
+  "controlsWith": [
+   2,
+   2
+  ],
+  "controls": 5,
+  "findings": [
+   46,
+   44
+  ]
+ },
+ "escapes": {
+  "named": [
+   4,
+   2
+  ],
+  "of": 36,
+  "casesNamed": [
+   4,
+   2
+  ],
+  "controlsWith": [
+   6,
+   4
+  ],
+  "controls": 10,
+  "findings": [
+   21,
+   18
+  ]
+ },
+ "cost": 27.33,
+ "results": "shared/project/reports/reviewer-benchmark-baseline-2026-11.md"
+}

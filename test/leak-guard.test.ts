@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 
 const gone = `${tmpdir()}/leak-guard-test-gone-${process.pid}/x`;
 const pidOf = (marker: string) => Number(spawnSync('pgrep', ['-f', marker], { encoding: 'utf8' }).stdout.trim().split('\n')[0]);
-const stop = (pid: number) => { try { process.kill(pid, 'SIGKILL'); } catch {} };
+// The shell and the sleep it waits on (#1763: killing the shell alone left the sleep running).
+const stop = (pid: number) => { spawnSync('pkill', ['-KILL', '-P', String(pid)]); try { process.kill(pid, 'SIGKILL'); } catch {} };
 
 test('a process that is not this run\'s, with a live parent of its own, is left alone (#1223)', async () => {
   // A detached shell (reparented to init) starts a child: the child's chain never reaches this run.

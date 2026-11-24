@@ -115,7 +115,7 @@ const ADDED_BUDGET = 3_350; // down from 3,850 with #1575 (3,072 that day); +100
 test("a minion's always-loaded tool definitions stay within their budget", () => {
   for (const env of [{}, { COORDINATOR_DEPLOYS: '1' }, { COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }, { COORDINATOR_DEPLOYS: '1', COORDINATOR_HOME_CONTRAPTIONS: 'peek-auras' }]) {
     const input = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n';
-    const r = spawnSync(process.execPath, ['src/mcp.ts'], { input, encoding: 'utf8', env: { ...process.env, COORDINATOR_ROLE: 'thread', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_APP_INSTRUCTIONS: '', COORDINATOR_DEPLOYS: '', COORDINATOR_HOME_CONTRAPTIONS: '', ...env } });
+    const r = spawnSync(process.execPath, ['src/mcp.ts'], { input, encoding: 'utf8', env: { ...process.env, COORDINATOR_ROLE: 'thread', COORDINATOR_PROJECT: '1', COORDINATOR_TICKET: '1', COORDINATOR_APP_INSTRUCTIONS: '', COORDINATOR_DEPLOYS: '', COORDINATOR_HOME_CONTRAPTIONS: '', TMPDIR: '', ...env } }); // no TMPDIR: no held tool list (src/tool-hold.ts) left behind
     const tools = JSON.parse(r.stdout.split('\n')[0]).result.tools.filter((t: any) => t._meta?.['anthropic/alwaysLoad']);
     assert.deepEqual(tools.map((t: any) => t.name).sort(), ['ask_question', 'close_self', 'hand_off_land', 'message_coordinator', 'plan', 'set_properties', 'set_thread_status'], JSON.stringify(env));
     const sizes = tools.map((t: any) => ({ name: t.name, n: JSON.stringify({ name: t.name, description: t.description, input_schema: t.inputSchema }).length }));

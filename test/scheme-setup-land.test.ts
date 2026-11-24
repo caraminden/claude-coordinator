@@ -151,7 +151,7 @@ test('--check (#770) says whether the rebase onto main would conflict, naming th
   const main = git(r.main, 'rev-parse', 'main');
   res = check();
   assert.equal(res.status, 3);
-  assert.equal(res.stderr, `land: ticket/1-x won't rebase onto main (${main.slice(0, 7)} "a.txt: theirs") cleanly, by git merge-tree at hand-off, so nothing landed; conflicted files: a.txt. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again\n`);
+  assert.equal(res.stderr, `land: ticket/1-x won't rebase onto main (${main.slice(0, 7)} "a.txt: theirs") cleanly, by git merge-tree at hand-off, so nothing landed; conflicted files: a.txt. On conflicts: run git rebase main, resolve them keeping the other minions' changes, re-test, commit, then run this again. If every conflicted file is a command's output (a reformat, a baseline, generated files), declare it instead: a commit with the trailers Regenerate: <command> and Regenerate-files: <those files>, and the ship makes them again after its rebase\n`);
   assert.equal(git(r.main, 'rev-parse', 'main'), main);
   assert.equal(git(r.wt, 'rev-parse', 'HEAD'), mine);
   assert.equal(git(r.wt, 'status', '--porcelain'), '');

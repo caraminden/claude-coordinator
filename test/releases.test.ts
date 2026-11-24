@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -71,6 +71,7 @@ function world(news?: ConstructorParameters<typeof CitadelServer>[0]['news']) {
     minion,
     land,
     clearLine,
+    state,
     setTurns: (n: number) => (turns = n),
     setHead: (h: string | null) => (head = h),
   };
@@ -495,6 +496,28 @@ test('a ship train (#1303): the riders are in the release under way, right behin
     w.server.read()[0].line.map((e) => e.movable),
     [false, false, false, false],
   );
+});
+
+test("a ship that holds the line (a Regenerate ship, #1827) is first among the waiters, can't be moved, and says why", async () => {
+  const w = world();
+  const a = w.minion('Plain'),
+    h = w.minion('Reformat');
+  w.land(1, a.branch, 0, 'waiting', 20);
+  w.land(2, h.branch, 0, 'waiting', 10);
+  for (const [n, end] of [
+    ['0000000001', 'order\n'],
+    ['0000000002', 'order\nhold\n'],
+  ]) appendFileSync(join(w.state, 'queue', n), end);
+  await w.waits.poll();
+  const line = w.server.read()[0].line;
+  assert.deepEqual(
+    line.map((e) => [e.ticketId, e.movable]),
+    [
+      [h.id, false],
+      [a.id, true],
+    ],
+  );
+  assert.match(line[0].why ?? '', /holds the line/);
 });
 
 // #1398: a fix shipped without a go says so on its Releases row, read from its newest shipped line; one still on its way

@@ -11,7 +11,7 @@ import { desktopPaths, type DesktopIndex, type DesktopTarget } from './desktop-f
 import type { Contains, Green, Pin } from './last-green.ts';
 import type { ContraptionDeployRow, ContraptionRow, Project, Store, Ticket } from './db.ts';
 import { verdict, type PrSnapshot } from './github.ts';
-import { BEHIND_OLD, CITADEL_TARGET, git, landedIn, OLD_LAND, reachedMain, releaseOf, type Change, type LineEntry, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
+import { BEHIND_OLD, CITADEL_TARGET, HOLDS_LINE, git, landedIn, OLD_LAND, reachedMain, releaseOf, type Change, type LineEntry, type Landed, type Next, type Progress, type Reader, type Release, type TargetView, type TestCopy } from './releases.ts';
 import { holds, shipsTo, type BuildFile, type Found, type TargetFinder } from './release-targets.ts';
 import { repoSlug } from './prlinks.ts';
 import { behindOld, median, ordinal, readHeavy, readQueue, type LandTicket } from './waits.ts';
@@ -1180,10 +1180,10 @@ export class LandsInFlight {
         holds: !waits,
         place: ordinal(at + 1),
         seq: l.seq,
-        movable: waits && !!l.orders && q!.current && !behindOld(q!.line, l),
+        movable: waits && !l.holds && !!l.orders && q!.current && !behindOld(q!.line, l),
         stage: waits ? 'line' : 'land',
         since: l.mtime,
-        ...(waits && !q!.current ? { why: OLD_SCHEME_LAND } : waits && !l.orders ? { why: OLD_LAND } : waits && behindOld(q!.line, l) ? { why: BEHIND_OLD } : {}),
+        ...(waits && !q!.current ? { why: OLD_SCHEME_LAND } : waits && l.holds ? { why: HOLDS_LINE } : waits && !l.orders ? { why: OLD_LAND } : waits && behindOld(q!.line, l) ? { why: BEHIND_OLD } : {}),
       };
       for (const tv of mine.filter((v) => on.has(v.target.id))) {
         if (tv.next?.changes.some((c) => c.ticketId === id)) continue;

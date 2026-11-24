@@ -341,3 +341,16 @@ test('a scan-style guard test that imports nothing still pins the ship that turn
   for (const i of [1, 2, 3, 5]) assert.equal(done[i - 1].status, 0, `ship ${i}: ${done[i - 1].stderr}`);
   l.done();
 });
+
+// #1827: a ship that declares Regenerate files holds the line. In line behind ship 1's deploy with ships 2 and 3 ahead
+// of it, ship 4 goes next, alone; the ships behind may stack on it (early next) but none ships before it.
+test('a ship that declares Regenerate files goes first among the waiters, alone, and the ships ahead of it in line wait for it', async () => {
+  const l = await line([{}, {}, {}, { trailers: 'Regenerate: true\nRegenerate-files: f4.txt' }, {}]);
+  assert.match(l.out[3], /ticket\/4-x declares Regenerate files \(f4\.txt\), so it holds the line/);
+  const done = await l.go();
+  done.forEach((d, i) => assert.equal(d.status, 0, `ship ${i + 1}: ${d.stderr}`));
+  assert.deepEqual(l.subjects(), ['base', 'f1.txt: 1', 'f4.txt: 4', 'f2.txt: 2', 'f3.txt: 3', 'f5.txt: 5']);
+  assert.doesNotMatch(done[3].stderr, /ship train:/, 'it ships alone');
+  assert.match(done[1].stderr, /in line for the deploy lock, about \d+ min \(ahead: ticket\/4-x/, 'ship 2, first in line before it, waited behind it');
+  l.done();
+});

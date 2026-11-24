@@ -296,9 +296,40 @@ under_of() {
 numbers_git() {
   local side=$1
   shift
-  git -c "core.attributesFile=$tools/ship-numbers.attributes" -c "merge.citadel-numbers.name=land.sh's ship-time merges" \
+  git -c "core.attributesFile=${regen_attrs:-$tools/ship-numbers.attributes}" -c "merge.citadel-regen.name=land.sh: a Regenerate file, made again after the rebase" -c merge.citadel-regen.driver=true \
+    -c "merge.citadel-numbers.name=land.sh's ship-time merges" \
     -c "merge.citadel-numbers.driver=if [ -f '$tools/land-core.sh' ]; then CITADEL_TOOLS='$tools' bash '$tools/land-core.sh' --merge $side %O %A %B %P; elif [ -f '$tools/ship-numbers.ts' ]; then '$tools/citadel-node' --no-warnings '$tools/ship-numbers.ts' merge $side %O %A %B; else git merge-file %A %O %B; fi" "$@"
 }
+# Regenerated files (#1827; Cara, 2026-11-24: "a way for them to make an update at the front of the CI queue to
+# preemptively fix a foreseeable issue instead of having to wait for the queue to totally empty while constantly being
+# kicked out"). A ship whose diff is a command's output (a reformat, a baseline, generated files) says so with trailers
+# on its own commits:
+#   Regenerate: <a command, run with bash from the repo's top>
+#   Regenerate-files: <the files it writes, as .gitattributes patterns, space-separated>
+# Every merge numbers_git makes for it then takes main's side of those files instead of stopping on them (the
+# citadel-regen driver keeps %A, main's side in a rebase and in merge-tree), so the early checks pass it too; after the
+# rebase each command runs again on main and what it wrote is committed (regen_run, below). A conflict in any other
+# file stops as before. Such a ship holds the line (QUEUE_HOLD, below). Land and --into only; the prompt baseline is
+# this step's built-in case. shortcut: a modify/delete conflict in a declared file, or a .gitattributes merge= on one,
+# still stops, and a hand edit to a declared file is lost when main changed it too: declare only what the command writes.
+regen_cmds=() regen_pats=() regen_attrs=''
+if [[ $mode = land || $mode = into ]]; then
+  regen_from=main
+  [ "$mode" = land ] || regen_from=refs/heads/$build
+  # From the branch as it was before the rebase on a re-run: a declared commit whose files main already has drops out of it.
+  mapfile -t regen_cmds < <(git log --reverse --format='%(trailers:key=Regenerate,valueonly,unfold)' "$regen_from..${LAND_PRE:-HEAD}" | awk 'NF && !seen[$0]++')
+  read -ra regen_pats <<<"$(git log --format='%(trailers:key=Regenerate-files,valueonly,unfold)' "$regen_from..${LAND_PRE:-HEAD}" | tr '\n' ' ')" || true
+  [ ${#regen_cmds[@]} -gt 0 ] || [ ${#regen_pats[@]} -eq 0 ] || refuse "$branch has a Regenerate-files: trailer but no Regenerate: <command> one: add the command that writes them (git commit --allow-empty with both trailers), then this again. Nothing landed"
+  [ ${#regen_pats[@]} -gt 0 ] || [ ${#regen_cmds[@]} -eq 0 ] || refuse "$branch has a Regenerate: trailer but no Regenerate-files: <patterns> one naming what the command writes: add it (git commit --allow-empty with both trailers), then this again. Nothing landed"
+  for p in "${regen_pats[@]}"; do
+    case $p in '!'* | '#'* | *=*) refuse "Regenerate-files: takes plain .gitattributes patterns, not \"$p\". Nothing landed" ;; esac
+  done
+  if [ ${#regen_cmds[@]} -gt 0 ]; then
+    regen_attrs=$(git rev-parse --absolute-git-dir)/land-regen.attributes
+    { cat "$tools/ship-numbers.attributes"; printf '%s citadel-regen merge=citadel-regen\n' "${regen_pats[@]}"; } >"$regen_attrs.$$"
+    mv -f "$regen_attrs.$$" "$regen_attrs"
+  fi
+fi
 # A conflict in src/db.ts the driver couldn't sort out: the number to take, from <onto>'s history.
 number_hint() {
   local n
@@ -307,10 +338,11 @@ number_hint() {
   [ -z "$n" ] || echo " SCHEMA_HISTORY ends at $n on ${2#refs/heads/}: number this branch's new lines from $((n + 1)), and its schema_version checks with them."
 }
 # What to do about a conflict, the same for a rebase or merge that stopped and for the early check below.
+regen_hint=" If every conflicted file is a command's output (a reformat, a baseline, generated files), declare it instead: a commit with the trailers Regenerate: <command> and Regenerate-files: <those files>, and the ship makes them again on main"
 conflict_fix() {
   case $mode in
-    land) echo "On conflicts: run git rebase ${under:+--onto }main${under:+ $(git rev-parse --short "$under")}, resolve them keeping the other minions' changes, re-test, commit, then run this again" ;;
-    into) echo "On conflicts: run git rebase $build, resolve them keeping the other feeders' changes, re-test, commit, then run this again" ;;
+    land) echo "On conflicts: run git rebase ${under:+--onto }main${under:+ $(git rev-parse --short "$under")}, resolve them keeping the other minions' changes, re-test, commit, then run this again.$regen_hint" ;;
+    into) echo "On conflicts: run git rebase $build, resolve them keeping the other feeders' changes, re-test, commit, then run this again.$regen_hint" ;;
     build) echo "Take main in on your branch by hand (tools/citadel-node tools/ship-numbers.ts take main: git merge main that renumbers the build's schema lines main took), resolve it keeping both sides, run tools/land.sh --into $build --full, then this again" ;;
   esac
 }
@@ -506,6 +538,13 @@ fi
 # On landed or refused this ends the landing, as its own ship would have.
 train_dir=$state/train riding=''
 [ "$mode" != land ] || [ "${LAND_TRAIN:-1}" = 0 ] || QUEUE_TRAIN=train # the ticket's 6th line (tools/deploy-queue.sh)
+# A Regenerate ship (above) holds the line instead (Cara picked "Regenerate + hold the line", 2026-11-24): it waits at
+# the front, rides no train and takes no riders, and the restart lock keeps the next ship until it is live. Anything
+# that ships ahead of it would only make its command run on a newer main; anything batched with it would conflict.
+if [ "$mode" = land ] && [ -n "$regen_attrs" ]; then
+  QUEUE_TRAIN=hold
+  [ -n "$quiet" ] || say "$branch declares Regenerate files (${regen_pats[*]}), so it holds the line: it goes first among the waiters, alone, and nothing ships ahead of it"
+fi
 train_verdict() {
   local f=$train_dir/${DEPLOY_QUEUE_TICKET##*/} v a b c d e x lines=() at requeue=''
   if [ -z "${DEPLOY_QUEUE_TICKET:-}" ] || [ ! -s "$f" ]; then
@@ -747,14 +786,44 @@ if [ -n "$adr_onto" ] && [ -f "$tools/ship-numbers.ts" ]; then
     [ "$mode" != into ] || claims_check main # its link rewrites may reach a file another feeder claims
   fi
 fi
-# The prompt baseline (#1418): a branch that changed it got main's copy from the merge (numbers_git above), so it is
-# measured again on the merged prompts. shortcut: not for --build, whose merge of main keeps main's baseline (it only
-# lists what grew, it never fails a test); upgrade if a build's baseline going stale bites.
+# <commit title> <command> <patterns...>: run a Regenerate command (above) on the rebased branch and commit what it
+# changed, if anything. It may change only files the patterns (all the branch declared) name: when it fails or writes
+# elsewhere, the worktree is put back and the land refused. Its fds 6, 7 and 9 (the locks) are closed, so a process it
+# leaves behind can't hold the line.
+regen_run() {
+  local title=$1 cmd=$2 log rc=0 was chk out=() bad=() new=() why
+  shift 2
+  was=$(git -c core.quotePath=false ls-files --others --exclude-standard)
+  log=$(mktemp "${TMPDIR:-/tmp}/land-regen.XXXXXX")
+  [ -n "$quiet" ] || say "making ${*} again on main ($(git rev-parse --short HEAD)): $cmd"
+  (timeout "${LAND_REGEN_TIMEOUT:-900}" bash -c "$cmd") </dev/null >"$log" 2>&1 9>&- 7>&- 6>&- || rc=$?
+  mapfile -t new < <(comm -13 <(sort <<<"$was") <(git -c core.quotePath=false ls-files --others --exclude-standard | sort) | awk NF)
+  mapfile -t out < <({ git -c core.quotePath=false diff --name-only HEAD; printf '%s\n' "${new[@]}"; } | awk 'NF && !seen[$0]++')
+  if [ ${#out[@]} -gt 0 ]; then
+    chk=$(git rev-parse --absolute-git-dir)/land-regen-check.attributes
+    printf '%s citadel-regen\n' "$@" >"$chk"
+    mapfile -t bad < <(printf '%s\n' "${out[@]}" | git -c "core.attributesFile=$chk" check-attr --stdin citadel-regen | awk -F': ' '$NF != "set" { print $1 }')
+  fi
+  if [ "$rc" != 0 ] || [ ${#bad[@]} -gt 0 ]; then
+    git reset -q --hard HEAD
+    [ ${#new[@]} -eq 0 ] || git --literal-pathspecs clean -fq -- "${new[@]}"
+    why=$(tail -n 5 "$log" | tr '\n' ' ')
+    rm -f "$log"
+    [ "$rc" = 0 ] || refuse "the Regenerate command \`$cmd\` $([ "$rc" = 124 ] && echo "ran past ${LAND_REGEN_TIMEOUT:-900} s" || echo "failed (exit $rc)") on main ($(git rev-parse --short HEAD)), so nothing landed and what it wrote was put back${why:+. Its output ended: $why}. Run it on your rebased branch, fix it, commit, then this again"
+    refuse "the Regenerate command \`$cmd\` changed files outside Regenerate-files ($*): $(echo "${bad[@]}"), so nothing landed and they were put back. Add them to Regenerate-files: or stop the command writing them, then this again"
+  fi
+  rm -f "$log"
+  [ ${#out[@]} -gt 0 ] || return 0
+  git --literal-pathspecs add -A -- "${out[@]}"
+  git diff --cached --quiet || git commit -q -m "$title" -m "Made again on main ($(git rev-parse --short main)) by tools/land.sh (#1827)."
+}
+n=${branch#ticket/} n=${n%%-*}
+for c in "${regen_cmds[@]}"; do regen_run "${n:+#$n: }regenerated at ship time: $c" "$c" "${regen_pats[@]}"; done
+# The prompt baseline (#1418), the built-in case: a branch that changed it got main's copy from the merge (numbers_git
+# above), so it is measured again on the merged prompts. shortcut: not for --build, whose merge of main keeps main's
+# baseline (it only lists what grew, it never fails a test); upgrade if a build's baseline going stale bites.
 if [[ $mode = land || $mode = into ]] && [ -f test/prompt-budget.test.ts ] && ! git diff --quiet "$(git merge-base "$adr_onto" "$pre")" "$pre" -- test/prompt-baseline.json; then
-  PROMPT_BASELINE=write "$tools/citadel-node" --no-warnings --test test/prompt-budget.test.ts >/dev/null 2>&1 </dev/null || true
-  git add test/prompt-baseline.json
-  n=${branch#ticket/} n=${n%%-*}
-  git diff --cached --quiet || git commit -q -m "${n:+#$n: }test/prompt-baseline.json measured again at ship time"
+  regen_run "${n:+#$n: }test/prompt-baseline.json measured again at ship time" "PROMPT_BASELINE=write $(printf %q "$tools/citadel-node") --no-warnings --test test/prompt-budget.test.ts >/dev/null 2>&1 || true" test/prompt-baseline.json
 fi
 
 # Commit titles (#1489): a rebase stopped on a conflict and continued with GIT_EDITOR=true used to read "#N: ..." as a comment
@@ -958,7 +1027,7 @@ preflight() {
     QUEUE_KEEP=$DEPLOY_QUEUE_TICKET queue_lock "$state" "$branch" || { land_timing 1; exit 1; }
     unset -f queue_wait_check
     train_verdict held
-    LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}" # RETRY_NOW: not quiet, so a land.sh the fix changed takes over
+    LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}" # RETRY_NOW: not quiet, so a land.sh the fix changed takes over
   fi
   retro_log "preflight refusal · $label · refusing since $since ($why)"
   [ "$rc" != 124 ] && [ "$rc" != 137 ] || refuse "deploy has been refusing since $since: $why, and the boot check hung on $short here too (stopped after ${DEPLOY_BOOT_TIMEOUT:-420} s), so no CI run was spent and $untouched; $branch keeps the rebased work. A hang is not a verdict on the change: run it again, and if it hangs again tell the Taskmaster, since landings are blocked until that is fixed"
@@ -1126,7 +1195,7 @@ retry_in_place() {
   unset -f queue_wait_check
   train_verdict held
   say "back at the front after its retry in place: starting over from the rebase"
-  LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}"
+  LAND_REBASED=1 LAND_RETRY_NOW=1 LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}"
 }
 # A CI red of flakes only on the one fresh run too (#1419 part 2, Taskmaster 2026-11-21, after Cara: "I thought they
 # were supposed to keep their spot not?"): when every failed file passed alone again and no ship on the train changed
@@ -1527,7 +1596,7 @@ early_next() {
   [ "$mode" = land ] && [ "${LAND_EARLY:-1}" != 0 ] && [ ! -e "$state/early-off" ] && [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] || return 0
   ! pipeline_touch "$old" "$tip" || return 0 # the next one runs this train's own land.sh, not this one
   local -A QUEUE_RANK=()
-  local QUEUE_OLD=() QUEUE_ORDER_BY=''
+  local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' regen_attrs='' # another ship's merges get no Regenerate files of this one's
   queue_order "$q"
   while read -r x t; do # the first in line that isn't on this train
     [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && mapfile -t l 2>/dev/null <"$t" || continue
@@ -1672,7 +1741,7 @@ train_at() { if [ "$1" = 0 ]; then echo "$own"; else echo "${train_tip[$(($1 - 1
 train_build() {
   local max=${LAND_TRAIN_MAX:-6} q=$state/queue t l b r base c cur=$own wt='' skip down_at='' down_why='' x
   local -A tried=()
-  [ "$mode" = land ] && [ "$lane" != light ] && [ "${LAND_TRAIN:-1}" != 0 ] && [ ! -e "$state/train-off" ] || return 0
+  [ "$mode" = land ] && [ "$lane" != light ] && [ "${LAND_TRAIN:-1}" != 0 ] && [ ! -e "$state/train-off" ] && [ "${QUEUE_TRAIN:-}" != hold ] || return 0
   [[ $max =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ] || return 0
   [ ! -s "$state/bad" ] && [ ! -s "$state/refusing" ] || return 0
   [ "${LAND_CI:-1}" != 0 ] && [ -n "$REMOTE" ] && git remote get-url "$REMOTE" >/dev/null 2>&1 || return 0
@@ -1680,7 +1749,7 @@ train_build() {
   ! [[ $down_at =~ ^[0-9]+$ ]] || [ $(($(date +%s) - down_at)) -ge "$CI_DOWN" ] || return 0
   ! pipeline_touch "$old" "$own" || return 0
   local -A QUEUE_RANK=()
-  local QUEUE_OLD=() QUEUE_ORDER_BY=''
+  local QUEUE_OLD=() QUEUE_ORDER_BY='' QUEUE_HOLD=' ' regen_attrs='' # another ship's merges get no Regenerate files of this one's
   queue_order "$q"
   mkdir -p -m 700 "$train_dir"
   find "$train_dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true # a killed rider's, or one never read
@@ -1688,6 +1757,8 @@ train_build() {
     [ ${#train_n[@]} -lt "$max" ] || break
     [ "${t##*/}" != "${DEPLOY_QUEUE_TICKET##*/}" ] && [ -z "${tried[${t##*/}]:-}" ] && mapfile -t l 2>/dev/null <"$t" || continue
     tried[${t##*/}]=1
+    # A waiting ship that holds the line (QUEUE_TRAIN=hold): nobody behind it rides ahead of it.
+    { [ "${l[5]:-}" = hold ] || [ "${l[8]:-}" = hold ]; } && [ "${l[1]:-}" = 0 ] && [ -n "${l[0]:-}" ] && [ "$(queue_proc "${l[0]%% *}")" = "${l[0]}" ] && break
     read -r x _ 2>/dev/null <"$train_dir/${t##*/}" && [[ $x = moving || $x = refused ]] && continue # still on the train before this one, or refused by this one
     [ -z "${early_memo:-}" ] || [ "$x" != riding ] || continue # early_next: on the train before this one
     [ -z "$train_only" ] || [[ $train_only == *" ${t##*/} "* ]] || continue # early_look: the riders its early run has
@@ -2410,7 +2481,7 @@ if [ "$(git -C "$SOURCE" rev-parse main)" != "$old" ]; then
   train_drop
   flock -u 7
   exec 7>&-
-  LAND_REBASED=1 LAND_REDO=1 LAND_BUILD=$build LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}"
+  LAND_REBASED=1 LAND_REDO=1 LAND_BUILD=$build LAND_PRE=$pre LAND_RETRIED=$retried LAND_FLAKE_KEPT=$flake_kept exec bash "$tools/land.sh" "${args[@]}"
 fi
 
 # A rider that left the line while the train was tested (its minion was stopped) doesn't ship: the train ships up to

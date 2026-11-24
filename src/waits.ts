@@ -158,7 +158,10 @@ export function testCounts(done: unknown, total: unknown, file: unknown = '', fa
 
 const countsText = (c: TestCounts) => `${c.done} of ${c.total} ${c.rerun ? 'failed files rerun alone' : 'files'}${c.file ? ` · ${c.file}` : ''}`;
 
-/** `orders`: its landing follows queue/.order (deploy-queue.sh's 5th ticket line, #1002); one from an older branch doesn't. */
+/**
+ * `orders`: its landing follows queue/.order (deploy-queue.sh's 5th ticket line, #1002); one from an older branch doesn't.
+ * `holds`: a Regenerate ship that holds the line (#1827: deploy-queue.sh's 6th line "hold", the kit's 9th): the first waiter, whatever .order says.
+ */
 export interface LandTicket {
   seq: number;
   proc: string;
@@ -167,6 +170,7 @@ export interface LandTicket {
   phase: string;
   mtime: number;
   orders?: boolean;
+  holds?: boolean;
   tests?: TestCounts | null;
 }
 
@@ -243,13 +247,13 @@ export async function readQueueA(q: string, orderAt: number, alive = procAlive):
 function queueFrom(order: number[], tickets: { name: string; text: string | null; at: number | null }[], orderAt: number, alive: (proc: string) => boolean): LandTicket[] {
   const line: LandTicket[] = [];
   // A waiter from before .order waits for every lower ticket, so nobody who arrived after it goes ahead (The Trans Agenda #76).
-  const rank = (t: LandTicket) => (t.got > 0 ? -1 : !t.orders ? order.length + 1 : order.includes(t.seq) ? order.indexOf(t.seq) : order.length);
+  const rank = (t: LandTicket) => (t.got > 0 ? -1 : t.holds ? -0.5 : !t.orders ? order.length + 1 : order.includes(t.seq) ? order.indexOf(t.seq) : order.length);
   for (const { name, text, at } of tickets) {
     if (text == null || at == null) continue;
     const l = text.split('\n');
     const [proc = '', got = '0', label = '', phase = ''] = l;
     if (!alive(proc)) continue;
-    line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: l[orderAt] === 'order' || l[7] === 'order' });
+    line.push({ seq: Number(name), proc, got: Number(got) || 0, label, phase, mtime: at, orders: l[orderAt] === 'order' || l[7] === 'order', ...((l[5] === 'hold' || l[8] === 'hold') && { holds: true }) });
   }
   const old = line.filter((t) => t.got === 0 && !t.orders).map((t) => t.seq);
   const before = (t: LandTicket) => (t.got > 0 ? -1 : old.filter((s) => s < t.seq).length);

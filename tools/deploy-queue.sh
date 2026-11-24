@@ -103,7 +103,9 @@ queue_outside() {
 # The 5th line, "order", says this landing follows .order (#1002): the server lists only those in it. A landing started
 # from an older branch runs the older queue_lock, which waits for every lower ticket, so ranking it could deadlock.
 # The 6th, "train" ($QUEUE_TRAIN, set by land.sh), says it can ride in the ship train of the landing at the front (#1166):
-# it reads that landing's verdict on it from <state>/train/<ticket>. One without it is never taken on a train.
+# it reads that landing's verdict on it from <state>/train/<ticket>. One without it is never taken on a train. "hold"
+# there instead (land.sh's Regenerate ship, #1827) holds the line: it goes first among the waiters, and no train takes
+# a rider from behind it (land.sh's train_build). The kit core's ticket says it on its 9th line.
 # The 7th, "yield" ($QUEUE_YIELD, land.sh's retry in place, #1360), says it lets the next waiter take the lock first.
 queue_write() { # <file> <pid and start> <got> <label> <phase>: by a rename, so nobody reads half a ticket
   printf '%s\n' "$2" "$3" "$4" "$5" order "${QUEUE_TRAIN:-}" ${QUEUE_YIELD:+yield} >"$1.tmp$$" && mv -f "$1.tmp$$" "$1"
@@ -137,14 +139,15 @@ queue_done() {
 }
 
 # <queue dir> <ticket>: its sort key in the line, "<the waiters from before .order ahead of it>" then "0<place in
-# .order>", "1<ticket>" or, for one from before .order, "2". queue_order loads .order and those waiters first. One of
+# .order>" ("0" and ten zeros and the ticket for one that holds the line), "1<ticket>" or, for one from before .order, "2". queue_order loads .order and those waiters first. One of
 # those waits for every lower ticket, so nobody who arrived after it goes ahead of it: .order ranks the waiters between
 # two of them only among themselves (had a later one counted itself ahead, both would take the lock: The Trans Agenda #76).
 queue_order() {
   local t i=0 l
-  QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY=""
+  QUEUE_RANK=() QUEUE_OLD=() QUEUE_ORDER_BY="" QUEUE_HOLD=" "
   for t in "$1"/[0-9]*; do
     [[ ${t##*/} =~ ^[0-9]+$ ]] && mapfile -t l 2>/dev/null <"$t" || continue
+    [ "${l[5]:-}" != hold ] && [ "${l[8]:-}" != hold ] || QUEUE_HOLD+="${t##*/} " # the core's (kit template's) is its 9th line
     [ "${l[1]:-0}" != 0 ] || [ "${l[4]:-}" = order ] || [ "${l[7]:-}" = order ] || QUEUE_OLD+=("${t##*/}") # the core's "order" is line 8
   done
   [ -f "$1/.order" ] || return 0
@@ -158,7 +161,8 @@ queue_key() { # <ticket> [variable]: printed, or into that variable (as queue_pr
     [ "$o" != "$1" ] || { printf -v k '%05d2' "$seg"; break; }
     [[ $o > $1 ]] || seg=$((seg + 1))
   done
-  if [ -n "${k:-}" ]; then :; elif [ -n "${QUEUE_RANK[$1]:-}" ]; then printf -v k '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf -v k '%05d1%s' "$seg" "$1"; fi
+  # A ship that holds the line (6th line "hold") comes before every rank, which start at 1, then in arrival order.
+  if [ -n "${k:-}" ]; then :; elif [[ ${QUEUE_HOLD:-} == *" $1 "* ]]; then printf -v k '%05d0%010d%s' "$seg" 0 "$1"; elif [ -n "${QUEUE_RANK[$1]:-}" ]; then printf -v k '%05d0%010d' "$seg" "${QUEUE_RANK[$1]}"; else printf -v k '%05d1%s' "$seg" "$1"; fi
   if [ -n "${2:-}" ]; then printf -v "$2" %s "$k"; else printf %s "$k"; fi
 }
 
@@ -175,7 +179,7 @@ queue_lock() {
   local q=$1/queue label=$2 n me t l p st ahead head headname headpid phase detail look sig last="" since=${EPOCHREALTIME//[!0-9]/} said="" typical sum count line mine headkey key by="" took yield_from=$SECONDS
   local -A QUEUE_RANK=()
   local QUEUE_OLD=()
-  local QUEUE_ORDER_BY=""
+  local QUEUE_ORDER_BY="" QUEUE_HOLD=" "
   mkdir -p -m 700 "$q"
   # Unopened, every flock below fails at once ("Bad file descriptor") for the whole stall (#553 F12b).
   if ! exec 9>"$1/lock"; then

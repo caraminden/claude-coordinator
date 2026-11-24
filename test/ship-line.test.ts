@@ -138,6 +138,16 @@ test("a ship whose land script is too old to move still can't be moved by a Task
   );
 });
 
+test("a ship that holds the line (a Regenerate ship, #1827) can't be moved, and says why", () => {
+  const { app, p, q, line } = scheme('Peek Auras');
+  writeFileSync(join(q, '0000000003'), readFileSync(join(q, '0000000003'), 'utf8') + 'hold\n');
+  app.releases.poll();
+  const three = line().find((x) => x.name === '#3')!;
+  assert.equal(three.movable, false);
+  assert.match(three.why ?? '', /holds the line/);
+  assert.equal(line().find((x) => x.name === '#2')!.movable, true, 'the others still move');
+});
+
 // Whose line a call may reach is the router's (src/http.ts checkScope; test/access-matrix: another scheme's Taskmaster gets a 403,
 // a minion a 403); here, a scheme with no line to order, and each scheme's pins kept apart.
 test("a scheme with no ship line can't be ordered, and a pin lives in its own scheme's setting", () => {

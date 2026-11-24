@@ -110,6 +110,8 @@ export interface Next extends Progress {
 /** Why a waiting landing can't be moved (#1002, #1007): its branch's land script predates reordering. */
 export const OLD_LAND = "Can't move: it started from a branch whose land script is older than reordering, so it ships in its turn";
 /** Why one behind such a landing can't move (#1020): nobody who arrived after that one goes ahead of it. */
+/** Why a Regenerate ship can't be moved (#1827): it goes first among the waiters until it ships. */
+export const HOLDS_LINE = 'It declares files its ship makes again (Regenerate), so it holds the line: it goes first among the waiters and nothing ships ahead of it';
 export const BEHIND_OLD = "Can't move yet: a change ahead of it started from a branch whose land script is older than reordering, and nobody behind that one can pass it";
 
 export interface LineEntry {
@@ -479,11 +481,11 @@ export class CitadelServer implements Reader {
         holds: t.got > 0,
         place: ordinal(i + 1),
         seq: t.seq,
-        movable: t.got === 0 && !ridingOf(t.phase) && !!t.orders && !behindOld(lineTickets, t),
+        movable: t.got === 0 && !t.holds && !ridingOf(t.phase) && !!t.orders && !behindOld(lineTickets, t),
         stage: t.got > 0 ? landPhase(t.phase).stage : 'line',
         since: t.mtime,
         ...(t.got > 0 && { label: (id != null ? this.d.wait(id)?.label : undefined) ?? landPhase(t.phase).label }),
-        ...(t.got === 0 && !t.orders ? { why: OLD_LAND } : t.got === 0 && behindOld(lineTickets, t) ? { why: BEHIND_OLD } : {}),
+        ...(t.got === 0 && t.holds ? { why: HOLDS_LINE } : t.got === 0 && !t.orders ? { why: OLD_LAND } : t.got === 0 && behindOld(lineTickets, t) ? { why: BEHIND_OLD } : {}),
       };
     });
     // A deploy run alone holding the lock carries whatever is on main.

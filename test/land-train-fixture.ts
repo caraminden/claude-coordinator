@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { ci, git, setup, landAsync, tickets, issued } from './land-fixture.ts';
 import { until } from './wait.ts';
 
-export type Ship = { change?: [string, string]; also?: [string, string]; env?: Record<string, string>; on?: number };
+export type Ship = { change?: [string, string]; also?: [string, string]; env?: Record<string, string>; on?: number; trailers?: string };
 
 // Ship 1 (ticket/1-x) lands alone and holds the lock in its deploy until every other ship is in line behind it, so
 // ship 2 is the front of a train with the rest behind it. Ship i changes f<i>.txt unless it says otherwise, and starts
@@ -37,6 +37,7 @@ export async function line(ships: Ship[], extra: Record<string, string> | ((dir:
   ships.forEach((s, i) => s.on || r.commit(wts[i], ...(s.change ?? [`f${i + 1}.txt`, `${i + 1}\n`])));
   ships.forEach((s, i) => s.on && (git(wts[i], 'reset', '-q', '--hard', `ticket/${s.on}-x`), r.commit(wts[i], ...(s.change ?? [`f${i + 1}.txt`, `${i + 1}\n`]))));
   ships.forEach((s, i) => s.also && r.commit(wts[i], ...s.also));
+  ships.forEach((s, i) => s.trailers && git(wts[i], 'commit', '-q', '--amend', '-m', git(wts[i], 'log', '-1', '--format=%s'), '-m', s.trailers));
   const was = wts.map((wt) => git(wt, 'rev-parse', 'HEAD'));
   const out = wts.map(() => '');
   const lands = [landAsync(wts[0], { ...env, ...ships[0].env }, 150_000, (s) => (out[0] = s))];

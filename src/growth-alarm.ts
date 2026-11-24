@@ -37,7 +37,7 @@ const MB = 1024 ** 2;
 /**
  * The least rise over the window that rings, in the series' own unit, and as a share of where it started. Set against
  * Nov 16-24's readings: the server's memory creeps 10-30 MB an hour after its first hour (finding C), so its floor is 300 MB
- * (50 MB an hour); 184 open files at the hunt; /tmp held 2 GB of leftovers; app servers sit at 30-300 MB.
+ * between the first and last hours' medians, 5 hours apart: 60 MB an hour; 184 open files at the hunt; /tmp held 2 GB of leftovers; app servers sit at 30-300 MB.
  */
 export const FLOORS: Record<Series['kind'], { rise: number; share: number }> = {
   rss: { rise: 300 * MB, share: 0.3 },
@@ -156,7 +156,8 @@ export function checkGrowth(d: GrowthDeps, now: number): Growth[] {
   const { store } = d;
   const rows = store.hostSamples(now - RISE_WINDOW_MS - WARMUP_MS);
   const open: Open = store.getSetting<Open>(OPEN) ?? {};
-  for (const [k, o] of Object.entries(open)) if (now - o.last > QUIET_AFTER_MS) delete open[k];
+  // One the Taskmaster hasn't heard yet (held overnight, or no Taskmaster) stays until it has.
+  for (const [k, o] of Object.entries(open)) if (o.woke && now - o.last > QUIET_AFTER_MS) delete open[k];
   const fresh: Growth[] = [];
   for (const g of alarms(rows, d.bootAt, now, d.turns())) {
     if (open[g.key]) {
@@ -170,7 +171,7 @@ export function checkGrowth(d: GrowthDeps, now: number): Growth[] {
   }
   const own = d.ownScheme();
   const unheard = Object.entries(open).filter(([, o]) => !o.woke);
-  if (unheard.length && own != null && d.tell && quietUntil(now) === null) {
+  if (unheard.length && own != null && d.tell && store.getOverlord(own) && quietUntil(now) === null) {
     d.tell(own, `Growth alarm on perigee: ${unheard.length === 1 ? 'something keeps' : 'some things keep'} growing.\n${unheard.map(([, o]) => `- ${o.what}`).join('\n')}\n\nThe 5-minute host_samples rows have the readings (rss, open_fds, supervisors, tmp_used, app_mem); 'growth' health events record each. A leak leaves these behind: leftover units, /tmp entries, open files (shared/project/reports/leak-hunt-2026-11.md). Find what's growing; an app's alarm goes to its scheme's Taskmaster to look into. Each rings once until it has been quiet for ${QUIET_AFTER_MS / 3_600_000} hours.`);
     for (const [, o] of unheard) o.woke = true;
   }

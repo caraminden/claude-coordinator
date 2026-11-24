@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store, type HostSample } from '../src/db.ts';
 import { Contraptions } from '../src/contraptions.ts';
-import { checkGrowth, readGrowth, KIND, SUPERVISOR_SLACK } from '../src/growth-alarm.ts';
+import { checkGrowth, readGrowth, steadyRise, FLOORS, KIND, SUPERVISOR_SLACK } from '../src/growth-alarm.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'growth-alarm-'));
 // timing-ok: own temp dir
@@ -20,6 +20,8 @@ const NOON = Date.parse('2026-11-20T20:00:00Z');
 function setup(name: string) {
   const store = new Store(join(root, `${name}.db`));
   const citadel = store.createProject('Citadel', null, null);
+  const cara = store.createUser({ name: 'Cara', login: 'cara' });
+  store.createTicket({ project_id: citadel.id, title: 'Taskmaster', permission_mode: 'default', created_by: cara.id, kind: 'coordinator' });
   const told: string[] = [];
   return { store, citadel, told, deps: (bootAt: number, turns = 0) => ({ store, bootAt, turns: () => turns, ownScheme: () => citadel.id, tell: (_: number, t: string) => void told.push(t) }) };
 }
@@ -137,4 +139,33 @@ test('readGrowth counts fds, supervisor units, /tmp and app servers from the pat
   // No cgroup to read (a dev box): only fds and /tmp.
   const none = await readGrowth({ slice: null, apps: ['mandate'], fdDir: fds, tmp: d });
   assert.deepEqual([none.supervisors, none.app_mem], [null, null]);
+});
+
+test('an overnight alarm that clears before 9 AM still wakes the Taskmaster at 9', () => {
+  const s = setup('quiet-clears');
+  const twoAm = Date.parse('2026-11-20T10:05:00Z');
+  run(s, twoAm, twoAm, () => twoAm - H, () => ({ supervisors: 30 }));
+  run(s, twoAm + STEP, twoAm + 7 * H, () => twoAm - H, () => ({ supervisors: 1 }));
+  assert.equal(s.told.length, 1);
+  assert.match(s.told[0], /30 citadel-supervisor/);
+});
+
+test('with no Taskmaster the alarm waits, and wakes one that comes back', () => {
+  const store = new Store(join(root, 'no-tm.db'));
+  const citadel = store.createProject('Citadel', null, null);
+  const told: string[] = [];
+  const deps = { store, bootAt: NOON - H, turns: () => 0, ownScheme: () => citadel.id, tell: (_: number, t: string) => void told.push(t) };
+  store.addHostSample({ ...base(NOON), supervisors: 30 });
+  checkGrowth(deps, NOON);
+  assert.equal(told.length, 0);
+  store.createTicket({ project_id: citadel.id, title: 'Taskmaster', permission_mode: 'default', created_by: store.createUser({ name: 'Cara', login: 'cara' }).id, kind: 'coordinator' });
+  store.addHostSample({ ...base(NOON + STEP), supervisors: 1 });
+  checkGrowth(deps, NOON + STEP);
+  assert.equal(told.length, 1);
+});
+
+test("the server memory's floor is 300 MB between the first and last hours: 55 MB an hour stays quiet, 65 rings", () => {
+  const climb = (mbPerHour: number) => Array.from({ length: 72 }, (_, i): [number, number] => [NOON - 6 * H + (i + 1) * STEP, 700 * MB + ((i + 1) * STEP / H) * mbPerHour * MB]);
+  assert.equal(steadyRise(climb(55), NOON, FLOORS.rss), null);
+  assert.ok(steadyRise(climb(65), NOON, FLOORS.rss));
 });

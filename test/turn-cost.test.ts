@@ -17,6 +17,7 @@ const root = mkdtempSync(join(tmpdir(), 'turn-cost-'));
 // timing-ok: stopTurns ends every child first
 after(async () => {
   await stopTurns(root);
+  // timing-ok: stopTurns ends every child first
   rmSync(root, { recursive: true, force: true });
 });
 

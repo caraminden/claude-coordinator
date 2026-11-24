@@ -33,7 +33,7 @@ test('the check fails when a part is gone', () => {
 // Most names are given at a call site (settingsRow({ part: 'fast-mode' })): these helpers put them on the element.
 test('the helpers that take a part name put it on their element', () => {
   const src = (f: string) => readFileSync(join(PUBLIC, f), 'utf8');
-  assert.match(src('settings.js'), /export function settingsRow\(\{[^}]*\bpart \}(?:[^\n]*\n){1,6}[^\n]*h\('details', \{[^}]*'data-part': part \?\? null/, 'settingsRow');
+  assert.match(src('settings.js'), /export function settingsRow\(\{[^}]*\bpart \}(?:[^\n]*\n){1,6}[^\n]*h\(\s*'details',\s*\{[^}]*'data-part': part \?\? null/, 'settingsRow');
   assert.match(src('people.js'), /function accountRow\([^)]*\{ part \}[^\n]*\n\s*const \[row, sum\] = settingsRow\(\{ part,/, 'accountRow');
   assert.match(src('minion-rules.js'), /const live = \(meta,[^\n]*\n[^\n]*\n\s*const \[row, sum\] = settingsRow\(meta,/, "Minion rules' live rows");
 });

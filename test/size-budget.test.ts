@@ -13,16 +13,18 @@ export const LIMIT = 1500;
 
 // path -> [lines it may have, why it is allowed]. A split that shrinks a file lowers its number in the same commit.
 export const ALLOWED: Record<string, [number, string]> = {
-  'src/runner.ts': [4870, 'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+21: types replacing any, #1799)'],
-  'src/db.ts': [3990, 'schema, migrations and settings; queries are already moving to src/db/<area>.ts (+1: SCHEMA_HISTORY row 115, #1798; +2: types replacing any, #1799)'],
-  'src/mcp.ts': [2640, 'every MCP tool definition and handler; split by tool family is queued (+5: apply_memory, #1803)'],
+  'public/core.js': [1601, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
+  'src/ci-health.ts': [1560, 'over the line once the Biome reformat (#1792) broke its long lines; a split is queued'],
+  'src/runner.ts': [5286, 'turn runner: spawn, stream, resume and cost in one module; a split into its seams is queued (+21: types replacing any, #1799) (raised once for the Biome reformat, #1792)'],
+  'src/db.ts': [4135, 'schema, migrations and settings; queries are already moving to src/db/<area>.ts (+1: SCHEMA_HISTORY row 115, #1798; +2: types replacing any, #1799) (raised once for the Biome reformat, #1792)'],
+  'src/mcp.ts': [2898, 'every MCP tool definition and handler; split by tool family is queued (+5: apply_memory, #1803) (raised once for the Biome reformat, #1792)'],
   'tools/land.sh': [2509, 'the ship script is one shell program; its steps share state and are pinned by tests'],
   'kit/skills/scheme-setup/templates/land.sh': [2787, 'the kit template every scheme copies byte for byte; the schemes skip their copies, so this is the one place its size is counted'],
-  'public/machine-agent.mjs': [2337, 'standalone agent a person runs on their own computer: one file so it can be copied alone'],
-  'src/routes/projects.ts': [1894, 'every /projects route; split by page is queued'],
-  'src/tripwire.ts': [1672, 'the tripwire rules; high risk to edit, so a split waits for its own change'],
-  'src/routes/tickets.ts': [1696, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799)'],
-  'tools/dev-seeds.ts': [1594, 'seed data for dev copies; grows with every table'],
+  'public/machine-agent.mjs': [2474, 'standalone agent a person runs on their own computer: one file so it can be copied alone (raised once for the Biome reformat, #1792)'],
+  'src/routes/projects.ts': [2066, 'every /projects route; split by page is queued (raised once for the Biome reformat, #1792)'],
+  'src/tripwire.ts': [1830, 'the tripwire rules; high risk to edit, so a split waits for its own change (raised once for the Biome reformat, #1792)'],
+  'src/routes/tickets.ts': [1933, 'every /tickets route; split by page is queued (+19: #1823 unchain, +13: card types replacing any, #1799) (raised once for the Biome reformat, #1792)'],
+  'tools/dev-seeds.ts': [2104, 'seed data for dev copies; grows with every table (raised once for the Biome reformat, #1792)'],
 };
 
 // Symlinks are skipped on purpose: their target is counted where it really lives.

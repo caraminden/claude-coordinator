@@ -9,7 +9,7 @@
     "summary": "0 as before, 112 new, 0 gone"
   },
   "ci-red": {
-    "hash": "b2067f02444741d4",
+    "hash": "c49c1598cb3647d2",
     "at": "2026-11-23",
     "days": 3,
     "inputs": "12 schemes' runs on main (gh, read-only) and their minions' chats",
@@ -18,7 +18,7 @@
     "summary": "26 as before, 2 new, 4 gone"
   },
   "deploy-watch": {
-    "hash": "13628e2c16779b4e",
+    "hash": "bfeb5b90b4633551",
     "at": "2026-11-21",
     "days": 3,
     "inputs": "338 deploys of the Citadel server, health_events and turns from the database",
@@ -27,7 +27,7 @@
     "summary": "23 as before, 1 new, 4 gone"
   },
   "effort-retros": {
-    "hash": "46a67b1e118de186",
+    "hash": "89116e3ad924b941",
     "at": "2026-11-24",
     "days": 3,
     "inputs": "2 named or chained efforts in 15 schemes, checked hourly over 3 days",
@@ -36,7 +36,7 @@
     "summary": "0 as before, 0 new, 0 gone"
   },
   "flake-counter": {
-    "hash": "0685d004f4df8560",
+    "hash": "c168d99f5cc1b2a5",
     "at": "2026-11-24",
     "days": 3,
     "inputs": "288 passes over 15 schemes: their retro logs, land-recorded flakes and minions",

@@ -64,7 +64,7 @@ function bridgeSource(): string {
   if (mtime !== bridge.mtime) {
     // The function alone: its header comment needn't ride along in every page.
     const src = readFileSync(BRIDGE_FILE, 'utf8');
-    bridge = { mtime, src: src.slice(src.indexOf('(function (cfg)')).trim() };
+    bridge = { mtime, src: src.slice(src.indexOf('(function (cfg)')).trim().replace(/;$/, '') }; // the formatter ends the file with a semicolon; the call's brackets follow it
   }
   return bridge.src;
 }

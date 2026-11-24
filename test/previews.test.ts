@@ -393,6 +393,7 @@ test('copyData finishes while another connection keeps writing the source (#1204
   })();
   const to = join(dir, 'copy.db');
   try {
+    // timing-ok: a 20 s guard that fails the test if the copy hangs, not a wait
     await Promise.race([copyData(src, to), new Promise((_, rej) => setTimeout(() => rej(new Error('copy did not finish while the source was written')), 20000))]);
     const copy = new DatabaseSync(to);
     assert.equal(copy.prepare('SELECT count(*) AS n FROM t').get()!.n, 8000);

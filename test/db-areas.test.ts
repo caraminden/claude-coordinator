@@ -106,6 +106,7 @@ flakeFix
 flakeFixes
 flakeSightings
 forgetCards
+getArtifact
 getCiFile
 getClaudeState
 getContraption

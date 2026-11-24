@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import vm from 'node:vm';
 
 const SRC = readFileSync(join(import.meta.dirname, '..', 'public', 'artifact-bridge.js'), 'utf8');
-const FN = SRC.slice(SRC.indexOf('(function (cfg)')).trim();
+const FN = SRC.slice(SRC.indexOf('(function (cfg)')).trim().replace(/;$/, '');
 const TAG = 'citadel-bridge-1';
 // The page's timers run 100 times faster: the 100 ms flush is 1 ms, the 15 s request limit 150 ms.
 const SCALE = 100;

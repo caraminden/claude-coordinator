@@ -190,7 +190,7 @@ describe('the smoke pass through the turn tools, the file viewer and the launch 
   // #661: git rules for every minion's worktree, closed ones included, took the Citadel Taskmaster's every-scheme
   // settings.json past Claude Code's 2 MiB cap. Put back for other schemes, the 700 closed minions above pass the 1 MiB budget.
   test('a launch file that grows with closed minions fails it', { timeout: 200_000 }, async () => {
-    const checkout = brokenCheckout('closed-minions', 'src/runner.ts', ".filter((t) => t.status !== 'closed' && t.cwd).map((t) => t.cwd!)]))]", '.filter((t) => t.cwd).map((t) => t.cwd!)]))]');
+    const checkout = brokenCheckout('closed-minions', 'src/runner.ts', ".filter((t) => t.status !== 'closed' && t.cwd)", '.filter((t) => t.cwd)');
     const run = await bootCheck(checkout);
     assert.equal(run.ok, false);
     assert.match(run.out, /A Taskmaster turn started, but: The launch's settings\.json is \d+ bytes, over the 1024 KiB budget for a launch file \(Claude Code refuses a settings file past 2 MiB\)/);

@@ -37,6 +37,17 @@ function worktree(name: string): string {
   return dir;
 }
 
+/** A worktree whose server only answers health checks in preview mode: for tests about the preview process, not the app. */
+function stubWorktree(name: string): string {
+  const dir = join(root, name);
+  mkdirSync(dir);
+  writeFileSync(join(dir, 'server.ts'), `import { createServer } from 'node:http';
+createServer((req, res) => res.end(JSON.stringify({ ok: true, preview: true }))).listen(Number(process.env.PORT), '127.0.0.1');
+`);
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  return dir;
+}
+
 const data = join(root, 'data');
 mkdirSync(data);
 const store = new Store(join(data, 'coordinator.db'));
@@ -216,7 +227,7 @@ test('idle previews stop (a page load starts them again) and at most `max` run a
   const p2 = s2.createProject('Two', null);
   const make = (n: number) => {
     const t = s2.createTicket({ project_id: p2.id, title: `T${n}`, permission_mode: 'default', created_by: 'Cara' });
-    s2.setTicketDir(t.id, worktree(`wt-two-${n}`), `ticket/${n}`);
+    s2.setTicketDir(t.id, stubWorktree(`wt-two-${n}`), `ticket/${n}`);
     return s2.getTicket(t.id)!;
   };
   const [a, b] = [make(1), make(2)];
@@ -289,6 +300,7 @@ createServer((req, res) => {
   );
   s5.setTicketDir(t.id, wt, 'ticket/5-hung');
   const previews = new Previews(s5, d5);
+  previews.healthMs = 300; // the abort is what is tested, not its 3 s length
   const t0 = Date.now();
   let booted = 0;
   let failed: unknown;
@@ -314,7 +326,7 @@ createServer((req, res) => {
   try {
     // Timed from the hung request, not from start(): copying the data and starting the server aren't what this checks (#973).
     await until('the first health check to reach the preview', () => seen().length || failed, 30_000, what);
-    // The 3 s abort and one more ask: well under 10 s. Without the abort fetch waits 5 minutes.
+    // The abort and one more ask: well under 10 s. Without the abort fetch waits 5 minutes.
     await until('the preview to boot after its first health check hung', () => booted || failed, 10_000, what);
     if (failed) throw new Error(`The boot failed: ${what()}`, { cause: failed });
     assert.ok(seen().length >= 2, what());
@@ -351,6 +363,7 @@ createServer((req, res) => res.end(JSON.stringify({ ok: true, preview: true })))
   );
   s3.setTicketDir(t.id, wt, 'ticket/3-stubborn');
   const previews = new Previews(s3, d3);
+  previews.killAfterMs = 200; // waiting for the exit is what is tested, not the 2 s grace before SIGKILL
   const dir = join(previews.root, String(t.id));
   const pid = () => Number(readFileSync(join(previews.root, 'stubborn.pid'), 'utf8'));
   const pids: number[] = [];
@@ -414,7 +427,7 @@ test('two boots at once cannot pass the cap (#1345)', async () => {
   const p3 = s3.createProject('Three', null);
   const make = (n: number) => {
     const t = s3.createTicket({ project_id: p3.id, title: `T${n}`, permission_mode: 'default', created_by: 'Cara' });
-    s3.setTicketDir(t.id, worktree(`wt-cap-${n}`), `ticket/${n}`);
+    s3.setTicketDir(t.id, stubWorktree(`wt-cap-${n}`), `ticket/${n}`);
     return s3.getTicket(t.id)!;
   };
   const [a, b] = [make(1), make(2)];

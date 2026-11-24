@@ -96,11 +96,11 @@ function health(port: number, ms = 3000): Promise<any> {
 }
 
 /** End a preview's process and wait until it has exited, so nothing writes into its folder as we delete it. */
-async function end(proc: ChildProcess): Promise<void> {
+async function end(proc: ChildProcess, killAfterMs = KILL_AFTER_MS): Promise<void> {
   if (proc.exitCode !== null || proc.signalCode !== null) return;
   const exited = new Promise((r) => proc.once('exit', r));
   proc.kill();
-  const timer = setTimeout(() => proc.kill('SIGKILL'), KILL_AFTER_MS);
+  const timer = setTimeout(() => proc.kill('SIGKILL'), killAfterMs);
   await exited;
   clearTimeout(timer);
 }
@@ -165,6 +165,9 @@ export class Previews {
   buildScheme: () => Project | null = () => null;
   idleMs = IDLE_MS;
   max = MAX_RUNNING;
+  /** How long one health check may hang, and how long a stopping preview gets before SIGKILL: tests turn them down. */
+  healthMs = 3000;
+  killAfterMs = KILL_AFTER_MS;
 
   constructor(store: Store, dataDir: string) {
     this.store = store;
@@ -227,7 +230,7 @@ export class Previews {
     const r = this.running.get(key);
     if (r) {
       this.running.delete(key);
-      const job = end(r.proc)
+      const job = end(r.proc, this.killAfterMs)
         .then(() => rmSync(r.dir, { recursive: true, force: true }))
         .finally(() => this.stopping.delete(key));
       this.stopping.set(key, job);
@@ -315,7 +318,7 @@ export class Previews {
       rmSync(dir, { recursive: true, force: true });
     });
     const fail = async (why: string) => {
-      await end(proc);
+      await end(proc, this.killAfterMs);
       rmSync(dir, { recursive: true, force: true });
       return new PreviewError(502, `${why}${log ? `\n--- preview output ---\n${log}` : ''}`);
     };
@@ -323,7 +326,7 @@ export class Previews {
       if (proc.exitCode !== null || proc.signalCode) throw await fail(`The preview exited during boot (code ${proc.exitCode})`);
       if (Date.now() > deadline) throw await fail(`The preview did not answer within ${BOOT_TIMEOUT_MS / 1000} s`);
       // A server that accepts and never answers must not hold the loop past its deadline: http alone waits for ever.
-      const answer = await health(port);
+      const answer = await health(port, this.healthMs);
       if (!answer) continue;
       // A branch from before preview mode would serve with turns and pushes switched on.
       if (answer.preview !== true) throw await fail("This branch's server has no preview mode; rebase it onto main first");

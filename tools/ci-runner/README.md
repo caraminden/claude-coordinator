@@ -244,7 +244,8 @@ there and tell the minion**: the PC is never restarted for this.
    wsl --shutdown
    ```
 
-   To check it's holding (after a suite has run there), this should print a number near zero for wslrelay:
+   Each CI suite checks this itself once step 4's task runs (`win-ports.sh`). To check it by hand (after a suite has
+   run there), this should print a number near zero for wslrelay:
 
    ```powershell
    $r = @(Get-Process wslrelay -ErrorAction SilentlyContinue).Id; "wslrelay listeners: " + @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $r -contains $_.OwningProcess }).Count; "listeners inside citadel-ci: " + (wsl -d citadel-ci -u root -- sh -c 'ss -Hltn | wc -l')
@@ -286,7 +287,11 @@ there and tell the minion**: the PC is never restarted for this.
    $u = 'http://perigee.tail59477f.ts.net:8574'; iwr "$u/ci-runner/keep-wsl-up.ps1" -UseBasicParsing -OutFile "$env:TEMP\keep-wsl-up.ps1"; powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\keep-wsl-up.ps1"
    ```
 
-   It registers the task **Citadel WSL runners** for you and says when `citadel-ci` is Running.
+   It registers the task **Citadel WSL runners** for you and says when `citadel-ci` is Running. It also registers
+   **Citadel WSL ports** (#1763), which tells `citadel-ci` every 10 s how many Windows listening ports `wslrelay`
+   holds (`/run/citadel-win-ports`); each suite reads it before and after (`win-ports.sh`) and goes red on a rise still
+   there a write later, step 1's leak come back. A PC set up before it shipped runs this line once more to get it; until
+   then the suite says there is no count and checks nothing.
 5. **The runners.** A minion or Taskmaster of the scheme asks `ci_runners` with `op: add`, `os: linux` and a count.
    Then the scheme's own system packages go in by hand (`wsl -d citadel-ci -u root`, then `apt-get install …`).
 

@@ -13,8 +13,11 @@
   masks systemd-timesyncd where WSL keeps the clock itself, since one distro's timesyncd skews the clock every distro
   shares, CI's included (tools/ci-runner/README.md, #542). Each distro it masks goes in
   %LOCALAPPDATA%\citadel-wsl-clock.log.
+  For citadel-ci it also registers "Citadel WSL ports" (#1763): while citadel-ci runs, every 10 s, it writes how many
+  Windows listening ports wslrelay holds into /run/citadel-win-ports there, and each CI suite fails if that rose across
+  it (tools/ci-runner/win-ports.sh), since wslrelay once leaked them until Windows ran short (#1753).
   WSL distros are each person's own, so the task runs as whoever runs this, while they're logged on, like the session
-  runners. It changes nothing inside the distro, touches no runner, and never restarts or reboots the PC. No
+  runners. Besides that count file it changes nothing inside the distro; it touches no runner, and never restarts or reboots the PC. No
   elevation needed.
 
 .PARAMETER Distro
@@ -68,6 +71,27 @@ $clockSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStop
 Register-ScheduledTask -Force -TaskName 'Citadel WSL clock' -Action $clockAction -Trigger $triggers -Principal $principal -Settings $clockSettings | Out-Null
 Start-ScheduledTask -TaskName 'Citadel WSL clock'
 
+# The Windows half of the CI leak count (#1763): the distro can't see Windows, so this tells it, every 10 s, how many
+# Windows listening ports wslrelay holds. The sh line keeps to single quotes and an argument with no spaces, for 5.1.
+if ($Distro -eq 'citadel-ci') {
+  $count = @'
+$w = '__WSL__'; $d = '__DISTRO__'
+while ($true) {
+  if (@(& $w -l --running -q | ForEach-Object { ($_ -replace "`0", '').Trim() }) -contains $d) {
+    $r = @(Get-Process wslrelay -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+    $l = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue)
+    $n = @($l | Where-Object { $r -contains $_.OwningProcess }).Count
+    & $w -d $d -u root --exec /bin/sh -c 'echo $1 > /run/citadel-win-ports.tmp && mv -f /run/citadel-win-ports.tmp /run/citadel-win-ports' sh "wslrelay=$n,listen=$($l.Count)"
+  }
+  Start-Sleep -Seconds 10
+}
+'@ -replace '__WSL__', $wsl -replace '__DISTRO__', $Distro
+  $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($count))
+  $portsAction = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" -Argument "--headless `"$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -NonInteractive -EncodedCommand $encoded"
+  Register-ScheduledTask -Force -TaskName 'Citadel WSL ports' -Action $portsAction -Trigger $triggers -Principal $principal -Settings $settings | Out-Null
+  Start-ScheduledTask -TaskName 'Citadel WSL ports'
+}
+
 Start-Sleep -Seconds 5
 $running = @(& $wsl -l -v | ForEach-Object { $_ -replace "`0", '' } | Where-Object { $_ -match "\b$([regex]::Escape($Distro))\s+Running\b" })
 if ($running) {
@@ -77,4 +101,5 @@ if ($running) {
 }
 Write-Host "Stop it:   Disable-ScheduledTask -TaskName '$task'; Stop-ScheduledTask -TaskName '$task'"
 Write-Host "Remove it: Unregister-ScheduledTask -TaskName '$task' -Confirm:`$false"
+if ($Distro -eq 'citadel-ci') { Write-Host "Task 'Citadel WSL ports' tells $Distro every 10 s how many Windows listening ports wslrelay holds; CI fails a suite that left more (#1763)." }
 Write-Host "Task 'Citadel WSL clock' masks systemd-timesyncd in any running distro every 5 minutes; what it masked: $env:LOCALAPPDATA\citadel-wsl-clock.log"

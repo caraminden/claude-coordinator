@@ -214,6 +214,7 @@ jobs:
           tail -n +1 -f "$RUNNER_TEMP/tests.log" & tailer=$!
           # The file counts and failed files so far, on to the Releases page (#1368); it never fails the step.
           node tools/ci-progress.ts "$RUNNER_TEMP/tests.progress" & poster=$!
+          tools/ci-runner/win-ports.sh before "$RUNNER_TEMP/win-ports" || true # Windows' half of the leak count (#1763): the step after the numbers
           # The window this suite ran in, kept on the machine's disk where every runner on it can read it (#1811): a suite that
           # shared the machine with another suite run reads slow for that reason, not the code's, so the numbers step skips it.
           win=/tmp/citadel-suite-windows-$(id -u); mkdir -p "$win"; find "$win" -type f -mmin +1440 -delete 2>/dev/null || true
@@ -253,6 +254,12 @@ jobs:
           [ -e "$RUNNER_TEMP/suite-overlap" ] || nums+=("$series=$(cat "$RUNNER_TEMP/suite-secs")s")
           nums+=("front-end-size=$(find public -type f -printf '%s\n' | awk '{s+=$1} END {print s}')B")
           tools/ci-numbers.sh "${nums[@]}" || true
+      # Windows listening ports WSL's relay left behind (#1763, #1753): a rise across the suite is red. Only on the PC's
+      # distro, where keep-wsl-up.ps1's task writes the count; elsewhere it says so and passes. After a green suite only,
+      # so a red one's reruns keep all of land.sh's window.
+      - name: Windows ports left behind
+        if: ${{ success() }}
+        run: tools/ci-runner/win-ports.sh after "$RUNNER_TEMP/win-ports"
       # The full suite's failed files, each rerun alone once to label it flake or real (tools/run-tests.sh), in a step of
       # their own so land.sh sees them start (#1374): on Nov 20 a busy desktop's full suite ended past the reruns'
       # deadline, so no flake was rerun and each red counted as real. At its LAND_CI_TIMEOUT land.sh waits LAND_CI_RERUN

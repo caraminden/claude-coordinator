@@ -678,7 +678,7 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
   if (lastDeploy?.outcome === 'failed') reasons.push(['bad', 'its last deploy failed', 'deploys']);
   else if (deployTone !== 'ok') reasons.push([deployTone, `${nFailed} of ${deploys.length} deploys failed this week`, 'deploys']);
   if (lastDay >= APP_ERRORS_WARN) reasons.push(['warn', `${lastDay} errors in the last day`, 'errors']);
-  if (disk?.warn_gb && disk.data_bytes! >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`, 'disk']);
+  if (disk?.warn_gb && disk.data_bytes !== null && disk.data_bytes >= disk.warn_gb * 1e9) reasons.push(['warn', `its data is over ${disk.warn_gb} GB`, 'disk']);
   const backup = appBackup(join(home, '.local/share', a.name), now);
   if (backup.day && !backup.ok) reasons.push(['warn', `its last backup was ${backup.day}`, 'backup']);
   return {
@@ -689,7 +689,7 @@ export function appVitals(store: Store, a: ContraptionRow, now: number, days: st
     deploys: { tone: deployTone, counts: dCount, failed: dFailed, median: median(took), longest: took.length ? Math.max(...took) : null, last: lastDeploy ? { at: lastDeploy.started_at, outcome: lastDeploy.outcome, by: lastDeploy.by, sha: lastDeploy.to_sha?.slice(0, 8) ?? null, took: lastDeploy.finished_at ? (lastDeploy.finished_at - lastDeploy.started_at) / 1000 : null } : null },
     errors: { counts: eCount, kinds, top, lastDay },
     turns: { counts: tCount, tokens: tTokens, people: [...people.entries()].sort((x, y) => y[1] - x[1]).map(([name, turns]) => ({ name, turns })) },
-    disk: disk ? { bytes: disk.data_bytes, at: disk.measured_at, warn_gb: disk.warn_gb } : null,
+    disk: disk ? { bytes: disk.data_bytes, at: Date.parse(disk.measured_at), warn_gb: disk.warn_gb } : null,
     backup,
   };
 }
@@ -740,7 +740,7 @@ export interface AppStatus {
   deploys: { tone: Tone; counts: number[]; failed: number[]; median: number | null; longest: number | null; last: { at: number; outcome: string; by: string; sha: string | null; took: number | null } | null };
   errors: { counts: number[]; kinds: Record<string, number>; top: { kind: string; count: number; sample: string; last_at: number }[]; lastDay: number };
   turns: { counts: number[]; tokens: number[]; people: { name: string; turns: number }[] };
-  disk: { bytes: number | null; at: string; warn_gb: number | null } | null;
+  disk: { bytes: number | null; at: number; warn_gb: number | null } | null;
   backup: { day: string | null; ok: boolean };
 }
 

@@ -547,3 +547,14 @@ test('answer time (#1559): each sample stores its window; three slow ones in a r
   assert.equal(a.rows.length, 7);
   assert.equal(a.now, 12);
 });
+
+test("an app's disk reading reaches the page as a timestamp in ms, and a failed measurement doesn't warn", async () => {
+  const { store, mia } = setup('disk');
+  const at = Date.now() - 3 * 60_000;
+  const build = async (data_bytes: number | null) => (await new StatusPage({ store, dataDir: root, bootAt: Date.now(), commit: 'abc', ownScheme: () => null,
+    diskUse: () => ({ data_bytes, measured_at: new Date(at).toISOString(), warn_gb: 1 }) }).build(viewer(store, mia.id))).apps[0];
+  const big = await build(2e9);
+  assert.equal(big.disk?.at, at);
+  assert.ok(big.verdict.reasons.includes('its data is over 1 GB'));
+  assert.ok(!(await build(null)).verdict.reasons.some((r) => r.includes('GB')));
+});

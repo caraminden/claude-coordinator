@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setAccount, setView } from '../public/base.js';
-import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, spokenCell, workingBy } from '../public/threadstate.js';
+import { askWhy, mentions, byUrgency, cardChip, cardsYours, pacific, progressWhy, refBucket, rowBar, rowState, rowUnread, rowWhy, LOOK, serverLabel, SHIP, span, spokenCell, workingBy } from '../public/threadstate.js';
 
 const NOW = Date.UTC(2026, 10, 10, 12);
 const MIN = 60_000, HOUR = 60 * MIN;
@@ -470,4 +470,41 @@ test('pacific and span: clock times are Pacific with the day once old; spans rea
   assert.equal(pacific(NOW, NOW), '4:00 AM PST');
   assert.equal(pacific(NOW - 30 * HOUR, NOW), 'Sun, 10:00 PM PST');
   assert.deepEqual([span(20_000), span(14 * MIN), span(65 * MIN), span(2 * HOUR), span(51 * HOUR)], ['under a minute', '14m', '1h 5m', '2h', '2d 3h']);
+});
+
+test('refBucket: a minion link in chat is waiting, working, deployed or neutral (#1743), not the sidebar family', () => {
+  const live = { stage: 'live' };
+  const rows = [
+    // [what the minion is, bucket]
+    [null, 'neutral'], // not in the loaded list (another scheme)
+    [{ kind: 'coordinator' }, 'neutral'],
+    [{}, 'neutral'], // idle, nothing pending
+    [{ status: 'running' }, 'working'],
+    [{ status: 'new' }, 'working'], // queued first turn
+    [{ status: 'new', parked_for: 'start_after' }, 'neutral'],
+    [{ server_work: { kind: 'land' }, wait: { stage: 'test' } }, 'working'],
+    [{ server_work: { kind: 'land' }, wait: { stage: 'line' } }, 'waiting'], // behind others in the ship line
+    [{ state: 'pending-deploy' }, 'working'], // the sidebar shows violet "wait"
+    [{ state: 'ready' }, 'waiting'], // the sidebar shows green "done"
+    [{ state: 'complete', note: 'nothing left' }, 'waiting'],
+    [{ state: 'try' }, 'waiting'], // the sidebar shows blue "work"
+    [{ state: 'parked' }, 'waiting'], // the sidebar shows grey "idle"
+    [{ state: 'blocked' }, 'waiting'],
+    [{ state: 'outside' }, 'waiting'],
+    [{ state: 'limited', status: 'error' }, 'waiting'],
+    [{ status: 'error' }, 'waiting'],
+    [{ pending_card_at: NOW }, 'waiting'],
+    [{ replies: ['Ship it'] }, 'waiting'],
+    [{ approvals: 1 }, 'waiting'],
+    [{ ship: live }, 'deployed'], // open and idle, its change live
+    [{ ship: live, state: 'complete' }, 'waiting'], // but a read-it deliverable still waits on people
+    [{ ship: live, pending_card_at: NOW }, 'waiting'],
+    [{ ship: { stage: 'failed' } }, 'waiting'],
+    [{ status: 'closed' }, 'neutral'], // dismissed without shipping
+    [{ status: 'closed', ship: live }, 'deployed'],
+    [{ status: 'closed', ship: { stage: 'main' } }, 'working'],
+    [{ status: 'closed', ship: live, release: { stuck: false } }, 'working'], // its release is still on its way
+    [{ status: 'closed', release: { stuck: true } }, 'waiting'],
+  ];
+  for (const [over, bucket] of rows) assert.equal(refBucket(over && { ...t({}), ...over }), bucket, JSON.stringify(over));
 });

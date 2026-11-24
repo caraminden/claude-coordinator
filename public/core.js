@@ -23,6 +23,7 @@ import { countsIfOwed, forgetOtherSchemes, holdAnswered, inboxEvent, inboxOtherT
 import { onSchedulesChanged } from './schedules.js';
 import { onReviewsChanged } from './reviews.js';
 import { onHiddenChanged } from './hidden.js';
+import { schedulePaintRefs, watchRefs } from './refstate.js';
 import { loadReleases, onClaimHolder, onClaims, onReleases } from './releases.js';
 import { ciChip, releasesChip, tabOf } from './ci.js';
 import { statusChip } from './status.js';
@@ -454,7 +455,7 @@ function connectStream(catchUp = false) {
     if (msg.type === 'views') onViewsChanged(msg.projectId, msg.name);
     if (msg.type === 'hidden') onHiddenChanged(msg.name);
     if (msg.type === 'claims') onClaims(msg);
-    if (msg.type === 'releases') Promise.resolve(onReleases(msg)).then((rows) => rows && view?.kind === 'project' && scheduleSidebar());
+    if (msg.type === 'releases') Promise.resolve(onReleases(msg)).then((rows) => { if (rows && view?.kind === 'project') { scheduleSidebar(); schedulePaintRefs(); } });
     if (msg.type === 'presence' && onPresenceMsg(msg)) {
       scheduleSidebar();
       if (view.id) renderTicketHead();
@@ -926,6 +927,7 @@ export function onTicketUpdate(ticket) {
   if (ticket.kind !== 'coordinator') noteTicketChange(before, ticket);
   if (ticket.kind === 'coordinator') view.coordinator = ticket;
   else view.tickets.set(ticket.id, ticket);
+  schedulePaintRefs(); // chat links to minions show their state (refstate.js)
   inboxTicket(before, ticket);
   scheduleSidebar();
   if (view.id === ticket.id) {
@@ -1159,6 +1161,7 @@ function loadPrs() {
     prList = r;
     prRepos = new Map(r.map((x) => [x.repo, x]));
     linkPrRefs();
+    schedulePaintRefs();
   }).catch(() => {});
 }
 /** Where a GitHub PR link should go instead (see prOwnerRoute); null until api/prs has loaded. */
@@ -1188,6 +1191,7 @@ function pointPrLink(a) {
   a.removeAttribute('target');
   a.title = to.title;
 }
+watchRefs();
 for (const type of ['pointerover', 'focusin']) {
   document.addEventListener(type, (e) => { const a = e.target.closest?.('a[href^="https://github.com/"]'); if (a) pointPrLink(a); });
 }

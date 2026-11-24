@@ -189,6 +189,7 @@ uses the built-in `node:sqlite`. Nothing in `src/` imports a package: the one de
 | `src/mcp-pool.ts`, `src/pool-client.mjs`, `src/pool-machine.ts` | The shared tool server (#1259): one process per place (a person's container, or the host) and pinned version serves every turn's `src/mcp.ts` tools and machine links over HTTP MCP, each call as the turn whose token reached it; the turn's wrapper starts it and keeps the turn registered. `TURN_POOL=0` goes back to helpers per turn |
 | `src/machine-mcp.ts` | Per-turn stdio stand-in for a machine's MCP server, for a turn whose shared tool server won't start, and Codex turns |
 | `public/machine-agent.mjs` | Agent people run on their own computers to connect them |
+| `public/refstate.js` | Paints minion links in chat (`a.thread-ref`) by their minion's state: waiting, working, deployed (`refBucket` in `public/threadstate.js`) |
 | `src/github.ts` | Watches minions' pull requests and messages them about CI, reviews and merges |
 | `src/workspace.ts` | Clones scheme repos, creates per-ticket worktrees |
 | `src/instructions.ts` | Finds Claude Code instruction and memory files to import as scheme instructions |

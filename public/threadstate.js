@@ -140,6 +140,45 @@ function baseState(t, usage, now) {
   return { rank: 4, fam: 'idle', cell: waited(), label: 'Idle' };
 }
 
+/** The words a minion link in chat carries in its hover title (refBucket): waiting on people, working, live; neutral has none. */
+export const REF_WORDS = { waiting: 'waiting', working: 'working', deployed: 'deployed' };
+
+/**
+ * Which bucket a minion link in chat belongs to (#1743; Cara, 2026-11-23: "color minion links in chats based on if the minion is
+ * blocked/waiting, working, or deployed"). Not the sidebar's families: there ready, complete and try are green or blue, a deploy
+ * violet and sealed grey, while here each reads as what it is to the person in the chat.
+ *   working:  its turn runs or is queued, the server is landing it, it is deploying (state pending-deploy, or dismissed with its release on its way)
+ *   waiting:  a card, approval or replies wait on people, state try/ready/complete/blocked/outside/parked/limited, a failed turn,
+ *             the ship line, or a release or deploy that is stuck or failed
+ *   deployed: its change is live, open and idle or dismissed
+ *   neutral:  anything else, or no row (another scheme's list isn't loaded)
+ * `t` carries `release` (releases.js pendingRelease) when its change is on its way, as the sidebar adds it.
+ */
+export function refBucket(t) {
+  if (!t || isCoordinator(t)) return 'neutral';
+  const stage = t.ship?.stage;
+  if (t.status === 'closed') {
+    if (t.release) return t.release.stuck ? 'waiting' : 'working';
+    if (stage === 'live') return 'deployed';
+    return stage === 'failed' ? 'waiting' : stage === 'main' || stage === 'deploying' ? 'working' : 'neutral';
+  }
+  const by = workingBy(t);
+  if (by === 'turn') return 'working';
+  if (by === 'server') return t.wait?.stage === 'line' ? 'waiting' : 'working';
+  if (t.state === 'pending-deploy') return 'working';
+  if (t.status === 'error' || t.approvals || t.pending_card_at || t.replies?.length) return 'waiting';
+  if (['try', 'ready', 'complete', 'blocked', 'outside', 'parked', 'limited'].includes(t.state) || stage === 'failed') return 'waiting';
+  return stage === 'live' ? 'deployed' : 'neutral';
+}
+
+/** A link's hover title with the state in words: "#12 · working · Title", "Delve #12 · working · Title", or "#12 · working" with no title. */
+export function refTitle(base, number, word) {
+  if (!word) return base;
+  if (!base) return `#${number} · ${word}`;
+  const m = /^(.*?#\d+) (.*)$/s.exec(base);
+  return m ? `${m[1]} · ${word} · ${m[2]}` : `${base} · ${word}`;
+}
+
 /**
  * A minion that hit the usage limit: a countdown to its own resume when it has one, else a countdown while the account's limit is still hit, your move
  * once a later turn shows it has reset, and just "limit hit" when neither is known (the note says when).

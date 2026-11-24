@@ -2,11 +2,11 @@
 // temp folder behind goes red naming each, and is cleaned up after; a clean file stays green.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { judge, type Leftovers } from './leak-file.ts';
+import { judge, KINDS, readBaseline, type Leftovers } from './leak-file.ts';
 
 const GUARD = join(import.meta.dirname, 'leak-guard.ts');
 const alive = (pid: number) => {
@@ -111,4 +111,14 @@ test('a test process that is not a test file of a guarded run loads the counter 
     encoding: 'utf8', env: { ...process.env, CITADEL_LEAK_FILES: '1', TMPDIR: '/tmp' },
   });
   assert.equal(r.stdout.trim(), `/tmp ${process.env.CITADEL_LEAK_FILE ?? 'none'}`, r.stderr);
+});
+
+test('the baseline names only test files that exist, with a positive count of a known kind for each', () => {
+  for (const [file, counts] of Object.entries(readBaseline())) {
+    assert.ok(existsSync(join(import.meta.dirname, file)), `test/leak-baseline.json names ${file}, which is gone: drop its line`);
+    for (const [kind, n] of Object.entries(counts)) {
+      assert.ok((KINDS as string[]).includes(kind), `${file}: ${kind} is not one of ${KINDS.join(', ')}`);
+      assert.ok(Number.isInteger(n) && n! > 0, `${file}: ${kind} ${n}: a count of none goes, with its line once it is empty`);
+    }
+  }
 });

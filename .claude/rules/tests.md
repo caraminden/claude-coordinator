@@ -27,4 +27,13 @@ count rises. Write the right-hand column instead.
 - Don't edit the guard's patterns to get green; fix the test, or say why the pattern is wrong.
 - After a `git mv` of a test file the baseline (keyed by name) needs the same regenerate.
 
+## What a test file leaves behind (#1763)
+
+Each file of a guarded run (npm test, citadel-test, run-tests.sh and its reruns) gets its own `TMPDIR` and a tag,
+and once its teardown is over `test/leak-file.ts` counts what is still its own: processes, the user units they run in,
+listening TCP ports, and entries left in its `TMPDIR`. Anything left fails the file, naming it, and is then cleaned up.
+Fix it in the file's teardown (`bootServer`'s stop, `stopTurns(root)` for a server's turn supervisor, `tempRoot`'s
+teardown, a `finally`). `test/leak-baseline.json` lists files that leaked before the guard; like the flake baseline it
+only shrinks: a drop passes with a note to lower it, and a file at zero loses its line.
+
 Before the first hand-off, run `tools/burn-in.sh` on every test file you touched: it burns in each, and old tests with shared state fail on whoever next edits them. A failure in 10 of 10 copies is a real failure, not a race. Editing a file a judge pins needs `node tools/judge-replay.ts <id> --record`, or `test/judges.test.ts` goes red.

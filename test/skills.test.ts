@@ -6,13 +6,14 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { KIT_DIR, listSkills, skillTimeline, refreshUsage, cachedUsage, scanSkills, reportFor, forgetUsage, skillDetail, sentenceAround, offSkills, pruneKit, skillDenies, splitDescription, usageFrom } from '../src/skills.ts';
-import { bootServer, stopProcs, until, type Booted } from './helpers.ts';
+import { bootServer, stopProcs, stopTurns, until, type Booted } from './helpers.ts';
 
 // The Skills page (#1062): the list, the usage walk over a scheme's events, and the per-scheme Off switch.
 const root = mkdtempSync(join(tmpdir(), 'skills-'));
 const procs: ChildProcess[] = [];
 after(async () => {
   await stopProcs(procs);
+  await stopTurns(root); // its server's turn supervisor runs in a unit of its own, outliving the server (#1763)
   rmSync(root, { recursive: true, force: true });
 });
 

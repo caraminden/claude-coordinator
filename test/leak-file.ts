@@ -117,7 +117,8 @@ export function leftovers(o: { self: number; id: string; dir: string }): Leftove
     }
   }
   let tmp: string[] = [];
-  try { tmp = readdirSync(o.dir).sort(); } catch {}
+  // tools/citadel-node's link to node and its compile cache: caches it makes in any TMPDIR, gone with the folder.
+  try { tmp = readdirSync(o.dir).filter((e) => !/^citadel-node-(\d+|cache)$/.test(e)).sort(); } catch {}
   return { procs: procs.map((p) => [p.pid, p.args.join(' ')]), units, ports, tmp };
 }
 

@@ -76,12 +76,13 @@ FIXTURES['slow-pass.test.mjs'] = slowOnce('pass');
 FIXTURES['slow-hang.test.mjs'] = slowOnce('hang');
 for (const name of ['once-then-hang', 'once-then-hang2', 'once-then-hang3']) FIXTURES[`${name}.test.mjs`] = onceThenHang(name);
 // Killed from outside (#1393: the desktop's out-of-memory killer): the file SIGKILLs the node --test runner that started it,
-// before any test fails. kill-once does it only when rerun alone, after failing in the full run.
-FIXTURES['killed.test.mjs'] = "import test from 'node:test';\ntest('killed', () => { process.kill(process.ppid, 'SIGKILL'); return new Promise(() => {}); });\n";
+// before any test fails, then exits itself rather than wait on forever as an orphan (#1763). kill-once does it only when
+// rerun alone, after failing in the full run.
+FIXTURES['killed.test.mjs'] = "import test from 'node:test';\ntest('killed', () => { process.kill(process.ppid, 'SIGKILL'); process.exit(1); });\n";
 FIXTURES['fail-then-killed.test.mjs'] = `import test from 'node:test';
 import { existsSync, writeFileSync } from 'node:fs';
 test('fails, then is killed', () => {
-  if (existsSync('ran-killed')) { process.kill(process.ppid, 'SIGKILL'); return new Promise(() => {}); }
+  if (existsSync('ran-killed')) { process.kill(process.ppid, 'SIGKILL'); process.exit(1); }
   writeFileSync('ran-killed', '');
   throw new Error('first run fails');
 });
@@ -401,7 +402,7 @@ test('counts that cannot be written never fail or change the run', async () => {
 });
 
 // The gate has npm test's leak guard (ultra review A3): green tests that leave a process running are a red run.
-test("a full run whose tests leave a process running fails, and names it; the guard's file is the suite's own", async () => {
+test("a full run whose test file leaves a process running fails that file, naming it, and its rerun alone fails too; the guard's file is the suite's own", async () => {
   const pidFile = join(root, 'leaked-pid');
   const gone = join(tmpdir(), 'run-tests-leak-gone', 'x'); // a scratch folder that was deleted, as the guard looks for
   const leak = `import test from 'node:test';
@@ -419,8 +420,10 @@ test('leaves a process', () => {
       writeFileSync(join(dir, 'test', 'leak-guard.ts'), `export * from ${JSON.stringify(join(import.meta.dirname, 'leak-guard.ts'))};\n`);
     });
     assert.equal(r.code, 1, r.log);
-    assert.match(r.log, /The tests left 1 process\(es\) running \(now killed\)/);
-    assert.doesNotMatch(r.log, /rerunning each alone/, 'no test file failed, so nothing is rerun');
+    // The file's own count (test/leak-file.ts, #1763) catches it before the run's guard, and kills it.
+    assert.match(r.log, /leak guard: \S*leak\.test\.mjs left these behind[^]*1 process\(es\) still running/);
+    assert.match(r.log, /test\/leak\.test\.mjs: failed again alone: a real failure/, 'a leak is no flake');
+    assert.doesNotMatch(r.log, /passed alone/);
   } finally {
     try {
       process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');

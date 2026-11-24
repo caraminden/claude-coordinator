@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import { BY_TYPE, nextStep, tierLabel } from '../public/model-table.js';
 import { Store } from '../src/db.ts';
 import { flagBlock, ownBrief, repeats, steppedTier, termCounts, type BugBrief, type EarlierBug } from '../src/repeat-bugs.ts';
-import { bootServer, stopProcs } from './helpers.ts';
+import { bootServer, stopProcs, stopTurns } from './helpers.ts';
 
 const HOUR = 3_600_000;
 const NOW = 1_800_000_000_000;
@@ -67,6 +67,7 @@ const root = mkdtempSync(join(tmpdir(), 'repeat-bugs-'));
 const procs: ChildProcess[] = [];
 after(async () => {
   await stopProcs(procs);
+  await stopTurns(root); // its server's turn supervisor runs in a unit of its own, outliving the server (#1763)
   rmSync(root, { recursive: true, force: true });
 });
 

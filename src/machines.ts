@@ -267,7 +267,7 @@ const WATCH_RUNNING_WAIT_S = 50;
 /** No answer this long: the session is closed and another opened. */
 const WATCH_ASK_MS = 90_000;
 const WATCH_RETRY_MS = 15_000;
-/** Past the line's worst case (CI's 40 minute take and 30 minute holds) and a 30 minute run: Citadel stops and says so. */
+/** Past the line's worst case (CI's 40 minute take and 30 minute holds) and a 30 minute run: Citadel stops and says so, taking a job still in line out of it. */
 const WATCH_MAX_MS = 12 * 60 * 60_000;
 /** The agent's words (public/machine-agent.mjs report()) for a job waiting, running, ended, or forgotten by a restart. */
 export const JOB_WORDS = {
@@ -771,13 +771,13 @@ export class MachineRelay {
   }
 
   /** Stop following a job. A minion stopped or closed takes a job still waiting for the screen out of the line, as its turn ending did before. */
-  private unwatch(w: LiveWatch, why: 'seen' | 'told' | 'stopped' | 'closed' | 'unlent') {
+  private unwatch(w: LiveWatch, why: 'seen' | 'told' | 'stopped' | 'closed' | 'unlent' | 'capped') {
     if (w.done) return;
     w.done = true;
     if (this.watches.get(watchKey(w)) === w) this.watches.delete(watchKey(w));
     this.saveWatches();
     w.cancel?.();
-    const because = { stopped: 'its turn was stopped', closed: 'it was closed', unlent: 'the box is no longer lent to its scheme' } as Record<string, string>;
+    const because = { stopped: 'its turn was stopped', closed: 'it was closed', unlent: 'the box is no longer lent to its scheme', capped: `it waited ${WATCH_MAX_MS / 3_600_000} hours in line` } as Record<string, string>;
     if (because[why] && !w.started) this.stopJob(w.machine, w.job, `Citadel, for ${this.minionName(w.ticket)} (${because[why]})`);
   }
 
@@ -815,8 +815,12 @@ export class MachineRelay {
       return true;
     }
     if (Date.now() - w.since > WATCH_MAX_MS) {
-      this.unwatch(w, 'told');
-      this.tell(w, `Citadel stopped following your job ${w.job} on ${this.machineName(w.machine)} (${w.what}) after ${WATCH_MAX_MS / 3_600_000} hours. Call job with id "${w.job}" there to see where it is.`);
+      // Still in line at the cap: it leaves now and says so, rather than wait on unfollowed and leave later unseen.
+      this.unwatch(w, 'capped');
+      const hours = WATCH_MAX_MS / 3_600_000;
+      this.tell(w, w.started
+        ? `Citadel stopped following your job ${w.job} on ${this.machineName(w.machine)} (${w.what}) after ${hours} hours. Call job with id "${w.job}" there to see where it is.`
+        : `Your job ${w.job} on ${this.machineName(w.machine)} (${w.what}) waited ${hours} hours in line for the screen without getting it, so Citadel took it out of the line: nothing was started. Run run_task again if you still need it.`);
       return true;
     }
     return false;

@@ -323,6 +323,45 @@ test('a restart carries on following the jobs it was following (#1425)', async (
   next.minionStopped(minion.id);
 });
 
+test('a job still in line when Citadel\'s 12 hours of following run out leaves the line, and its minion is told nothing ran (#1819)', async () => {
+  for (const started of [false, true]) {
+    const { store, relay, box, minion, minionCalls } = followed();
+    minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);
+    const old = relay.boxWatches().map((w) => ({ ...w, since: Date.now() - 13 * 3_600_000, ...(started ? { started: true } : {}) }));
+    relay.minionStopped(-1);
+    store.setSetting('box-watches', old);
+    const next = new MachineRelay(store, () => {});
+    relays.push({ relay: next, store });
+    const agent = stream();
+    next.connectAgent(box, agent, { host: 'h', command: '', managed: true });
+    next.setInfo(box, { v: 2, workspaces: [{ name: 'w', tasks: [{ name: 'run', run: ['run.ps1'] }] }] });
+    next.setLend(box.id, { server: null, workspaces: ['w'] });
+    const wakes: { id: number; text: string }[] = [];
+    next.watchBoxes((id, text) => wakes.push({ id, text }));
+    const init = agent.sent.find((m) => m.message?.method === 'initialize' && /^Citadel, following job ab12cd34/.test(m.who));
+    next.fromAgent(box, init.session, { message: { jsonrpc: '2.0', id: init.message.id, result: {} } });
+    for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
+    assert.ok(!agent.sent.some((m) => m.session === init.session && m.message?.params?.name === 'job'), 'not asked after again');
+    assert.deepEqual(next.boxWatches(), [], 'no longer followed');
+    assert.deepEqual(store.getSetting('box-watches'), []);
+    assert.equal(wakes.length, 1);
+    assert.equal(wakes[0].id, minion.id);
+    const stopper = agent.sent.filter((m) => m.message?.method === 'initialize' && /^Citadel, for Peek #1 \(it waited 12 hours in line\)$/.test(m.who));
+    if (started) {
+      assert.match(wakes[0].text, /^Citadel stopped following your job ab12cd34 on box \(run in w\) after 12 hours\. Call job/);
+      assert.equal(stopper.length, 0, 'a running job is left to its own 30 minute limit');
+    } else {
+      assert.match(wakes[0].text, /^Your job ab12cd34 on box \(run in w\) waited 12 hours in line for the screen without getting it, so Citadel took it out of the line: nothing was started\. Run run_task again/);
+      assert.equal(stopper.length, 1, 'it leaves the line now');
+      next.fromAgent(box, stopper[0].session, { message: { jsonrpc: '2.0', id: stopper[0].message.id, result: {} } });
+      for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
+      assert.deepEqual(agent.sent.filter((m) => m.session === stopper[0].session && m.message?.params?.name).map((m) => m.message.params), [{ name: 'stop_job', arguments: { id: 'ab12cd34' } }]);
+    }
+    relay.minionStopped(minion.id);
+    next.minionStopped(minion.id);
+  }
+});
+
 test('a followed job ends on its report\'s head, not on box words its own output quotes; a box no longer lent to the scheme takes its job out of the line (#1425)', async () => {
   const { relay, wakes, minionCalls, opened, answer } = followed();
   minionCalls(5, 'run_task', { workspace: 'w', task: 'run' }, QUEUED);

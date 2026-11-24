@@ -2,7 +2,7 @@
 // checkout's desktop/ as its app (as keys.mjs checkout), in a throwaway profile folder, signed out on the WCO rig's dev copy
 // (rig.ts up, no driver needed). It signs in with Remember ticked, signs out, and checks the sign-in page comes back filled
 // and waits (no sign-in by itself); then a wrong saved password is dropped on its refusal; then Forget empties the form.
-//   node saved-login.mjs <config URL from rig.ts up's box line>
+//   node saved-login.mjs <config URL from rig.ts up's box line> [seconds before the kill and restart, default 15]
 // Prints PASS/FAIL lines (exit 1 on a FAIL); shots land in saved-login-rig\ in the checkout (fetch_file reads them).
 import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -10,7 +10,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
-const [cfgUrl] = process.argv.slice(2);
+const [cfgUrl, after = '15'] = process.argv.slice(2);
+const RESTART_AFTER = Number(after) * 1000; // seconds the app runs after the save before it is killed and restarted
 const cfg = await (await fetch(`${cfgUrl.replace(/\/$/, '')}/config`)).json();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const repo = path.resolve(import.meta.dirname, '../../../../..');
@@ -117,6 +118,9 @@ try {
   await c.shot('2-filled');
 
   // A new start of the app, the same Windows account: still filled.
+  // safeStorage's key lives in the profile's Local State, which Chromium writes on a ~10 s timer or a clean quit; a kill
+  // sooner than that loses the key (then the saved file reads as nothing saved). A person's app runs longer.
+  await sleep(RESTART_AFTER);
   c.close();
   app.kill();
   await sleep(2000);

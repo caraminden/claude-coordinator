@@ -507,7 +507,8 @@ test("a ship that holds the line (a Regenerate ship, #1827) is first among the w
   for (const [n, end] of [
     ['0000000001', 'order\n'],
     ['0000000002', 'order\nhold\n'],
-  ]) appendFileSync(join(w.state, 'queue', n), end);
+  ])
+    appendFileSync(join(w.state, 'queue', n), end);
   await w.waits.poll();
   const line = w.server.read()[0].line;
   assert.deepEqual(

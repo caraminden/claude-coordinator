@@ -75,11 +75,7 @@ test('a ticket that holds the line goes first among the waiters in the core, dep
   writeFileSync(join(q, '0000000004'), held(coreTicket('core-d'), 9));
   writeFileSync(join(q, '.order'), '0000000002\n0000000001\n');
   const core = bash(`${fn(template, 'queue_order')}Q_DIR=$1; queue_order; printf '%s\\n' "\${Q_ORDER[@]}"`, q);
-  const deploy = bash(
-    `. "$2"; queue_order "$1"; for t in "$1"/[0-9]*; do t=\${t##*/}; echo "$(queue_key "$t") $t"; done | LC_ALL=C sort | cut -d' ' -f2`,
-    q,
-    deployQueue,
-  );
+  const deploy = bash(`. "$2"; queue_order "$1"; for t in "$1"/[0-9]*; do t=\${t##*/}; echo "$(queue_key "$t") $t"; done | LC_ALL=C sort | cut -d' ' -f2`, q, deployQueue);
   const server = readQueue(q, 4, () => true).map((t) => String(t.seq).padStart(10, '0'));
   const want = ['0000000003', '0000000004', '0000000002', '0000000001'];
   assert.deepEqual(deploy, want, 'deploy-queue.sh');

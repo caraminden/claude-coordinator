@@ -87,7 +87,11 @@ test('a declared command that fails, or writes outside its files, refuses and th
 });
 
 test('a command with no files declared, or files with no command, is refused before anything moves', () => {
-  for (const [body, want] of [['Regenerate: true', /a Regenerate: trailer but no Regenerate-files:/], ['Regenerate-files: *.txt', /a Regenerate-files: trailer but no Regenerate: <command>/], [declare('true', '!a.txt'), /plain \.gitattributes patterns, not "!a\.txt"/]] as const) {
+  for (const [body, want] of [
+    ['Regenerate: true', /a Regenerate: trailer but no Regenerate-files:/],
+    ['Regenerate-files: *.txt', /a Regenerate-files: trailer but no Regenerate: <command>/],
+    [declare('true', '!a.txt'), /plain \.gitattributes patterns, not "!a\.txt"/],
+  ] as const) {
     const r = reformat(body);
     const main = git(r.main, 'rev-parse', 'main');
     const res = r.run();

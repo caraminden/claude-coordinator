@@ -87,7 +87,11 @@ test('a declared command that writes outside its files refuses, naming them, and
 });
 
 test('a command with no files declared, or files with no command, is refused before anything moves', () => {
-  for (const [body, want] of [['Regenerate: true', /a Regenerate: trailer but no Regenerate-files:/], ['Regenerate-files: *.txt', /a Regenerate-files: trailer but no Regenerate: <command>/], [declare('true', '!a.txt'), /plain \.gitattributes patterns, not "!a\.txt"/]] as const) {
+  for (const [body, want] of [
+    ['Regenerate: true', /a Regenerate: trailer but no Regenerate-files:/],
+    ['Regenerate-files: *.txt', /a Regenerate-files: trailer but no Regenerate: <command>/],
+    [declare('true', '!a.txt'), /plain \.gitattributes patterns, not "!a\.txt"/],
+  ] as const) {
     const r = reformat(body);
     const main = git(r.source, 'rev-parse', 'main');
     const res = r.run();
@@ -114,7 +118,7 @@ test('a declared generated file with no conflict is made again on main all the s
   assert.equal(git(r2.source, 'log', '-1', '--format=%s', 'main'), '#1: other');
 });
 
-test("a declared commit the rebase empties still ships its command when the rebase brought a newer land.sh, which runs over", () => {
+test('a declared commit the rebase empties still ships its command when the rebase brought a newer land.sh, which runs over', () => {
   // The branch's only commit formats a.txt, and main changed a.txt: the driver takes main's side, the commit drops out of
   // the rebase, and land.sh starts over as the rebased copy. The trailers come from the branch as it was before the rebase.
   const r = setup();

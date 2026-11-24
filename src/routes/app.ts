@@ -23,7 +23,7 @@ const MAX_CLIENTS = 100;
 /** A page's slow-moment report (POST /api/slow-moments, public/slow-moments.js): rows a person's flood can't grow past this many per window. */
 const SLOW_RATE = 60, SLOW_RATE_MS = 10 * 60_000, SLOW_MAX_MS = 10 * 60_000;
 const slowSeen = new Map<string, { since: number; n: number }>();
-const SLOW_KINDS = new Set(['request', 'load', 'freeze']);
+const SLOW_KINDS = new Set(['request', 'open', 'load', 'freeze']);
 
 /** The report's rows as stored, each field checked and clipped, at most `room` of them; malformed ones dropped. */
 export function slowRows(body: any, person: string, room: number, now = Date.now()): Omit<SlowMoment, 'id'>[] {
@@ -37,8 +37,8 @@ export function slowRows(body: any, person: string, room: number, now = Date.now
     const page = text(m.page, 120);
     const scheme = /^#\/p\/(\d+)/.exec(page);
     out.push({
-      at, person, device: text(body.device, 60), tab: text(body.tab, 12), kind: m.kind, what: text(m.what, 160), page,
-      project_id: scheme ? Number(scheme[1]) : null, total_ms: total, server_ms: ms(m.server), network_ms: ms(m.network) ?? 0, tab_ms: ms(m.tab) ?? 0,
+      at, person, device: text(body.device, 60), tab: text(m.tab ?? body.tab, 12), kind: m.kind, what: text(m.what, 160), page,
+      project_id: scheme ? Number(scheme[1]) : null, total_ms: total, server_ms: ms(m.server), network_ms: ms(m.network) ?? 0, tab_ms: ms(m.tab_ms) ?? 0,
     });
   }
   return out;
@@ -134,7 +134,8 @@ export const appRoutes: Route[] = [
       if (!seen || t - seen.since >= SLOW_RATE_MS) slowSeen.set(who, (seen = { since: t, n: 0 }));
       const rows = slowRows(body, who, SLOW_RATE - seen.n, t);
       seen.n += rows.length;
-      if (rows.length) app.store.addSlowMoments(rows);
+      // Answered once the rows are written: a failed write is a 500, so the page keeps them and sends them again.
+      if (rows.length) await app.store.addSlowMoments(rows);
       return json(res, 202, {});
     },
   },

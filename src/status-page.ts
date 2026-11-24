@@ -7,7 +7,7 @@ import { statfs } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { cores as hostCores, hostText, loadavg, MEMINFO } from './host-signals.ts';
 import type { Store, HostSample, ReleaseRow, ContraptionRow } from './db.ts';
-import type { SlowMoment } from './db/slow-moments.ts';
+import { SLOW_KEEP, type SlowMoment } from './db/slow-moments.ts';
 import type { CiView } from './ci-health.ts';
 import type { PcView } from './ci-load.ts';
 import type { DiskUse, UnitState } from './app-services.ts';
@@ -574,10 +574,14 @@ export class StatusPage {
 
 /** Pauses over 2 s people's pages noticed in the last day (#1752), newest first; a scheme the viewer can't see goes unnamed. */
 export function slowView(store: Store, viewer: Viewer, now: number): CitadelStatus['slow'] {
-  return store.slowMoments(now - DAY_MS).map(({ id: _id, project_id, ...m }) => ({
-    ...m, scheme: project_id != null && viewer.canSee(project_id) ? store.getProject(project_id)?.name ?? null : null,
-  }));
+  // A moment on a scheme's page shows only to those who may see that scheme; opening Citadel or a frozen Home, to everyone.
+  const seen = store.slowMoments(now - DAY_MS, SLOW_KEEP).filter((m) => m.project_id == null || viewer.canSee(m.project_id));
+  return {
+    count: seen.length, longest: seen.reduce((w, m) => Math.max(w, m.total_ms), 0),
+    rows: seen.slice(0, SLOW_SHOWN).map(({ id: _id, project_id, ...m }) => ({ ...m, scheme: project_id != null ? store.getProject(project_id)?.name ?? null : null })),
+  };
 }
+const SLOW_SHOWN = 30;
 
 function shipChanges(r: ReleaseRow): string[] {
   try {
@@ -687,7 +691,8 @@ export interface CitadelStatus {
   backup: BackupInfo & { problems: string[] };
   slots: { key: string; title: string; note: string }[];
   /** Pauses over 2 s on people's pages in the last day (#1752): where each one's time went. */
-  slow: (Omit<SlowMoment, 'id' | 'project_id'> & { scheme: string | null })[];
+  /** The last day's slow moments the viewer may see (#1752): how many, the longest, and the newest SLOW_SHOWN. */
+  slow: { count: number; longest: number; rows: (Omit<SlowMoment, 'id' | 'project_id'> & { scheme: string | null })[] };
 }
 
 export interface AppStatus {

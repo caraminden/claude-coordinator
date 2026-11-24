@@ -365,9 +365,11 @@ export function slowPlace(page, scheme) {
   return top ? `the ${named(top[1])}` : page;
 }
 const s1 = (v) => `${(v / 1000).toFixed(1)} s`;
-/** What the moment was waiting on: "Opening Citadel", "Waiting for GET /api/status on the Status page". */
+/** What the moment was waiting on: "Opening Citadel", "Opening Seeded's Status page", "Waiting for GET /api/status on the Status page". */
 const slowDoing = (m) => (m.kind === 'freeze' ? `The tab was frozen on ${slowPlace(m.page, m.scheme)}`
-  : m.kind === 'load' ? 'Opening Citadel' : `Waiting for ${m.what} on ${slowPlace(m.page, m.scheme)}`);
+  : m.kind === 'load' ? 'Opening Citadel'
+  : m.kind === 'open' ? `Opening ${slowPlace(m.page, m.scheme)}${m.what ? `, slowest ${m.what}` : ''}`
+  : `Waiting for ${m.what} on ${slowPlace(m.page, m.scheme)}`);
 /** Where its time went, parts under 0.05 s left out: "0.1 s server, 0.2 s network, 19.8 s the tab was frozen". */
 const slowSplit = (m) => {
   if (m.kind === 'freeze') return '';
@@ -379,20 +381,26 @@ export function slowWords(m) {
   const doing = slowDoing(m), split = slowSplit(m);
   return `${s1(m.total_ms)} ${doing[0].toLowerCase()}${doing.slice(1)}${split ? `: ${split}` : ''}`;
 }
-/** The part that took most of it, as a hue: the server's, the network's or the tab's. */
-const slowHue = (m) => {
-  const parts = [['accent', m.server_ms ?? 0], ['teal', m.network_ms], ['waiting', m.tab_ms]];
-  return parts.reduce((a, b) => (b[1] > a[1] ? b : a))[0];
-};
+/** What took most of it, as [hue, chip tone, word]: the server, the network or the tab. */
+const slowCause = (m) => [['danger', 'danger', 'server', m.server_ms ?? 0], ['teal', 'info', 'network', m.network_ms], ['waiting', 'warn', 'tab frozen', m.tab_ms]]
+  .reduce((a, b) => (b[3] > a[3] ? b : a));
+/** A request's path, free to wrap after each slash rather than mid-word. */
+const pathText = (text) => text.split(/(?<=\/)/).flatMap((part, i) => (i ? [h('wbr'), part] : [part]));
 /** Slow moments (#1752): every load, click or freeze over 2 s on people's pages in the last day, and where its time went. */
 function slowTile(slow) {
-  const worst = slow.reduce((w, m) => Math.max(w, m.total_ms), 0);
-  return tile('Slow moments', slow.length ? `${slow.length} in the last day` : 'None in the last day',
-    slow.length ? `The longest ${s1(worst)} · pages note any wait over 2 s and whether the server, the network or the tab took it` : 'Pages note any wait over 2 s and whether the server, the network or the tab took it',
-    slow.length ? showFirst({ key: 'st-slow', noun: 'moments', items: slow.map((m) => hueRow({ hue: slowHue(m), lead: s1(m.total_ms), meta: pacificClock(m.at) },
-      h('div', {}, slowDoing(m)), h('div', { class: 'muted' }, [slowSplit(m), `${m.person} · ${m.device}`].filter(Boolean).join(' · ')))) })
+  const row = (m) => {
+    const [hue, tone, cause] = slowCause(m);
+    return hueRow({ hue, lead: s1(m.total_ms) },
+      h('div', {}, ...pathText(slowDoing(m))),
+      h('div', { class: 'st-slow-split' }, toneChip(tone, cause), ' ', slowSplit(m)),
+      h('div', { class: 'muted' }, `${pacificClock(m.at)} · ${m.person} · ${m.device}`));
+  };
+  const about = 'Pages note any wait over 2 s and whether the server, the network or the tab took it';
+  return tile('Slow moments', slow.count ? `${slow.count} in the last day` : 'None in the last day',
+    slow.count ? `The longest ${s1(slow.longest)} · ${about[0].toLowerCase()}${about.slice(1)}` : about,
+    slow.count ? showFirst({ key: 'st-slow', noun: 'moments', items: slow.rows.map(row) })
       : emptyCard('No slow moments', 'A wait over 2 s on anyone\'s page shows here'),
-    { wide: true, key: 'slow', chart: slow.slice(0, 10).map((m) => `${pacificClockBare(m.at)} ${m.person} (${m.device}): ${slowWords(m)}`).join('; ') });
+    { wide: true, key: 'slow', chart: slow.rows.slice(0, 10).map((m) => `${pacificClockBare(m.at)} ${m.person} (${m.device}): ${slowWords(m)}`).join('; ') });
 }
 
 /**

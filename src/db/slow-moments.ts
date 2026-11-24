@@ -6,9 +6,9 @@ export const SLOW_KEEP = 500;
 
 export type SlowMoment = {
   id: number; at: number; person: string; device: string; tab: string;
-  /** 'request', 'load' (opening Citadel) or 'freeze' (the tab blocked with nothing asked). */
+  /** 'request', 'open' (opening a page inside Citadel), 'load' (opening Citadel) or 'freeze' (the tab blocked with nothing asked). */
   kind: string;
-  /** The request (`GET /api/projects/2`), or '' for a load or a freeze. */
+  /** The request (`GET /api/projects/2`; for an opening, its slowest), or '' for a load, a freeze or an opening with none. */
   what: string;
   /** The page's address then (`#/p/2/t/394`), and its scheme when it names one. */
   page: string; project_id: number | null;

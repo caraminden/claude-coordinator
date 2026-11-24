@@ -565,6 +565,9 @@ button.ci-run:not(:disabled):hover { background: var(--panel); }
 .st-tile[data-tone="warn"] { box-shadow: inset 3px 0 0 var(--waiting); }
 .st-tile[data-tone="bad"] { box-shadow: inset 3px 0 0 var(--error); }
 .st-tile.wide { grid-column: 1 / -1; }
+/* Slow moments (#1752): the seconds in one column, so every row's text starts at the same place. */
+.st-tile[data-tile="slow"] .hue-row-lead { min-width: 3.4em; }
+.st-slow-split { margin: 0.15rem 0; }
 .st-tile h4 { margin: 0; font-size: 0.75em; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .st-value { font-size: 1.15em; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-sub { font-size: 0.82em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

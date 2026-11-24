@@ -65,8 +65,9 @@ skill step is skipped or uses its default.
 - **Rule homes:** `src/rule-homes.ts` names each registered rule's one home and the pointer used
   everywhere else; `test/rule-homes.test.ts` fails on a copy in the repo, and the Settings text is
   checked when it is saved.
-- **Glossary:** none. The names people read (Scheme, Taskmaster, Minion, Grunt) are in the scheme
-  instructions; code keeps the old identifiers.
+- **Glossary:** `kit/skills/citadel-words/SKILL.md` (`citadel:citadel-words`, every scheme's too): each word
+  people read and the name code keeps for it, and the retired words. `test/citadel-words.test.ts` ties
+  `public/help-words.js` and `src/wording.ts` to it.
 - **Decisions log (ADRs):** `docs/adr/`.
 - **Retros:** none yet; the first goes in `docs/retros/`.
 - **Bug classes of its own:** none beyond the bug-fixing skill's.

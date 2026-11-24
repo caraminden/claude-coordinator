@@ -28,7 +28,7 @@ const MERGE = String.raw`merg(?:e|es|ed|ing)`;
 const INTO = String.raw`(?!\s+(?:in(?:to)?|with)\b)`;
 const LAND = String.raw`land(?:s|ed|ing)?`;
 
-/** The words Citadel says one way. Another one is one more row. */
+/** The words Citadel says one way. Another one is one more row, and a retired or restricted word in the kit's glossary (kit/skills/citadel-words/SKILL.md; test/citadel-words.test.ts). */
 export const RESERVED: Reserved[] = [
   {
     term: 'fold',

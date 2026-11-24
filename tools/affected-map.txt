@@ -123,6 +123,9 @@ tools/judge-replays/**: test/judges.test.ts
 kit/agents/reviewer.md: test/reviewer-benchmark.test.ts
 kit/skills/self-review/**: test/reviewer-benchmark.test.ts
 kit/skills/ponytail-review/**: test/reviewer-benchmark.test.ts
+kit/skills/citadel-words/**: test/citadel-words.test.ts
+src/wording.ts: test/citadel-words.test.ts
+public/help-words.js: test/citadel-words.test.ts
 tools/review-escapes/**: test/reviewer-benchmark.test.ts
 
 # The answer-time probe and the per-turn cost budget (#1559).

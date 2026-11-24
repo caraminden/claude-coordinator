@@ -39,6 +39,8 @@ If a `GLOSSARY-MAP.md` exists at the root, the repo has multiple contexts. The m
 │       └── docs/adr/
 ```
 
+Citadel's own words (minion, sealed, ship and the rest) are `citadel:citadel-words`, shared by every scheme: a scheme's glossary holds its own domain and doesn't repeat them.
+
 Create files lazily: only when you have something to write. If no `GLOSSARY.md` exists, create one when the first term is resolved.
 
 ## During the session

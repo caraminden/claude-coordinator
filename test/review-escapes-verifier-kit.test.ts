@@ -71,6 +71,16 @@ test('the clock offset boot.mjs writes moves the limit\'s reset hour and the log
   assert.ok(Math.abs(Date.parse(calls[0].at) - (Date.now() + day)) < 60_000);
 });
 
+test('the server\'s shifted clock moves Date and Date.now, and a bare Date() still returns a string', () => {
+  const day = 24 * 3600_000;
+  const code = 'console.log(JSON.stringify([Date.now(), new Date().getTime(), typeof Date(), new Date(0).getTime(), new Date() instanceof Date, Date.UTC(2026, 0, 1)]))';
+  const r = spawnSync(process.execPath, [`--import=${join(HERE, 'verifier-clock.mjs')}`, '-e', code], { env: { ...process.env, VERIFIER_CLOCK_OFFSET_MS: String(day) }, encoding: 'utf8' });
+  const [now, made, bare, epoch, isDate, utc] = JSON.parse(r.stdout);
+  assert.ok(Math.abs(now - (Date.now() + day)) < 60_000);
+  assert.ok(Math.abs(made - (Date.now() + day)) < 60_000);
+  assert.deepEqual([bare, epoch, isDate, utc], ['string', 0, true, Date.UTC(2026, 0, 1)]);
+});
+
 test('tools go to the turn\'s own stdio MCP server, the way Claude Code calls them', () => {
   // A tiny MCP server: answers initialize, echoes a tools/call with the ticket it runs for.
   const server = `const rl = require('node:readline').createInterface({ input: process.stdin });

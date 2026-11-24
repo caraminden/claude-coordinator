@@ -896,7 +896,7 @@ if (!BOOT_CHECK && !PREVIEW) {
     await runner.sweepBuildOutput();
     await runner.sweepWorktrees();
     // Scratch a killed ship, lint or heavy command left in perigee's RAM-backed /tmp (#1339).
-    const orphans = sweepOrphanTmp(['/tmp', join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'citadel-heavy-tmp')]);
+    const orphans = await sweepOrphanTmp(['/tmp', join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'citadel-heavy-tmp')]);
     if (orphans.length) console.log(`Removed ${orphans.length} orphaned scratch folder${orphans.length === 1 ? '' : 's'} (${orphans.map((d) => basename(d)).join(', ')}).`);
     // The shared Gradle build cache (#1153) under its cap.
     const t = await trimCache(gradleCacheDir(DATA_DIR), GRADLE_CACHE_CAP);

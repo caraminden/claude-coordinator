@@ -95,7 +95,6 @@
  "src/standing-checks.ts": 5,
  "src/supervisor-client.ts": 12,
  "src/taskmaster-files.ts": 8,
- "src/tmp-sweep.ts": 5,
  "src/tripwire-git.ts": 5,
  "src/tripwire.ts": 17,
  "src/turn-launch.ts": 46,

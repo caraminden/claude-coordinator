@@ -244,13 +244,14 @@ function notesBody(card) {
 
 /**
  * A memory tidy card (#1111, #1803): Approve all has the curator apply the whole tidy in its next turn; to pick change by
- * change, the Memory page. The notes it would delete are named outside the toggle, so none goes unseen.
+ * change, the Memory page. Approve all never deletes (Josh, 2026-11-19: "Delete, each ticked"): the deletes it turns down
+ * are named outside the toggle, so a member who wants them ticks them on the page instead.
  */
 function memoryBody(card, ticketId) {
   const deletes = [...(card.plan ?? '').matchAll(/^- \*\*delete\*\* `([^`]+)`/gm)].map((m) => m[1]);
   return [
     h('div', {}, 'Approve all and the curator applies it in its next turn, or pick change by change on ', h('a', { href: `#/p/${card.memory.project}/memory` }, 'the Memory page'), '. Either can be put back there for 30 days.'),
-    deletes.length ? h('div', { class: 'pwarn' }, `Deletes ${deletes.length} note${deletes.length === 1 ? '' : 's'}: ${deletes.join(', ')}`) : null,
+    deletes.length ? h('div', { class: 'pwarn' }, `Approve all keeps ${deletes.length === 1 ? 'the note' : `the ${deletes.length} notes`} it proposes to delete (${deletes.join(', ')}): to delete, tick ${deletes.length === 1 ? 'it' : 'them'} on the Memory page instead.`) : null,
     h('details', {}, h('summary', {}, 'Every change'), markdown(card.plan, ticketId)),
   ];
 }

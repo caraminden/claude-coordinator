@@ -18,8 +18,8 @@ What changed (#1803):
   decided in one place is refused in the other, so nothing is applied twice.
 - **The page stays** for picking a subset. A tidy approved on the card shows as approved there until the run applies it,
   and the ticks still work meanwhile; whichever decides first wins.
-- **Approve all covers:** every change but the flags (flags change nothing). Deletes: see below.
+- **Approve all covers:** every change but the flags (flags change nothing) and the deletes. Josh's "Delete, each ticked"
+  (2026-11-19) stands: Approve all keeps every note it would delete, and the card names them; a member who wants one
+  gone ticks it on the Memory page instead.
 - **Tidies already waiting** (such as #1766's) get the new card at once: the card is drawn from the stored event, so
   their Approve works after the deploy, and their runs get `apply_memory`.
-
-Deletes on Approve all: pending the card on #1803 (Josh's "Delete, each ticked", 2026-11-19, vs. one Approve for all).

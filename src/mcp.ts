@@ -392,7 +392,7 @@ const PROPOSE_MACHINE_NOTES = {
 const PROPOSE_MEMORY = () => ({
   name: 'propose_memory',
   description:
-    "For a memory curator run: propose a tidy of this scheme's Claude Code memory (MEMORY.md and its notes) as a card in this chat. Nothing is written until a member approves it all on the card (then you apply it with apply_memory) or ticks changes on the Memory page; the decision comes as a message. One change per note file: edit (whole new text, and optionally a new index line), add (new note with its index line), delete, index (only its MEMORY.md line), or flag (no change, just the reason, for a person to judge). Every change needs a reason people decide from. A newer proposal replaces an open one. Never edit memory files yourself in a curator run.",
+    "For a memory curator run: propose a tidy of this scheme's Claude Code memory (MEMORY.md and its notes) as a card in this chat. Nothing is written until a member approves it all on the card (then you apply it with apply_memory) or ticks changes on the Memory page; the decision comes as a message. One change per note file: edit (whole new text, and optionally a new index line), add (new note with its index line), delete (only a member's tick on the page applies one; Approve all keeps the note), index (only its MEMORY.md line), or flag (no change, just the reason, for a person to judge). Every change needs a reason people decide from. A newer proposal replaces an open one. Never edit memory files yourself in a curator run.",
   inputSchema: {
     type: 'object',
     properties: {

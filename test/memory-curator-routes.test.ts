@@ -150,13 +150,13 @@ test('approved on the card, the run applies the whole tidy through the page\'s p
   const card = await cardOf(r.proposal);
   await answered(() => verdict('Cara', card.id, 'approve'));
   assert.equal(read('c.md'), '---\nname: C\ndescription: unindexed\n---\ngamma\n', 'Approve itself writes nothing: the run applies');
-  assert.match((await events('user_message')).at(-1).text, /^Approved: Cara approved your whole memory tidy .* Call apply_memory now/);
+  assert.match((await events('user_message')).at(-1).text, /^Approved: Cara approved your memory tidy .* Call apply_memory now: it applies all but the deletes/);
   assert.equal((await proposals()).open.approved_by, 'Cara', 'the page shows it approved on the card');
   const out = await applyMine();
-  assert.match(out.line, /^Applied 2 of the 2 changes Cara approved \(1 edit, 1 delete\)\.$/);
-  assert.deepEqual(out.changes.map((c: any) => c.outcome), ['applied', 'applied', 'noted']);
+  assert.match(out.line, /^Applied 1 of the 1 changes Cara approved \(1 edit\)\.$/);
+  assert.deepEqual(out.changes.map((c: any) => c.outcome), ['applied', 'turned down', 'noted']);
   assert.equal(read('c.md'), 'gamma, tidied\n');
-  assert.equal(read('d.md'), null);
+  assert.equal(read('d.md'), '---\nname: D\ndescription: dup\n---\ndelta\n', 'Approve all never deletes (Josh: "Delete, each ticked")');
   assert.match(read('MEMORY.md')!, /- \[C\]\(c\.md\) — tidied/);
   const after = await proposals();
   assert.equal(after.open, null);
@@ -164,7 +164,8 @@ test('approved on the card, the run applies the whole tidy through the page\'s p
   assert.equal(after.kept[0].decided_by, 'Cara', 'the page shows it applied, decided by the approver');
   await assert.rejects(applyMine(), /409 Cara already applied this tidy/, 'never applied twice');
   await call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/restore`, { method: 'POST' });
-  assert.equal(read('d.md'), '---\nname: D\ndescription: dup\n---\ndelta\n');
+  assert.equal(read('c.md'), '---\nname: C\ndescription: unindexed\n---\ngamma\n');
+  rmSync(join(dir, 'd.md'));
 });
 
 test('a non-member\'s answer applies nothing, and Reject turns it down at once', async () => {
@@ -211,5 +212,16 @@ test('approved on the card, then ticked on the page before the run applies: the 
   await assert.rejects(applyMine(), /409 Cara already applied this tidy/);
   assert.equal(read('c.md'), 'page first\n');
   assert.doesNotMatch(read('MEMORY.md')!, /again/);
+  await idle();
+});
+
+test('approved on the card, then turned down on the page: the card says so and the run applies nothing', async () => {
+  const r = await propose([{ action: 'edit', file: 'c.md', text: 'never', reason: 'r' }]);
+  await idle();
+  await answered(async () => verdict('Cara', (await cardOf(r.proposal)).id, 'approve'));
+  await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/decide`, { method: 'POST', body: { apply: [] } }));
+  assert.equal((await cardOf(r.proposal)).status, 'rejected', 'the card no longer says approved');
+  await assert.rejects(applyMine(), /409 Cara already turned down this tidy/);
+  assert.doesNotMatch(read('c.md')!, /never/);
   await idle();
 });

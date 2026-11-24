@@ -24,7 +24,8 @@ export function tidyCard(app: App, p: Proposal): { id: number; card: any } | nul
 function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'superseded', by: string, text: string) {
   if (p.ticket_id === null) return;
   const found = tidyCard(app, p);
-  if (found && found.card.status === 'pending') {
+  // A card approved but not yet applied is settled again when the page turns it down or a newer tidy replaces it.
+  if (found && (found.card.status === 'pending' || (found.card.status === 'approved' && status !== 'approved'))) {
     const result = { status, by, at: Date.now() };
     app.store.setEventData(found.id, { ...found.card, ...result });
     app.runner.emit(p.ticket_id, 'plan_result', { id: found.card.id, ...result });
@@ -32,8 +33,9 @@ function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'su
   if (app.store.getTicket(p.ticket_id)?.status !== 'closed') deliverAnswer(app, p.ticket_id, by, text, { memoryProposal: { id: p.id, status } });
 }
 
-/** What the card's Approve covers: every change but the flags, which change nothing. */
-export const approveAll = (changes: Pick<Change, 'id' | 'action'>[]): number[] => changes.filter((c) => c.action !== 'flag').map((c) => c.id);
+/** What the card's Approve all covers: every change but the flags, which change nothing, and the deletes, which a member
+ *  ticks one by one on the Memory page (Josh, 2026-11-19: "Delete, each ticked"; approve all never covers one). */
+export const approveAll = (changes: Pick<Change, 'id' | 'action'>[]): number[] => changes.filter((c) => c.action !== 'flag' && c.action !== 'delete').map((c) => c.id);
 
 /**
  * The one write path for a tidy (#1803): the page's ticks and the run's apply_memory both decide through here. Applies

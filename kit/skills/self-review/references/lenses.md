@@ -157,6 +157,14 @@ harmless refactor breaks it, and each shape under test-quality's "Tests that cos
 prove" (a new test per bug number, a prose pin, a real wait, a copied harness, a host-path
 fixture), naming the cheaper shape.
 
+When the diff adds or changes test files, run `node <kit>/skills/test-quality/scripts/test-habits.ts
+--base <the diff's base>` (it only reads, in about a second). It prints suspects for four of those shapes: a
+new test file whose seam an existing file already drives, a regex or substring of prose in an assert, a fixed
+sleep, a copied harness. Read each one against the code it names: a new file that reaches a case the named
+file can't, or drives it through another seam, isn't a finding. Each that holds is a Should fix, never Must
+fix (it costs lines and minutes, it doesn't break the change), and names the file to put the case in or the
+helper to use, as the script's line does.
+
 #### New types
 
 Name the type's invariants (fields that must agree, valid state changes, required values).

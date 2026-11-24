@@ -615,6 +615,28 @@ export class LiveWaiters {
     if (c.id != null) this.outbox?.finish(c.id, event);
   }
 
+  /**
+   * Take `ticket` off its start_after chain without starting it: `sendBrief` leaves the held brief as held mail (the
+   * minion stays sealed), then the chain goes, so its leader's work starting nothing. False when it isn't chained
+   * (or its start is running now).
+   */
+  unchain(ticket: number, sendBrief: (c: Chain) => number | null): boolean {
+    const c = this.claim(ticket);
+    if (!c) return false;
+    let event: number | null;
+    try {
+      event = sendBrief(c);
+    } catch (err) {
+      this.done(c, null); // back to waiting, unsent
+      this.end(ticket);
+      throw err;
+    }
+    if (this.outbox) this.done(c, event);
+    else this.release(ticket);
+    this.end(ticket);
+    return true;
+  }
+
   /** Take `ticket`'s held brief out of the chain (its start sends it now), or null. */
   release(ticket: number): Chain | null {
     const all = this.chains();

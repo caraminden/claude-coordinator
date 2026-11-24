@@ -83,6 +83,20 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
   if ((body.state === 'complete' || clearsNote) && !fields.note) {
     throw new HttpError(400, 'State complete needs a note in the same call saying what is left: "nothing left", or what people should read now ("read: the PR #12 report"), at most 60 characters. Link the files themselves in your reply');
   }
+  // Off its start_after chain, still sealed (#1823): its held brief becomes held mail, read when it is unsealed or messaged with unpark.
+  if (body.start_after !== undefined) {
+    if (body.start_after !== null) throw new HttpError(400, 'start_after can only be set to null here: it takes a minion off its chain (a chain is made by create_ticket)');
+    if (ticket.kind === 'coordinator' || caller === id) throw new HttpError(400, `Only the ${AGENT_NAME} or a person takes a minion off its chain`);
+    const leader = app.waiters.heldFor(id) ? app.store.getTicket(app.waiters.chains().find((c) => c.ticket === id)?.after ?? 0) : null;
+    const gone = app.waiters.unchain(id, (c) => {
+      const sent = c.message ? runner.send(id, c.from, c.message, [], { brief: true, hold: true }) : null;
+      return sent?.event.id ?? null;
+    });
+    if (!gone) throw new HttpError(409, `#${ticket.number} isn't sealed waiting on another minion's work`);
+    runner.emit(id, 'note', { text: `${name} took this minion off its chain${leader ? ` behind #${leader.number}` : ''}: it stays sealed and no longer starts when that work is in. Unseal it, or message it with unpark, to start it.` });
+    store.updateTicket(id, { state: 'parked', ...(body.note === undefined ? { note: 'sealed, off its chain' } : {}) });
+    runner.broadcastTicket(id);
+  }
   // The view's replies are a list; compare the stored JSON.
   const stored = store.getTicket(id)!;
   for (const k of Object.keys(fields) as (keyof typeof fields)[]) if (fields[k] === stored[k]) delete fields[k];

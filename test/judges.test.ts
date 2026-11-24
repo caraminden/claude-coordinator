@@ -25,7 +25,7 @@ const NOT_JUDGES: Record<string, { why: string; calls: number }> = {
   'src/exit-with-parent.ts': { why: 'kills only its own test server\'s processes when the parent test exits; judges nothing', calls: 2 },
   'src/worktree-deps.ts': { why: 'stops its own npm install past its time limit; judges nothing', calls: 1 },
   'src/ci-armed.ts': { why: "tellTaskmaster itself and the minion's own message tool", calls: 3 },
-  'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes, and a person's Split first on a start card (#1674)", calls: 11 },
+  'src/routes/tickets.ts': { why: "messages a minion or person sends on purpose, and tracking notes, and a person's Split first on a start card (#1674), and an unchained minion's held brief (#1823)", calls: 12 },
   'src/routes/projects.ts': { why: "tells the Taskmaster a person started a minion; a new scheme's kickoff, a tune-up and a brief a person sent", calls: 4 },
   'src/outbox.ts': { why: "the delivery queue's own interface, and a dropped-delivery note", calls: 4 },
   'src/live-probe.ts': { why: "runs the minion's own check of its ship and wakes that minion on its fail; the minion picked the check, and the trial's stop rule (docs/adr/0030-live-probe-trial.md) counts its wrong fails", calls: 1 },

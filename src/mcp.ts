@@ -687,10 +687,10 @@ const TOOLS = () => ([
   },
   {
     name: 'update_ticket',
-    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders; leave out what should stay. A new model, effort, switch or folder applies from its next turn. State null on a sealed minion unseals it: a turn starts that reads what was held for it (a chained one starts now). (The branch keeps its original name.)",
+    description: "Change a minion's title, state, note, build group (the major build it is assigned to), model, effort, Workflow switch or extra plugin folders, or take it off its start_after chain (start_after: null: it stays sealed); leave out what should stay. A new model, effort, switch or folder applies from its next turn. State null on a sealed minion unseals it: a turn starts that reads what was held for it (a chained one starts now). (The branch keeps its original name.)",
     inputSchema: {
       type: 'object',
-      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, reason: PICK_REASON, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS },
+      properties: { ticket_id: TICKET_ID, title: TITLE, state: STATE, note: NOTE, build: { ...BUILD, description: `${BUILD.description} A build whose branch build/<n> exists sets its base and target from the minion's next turn: its prompt tells it to rebase onto build/<n> itself and merge into it, never main.` }, model: MODEL_CHANGE, effort: EFFORT_CHANGE, reason: PICK_REASON, workflow: WORKFLOW, plugin_folders: PLUGIN_FOLDERS, start_after: { type: 'null', description: 'Only null: takes a sealed minion off its start_after chain but keeps it sealed. Its brief stays held as mail, it no longer starts when its leader ships, and it starts only when someone unseals it or you message it with unpark.' } },
       required: ['ticket_id'],
     },
   },
@@ -1484,7 +1484,7 @@ const otherScheme = (name: string) => `Scheme ${name}: these are its minions, no
 /** The label fields a call sets; ones left out stay as they are. */
 function labelFields(args: Record<string, unknown>) {
   const out: Record<string, unknown> = {};
-  for (const k of ['title', 'state', 'note', 'replies', 'build']) if (args[k] !== undefined) out[k] = args[k];
+  for (const k of ['title', 'state', 'note', 'replies', 'build', 'start_after']) if (args[k] !== undefined) out[k] = args[k];
   return out;
 }
 
@@ -2228,7 +2228,7 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<str
       return `${how}${copied}${r.left <= 2 ? ` ${r.left} more between you before the loop guard holds them. ${ask}` : ''}`;
     }
     case 'update_ticket':
-      needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders'], 'update_ticket');
+      needOne(args, ['title', 'state', 'note', 'replies', 'build', 'model', 'effort', 'workflow', 'plugin_folders', 'start_after'], 'update_ticket');
       return `Updated. ${ticketLine(await call<TicketView>('PATCH', `/api/tickets/${await id(args)}`, { ...labelFields(args), model: args.model, effort: args.effort, pick_reason: args.reason, workflow: args.workflow, plugin_dirs: args.plugin_folders }))}`;
     case 'ask_question': {
       const direct = args.to ? { to: args.to } : {};

@@ -74,7 +74,6 @@ the triggers miss. Give it the code, not your view of it: no summary of what you
 
 **Open `references/review-extras.md` when one applies:**
 - **A feeder** (your base is `build/<n>`): reviewed on the build's tip, with two more brief lines.
-- **Side by side (light and deep):** Codex and the base check start in the background before the reviewer and are collected after it (`references/review-extras.md`, "Side by side"); never run them one after another.
 - **Codex second opinion (light and deep):** run `citadel-codex-review --check` on every light or deep review; open it when that prints `ready`.
 - **Tests against the base (light and deep):** when the diff adds or changes tests.
 - **Fresh eyes:** any feature (the minion's `type`, or the kind the brief names), even with the pre-ship review off: the reference says which are small enough to skip.

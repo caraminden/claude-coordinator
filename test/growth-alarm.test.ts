@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store, type HostSample } from '../src/db.ts';
 import { Contraptions } from '../src/contraptions.ts';
-import { checkGrowth, readGrowth, steadyRise, FLOORS, KIND, SUPERVISOR_SLACK } from '../src/growth-alarm.ts';
+import { checkGrowth, readGrowth, steadyRise, FLOORS, KIND, LEARN_MS, SUPERVISOR_SLACK } from '../src/growth-alarm.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'growth-alarm-'));
 // timing-ok: own temp dir
@@ -95,6 +95,7 @@ test("an app server's rise names the app and its scheme; an app restart starts i
   new Contraptions(s.store, 's'.repeat(40), join(root, 'app-keys')).register({ name: 'peek-auras', title: 'Peek Auras', port: 9300, icon: null, home_scheme: peek.id, open_paths: '[]', default_model: null, turn_cap: null });
   const boot = NOON - H;
   const started = NOON - 10 * H;
+  s.store.setSetting('growth-since', NOON - LEARN_MS - 11 * H);
   const rang = run(s, NOON - 10 * H, NOON, () => boot, (t) => ({ app_mem: JSON.stringify({ 'peek-auras': { mem: 100 * MB + ((t - started) / H) * 50 * MB, since: started }, calm: { mem: 40 * MB, since: started } }) }));
   assert.deepEqual(rang, [`app:peek-auras@${started}`]);
   assert.match(s.told[0], /the app peek-auras \(scheme Peek Auras\): its server rose steadily/);
@@ -168,4 +169,15 @@ test("the server memory's floor is 300 MB between the first and last hours: 55 M
   const climb = (mbPerHour: number) => Array.from({ length: 72 }, (_, i): [number, number] => [NOON - 6 * H + (i + 1) * STEP, 700 * MB + ((i + 1) * STEP / H) * mbPerHour * MB]);
   assert.equal(steadyRise(climb(55), NOON, FLOORS.rss), null);
   assert.ok(steadyRise(climb(65), NOON, FLOORS.rss));
+});
+
+test('in its first 3 days a rise in a new reading is recorded but wakes no one; bounds and server memory still wake', () => {
+  const s = setup('learning');
+  const boot = NOON - 12 * H;
+  const rang = run(s, boot, NOON, () => boot, (t) => ({ open_fds: 200 + ((t - boot) / H) * 60, rss: 600 * MB + ((t - boot) / H) * 80 * MB }));
+  assert.deepEqual(rang.sort(), [`fds@${boot}`, `rss@${boot}`]);
+  assert.equal(s.told.length, 1);
+  assert.doesNotMatch(s.told[0], /open files rose/);
+  const fds = s.store.healthEventsSince([KIND], 0).map((e) => JSON.parse(e.detail)).find((g) => g.kind === 'fds');
+  assert.equal(fds.learning, true);
 });

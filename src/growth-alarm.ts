@@ -32,6 +32,13 @@ export const SUPERVISOR_SLACK = 10;
 export const TMP_BOUND = 3 * 1024 ** 3;
 export const KIND = 'growth';
 const OPEN = 'growth-open';
+/**
+ * "Tune before it wakes anyone" (the handoff): the new readings (open fds, the units, /tmp, app servers) have no history
+ * to set their floors against, so for this long after the first check a rise in one is recorded but wakes no one. The
+ * bounds (the handoff's own numbers) and the server's memory (set against a week of readings) wake from the start.
+ */
+export const LEARN_MS = 3 * 24 * 3_600_000;
+const SINCE = 'growth-since';
 
 const MB = 1024 ** 2;
 /**
@@ -127,7 +134,7 @@ export function alarms(rows: HostSample[], bootAt: number, now: number, turns: n
     out.push({ key: 'bound:supervisors', kind: 'bound', what: `${last.supervisors} citadel-supervisor-* units are running with ${turns} turns running (the line: turns + ${SUPERVISOR_SLACK})`, to: last.supervisors, line: turns + SUPERVISOR_SLACK });
   }
   if (last?.tmp_used != null && last.tmp_used > TMP_BOUND) {
-    out.push({ key: 'bound:tmp', kind: 'bound', what: `/tmp holds ${(last.tmp_used / 1024 ** 3).toFixed(1)} GB (the line: ${TMP_BOUND / 1024 ** 3} GB)`, to: last.tmp_used, line: TMP_BOUND });
+    out.push({ key: 'bound:tmp', kind: 'bound', what: `/tmp holds ${(last.tmp_used / 1024 ** 3).toFixed(1)} GB, every account's files on the shared tmpfs (the line: ${TMP_BOUND / 1024 ** 3} GB)`, to: last.tmp_used, line: TMP_BOUND });
   }
   return out;
 }
@@ -158,6 +165,9 @@ export function checkGrowth(d: GrowthDeps, now: number): Growth[] {
   const open: Open = store.getSetting<Open>(OPEN) ?? {};
   // One the Taskmaster hasn't heard yet (held overnight, or no Taskmaster) stays until it has.
   for (const [k, o] of Object.entries(open)) if (o.woke && now - o.last > QUIET_AFTER_MS) delete open[k];
+  let since = store.getSetting<number>(SINCE);
+  if (since == null) store.setSetting(SINCE, (since = now));
+  const learning = now - since < LEARN_MS;
   const fresh: Growth[] = [];
   for (const g of alarms(rows, d.bootAt, now, d.turns())) {
     if (open[g.key]) {
@@ -165,8 +175,9 @@ export function checkGrowth(d: GrowthDeps, now: number): Growth[] {
       continue;
     }
     if (g.app) g.scheme = appScheme(store, g.app);
-    store.addHealthEvent(KIND, now, null, JSON.stringify(g));
-    open[g.key] = { last: now, woke: false, what: g.app ? `the app ${g.app}${g.scheme ? ` (scheme ${g.scheme})` : ''}: ${g.what.replace(`${g.app} rose`, 'its server rose')}` : g.what };
+    const quiet = learning && g.kind !== 'rss' && g.kind !== 'bound';
+    store.addHealthEvent(KIND, now, null, JSON.stringify(quiet ? { ...g, learning: true } : g));
+    open[g.key] = { last: now, woke: quiet, what: g.app ? `the app ${g.app}${g.scheme ? ` (scheme ${g.scheme})` : ''}: ${g.what.replace(`${g.app} rose`, 'its server rose')}` : g.what };
     fresh.push(g);
   }
   const own = d.ownScheme();

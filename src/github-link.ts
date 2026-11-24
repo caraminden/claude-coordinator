@@ -341,10 +341,11 @@ export class GithubLink {
    * What a turn run for `person` gets, or null with linking not set up either way (the box's gh login, as before).
    * Its gh config folder is an empty one in the turn's folder, so an unlinked turn can't fall back to
    * the box's login; git's prompt is off, so a push without a login fails rather than waits.
+   * `later`: the caller makes that folder itself, off the thread (a turn launch, #1808).
    */
-  forTurn(person: User | null, turnDir: string): TurnGithub | null {
+  forTurn(person: User | null, turnDir: string, later = false): TurnGithub | null {
     if (!this.configured) return null;
-    const env = noLogin(turnDir);
+    const env = noLogin(turnDir, !later);
     const who = person?.name ?? 'Nobody';
     // A disabled person's link isn't used: their minions' turns can't push until someone else's message runs one.
     const c = person && !person.disabled_at ? this.creds.get<GithubMeta>(person.id, 'github') : null;
@@ -385,9 +386,9 @@ export function schemeGithub(store: Store, link: GithubLink, repoDir: string, da
 }
 
 /** An empty gh config folder in `dir`, so gh and git's gh credential helper can't fall back to the box's login; no prompts. */
-function noLogin(dir: string): Record<string, string> {
+function noLogin(dir: string, make = true): Record<string, string> {
   const ghDir = join(dir, 'gh');
-  mkdirSync(ghDir, { recursive: true, mode: 0o700 });
+  if (make) mkdirSync(ghDir, { recursive: true, mode: 0o700 });
   return { GH_CONFIG_DIR: ghDir, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' };
 }
 

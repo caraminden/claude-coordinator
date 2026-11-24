@@ -7,7 +7,7 @@ import { Store } from '../src/db.ts';
 import { Lanes } from '../src/lanes.ts';
 import { Runner, wrapperAlive } from '../src/runner.ts';
 import { projectSlug, saveSession } from '../src/sessions.ts';
-import { holds, lines, tempRoot, testPins } from './helpers.ts';
+import { holds, lines, tempRoot, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -186,6 +186,7 @@ test("a turn started from inside another lane step (the outbox's) holds the lane
     r.send(id, 'System', 'wake two');
   });
   assert.equal(retriedBeside, null, "the retry's step waits behind the live turn");
+  await until('the turn to be followed', () => followed(r, id)); // its files are written off the thread first (#1808)
   assert.equal(turnDirs(r, id).length, 1, 'one turn runs');
   writeFileSync(go, '');
   await retry;
@@ -210,9 +211,10 @@ test('a minion whose turn still runs unfollowed (its wrapper is alive in its fol
   // spawn() returns before the child's exec: until then /proc shows this process's cmdline, so the wrapper looks gone and a turn starts.
   await until('the stray wrapper to run in its folder', () => wrapperAlive(dir));
   writeFileSync(go, '');
+  // The server starts with it there, as after #1284's restart: recover notes the folder.
+  r.recover();
   try {
     r.send(id, 'Cara', 'hello');
-    assert.equal(r.isRunning(id), false, 'no turn starts beside the live one');
     // Its wrapper may never exit: the lane stays free for a dismissal or a sweep, and still no turn starts.
     await until('the lane to be free again', () => !(r as any).lanes.busy(id));
     assert.equal(r.isRunning(id), false, 'still no turn beside the live one');

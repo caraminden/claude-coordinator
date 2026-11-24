@@ -3,16 +3,17 @@
 // These copy that state into the app's database after each turn and put it back before the next,
 // so a thread survives a switch of Claude account or config dir.
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
-import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { isMainThread, parentPort, threadId, Worker, workerData } from 'node:worker_threads';
-import { gunzipSync, gzip, gzipSync } from 'node:zlib';
+import { gunzip as gunzipCb, gunzipSync, gzip, gzipSync } from 'node:zlib';
 import { track } from './settled.ts';
 import { StateDb, type ClaudeStateRow, type Project, type Store, type Ticket } from './db.ts';
 
 const gz = promisify(gzip);
+const gunzip = promisify(gunzipCb);
 
 export function claudeConfigDir(env: NodeJS.ProcessEnv): string {
   return env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
@@ -177,21 +178,27 @@ async function putFiles(store: Store, puts: Put[]) {
   for (const { row, file } of puts) store.putClaudeState({ ...row, data: await gz(await readFile(file)) });
 }
 
-/** The stored paths of a ticket's session state (and its project's memory) that the config dir lacks or holds an older copy of. Only stats. */
-function staleRows(store: Store, ticket: Ticket, project: Project, configDir: string): string[] {
-  const stale: string[] = [];
-  for (const meta of [...store.listClaudeState(project.id, ticket.id), ...store.listClaudeState(project.id, null)]) {
-    const abs = join(configDir, meta.path);
-    if (!abs.startsWith(configDir + sep)) continue;
-    // Rounded as saveSession stores it: unrounded, a file whose mtime rounded up looked older than its own copy,
-    // so each turn after one wrote its transcript back on the same login (#612).
-    if (existsSync(abs) && Math.round(statSync(abs).mtimeMs) >= meta.mtime) continue;
-    stale.push(meta.path);
-  }
-  return stale;
+/** The stored paths of a ticket's session state (and its project's memory) that the config dir lacks or holds an older copy of. Only stats, with fs/promises (#1808). */
+async function staleRows(store: Store, ticket: Ticket, project: Project, configDir: string): Promise<string[]> {
+  const rows = [...store.listClaudeState(project.id, ticket.id), ...store.listClaudeState(project.id, null)].filter((meta) => join(configDir, meta.path).startsWith(configDir + sep));
+  const mtimes = await Promise.all(
+    rows.map((meta) =>
+      stat(join(configDir, meta.path)).then(
+        (st) => st.mtimeMs,
+        () => null,
+      ),
+    ),
+  );
+  // Rounded as saveSession stores it: unrounded, a file whose mtime rounded up looked older than its own copy,
+  // so each turn after one wrote its transcript back on the same login (#612).
+  return rows.filter((meta, i) => mtimes[i] === null || Math.round(mtimes[i]) < meta.mtime).map((meta) => meta.path);
 }
 
-/** Write each stored path back under the config dir, as of its row now. Returns how many files it wrote. */
+/** The part file a restore writes before its rename: one name per restore in this process and thread, so two restores at once never share one (#1808). */
+let parts = 0;
+const partFile = (configDir: string) => join(configDir, `.citadel-restore-${process.pid}-${threadId}-${++parts}`);
+
+/** Write each stored path back under the config dir, as of its row now. Returns how many files it wrote. On the session worker's thread. */
 function writeBack(get: (path: string) => { data?: Uint8Array | null; mtime: number } | undefined, configDir: string, paths: string[]): number {
   let written = 0;
   for (const path of paths) {
@@ -201,7 +208,7 @@ function writeBack(get: (path: string) => { data?: Uint8Array | null; mtime: num
     mkdirSync(dirname(abs), { recursive: true, mode: 0o700 });
     // Whole or not at all: a half-written file has a new mtime, so a turn (or the next save) would take it for the latest.
     // Outside the saved folders, so one a crash leaves behind is never saved; the config dir is one filesystem.
-    const part = join(configDir, `.citadel-restore-${process.pid}-${threadId}-${written}`);
+    const part = partFile(configDir);
     writeFileSync(part, gunzipSync(row.data), { mode: 0o600 });
     utimesSync(part, new Date(row.mtime), new Date(row.mtime));
     try {
@@ -216,22 +223,39 @@ function writeBack(get: (path: string) => { data?: Uint8Array | null; mtime: num
 }
 
 /**
- * Write back any of a ticket's stored session state that the config dir is missing or has an older
- * copy of. Synchronous, since it runs just before the turn's process starts; normally it only stats,
- * as restoreAhead has put back what was missing. Returns how many files it wrote.
+ * Write back any of a ticket's stored session state that the config dir is missing or has an older copy of, just
+ * before the turn's process starts. Normally it only stats, as restoreAhead has put back what was missing; what it
+ * writes, it writes as writeBack does, with fs/promises (#1808). Returns how many files it wrote.
  */
-export function restoreSession(store: Store, ticket: Ticket, project: Project, configDir: string): number {
-  return writeBack((path) => store.getClaudeState(path, true), configDir, staleRows(store, ticket, project, configDir));
+export async function restoreSession(store: Store, ticket: Ticket, project: Project, configDir: string): Promise<number> {
+  let written = 0;
+  for (const path of await staleRows(store, ticket, project, configDir)) {
+    const row = store.getClaudeState(path, true);
+    if (!row?.data) continue;
+    const abs = join(configDir, path);
+    await mkdir(dirname(abs), { recursive: true, mode: 0o700 });
+    const part = partFile(configDir);
+    await writeFile(part, await gunzip(row.data), { mode: 0o600 });
+    await utimes(part, new Date(row.mtime), new Date(row.mtime));
+    try {
+      await rename(part, abs);
+    } catch (err) {
+      await rm(part, { force: true });
+      throw err;
+    }
+    written++;
+  }
+  return written;
 }
 
 /**
  * restoreSession's reads, gunzips and writes on a worker thread, run before the turn starts: a 60 MB transcript
- * held the event loop for seconds (#612). Null when there is nothing to restore, so the turn starts at once.
- * Resolves to how many files it wrote; a failure rejects, and restoreSession then tries again and reports it.
+ * held the event loop for seconds (#612). Resolves to how many files it wrote, 0 with nothing to restore (no worker);
+ * a failure rejects, and restoreSession then tries again and reports it.
  */
-export function restoreAhead(store: Store, ticket: Ticket, project: Project, configDir: string): Promise<number> | null {
-  const paths = staleRows(store, ticket, project, configDir);
-  if (!paths.length || !store.statePath) return null;
+export async function restoreAhead(store: Store, ticket: Ticket, project: Project, configDir: string): Promise<number> {
+  const paths = await staleRows(store, ticket, project, configDir);
+  if (!paths.length || !store.statePath) return 0;
   return sessionWorker(store.statePath, { kind: 'restore', configDir, paths }) as Promise<number>;
 }
 

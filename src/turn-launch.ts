@@ -3,12 +3,13 @@
 // both build their launches from these.
 import { LIVE_MANIFEST } from './host-tools.ts';
 import { msgEnv, msgSettings } from './msg-settings.ts';
-import { chmodSync, cpSync, statSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, statSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { PoolSpec } from './pool-client.mjs';
-import { pinSparesAt, takeSpare } from './pin-spares.ts';
+import { linkTree, pinSparesAt, takeSpare } from './pin-spares.ts';
+import { cp, rm } from 'node:fs/promises';
 import { APPROVAL_TIMEOUT_MS, lines, permissionArgs, pluginDirArgs, turnPluginDirs } from './approvals.ts';
 import { androidEnv, AUTH_VARS, resolveClaude, type TurnPlace } from './claude-link.ts';
 import type { Project, Ticket } from './db.ts';
@@ -38,6 +39,8 @@ export function alive(pid: number): boolean {
 /** The pinned copies this server process made (pinTurnFiles), and the data dir they live in. */
 export interface TurnPins {
   dataDir: string;
+  /** Whether this pinned folder has the kit and bin/heavy: a turn's copy has what this has, so launchPlan needn't look on the server's thread (#1808). */
+  PIN_HAS: { kit: boolean; heavy: boolean };
   MCP_DIR: string;
   MCP_SERVER: string;
   /** Stands in for a connected machine's MCP server; see src/machines.ts. */
@@ -188,7 +191,28 @@ export function pinTurnFiles(dataDir: string): TurnPins {
   mkdirSync(SPARES_DIR, { recursive: true });
   for (const name of readdirSync(SPARES_DIR)) if (parseInt(name) !== process.pid && !alive(parseInt(name))) rmSync(join(SPARES_DIR, name), { recursive: true, force: true });
   pinSparesAt(join(SPARES_DIR, gen ? `${process.pid}.${gen}` : String(process.pid)), MCP_DIR);
-  return (pins = { dataDir, MCP_DIR, MCP_SERVER, MACHINE_MCP_SERVER, TRIPWIRE, SIDE_GUARD, LINK_CHECK, WORDING, SCHEME_REFS, HOOK_RUN, TURN_WRAPPER, SUPERVISOR, SUPERVISOR_VERSION, KIT, HEAVY, CODEX_REVIEW, CODEX_TURN, POOL, POOL_VERSION });
+  return (pins = {
+    dataDir,
+    PIN_HAS: { kit: existsSync(KIT), heavy: existsSync(join(MCP_DIR, 'bin', 'heavy')) },
+    MCP_DIR,
+    MCP_SERVER,
+    MACHINE_MCP_SERVER,
+    TRIPWIRE,
+    SIDE_GUARD,
+    LINK_CHECK,
+    WORDING,
+    SCHEME_REFS,
+    HOOK_RUN,
+    TURN_WRAPPER,
+    SUPERVISOR,
+    SUPERVISOR_VERSION,
+    KIT,
+    HEAVY,
+    CODEX_REVIEW,
+    CODEX_TURN,
+    POOL,
+    POOL_VERSION,
+  });
 }
 
 /**
@@ -198,23 +222,16 @@ export function pinTurnFiles(dataDir: string): TurnPins {
  * mounted writable and it runs as the server's user, so it could chmod a link back and change the server's pinned tripwire.
  * A turn of the server's own pins takes a spare made ahead off the loop when one is ready (#1414, src/pin-spares.ts).
  */
-export function copyPinned(src: string, dst: string, link = true): void {
-  if (takeSpare(src, dst, link ? 'link' : 'copy')) return;
+export async function copyPinned(src: string, dst: string, link = true): Promise<void> {
+  if (await takeSpare(src, dst, link ? 'link' : 'copy')) return;
+  // With fs/promises (#1808): a launch makes no blocking file call, even with no spare ready.
   if (link)
     try {
-      mkdirSync(dst, { recursive: true });
-      for (const e of readdirSync(src, { withFileTypes: true })) {
-        const from = join(src, e.name),
-          to = join(dst, e.name);
-        if (e.isDirectory()) copyPinned(from, to);
-        else if (e.isSymbolicLink()) cpSync(from, to, { verbatimSymlinks: true });
-        else linkSync(from, to);
-      }
-      return;
+      return await linkTree(src, dst);
     } catch {
-      rmSync(dst, { recursive: true, force: true });
+      await rm(dst, { recursive: true, force: true });
     }
-  cpSync(src, dst, { recursive: true, verbatimSymlinks: true });
+  await cp(src, dst, { recursive: true, verbatimSymlinks: true });
 }
 
 /** The pinned copies pinTurnFiles made; throws if it was never called, since a turn launched without them would run with no tripwire. */
@@ -794,7 +811,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   const readOnly = ticket.kind === 'coordinator' && project.id === GLOBAL_OWNER ? (facts.everyScheme?.apps ?? []) : [];
   // A Taskmaster reads the whole data folder (and the contraptions'), never a .env file in it.
   const envFiles = ticket.kind === 'coordinator' ? [facts.folders.data, ...readOnly] : [];
-  const kit = existsSync(pinned(pins.KIT)) ? pinned(pins.KIT) : null;
+  const kit = pins.PIN_HAS.kit ? pinned(pins.KIT) : null;
   // Every PreToolUse check in one process (#1296); the kit's big-read guard rides it, so hooks.json leaves it out.
   const preToolUse = hookRunHooks(
     {
@@ -877,7 +894,7 @@ export function launchPlan(facts: TurnFacts): LaunchPlan {
   }
   env = { ...env, ...androidEnv(homedir(), env.PATH) };
   // mise's shims last (#1147): an approved host tool runs by name, and never shadows one the turn had before.
-  env = { ...env, ...facts.env.heavy, PATH: [...(existsSync(join(pin, 'bin', 'heavy')) ? [join(pin, 'bin', 'heavy')] : []), join(pin, 'bin'), env.PATH, join(homedir(), '.local/share/mise/shims')].filter(Boolean).join(':') };
+  env = { ...env, ...facts.env.heavy, PATH: [...(pins.PIN_HAS.heavy ? [join(pin, 'bin', 'heavy')] : []), join(pin, 'bin'), env.PATH, join(homedir(), '.local/share/mise/shims')].filter(Boolean).join(':') };
   // The server's host tools list (#1147), which propose_host_tool names; the live checkout is in every container too.
   env.COORDINATOR_HOST_TOOLS = LIVE_MANIFEST;
   // For plugins and hooks: the folders the prompt names (Delve's mod writes its retro log there).

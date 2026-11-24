@@ -12,7 +12,7 @@ import { Store } from '../src/db.ts';
 import { fallbacks } from '../src/fallbacks.ts';
 import { Runner, usageKey, wrapperAlive } from '../src/runner.ts';
 import { TURN_SLICE } from '../src/turn-launch.ts';
-import { jsonLines, lines, tempRoot, testPins } from './helpers.ts';
+import { jsonLines, lines, tempRoot, testPins, followed, runnerInsides } from './helpers.ts';
 import { until } from './wait.ts';
 import { holds } from './holds.ts';
 testPins();
@@ -143,7 +143,7 @@ test("a linked person's turn runs in their container, on their login, and keeps 
   const id = newTicket();
   const r = runner(inContainer);
   r.send(id, 'Josh', 'build it');
-  await until("status(id) === 'running'", () => status(id) === 'running');
+  await until('the turn is followed', () => followed(r, id));
   // A server restart doesn't stop a container turn, so it doesn't hold up the idle restart.
   assert.equal(r.inContainer('citadel-claude-test-2'), 1);
   assert.equal(r.interruptible(), 0);
@@ -704,7 +704,7 @@ test('Stop ends a container turn whose claude has not started, and never will (C
   rmSync(hungPid, { force: true });
   try {
     r.send(id, 'Josh', 'build it');
-    await until("status(id) === 'running'", () => status(id) === 'running');
+    await until('the turn is followed', () => followed(r, id));
     const turnDir = dir()!;
     assert.ok(!existsSync(join(turnDir, 'pid.json')));
     await until('the exec is hanging', () => existsSync(hungPid));
@@ -738,7 +738,7 @@ test('a turn stopped while its container starts never reaches podman exec (C6)',
   let ready!: () => void;
   const r = runner(() => ({ ...inContainer(), ensure: () => new Promise<void>((res) => (ready = res)) }));
   r.send(id, 'Josh', 'build it');
-  await until("status(id) === 'running'", () => status(id) === 'running');
+  await until('the turn is followed', () => followed(r, id));
   const before = jsonLines(calls).length;
   r.stop(id);
   await until('!r.isRunning(id)', () => !r.isRunning(id));
@@ -766,7 +766,8 @@ test("a container turn's claude that starts just after the stop is still signall
   process.env.FAKE_PODMAN_SLOW = '300';
   try {
     r.send(id, 'Josh', 'build it');
-    const turnDir = (r as any).turns.get(id).dir as string;
+    await until('the turn to be followed', () => followed(r, id));
+    const turnDir = runnerInsides(r).turns.get(id)!.dir;
     await until('jsonLines(calls).some((c) => c.includes(turnDir))', () => jsonLines(calls).some((c) => c.includes(turnDir))); // podman exec is under way
     r.stop(id);
     assert.ok(!existsSync(join(turnDir, 'pid.json')));

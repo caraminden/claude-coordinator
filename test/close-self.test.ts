@@ -6,7 +6,7 @@ import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { closeSelfResult } from '../src/mcp.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { stopTurns, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -74,6 +74,9 @@ async function secondTurn(id: number) {
   await until('the second turn to start', () => notes(id).length && runner.isRunning(id));
 }
 
+// Its launch writes the turn's files off the thread (#1808): the turn is followed, and the minion running, once it's done.
+const started = (id: number) => until('the turn to start', () => followed(runner, id));
+
 async function endTurn(id: number, outcome: 'ok' | 'error') {
   release(outcome);
   await until('the turn to end', () => !runner.isRunning(id));
@@ -92,6 +95,7 @@ test('refuses when the ticket is not mid-turn', () => {
 test('closes after a clean turn, with the reason as a close note', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
+  await started(id);
   assert.equal(runner.closeAfterTurn(id, 'Merged abc1234'), true);
   assert.equal(runner.view(store.getTicket(id)!).closing, true);
   assert.equal(store.getTicket(id)!.status, 'running');
@@ -105,6 +109,7 @@ test('closes after a clean turn, with the reason as a close note', async () => {
 test('a failed turn stays open', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
+  await started(id);
   runner.closeAfterTurn(id, null);
   await endTurn(id, 'error');
   assert.equal(store.getTicket(id)!.status, 'error');
@@ -114,6 +119,7 @@ test('a failed turn stays open', async () => {
 test('a stopped turn stays open', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
+  await started(id);
   runner.closeAfterTurn(id, null);
   runner.stop(id);
   await until('the turn to end', () => !runner.isRunning(id));
@@ -123,6 +129,7 @@ test('a stopped turn stays open', async () => {
 test('a message queued during the turn keeps it open and runs next', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
+  await started(id);
   runner.closeAfterTurn(id, null);
   runner.send(id, 'Josh', 'one more thing');
   release('ok');
@@ -136,6 +143,7 @@ test('a message queued during the turn keeps it open and runs next', async () =>
 test('a GitHub notice that needs no action, like its own merge, leaves a pending close armed and starts no turn (#619)', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'land it');
+  await started(id);
   runner.closeAfterTurn(id, 'Merged PR #82');
   runner.send(id, 'GitHub', 'PR #82 was merged by josh.', [], { fyi: true });
   await endTurn(id, 'ok');
@@ -150,6 +158,7 @@ test('a GitHub notice that needs action, or a person beside a no-action one, sti
   for (const extra of [[], [['Josh', 'one more thing', {}]]] as const) {
     const id = newTicket();
     runner.send(id, 'Cara', 'land it');
+    await started(id);
     runner.closeAfterTurn(id, null);
     if (extra.length) runner.send(id, 'GitHub', 'PR #82 was merged by josh.', [], { fyi: true });
     else runner.send(id, 'GitHub', 'CI failed on abc1234 in PR #82 — build: https://ci/build');
@@ -173,6 +182,7 @@ test('a GitHub notice that needs action, or a person beside a no-action one, sti
 test('refuses while a question or plan card waits on people, or the state is try', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
+  await started(id);
   const q = store.addEvent(id, 'question', { id: 'q1', questions: [{ header: 'Layout', question: 'Tabs or list?' }] });
   assert.match(runner.keptOpen(id)!, /card is still waiting/);
   // close_self's own refusal carries the card's link (#480).
@@ -206,6 +216,7 @@ test('refuses while a question or plan card waits on people, or the state is try
 test('a pending approval card refuses close_self, even in state ready, with its link', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
+  await started(id);
   store.updateTicket(id, { state: 'ready' });
   runner.approvals.request(id, 'Bash', { command: 'ls', description: 'List' });
   assert.match(runner.keptOpen(id, true)!, /^an approval card "Bash: List": \[open it\]\(#\/p\/\d+\/t\/\d+\?e=\d+\) is still waiting/);
@@ -217,6 +228,7 @@ test('a pending approval card refuses close_self, even in state ready, with its 
 test('state try refuses close_self mid-turn', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
+  await started(id);
   store.updateTicket(id, { state: 'try' });
   assert.equal(runner.closeAfterTurn(id, null), false);
   assert.equal(store.getTicket(id)!.state, 'try');
@@ -227,6 +239,7 @@ test('state try refuses close_self mid-turn', async () => {
 test('state ready with no card clears and dismisses (#480)', async () => {
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
+  await started(id);
   store.updateTicket(id, { state: 'ready', note: 'merged' });
   assert.equal(runner.keptOpen(id, true), null);
   assert.equal(runner.closeAfterTurn(id, 'Merged abc1234'), true);
@@ -240,6 +253,7 @@ test('a card posted or try/ready set after close_self keeps it open at the turn 
   for (const after of ['ready', 'try', 'card'] as const) {
     const id = newTicket();
     runner.send(id, 'Cara', 'ship it');
+    await started(id);
     assert.equal(runner.closeAfterTurn(id, null), true);
     if (after === 'card') store.addEvent(id, 'question', { id: 'q1', questions: [] });
     else store.updateTicket(id, { state: after });
@@ -254,6 +268,7 @@ test('a keep-open state set after close_self cancels the close at once, so the v
   for (const state of ['complete', 'try', 'ready'] as const) {
     const id = newTicket();
     runner.send(id, 'Cara', 'ship it');
+    await started(id);
     assert.equal(runner.closeAfterTurn(id, null), true);
     store.updateTicket(id, { state, note: 'read: the report' });
     assert.match(runner.closeCancelled(id)!, new RegExp(`state is ${state}`), state);
@@ -269,6 +284,7 @@ test('a keep-open state set after close_self cancels the close at once, so the v
   // A state that doesn't keep it open leaves the close armed.
   const id = newTicket();
   runner.send(id, 'Cara', 'ship it');
+  await started(id);
   runner.closeAfterTurn(id, null);
   store.updateTicket(id, { state: 'parked' });
   assert.equal(runner.closeCancelled(id), null);
@@ -281,6 +297,7 @@ test("a person's keep-open state cancels the close and the next turn is told; th
   for (const byOther of [true, false]) {
     const id = newTicket();
     runner.send(id, 'Cara', 'ship it');
+    await started(id);
     runner.closeAfterTurn(id, null);
     store.updateTicket(id, { state: 'ready' });
     runner.closeCancelled(id, byOther);
@@ -309,6 +326,7 @@ test('a new turn clears complete with its note, since "nothing left" is stale on
     const id = newTicket();
     store.updateTicket(id, { state, note: state === 'complete' ? 'nothing left' : 'merged' });
     runner.send(id, 'Cara', 'one more thing');
+    await started(id);
     assert.deepEqual([store.getTicket(id)!.state, store.getTicket(id)!.note], [null, note], state);
     await endTurn(id, 'ok');
   }
@@ -366,6 +384,7 @@ test('close on seen leaves it open with a card, in try or ready, mid-turn, or se
 
   const running = complete();
   runner.send(running, 'Cara', 'more'); // a new turn clears complete; set it again mid-turn
+  await started(running);
   store.updateTicket(running, { state: 'complete' });
   await pause();
   store.markSeen('Cara', running);

@@ -9,6 +9,7 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
 import { ZONE } from './pacific.ts';
 
@@ -181,32 +182,35 @@ export function claudeStamp(bin: string, path = process.env.PATH ?? ''): string 
  * The instructions Claude Code loads at a session's start: CLAUDE.md files from the working directory up, the
  * project's unscoped and scoped rules, the user's own CLAUDE.md and rules, and auto-memory's index.
  */
-export function contextText(cwd: string, configDir: string, memoryIndexes: string[]): string {
+export async function contextText(cwd: string, configDir: string, memoryIndexes: string[]): Promise<string> {
+  // With fs/promises, read one at a time in the order Claude Code loads them (#1808): a turn's launch makes no blocking file call.
   const out: string[] = [];
-  const read = (p: string) => {
+  const read = async (p: string) => {
     try {
-      out.push(`${p}\n${readFileSync(p, 'utf8')}`);
+      out.push(`${p}\n${await readFile(p, 'utf8')}`);
     } catch {
       // Not there.
     }
   };
-  const rules = (dir: string) => {
+  const rules = async (dir: string) => {
+    let entries;
     try {
-      for (const e of readdirSync(dir, { withFileTypes: true, recursive: true }).sort((a, b) => join(a.parentPath, a.name).localeCompare(join(b.parentPath, b.name)))) {
-        if (e.isFile() && e.name.endsWith('.md')) read(join(e.parentPath, e.name));
-      }
+      entries = await readdir(dir, { withFileTypes: true, recursive: true });
     } catch {
-      // No rules.
+      return; // No rules.
+    }
+    for (const e of entries.sort((a, b) => join(a.parentPath, a.name).localeCompare(join(b.parentPath, b.name)))) {
+      if (e.isFile() && e.name.endsWith('.md')) await read(join(e.parentPath, e.name));
     }
   };
   for (let d = cwd; ; d = dirname(d)) {
-    for (const f of ['CLAUDE.md', 'CLAUDE.local.md', '.claude/CLAUDE.md']) read(join(d, f));
-    rules(join(d, '.claude', 'rules'));
+    for (const f of ['CLAUDE.md', 'CLAUDE.local.md', '.claude/CLAUDE.md']) await read(join(d, f));
+    await rules(join(d, '.claude', 'rules'));
     if (dirname(d) === d) break;
   }
-  read(join(configDir, 'CLAUDE.md'));
-  rules(join(configDir, 'rules'));
-  for (const m of memoryIndexes) read(m);
+  await read(join(configDir, 'CLAUDE.md'));
+  await rules(join(configDir, 'rules'));
+  for (const m of memoryIndexes) await read(m);
   return out.join('\n');
 }
 

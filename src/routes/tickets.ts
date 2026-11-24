@@ -595,7 +595,7 @@ export const ticketRoutes: Route[] = [
       const thread = body.thread === undefined || body.thread === null ? undefined : Number(body.thread);
       if (thread !== undefined && !Number.isSafeInteger(thread)) throw new HttpError(400, "thread must be a side thread's id");
       try {
-        return json(res, 202, app.sideAsks.ask(ticket.id, session.uid, session.name, text, thread));
+        return json(res, 202, await app.sideAsks.ask(ticket.id, session.uid, session.name, text, thread));
       } catch (err) {
         throw new HttpError(409, thrown(err).message!);
       }

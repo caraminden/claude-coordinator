@@ -205,15 +205,14 @@ test("a big restore and save run off the event loop, and a file whose mtime only
   const dir = (name: string) => join(root, `config-612-${name}`);
   const file = join(dir('ahead'), path);
   put();
-  // Not written by the call itself, and written while this thread never yields: by another thread, so the loop stays free.
-  const ahead = restoreAhead(store, ticket, project, dir('ahead'))!;
+  // Not written by the call itself: by the worker (test/off-thread-fs.test.ts proves no sync call on this thread, #1808).
+  const ahead = restoreAhead(store, ticket, project, dir('ahead'));
   assert.equal(existsSync(file), false, 'nothing is written on the event loop');
-  const deadline = Date.now() + 60_000;
-  while (!(existsSync(file) && statSync(file).mtimeMs === 1_700_000_000_123)) assert.ok(Date.now() < deadline, 'the worker never wrote the file');
   assert.equal(await ahead, 1);
+  assert.equal(statSync(file).mtimeMs, 1_700_000_000_123);
   assert.equal(readFileSync(file).equals(text), true, 'the worker wrote the whole file');
-  assert.equal(restoreAhead(store, ticket, project, dir('ahead')), null, 'nothing left to restore: the turn starts at once');
-  assert.equal(restoreSession(store, ticket, project, dir('ahead')), 0);
+  assert.equal(await restoreAhead(store, ticket, project, dir('ahead')), 0, 'nothing left to restore: no worker');
+  assert.equal(await restoreSession(store, ticket, project, dir('ahead')), 0);
   // The save stores it again from the worker's connection, not the server's, with the same rounded mtime the restore reads.
   store.deleteClaudeState(path);
   const putOnLoop = store.putClaudeState;
@@ -228,8 +227,8 @@ test("a big restore and save run off the event loop, and a file whose mtime only
   // A file whose mtime has a fraction that rounded up when saved is the same file, not an older one.
   utimesSync(join(dir('ahead'), path), 1_700_000_000.1226, 1_700_000_000.1226);
   assert.ok(statSync(join(dir('ahead'), path)).mtimeMs < 1_700_000_000_123);
-  assert.equal(restoreAhead(store, ticket, project, dir('ahead')), null);
-  assert.equal(restoreSession(store, ticket, project, dir('ahead')), 0);
+  assert.equal(await restoreAhead(store, ticket, project, dir('ahead')), 0);
+  assert.equal(await restoreSession(store, ticket, project, dir('ahead')), 0);
   // An older copy is still written back.
   utimesSync(join(dir('ahead'), path), 1_700_000_000, 1_700_000_000);
   assert.equal(await restoreAhead(store, ticket, project, dir('ahead')), 1);
@@ -332,7 +331,7 @@ test("a link planted in the volume isn't followed out of it, so a restore can't 
     [],
   );
   rmSync(b.slugDir);
-  assert.equal(restoreSession(store, b.ticket, project, joshPlace.configDir), 0);
+  assert.equal(await restoreSession(store, b.ticket, project, joshPlace.configDir), 0);
   // A real file beside them is still saved.
   const c = planted('wt-c1-real', 'sess-1');
   mkdirSync(c.slugDir, { recursive: true });

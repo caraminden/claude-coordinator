@@ -111,7 +111,7 @@ test("a side question leaves the minion's session, history and next turn untouch
   const before = readFileSync(main, 'utf8');
   const events = store.listEvents(m.id).filter((e) => !e.kind.startsWith('side')).length;
 
-  const ev = sides.ask(m.id, josh.id, 'Josh', 'what is going on?');
+  const ev = await sides.ask(m.id, josh.id, 'Josh', 'what is going on?');
   await until('it', () => answers(m.id).length === 1);
   const [a] = answers(m.id);
   assert.equal(a.ok, true, a.text);
@@ -144,11 +144,11 @@ test("a side question leaves the minion's session, history and next turn untouch
 test('a follow-up resumes the fork, only its asker may send one, and an ended thread deletes the fork', async () => {
   rmSync(seen, { force: true });
   const m = await minion();
-  const ev = sides.ask(m.id, cara.id, 'Cara', 'first?');
+  const ev = await sides.ask(m.id, cara.id, 'Cara', 'first?');
   await until('it', () => answers(m.id).length === 1);
   const forkId = (store.db.prepare('SELECT session_id FROM turns WHERE ticket_id = ? AND side = 1').get(m.id) as any).session_id;
-  assert.throws(() => sides.ask(m.id, josh.id, 'Josh', 'me too?', ev.thread), /Only the person who started/);
-  sides.ask(m.id, cara.id, 'Cara', 'and then?', ev.thread);
+  await assert.rejects(sides.ask(m.id, josh.id, 'Josh', 'me too?', ev.thread), /Only the person who started/);
+  await sides.ask(m.id, cara.id, 'Cara', 'and then?', ev.thread);
   await until('it', () => answers(m.id).length === 2);
   const follow = runs().at(-1);
   assert.equal(follow.resume, forkId);
@@ -169,7 +169,7 @@ test('it answers while the minion is mid-turn, and the fork runs with the read-o
   runner.send(m.id, 'Cara', 'WAIT on the long job');
   await until('it', () => runs().length === 2);
   assert.equal(store.getTicket(m.id)!.status, 'running');
-  sides.ask(m.id, cara.id, 'Cara', 'is it stuck?');
+  await sides.ask(m.id, cara.id, 'Cara', 'is it stuck?');
   await until('it', () => answers(m.id).length === 1);
   assert.equal(store.getTicket(m.id)!.status, 'running', 'the answer came before the turn ended');
   assert.equal(answers(m.id)[0].ok, true, answers(m.id)[0].text);
@@ -198,17 +198,17 @@ test('it answers while the minion is mid-turn, and the fork runs with the read-o
   );
   assert.ok(!existsSync(join(m.cwd, 'x')));
 });
-test('refuses a minion with no session, a thread that ended, and a second ask while one is answering', () => {
+test('refuses a minion with no session, a thread that ended, and a second ask while one is answering', async () => {
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
-  assert.throws(() => sides.ask(t.id, cara.id, 'Cara', 'hi'), /no session/);
+  await assert.rejects(sides.ask(t.id, cara.id, 'Cara', 'hi'), /no session/);
   store.updateTicket(t.id, { session_id: 'sess-x' });
-  assert.throws(() => sides.ask(t.id, cara.id, 'Cara', 'hi', 999999), /ended/);
+  await assert.rejects(sides.ask(t.id, cara.id, 'Cara', 'hi', 999999), /ended/);
 });
 
 test("an answer that lands between the tick's two looks is not lost (#1619)", async () => {
   const m = await minion();
   const hand: any = new SideAsks(store, runner, (msg) => sent.push(msg), 60_000); // polled by hand below
-  const ev = hand.ask(m.id, cara.id, 'Cara', 'who is asking?');
+  const ev = await hand.ask(m.id, cara.id, 'Cara', 'who is asking?');
   const dir: string = hand.threads.get(ev.thread).run.dir;
   const stream = join(dir, 'stream.jsonl');
   const exit = join(dir, 'exit.json');
@@ -238,7 +238,7 @@ test("an answer that lands between the tick's two looks is not lost (#1619)", as
 test('an answer printed just before the deadline counts, not a timeout (#1619)', async () => {
   const m = await minion();
   const hand: any = new SideAsks(store, runner, (msg) => sent.push(msg), 60_000); // polled by hand below
-  const ev = hand.ask(m.id, cara.id, 'Cara', 'who is asking?');
+  const ev = await hand.ask(m.id, cara.id, 'Cara', 'who is asking?');
   const run = hand.threads.get(ev.thread).run;
   await until('the fork to exit', () => existsSync(join(run.dir, 'exit.json')));
   // The answer is in the stream, but the shell has not written exit.json yet and the ask is past its limit: it is

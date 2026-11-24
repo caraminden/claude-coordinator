@@ -14,7 +14,7 @@ import { Store } from '../src/db.ts';
 import { READER_PATHS, READER_ROUTES } from '../src/front.ts';
 import { SHELL_OFF_FILE } from '../src/shell.ts';
 import { mainOnly, readerRoutes } from '../src/reader.ts';
-import { agentToken, bootServer, PASSWORD, tempRoot, type Booted } from './helpers.ts';
+import { bootServer, mintedAgentToken, PASSWORD, tempRoot, type Booted } from './helpers.ts';
 import { until } from './wait.ts';
 
 const tmp = tempRoot('front-');
@@ -502,8 +502,10 @@ test("a running turn, a queued message and an approval card: the readers' list, 
     const callers = { cara: live.cookie, max: await signIn(live, 'Max', 'a-long-password'), olive: await signIn(live, 'Olive', 'a-long-password') };
     const made = (await live.call(`/api/projects/${project.id}/tickets`, { message: 'tidy up' })).data;
     const t = made.ticket ?? made;
-    const minion = { Authorization: `Bearer ${agentToken(live.data, t.id)}`, 'Content-Type': 'application/json' };
+    const minion = { Authorization: `Bearer ${await mintedAgentToken(live.data, t.id)}`, 'Content-Type': 'application/json' };
     await until('the turn', async () => (await fetch(`${live.base}/api/tickets/${t.id}/approvals?id=x`, { headers: minion })).ok);
+    // Past its launch (#1808): its token works a moment before the turn is followed and broadcast with its start time.
+    await until('the turn is followed', async () => !!JSON.parse((await get(live, `/api/tickets/${t.id}?citadel-test-reader=main`, live.cookie)).body).ticket.turnStartedAt);
     assert.equal((await live.call(`/api/tickets/${t.id}/messages`, { text: 'and then this', after: true })).status, 202);
     // A tripwire card (test/approvals.test.ts): the server's HOME holds its data, the turn has its own TMPDIR.
     const bak = join(live.data, 'coordinator.db.bak-x');

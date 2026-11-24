@@ -8,7 +8,7 @@ import { Runner } from '../src/runner.ts';
 import { fallbacks } from '../src/fallbacks.ts';
 import { claimSpec } from '../src/turn-run.mjs';
 import { readSupervisor } from '../src/supervisor-client.ts';
-import { lines, tempRoot, testPins } from './helpers.ts';
+import { lines, tempRoot, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
 testPins(); // the turn files the runner and its supervisor run from
 
@@ -286,6 +286,7 @@ test('a supervisor that dies after taking a turn and before starting it: the run
   try {
     const t = newTicket();
     r.send(t.id, 'Cara', 'build it');
+    await until('the turn is followed', () => followed(r, t.id));
     const dir = turnDir(r, t.id);
     await until('the supervisor took the turn', () => existsSync(join(dir, `spec.json.${sup.pid}`)));
     // Killed only once its systemd-run runs: killed before spawning it, nothing would start the turn, and the runner rightly restarts it at once.

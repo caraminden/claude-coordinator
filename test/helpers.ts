@@ -244,10 +244,21 @@ export const SECRET = 'x'.repeat(40);
 
 /** The token minion `id`'s current turn holds on the server whose DATA_DIR is `data`. */
 export function agentToken(data: string, id: number): string {
+  const row = nonceRow(data, id);
+  return new Auth(PASSWORD, SECRET).agentToken(id, row ? (JSON.parse(row.value).current ?? undefined) : undefined);
+}
+
+function nonceRow(data: string, id: number) {
   const db = new DatabaseSync(join(data, 'coordinator.db'), { readOnly: true, timeout: 30_000 });
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(`agent-nonce:${id}`) as { value: string } | undefined;
   db.close();
-  return new Auth(PASSWORD, SECRET).agentToken(id, row ? (JSON.parse(row.value).current ?? undefined) : undefined);
+  return row;
+}
+
+/** agentToken once minion `id`'s first turn has minted it: the launch runs after the send returns (#1808), so a read at the send can come first. */
+export async function mintedAgentToken(data: string, id: number): Promise<string> {
+  await until(`#${id}'s turn token`, () => !!nonceRow(data, id));
+  return agentToken(data, id);
 }
 
 export { until, holds };
@@ -475,3 +486,12 @@ touch "$d/$unit.active"; trap 'rm -f "$d/$unit.active"' EXIT
   chmodSync(run, 0o755);
   return { bin, journal, run, calls: () => (existsSync(join(dir, 'calls')) ? readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n') : []), state: (f: string) => existsSync(join(dir, f)) };
 }
+
+/** A Runner's private turn maps, for tests that wait past a launch (#1808): `turns` holds a followed turn, `launching` one still launching. */
+interface RunnerInsides {
+  turns: Map<number, { dir: string }>;
+  launching: Map<number, { stopped: boolean }>;
+}
+export const runnerInsides = (runner: object) => runner as unknown as RunnerInsides;
+/** Whether minion `id`'s turn is past its launch and followed: a launch writes its files and mints its token before then. */
+export const followed = (runner: object, id: number) => runnerInsides(runner).turns.has(id);

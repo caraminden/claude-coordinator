@@ -1101,17 +1101,21 @@ const verdictsSection = (vs: Verdict[]) => `## Verdicts\n\nPeople disagreed with
 export const lessonsSection = (ls: Lesson[]) =>
   `## Lessons: findings the finding checker refuted here\n\nOn this repo's past reviews, the finding checker refuted each kind of finding below in ${LESSON_HITS} reviews or more, with no ${LESSON_MS / 86_400_000}-day gap, for the reason given. A lesson is not a rule to stop looking: when this diff makes the reason untrue, raise the finding and say in it why the reason doesn't hold here.\n\n${ls.map((l) => `- ${l.kind}: refuted ${l.count} times, last ${day(l.last)}. It was wrong because ${l.why.replace(/\.$/, '')}.`).join('\n')}`;
 
-export function renderSet(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map(), requester: Extra['requester'] = null): number {
-  rmSync(dir, { recursive: true, force: true });
+/** Writes `text` to `path`, or with `out` keeps it there for the caller to write (a turn's launch, with fs/promises: #1808). */
+const put = (out: Map<string, string> | undefined, path: string, text: string) => (out ? void out.set(path, text) : writeFileSync(path, text));
+
+/** With `out`, its files go there for the caller to write into a fresh `dir`, and nothing on disk changes here. */
+export function renderSet(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map(), requester: Extra['requester'] = null, out?: Map<string, string>): number {
+  if (!out) rmSync(dir, { recursive: true, force: true });
   // The kit's built-ins aren't rubrics: kitLine tells the turn which are off and where the scheme's additions are.
   const on = entries.filter((e) => e.enabled && !fromFile(e));
   if (!on.length) return 0;
-  mkdirSync(dir, { recursive: true });
+  if (!out) mkdirSync(dir, { recursive: true });
   // A hand-off to an entry since deleted or switched off would send the critic nowhere: those steps drop out.
   const live = (s: OnFail) => s.to === 'professor' || s.to === 'person' || on.some((x) => x.slug === s.to) || entries.some((x) => x.slug === s.to && x.enabled && isAgentFile(x));
   for (const e of on) {
     const steps = e.on_fail?.filter(live) ?? null;
-    writeFileSync(join(dir, `${e.slug}.md`), renderEntry({ ...e, on_fail: steps?.length ? steps : null }, { verdicts: verdicts.get(e.id), requester }));
+    put(out, join(dir, `${e.slug}.md`), renderEntry({ ...e, on_fail: steps?.length ? steps : null }, { verdicts: verdicts.get(e.id), requester }));
   }
   return on.length;
 }
@@ -1290,8 +1294,8 @@ export function orderLine(entries: ReviewEntry[]): string {
  * The turn's line on the kit's built-ins (Q10): which ones this scheme switched off, what that means for the ship, and
  * the scheme's additions to the ones still on, written into `dir` as `<slug>.md`. Empty when all are on as the kit has them.
  */
-export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map(), lessons: Lesson[] = []): string {
-  rmSync(dir, { recursive: true, force: true });
+export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<number, Verdict[]> = new Map(), lessons: Lesson[] = [], files?: Map<string, string>): string {
+  if (!files) rmSync(dir, { recursive: true, force: true });
   const kit = entries.filter(isKit);
   const off = kit.filter((e) => !e.enabled);
   // People's recorded verdicts reach a kit reviewer the way its additions do (Q13).
@@ -1320,9 +1324,9 @@ export function kitLine(entries: ReviewEntry[], dir: string, verdicts: Map<numbe
   const ownOn = own.filter((e) => e.enabled);
   if (ownOn.length) out.push(`This scheme's own reviewing agents, whose text is their file: ${named(ownOn)}. Where a hand-off or a skill names one of these slugs, run that agent (subagent_type its name) instead of a kit one.`);
   if (added.length) {
-    mkdirSync(dir, { recursive: true });
+    if (!files) mkdirSync(dir, { recursive: true });
     for (const e of added)
-      writeFileSync(join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to ${isKit(e) ? "the kit's text" : `its agent file, ${e.source!.slice(6)}`}\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : '', learned(e).length ? lessonsSection(learned(e)) : ''].filter(Boolean).join('\n\n')}\n`);
+      put(files, join(dir, `${e.slug}.md`), `# ${e.name}: this scheme's additions to ${isKit(e) ? "the kit's text" : `its agent file, ${e.source!.slice(6)}`}\n\n${[e.body.trim(), said(e).length ? verdictsSection(said(e)) : '', learned(e).length ? lessonsSection(learned(e)) : ''].filter(Boolean).join('\n\n')}\n`);
     out.push(`This scheme's additions to kit reviewers and its own agents, read with their own text and passed to their Grunts: ${added.map((e) => `\`${dir}/${e.slug}.md\` (${e.name})`).join(', ')}.`);
   }
   return out.length ? `Kit reviewers: ${out.join(' ')}` : '';

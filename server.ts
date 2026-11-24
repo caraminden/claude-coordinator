@@ -801,7 +801,7 @@ runner.hostJobs = () => landings.running() + contraptionTurns.running() + servic
 // Whose turn a message starts: a person by name, or for a relay the person of the turn that sent it.
 runner.personOf = messagePerson(store);
 runner.mediaFor = (person) => openrouter.connected(person);
-runner.githubFor = (person, dir) => githubLink.forTurn(person ? (store.getUser(person) ?? null) : null, dir);
+runner.githubFor = (person, dir, later) => githubLink.forTurn(person ? (store.getUser(person) ?? null) : null, dir, later);
 runner.secretsFor = (project, person) => secrets.forTurn(project, person);
 
 // ---------- push notifications ----------

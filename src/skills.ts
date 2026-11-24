@@ -3,7 +3,8 @@
 // just what they do"; "Make it clear that these are default and highly recommended, but schemes should have autonomy";
 // on #1062's grilling: nothing locked on ("a scheme should be able to do whatever it wants"), an off skill left out of
 // the turn's kit copy with a deny rule behind it, Grunt types listed without a switch.
-import { readdirSync, readFileSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
@@ -48,8 +49,8 @@ export function skillDenies(off: readonly string[]): string[] {
 }
 
 /** Leave a scheme's off skills out of a turn's own kit copy (its pin folder), so the turn never lists them. */
-export function pruneKit(kitDir: string, off: readonly string[]): void {
-  for (const s of off) if (NAME.test(s)) rmSync(join(kitDir, 'skills', s), { recursive: true, force: true });
+export async function pruneKit(kitDir: string, off: readonly string[]): Promise<void> {
+  for (const s of off) if (NAME.test(s)) await rm(join(kitDir, 'skills', s), { recursive: true, force: true });
 }
 
 /** Split a description into what it does and when to use it: sentences opening "Use", "Open", "Also for/when" or "Only when", and a leading "Before …:" clause, are the trigger. */

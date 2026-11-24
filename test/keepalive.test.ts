@@ -12,7 +12,7 @@ import { changedParts, countGate, fingerprint, inWindow, KEEPALIVE_AFTER_MS, KEE
 import { sleepKey } from '../src/needs.ts';
 import { Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
-import { jsonLines, lines, stopTurns, testPins, until } from './helpers.ts';
+import { jsonLines, lines, stopTurns, testPins, until, runnerInsides } from './helpers.ts';
 testPins();
 
 /** A Pacific wall-clock time on 2026-11-16 (PST, UTC-8) as ms. */
@@ -406,6 +406,35 @@ test('a minion waiting on its ship gets a keepalive too, and a ship that ends du
   });
   await until('the minion to be dismissed', () => store.getTicket(id)!.status === 'closed');
   assert.equal(turnsOf(id).at(-1)!.keepalive, 1);
+});
+
+test('a ship that ends while a keepalive is still launching dismisses the minion, even when the launch starts no turn (#1808)', async () => {
+  const id = minion();
+  const end = pst(14, 40);
+  await realTurn(id, end);
+  store.updateTicket(id, { state: 'outside', note: 'landing: in line' });
+  const launching = runnerInsides(runner).launching;
+  const set = launching.set;
+  let asked: boolean | null = null;
+  // The ship ends as the keepalive launches, and the launch then starts no turn (a preview's noTurns stands in for any such end).
+  launching.set = (lid, mark) => {
+    set.call(launching, lid, mark);
+    if (lid === id && asked === null) {
+      asked = runner.closeAfterTurn(id, 'Shipped.');
+      runner.noTurns = true;
+    }
+    return launching;
+  };
+  try {
+    runner.keepaliveSweep(end + KEEPALIVE_AFTER_MS);
+    await until('the launch to end', () => asked !== null && !runner.isRunning(id));
+  } finally {
+    launching.set = set;
+    runner.noTurns = false;
+  }
+  assert.equal(asked, true, 'the dismissal waits for the launch');
+  await until('the minion to be dismissed', () => store.getTicket(id)!.status === 'closed');
+  assert.equal(turnsOf(id).filter((t) => t.keepalive).length, 0, 'no keepalive ran');
 });
 
 test("a deploy that goes live during a keepalive dismisses its pending-deploy minion at the keepalive's end (#1274)", async () => {

@@ -41,7 +41,7 @@ import { Outbox } from '../src/outbox.ts';
 import { RESUME_PROMPT } from '../src/prompts.ts';
 import { Runner } from '../src/runner.ts';
 import { chainedStep, LiveWaiters, TimedWakes } from '../src/wake.ts';
-import { releaseFake, stopTurns, testPins } from './helpers.ts';
+import { releaseFake, stopTurns, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -104,7 +104,7 @@ const FLOWS: Flow[] = [
         run: async (c) => {
           setRelease(null);
           c.say('Cara', 'build it');
-          await until('the turn to start', () => c.runner.isRunning(c.id));
+          await until('the turn to start', () => followed(c.runner, c.id));
         },
       },
       {
@@ -245,7 +245,7 @@ const FLOWS: Flow[] = [
         run: async (c) => {
           setRelease(null);
           c.say('Cara', 'build it');
-          await until('the turn to start', () => c.runner.isRunning(c.id));
+          await until('the turn to start', () => followed(c.runner, c.id));
           c.say('Josh', 'dropped by the stop');
           c.mail('Taskmaster', 'held: kept through the stop');
           await sleep(50);
@@ -278,7 +278,7 @@ const FLOWS: Flow[] = [
           setRelease(null);
           c.say('Cara', 'build it');
           c.say('Josh', 'and the readme');
-          await until('the turn to start', () => c.runner.isRunning(c.id));
+          await until('the turn to start', () => followed(c.runner, c.id));
         },
       },
       {
@@ -324,7 +324,7 @@ const FLOWS: Flow[] = [
         run: async (c) => {
           setRelease(null);
           c.say('Cara', 'build it');
-          await until('the turn to start', () => c.runner.isRunning(c.id));
+          await until('the turn to start', () => followed(c.runner, c.id));
         },
       },
       {
@@ -376,7 +376,7 @@ const FLOWS: Flow[] = [
         run: async (c) => {
           setRelease(null);
           c.relay('please start part two');
-          await until('the turn to start', () => c.runner.isRunning(c.id));
+          await until('the turn to start', () => followed(c.runner, c.id));
         },
       },
       {
@@ -409,7 +409,7 @@ const FLOWS: Flow[] = [
         run: async (c) => {
           setRelease(null);
           c.say('Cara', 'a question while you wait');
-          await until('the turn to start', () => c.runner.isRunning(c.id));
+          await until('the turn to start', () => followed(c.runner, c.id));
         },
       },
       {
@@ -452,6 +452,8 @@ const FLOWS: Flow[] = [
 
 /** The server dies mid-turn and its turn goes with it, as in auto-resume.test.ts. */
 async function crash(r: Runner, id: number) {
+  // A launch writes its files off the thread first (#1808): the turn is followed once they are.
+  await until('the turn to be followed', () => followed(r, id));
   const dir: string = (r as any).turns.get(id).dir;
   await until("the turn's pid.json", () => existsSync(join(dir, 'pid.json')));
   r.detachAll();

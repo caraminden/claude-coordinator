@@ -2,14 +2,14 @@
  * Spare copies of a server's pinned turn files, made ahead off the loop (#1414). A turn's start took its copy with
  * ~370 links or a byte copy of the tree on the loop: 3 to 10.8 s held under load with a cold disk cache. Now it takes a
  * ready spare with one rename and a new one is made behind it with fs/promises. With no spare ready (a burst, or just
- * after boot), copyPinned makes the copy on the loop as before.
+ * after boot), copyPinned makes the copy with fs/promises (#1808).
  *
  * Spares sit in run/turns/.pin-spares/<pid>: the same filesystem as every turn's folder, so a rename moves them, and
  * outside every container's mounts (a container mounts only its person-<uid> folder), so a container turn can't reach a
  * link spare or another turn's copy. A link spare only ever goes to a host turn; a container turn gets a byte copy.
  */
-import { renameSync, rmSync, mkdirSync } from 'node:fs';
-import { cp, link, mkdir, readdir, readlink, rm, symlink } from 'node:fs/promises';
+import { rmSync, mkdirSync } from 'node:fs';
+import { cp, link, mkdir, readdir, readlink, rename, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export type SpareKind = 'link' | 'copy';
@@ -61,23 +61,23 @@ export function readySpares(kind: SpareKind): string[] {
 }
 
 /**
- * Move a ready spare of `src` to `dst`. False when there is none (or it can't be moved), and the caller copies on the
- * loop; either way, a new spare is made behind it.
+ * Move a ready spare of `src` to `dst`. False when there is none (or it can't be moved), and the caller copies; either
+ * way, a new spare is made behind it. The spare is taken before the first await, so two launches at once never get the same one.
  */
-export function takeSpare(src: string, dst: string, kind: SpareKind): boolean {
+export async function takeSpare(src: string, dst: string, kind: SpareKind): Promise<boolean> {
   if (!at || src !== at.src) return false;
   const spare = ready[kind].shift();
   try {
     if (!spare) {
-      if (on) console.warn(`pin spares: none ready for a ${kind === 'link' ? 'host' : 'container'} turn, copying on the loop`);
+      if (on) console.warn(`pin spares: none ready for a ${kind === 'link' ? 'host' : 'container'} turn, copying it now`);
       return false;
     }
     try {
-      renameSync(spare, dst);
+      await rename(spare, dst);
       return true;
     } catch (e) {
-      console.warn(`pin spares: could not move ${spare} to ${dst}, copying on the loop: ${(e as Error).message}`);
-      rmSync(spare, { recursive: true, force: true });
+      console.warn(`pin spares: could not move ${spare} to ${dst}, copying it now: ${(e as Error).message}`);
+      await rm(spare, { recursive: true, force: true });
       return false;
     }
   } finally {
@@ -118,7 +118,7 @@ async function pass(): Promise<void> {
 }
 
 /** copyPinned's links, made with fs/promises: folders made, files linked, symlinks kept as they are. */
-async function linkTree(src: string, dst: string): Promise<void> {
+export async function linkTree(src: string, dst: string): Promise<void> {
   await mkdir(dst, { recursive: true });
   for (const e of await readdir(src, { withFileTypes: true })) {
     const from = join(src, e.name),

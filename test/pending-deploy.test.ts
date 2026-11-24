@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { stopTurns, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -59,6 +59,7 @@ function newTicket(state: any = 'pending-deploy', note: string | null = null) {
 
 /** End the running turn: waits for that turn, not for nothing to run, since a queued one may start right after. */
 async function endTurn(id: number, outcome: 'ok' | 'error') {
+  await until('the turn to start', () => followed(runner, id)); // its launch writes its files first (#1808)
   const live = (runner as any).turns.get(id);
   rmSync(join(root, 'release'), { force: true });
   writeFileSync(join(root, 'release'), outcome);

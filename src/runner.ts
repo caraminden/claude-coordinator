@@ -6,7 +6,7 @@ import { oomKilled } from './host-job.ts';
 import { jobMachinesFor } from './machine-jobs.ts';
 import { createHash } from 'node:crypto';
 import { appendFileSync, close, existsSync, fstatSync, open, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { access, rename, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
@@ -104,6 +104,17 @@ const MAX_TOOL_OUTPUT = 20_000;
 const STRIKE_SEARCH = 500;
 /** The most of a minion's Codex log kept for the way back, as characters (twice what a hand-over carries). */
 const CODEX_LOG_MAX = 2 * HANDOVER_MAX;
+/** Whether `path` is there, asked off the server's thread (#1808). */
+const exists = (path: string) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
+/** A container turn's `container` file and first beat (spawnInContainer): it counts as running while its container starts. */
+const containerFiles = async (dir: string, place: { container: string }) => {
+  await writeFile(join(dir, 'container'), place.container);
+  await writeFile(join(dir, 'beat'), '');
+};
 
 /** The scheme-refs snapshot for a turn of `project`: its name, the other schemes' names and its minions, plus its cards waiting on people (card-links.ts). */
 export function schemeRefs(project: Project, projects: Project[], tickets: Ticket[], cards?: { self: number | null; cards: CardLink[] }): SchemeRefs {
@@ -829,9 +840,11 @@ export class Runner {
   /** The person a message speaks for: its author, or for a relay (`from`), the sending turn's person. */
   personOf?: (author: string, from?: number) => number | null;
   /** A turn's GitHub env and prompt line for its person (src/github-link.ts forTurn); null with linking not set up. */
-  githubFor?: (person: number | null, turnDir: string) => TurnGithub | null;
+  githubFor?: (person: number | null, turnDir: string, later?: boolean) => TurnGithub | null;
   /** The secrets a turn of `project` running as `person` gets (src/secrets.ts, #838): its env vars, and the values its output hides. */
   secretsFor?: (project: number, person: number | null) => Map<string, string>;
+  /** Minions whose turn is launching (startTurn), and whether stop() was asked for meanwhile (#1808). */
+  private launching = new Map<number, { stopped: boolean; keepalive?: true }>();
   /** Each running turn's secrets, read once per turn (or once after a restart, on its next line). */
   private turnSecrets = new Map<number, Map<string, string>>();
   /** Minions with a keepalive asked for by keepaliveSweep, waiting for their lane (#862); a real message goes first and drops it. */
@@ -992,8 +1005,9 @@ export class Runner {
     return [...this.turns.keys()];
   }
 
+  /** A turn launching (startTurn, #1808) counts: it is past the queue's take, so a message now waits for it as for a live one. */
   isRunning(ticketId: number): boolean {
-    return this.turns.has(ticketId);
+    return this.turns.has(ticketId) || this.launching.has(ticketId);
   }
 
   /** How often a start waiting on a turn this server doesn't follow checks whether its wrapper has gone (#1464). */
@@ -1009,12 +1023,24 @@ export class Runner {
    * (wrapperAlive) and not only this server's map or the database, frees the lane at once, so a dismissal or a sweep
    * isn't stuck behind a wrapper that may never exit; the queue waits and starts once that wrapper is gone.
    */
-  private liveTurn(ticketId: number): Promise<void> | null {
+  private liveTurn(ticketId: number, none: () => unknown): unknown {
     const followed = this.turns.get(ticketId);
     if (followed) return followed.ended;
     if (this.strayWaits.has(ticketId)) return Promise.resolve();
-    const stray = this.strayTurnDir(ticketId);
-    if (!stray) return null;
+    // Only a folder the last server left can hold a stray (recover noted them): a turn launches with no read of
+    // the turns folder on the server's thread (#1808), and nothing between the queue's take and the send.
+    if (!this.strays.has(ticketId)) return none();
+    // Checked off the thread; it counts as launching meanwhile (isRunning), so a message sent now rides along.
+    const mark = { stopped: false };
+    this.launching.set(ticketId, mark);
+    const done = () => void (this.launching.get(ticketId) === mark && this.launching.delete(ticketId));
+    return this.strayTurnDir(ticketId)
+      .then((stray) => (mark.stopped ? undefined : stray ? (done(), this.waitStray(ticketId, stray)) : none()))
+      .finally(done);
+  }
+
+  /** Free the lane, and ask again once the stray turn in `stray` has ended. */
+  private waitStray(ticketId: number, stray: string): Promise<void> {
     console.error(`Minion ${ticketId}: a turn nothing here follows still runs in ${stray}; its next turn waits for it to end (#1464).`);
     this.strayWaits.add(ticketId);
     const check = () => {
@@ -1026,18 +1052,39 @@ export class Runner {
     return Promise.resolve();
   }
 
-  /** A turn folder of `ticketId`'s, host or container (<minion>-<ms>), whose wrapper is alive (and hasn't written its exit) though this server follows none. */
-  private strayTurnDir(ticketId: number): string | null {
-    let dirs: string[];
+  /** Folders the last server left, by minion, that had no exit.json at boot (noteStrays): where a stray turn can be. */
+  private strays = new Map<number, string[]>();
+
+  /** Note the turn folders (<minion>-<ms>, host or container) with no exit.json at boot: a turn launched since is followed. */
+  private noteStrays() {
+    this.strays.clear();
     try {
-      dirs = readdirSync(this.turnsDir).flatMap((name) => {
+      const dirs = readdirSync(this.turnsDir).flatMap((name) => {
         const dir = join(this.turnsDir, name);
         return /^person-\d+$/.test(name) ? readdirSync(dir).map((n) => join(dir, n)) : [dir];
       });
+      for (const d of dirs) {
+        if (!/^\d+-\d+$/.test(basename(d)) || existsSync(join(d, 'exit.json'))) continue;
+        const id = Number(basename(d).split('-')[0]);
+        this.strays.set(id, [...(this.strays.get(id) ?? []), d]);
+      }
     } catch {
-      return null; // no turns yet
+      // No turns yet.
     }
-    return dirs.find((d) => basename(d).startsWith(`${ticketId}-`) && /^\d+-\d+$/.test(basename(d)) && !existsSync(join(d, 'exit.json')) && wrapperAlive(d) === true) ?? null;
+  }
+
+  /** One of `ticketId`'s folders from noteStrays whose wrapper is alive (and hasn't written its exit) though this server follows none. */
+  private async strayTurnDir(ticketId: number): Promise<string | null> {
+    const live: string[] = [];
+    for (const d of this.strays.get(ticketId) ?? []) {
+      if (await exists(join(d, 'exit.json'))) continue;
+      // shortcut: wrapperAlive's reads are sync, but only a folder the last server left still there gets them; make it async if strays become common.
+      if (wrapperAlive(d) === true) live.push(d);
+    }
+    // One that has ended is never a stray again.
+    if (live.length) this.strays.set(ticketId, live);
+    else this.strays.delete(ticketId);
+    return live[0] ?? null;
   }
 
   /** The message ids each of these minions would take into its next turn, a usage-limit wait's too (they wait in its queue, #1378), read only (the standing checks, #1415). */
@@ -1130,7 +1177,8 @@ export class Runner {
     return {
       // Whether a turn of its own is running, which view() reports as its status (#1618): a hidden keepalive is not
       // one of those (it never shows as running, above), and a dismissed minion has nothing live.
-      turn_live: !closed && this.turns.has(ticket.id) && !this.keepalives.has(ticket.id),
+      // A launching turn's token is minted already (#1808): it counts, unless it's a keepalive's.
+      turn_live: !closed && (this.turns.has(ticket.id) ? !this.keepalives.has(ticket.id) : !!this.launching.get(ticket.id) && !this.launching.get(ticket.id)!.keepalive),
       // What steps took against their guesses (#571), which both bars scale the guesses by: the one ratio steps.usual used.
       step_ratio: ratio,
       steps: total ? { done, total, ...(est && { since: est.since, usual: est.usual }) } : null,
@@ -1652,7 +1700,7 @@ export class Runner {
   deployLive(ticketId: number): boolean {
     if (this.isRunning(ticketId) || this.queued(ticketId)) {
       this.deployedMidTurn.add(ticketId);
-      if (this.isRunning(ticketId)) this.saveTurn(ticketId, { deployed: true });
+      if (this.turns.has(ticketId)) this.saveTurn(ticketId, { deployed: true });
       return false;
     }
     const t = this.store.getTicket(ticketId);
@@ -1754,7 +1802,7 @@ export class Runner {
     if (!this.isRunning(ticketId) || this.keptOpen(ticketId, true)) return false;
     if (this.store.getTicket(ticketId)?.state === 'ready') this.store.updateTicket(ticketId, { state: null });
     this.closing.set(ticketId, reason);
-    this.saveTurn(ticketId, { closing: reason });
+    if (this.turns.has(ticketId)) this.saveTurn(ticketId, { closing: reason });
     this.broadcastTicket(ticketId);
     return true;
   }
@@ -1804,6 +1852,8 @@ export class Runner {
   recover() {
     // Up before the first turn, so it doesn't start in a wrapper for want of one (a deploy brings a new version).
     if (this.supervisor) ensureSupervisor(this.supervisorSpec());
+    // Before any turn starts below: a turn the last server left running may still run in its folder (#1464).
+    this.noteStrays();
     this.unsealStartHolds();
     const later: (() => void)[] = [];
     for (const p of this.store.listProjects()) {
@@ -2064,11 +2114,8 @@ export class Runner {
     if (this.isRunning(ticketId)) return void (ours() && this.resumes.cancelLimitWait(ticketId));
     // After the last turn's save, if that is still under way: no turn here starts before it is in (#259). Nor beside a
     // turn still live by then (#1464): as above, that turn is resume enough.
-    const ran = this.lanes.run(
-      ticketId,
-      'resume',
-      () =>
-        this.liveTurn(ticketId) ??
+    const ran = this.lanes.run(ticketId, 'resume', () =>
+      this.liveTurn(ticketId, () =>
         this.afterRestore(
           ticketId,
           (ticket, project) => this.turnPerson(ticket, project, this.waiting(ticketId), true),
@@ -2097,15 +2144,18 @@ export class Runner {
             // An account switch's note went with the turn that stopped (endFailed); a kill resume's with the kill (one line).
             if (via !== 'switch' && !killLine) this.emit(ticketId, 'note', { text: onCodex ? 'Resumed on Codex: its person switched to Codex' : via === 'limit' ? 'Resumed after the usage limit reset' : via === 'net' ? 'Resumed after a network outage' : 'Resumed after a server restart' });
             // It carries on the interrupted turn, so it runs for that turn's person.
-            return this.startTurn(
-              project,
-              ticket,
-              [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)],
-              person,
-              retries,
+            return this.ranTurn(
+              this.startTurn(
+                project,
+                ticket,
+                [{ author: 'System', text: onCodex ? RESUME_CODEX_PROMPT : via === 'switch' ? RESUME_ACCOUNT_PROMPT : via === 'limit' ? RESUME_LIMIT_PROMPT : via === 'net' ? RESUME_NET_PROMPT : killLine ? RESUME_KILL_PROMPT : RESUME_PROMPT, images: [] }, ...this.takeQueue(ticketId)],
+                person,
+                retries,
+              ),
             );
           },
         ),
+      ),
     );
     // One that started no turn (dismissed, refused, a start that bailed) ends its wait here, as it did before it was kept.
     if (token) void ran.then(() => ours() && this.resumes.cancelLimitWait(ticketId));
@@ -2748,6 +2798,20 @@ export class Runner {
 
   stop(ticketId: number): boolean {
     const live = this.turns.get(ticketId);
+    const launching = this.launching.get(ticketId);
+    if (!live && launching) {
+      // Its launch is still writing its files (#1808): it starts no turn, and as with a turn, its queue goes too.
+      launching.stopped = true;
+      // A resume launching ends its wait too: it won't start now.
+      this.resumes.cancelKillWait(ticketId);
+      this.resumes.cancelNetWait(ticketId);
+      this.resumes.cancelLimitWait(ticketId);
+      this.queue.drop(ticketId);
+      this.wakeNow.delete(ticketId);
+      this.emit(ticketId, 'note', { text: 'Stopped by user.' });
+      this.broadcastTicket(ticketId);
+      return true;
+    }
     if (!live) {
       // Waiting for its resume after a kill (#1364): likewise.
       if (this.resumes.cancelKillWait(ticketId)) {
@@ -3010,7 +3074,9 @@ export class Runner {
   private keepaliveGate(t: Ticket, p: Project, now: number): string | null {
     if (t.kind === 'coordinator') return 'taskmaster';
     if (!t.session_id || !t.cwd) return 'no session';
-    if (t.status !== 'idle' || this.isRunning(t.id) || this.queued(t.id)) return 'busy';
+    // A live turn, not isRunning: its own lane step re-checks here while it counts as launching (#1808), and a launch
+    // under way elsewhere holds the lane, so the sweep's next() waits for it.
+    if (t.status !== 'idle' || this.turns.has(t.id) || this.queued(t.id)) return 'busy';
     // A restart's resume still to start (2A2): a keepalive would take its place, or back out and hold its batch as mail.
     if (this.queue.owed(t.id)) return 'resume owed';
     if (this.limitWait(t.id)) return 'limit wait';
@@ -3138,55 +3204,57 @@ export class Runner {
     // Whose turn it will be, as below: a fresh-start step's is the minion's own, else the first queued message's.
     const person = (ticket: Ticket, project: Project) => this.turnPerson(ticket, project, this.freshStep(ticketId) ? [] : this.waiting(ticketId));
     // Nor beside a turn still live (#1464): the queue waits until it ends, then asks again.
-    this.lanes.run(
-      ticketId,
-      'turn',
-      () =>
-        this.liveTurn(ticketId) ??
+    this.lanes.run(ticketId, 'turn', () =>
+      this.liveTurn(ticketId, () =>
         this.afterRestore(ticketId, person, () => {
           const ticket = this.store.getTicket(ticketId);
           const project = ticket && this.store.getProject(ticket.project_id);
           if (!ticket || !project) return;
           // A Taskmaster's fresh-start step runs first and alone; the queue waits for the fresh session
           // (but goes before a handoff Citadel asked for by itself: freshStep).
-          const fresh = this.freshStep(ticketId);
-          if (fresh) {
-            let ended: Promise<void> | void;
-            try {
-              ended = this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []));
-            } catch (err) {
-              // Thrown out of the step with the fresh start still pending, the freed lane would ask again in a
-              // microtask, for ever, and nothing else on the server would run: give up as below.
-              console.error(`Ticket ${ticketId}: its fresh start's turn could not start:`, err);
-              ended = this.turns.get(ticketId)?.ended;
+          // The keepalive or the queue's turn: after a fresh start that ran no turn, or at once.
+          const rest = () => {
+            // A real message that came in meanwhile goes first, and the keepalive is dropped: that turn re-reads the cache anyway.
+            const skew = this.keepalivePending.get(ticketId);
+            if (this.keepalivePending.delete(ticketId) && !this.queue.size(ticketId) && !this.netWait(ticketId) && !this.killWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
+              return this.ranTurn(this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, [])));
             }
-            // The queue waits behind this turn as behind any.
-            if (this.isRunning(ticketId)) return ended;
-            // No turn started (a preview, a refused place): drop it, or the idle lane would ask again at once,
-            // and forget its size, or the idle check would ask again each minute.
-            this.store.deleteSetting(freshKey(ticketId));
-            this.store.deleteSetting(contextKey(ticketId));
-            this.emit(ticketId, 'note', { text: 'The fresh start could not run a turn, so the Taskmaster keeps its session.' });
-          }
-          // A real message that came in meanwhile goes first, and the keepalive is dropped: that turn re-reads the cache anyway.
-          const skew = this.keepalivePending.get(ticketId);
-          if (this.keepalivePending.delete(ticketId) && !this.queue.size(ticketId) && !this.netWait(ticketId) && !this.killWait(ticketId) && this.wantsKeepalive(ticket, project, this.now() + skew!)) {
-            return this.startTurn(project, ticket, [{ author: 'System', text: KEEPALIVE_TEXT, images: [], keepalive: true }], this.turnPerson(ticket, project, []));
-          }
-          // Everything queued while the last turn ran goes into one turn. Held mail alone wakes nothing, nor does a disabled person's message.
-          this.dropDisabled(ticketId);
-          if (!this.queue.size(ticketId)) return;
-          const person = this.turnPerson(ticket, project, this.waiting(ticketId));
-          if (this.refused(ticketId, person)) {
-            // What woke it is refused, as in send(); held mail stays for the next turn (#468 S03-6). Not kept as held mail:
-            // a refused person's message would pick them to pay for every later batch, and refuse it too (#1378 review).
-            this.queue.refuse(ticketId);
-            this.wakeNow.delete(ticketId);
-            this.broadcastTicket(ticketId);
-            return;
-          }
-          return this.startTurn(project, ticket, this.takeQueue(ticketId), person);
+            // Everything queued while the last turn ran goes into one turn. Held mail alone wakes nothing, nor does a disabled person's message.
+            this.dropDisabled(ticketId);
+            if (!this.queue.size(ticketId)) return;
+            const person = this.turnPerson(ticket, project, this.waiting(ticketId));
+            if (this.refused(ticketId, person)) {
+              // What woke it is refused, as in send(); held mail stays for the next turn (#468 S03-6). Not kept as held mail:
+              // a refused person's message would pick them to pay for every later batch, and refuse it too (#1378 review).
+              this.queue.refuse(ticketId);
+              this.wakeNow.delete(ticketId);
+              this.broadcastTicket(ticketId);
+              return;
+            }
+            return this.ranTurn(this.startTurn(project, ticket, this.takeQueue(ticketId), person));
+          };
+          const fresh = this.freshStep(ticketId);
+          if (!fresh) return rest();
+          // Its launch's stop mark (startTurn takes it on), so a stop before the turn is followed calls the fresh start off as a stop after does.
+          const mark = { stopped: false };
+          this.launching.set(ticketId, mark);
+          return this.startTurn(project, ticket, [fresh], this.turnPerson(ticket, project, []))
+            .catch((err) => {
+              // Thrown out of the step with the fresh start still pending, the freed lane would ask again at once, for ever: give up as below.
+              console.error(`Ticket ${ticketId}: its fresh start's turn could not start:`, err);
+            })
+            .then((started) => {
+              // The queue waits behind this turn as behind any.
+              if (this.isRunning(ticketId)) return started?.ended ?? this.turns.get(ticketId)?.ended;
+              // No turn started (a preview, a refused place, a stop): drop it, or the idle lane would ask again at once,
+              // and forget its size, or the idle check would ask again each minute.
+              this.store.deleteSetting(freshKey(ticketId));
+              this.store.deleteSetting(contextKey(ticketId));
+              this.emit(ticketId, 'note', { text: mark.stopped ? `The handoff turn was stopped, so the fresh start is off: the ${roleWord(ticket)} keeps its session.` : 'The fresh start could not run a turn, so the Taskmaster keeps its session.' });
+              return rest();
+            });
         }),
+      ),
     );
   }
 
@@ -3278,32 +3346,57 @@ export class Runner {
    * built, a throw) gives the queue's taken batch back as held mail (#1378): it rides along with the next turn, and asks
    * for none now, which would only fail the same way.
    */
-  private startTurn(...args: Parameters<Runner['launchTurn']>): ReturnType<Runner['launchTurn']> {
+  private async startTurn(...args: Parameters<Runner['launchTurn']>): ReturnType<Runner['launchTurn']> {
     const id = args[1].id;
-    // A resume that couldn't start pays its debt too, so the freed lane doesn't try it again at once.
-    const back = () => {
-      if (this.turns.has(id)) return;
-      this.queue.owe(id, null);
-      if (this.queue.giveBack(id, true).length) this.broadcastTicket(id);
-    };
-    let started: ReturnType<Runner['launchTurn']>;
+    // Stopped while its launch awaited its files (#1808): stop() marks it, and the launch starts no turn.
+    const mark = this.launching.get(id) ?? { stopped: false };
+    this.launching.set(id, mark);
+    if (args[2][0]?.keepalive) mark.keepalive = true;
+    // Shown running from the send, as when the launch was all one step: a launch that runs no turn puts it back.
+    // A crash meanwhile leaves it running with no turn saved: recover gives the batch back and runs it as a plain turn.
+    const was = this.store.getTicket(id)?.status;
+    const shown = !this.noTurns && !args[2][0]?.keepalive && was !== undefined && was !== 'running';
+    if (shown) this.setStatus(id, 'running');
     try {
-      started = this.launchTurn(...args);
-    } catch (err) {
-      back();
-      throw err;
+      return await this.launchTurn(...args);
+    } finally {
+      this.launching.delete(id);
+      if (!this.turns.has(id)) {
+        if (shown && this.store.getTicket(id)?.status === 'running') this.setStatus(id, was);
+        // A resume that couldn't start pays its debt too, so the freed lane doesn't try it again at once.
+        this.queue.owe(id, null);
+        // A stop drops the taken batch, as it drops a running turn's queue: done, so neither recover nor the next take reruns it.
+        if (mark.stopped) this.queue.done(id);
+        else if (this.queue.giveBack(id, true).length) this.broadcastTicket(id);
+        // A dismissal or live deploy that waited for this launch (isRunning counts it). A keepalive's acts now, as at its
+        // end; a real launch that started no turn is a stopped or failed start, which leaves the minion open, as such a turn does.
+        const closeReason = this.closing.get(id) ?? null;
+        const closing = this.closing.delete(id);
+        const deployed = this.deployedMidTurn.delete(id);
+        this.actOnDeferred(id, closing, closeReason, deployed, mark.keepalive && !mark.stopped ? null : "its turn didn't start");
+        if (closing) this.broadcastTicket(id);
+      }
     }
-    back();
-    return started;
   }
 
-  private launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, retries: Retries = {}) {
+  /** A lane's turn step: it holds the lane until the turn it started has ended (a stand-in startTurn may return anything). */
+  private ranTurn(started: unknown): Promise<void> {
+    return Promise.resolve(started).then((s) => (s as { ended?: Promise<void> } | undefined)?.ended);
+  }
+
+  /**
+   * Launch a turn: every file call awaited (#1808: on a busy disk a launch's sync calls held the server's thread ~1.2 s),
+   * then, with nothing more to await, the minion's changes and follow() in one go. Until then it isn't running: a message
+   * waits for the next turn, as behind afterRestore's restore.
+   */
+  private async launchTurn(project: Project, ticket: Ticket, batch: QueuedMessage[], person: number | null, retries: Retries = {}): Promise<{ ended: Promise<void> } | undefined> {
     // An account switch alone isn't a resume here: it carries on its person's own turn on another account.
     const resumed = !!(retries.restart || retries.limit || retries.net || retries.kill);
     // Before anything else here: restoring a worktree runs git in the real repo, and a turn is a real claude.
     if (this.noTurns) {
       this.emit(ticket.id, 'note', { text: 'This is a preview: it shows the app on a copy of the data, but it never runs turns.' });
-      return this.broadcastTicket(ticket.id);
+      this.broadcastTicket(ticket.id);
+      return;
     }
     // A hidden keepalive (#862): it re-reads the cached prefix and changes nothing of the minion's, the chat included.
     const keepalive = !!batch[0]?.keepalive;
@@ -3312,31 +3405,27 @@ export class Runner {
     if ('refused' in claudePlace) {
       if (keepalive) return;
       this.emit(ticket.id, 'note', { text: claudePlace.refused });
-      return this.broadcastTicket(ticket.id);
+      this.broadcastTicket(ticket.id);
+      return;
     }
     // The worktree sweep removes dismissed minions' worktrees; a reopened one gets its back.
     this.restoreDir(ticket, project);
     // With no folder it would run in the server's own (#899): the note above says why it can't.
-    if (ticket.kind === 'ticket' && !ticket.cwd) return this.broadcastTicket(ticket.id);
-    let filesDir = this.filesDir(ticket);
-    try {
-      if (filesDir) mkdirSync(filesDir, { recursive: true });
-    } catch {
-      filesDir = null;
+    if (ticket.kind === 'ticket' && !ticket.cwd) {
+      this.broadcastTicket(ticket.id);
+      return;
     }
-    let sharedDir = this.sharedDir(project);
-    try {
-      if (sharedDir) mkdirSync(sharedDir, { recursive: true });
-    } catch {
-      sharedDir = null;
-    }
+    // Each folder the turn gets, or null when it can't be made.
+    const made = async (d: string | null) =>
+      d &&
+      mkdir(d, { recursive: true }).then(
+        () => d,
+        () => null,
+      );
+    const filesDir = await made(this.filesDir(ticket));
+    const sharedDir = await made(this.sharedDir(project));
     // Claude Code keeps auto-memory under the main checkout's folder, shared by the project's worktrees.
-    let memoryDir = project.repo_dir && ticket.kind === 'coordinator' ? join(claudeConfigDir(process.env), 'projects', projectSlug(project.repo_dir), 'memory') : null;
-    try {
-      if (memoryDir) mkdirSync(memoryDir, { recursive: true });
-    } catch {
-      memoryDir = null;
-    }
+    const memoryDir = await made(project.repo_dir && ticket.kind === 'coordinator' ? join(claudeConfigDir(process.env), 'projects', projectSlug(project.repo_dir), 'memory') : null);
     // Who asked for it (#255): its messages' askers, any non-admin of them if several, since a ride-along
     // ask is in the turn too; with none (GitHub, a notice), and on a resume, the last turn's carries on.
     const before = this.store.turnAsker(ticket.id);
@@ -3394,9 +3483,9 @@ export class Runner {
     const typedBy = typers.size === 1 ? [...typers][0] : typers.size ? 0 : null;
     // A Codex turn resumes its thread when it is this person's; otherwise a new one starts from the hand-over below.
     const same = codexThread?.person === person && codexThread.thread;
-    let built: ReturnType<Runner['buildLaunch']>;
+    let built: Awaited<ReturnType<Runner['buildLaunch']>>;
     try {
-      built = this.buildLaunch(project, ticket, {
+      built = await this.buildLaunch(project, ticket, {
         place,
         person,
         asker,
@@ -3436,7 +3525,7 @@ export class Runner {
             env,
             pinned: treeHash(pins.MCP_DIR),
             claude: claudeStamp(command, env.PATH),
-            context: contextText(
+            context: await contextText(
               ticket.cwd,
               configDir,
               [ticket.cwd, project.repo_dir].filter((d): d is string => !!d).map((d) => join(configDir, 'projects', projectSlug(d), 'memory', 'MEMORY.md')),
@@ -3449,14 +3538,115 @@ export class Runner {
       if (!fp || s?.fp !== fp) {
         console.log(`[keepalive] minion ${ticket.id}: its prompt changed since its last turn (${changedParts(s?.parts ?? {}, fpParts ?? {}).join(', ')}), so its keepalives stop`);
         this.stopSeries(ticket.id, 'dirty');
-        rmSync(dir, { recursive: true, force: true });
+        await rm(dir, { recursive: true, force: true });
         this.turnSecrets.delete(ticket.id);
         return;
       }
     }
     const hashes = promptHashes(parts, plan.env, model, effort, this.payerOf(person), !!hold?.decision.held);
     // Written before anything of the minion's changes below, so a launch that can't be written leaves who it runs for as it was.
-    for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
+    for (const f of plan.files) await writeFile(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
+
+    // The session's transcript, task list and memory live in the database too; put back anything this
+    // config dir lacks (another account, a fresh machine) before resuming.
+    let restoreFailed = false;
+    let had: Set<string> | null = null;
+    // A session that is gone for good: the fresh one starts from a short digest of the chat (#899).
+    let lost: { text: string; entries: number } | null = null;
+    try {
+      const restored = await restoreSession(this.store, ticket, project, configDir);
+      // Everything stored is in the config dir now, so the end-of-turn save may prune what the turn deletes.
+      had = storedPaths(this.store, ticket, project);
+      if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
+    } catch (err) {
+      this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${thrown(err).message}` });
+      restoreFailed = true;
+    }
+    // With no copy of its transcript on this login or in the database, --resume would fail every turn from now on.
+    // A restore that failed (disk full, say) still resumes and fails loudly: the database's copy may be fine.
+    const transcript = ticket.session_id ? transcriptPath(configDir, ticket.cwd, ticket.session_id) : null;
+    if (ticket.session_id && transcript && (restoreFailed || (await exists(transcript)))) {
+      if (!codex) args.push('--resume', ticket.session_id);
+    } else if (keepalive) {
+      // No session to keep warm: its next real turn says so.
+      this.stopSeries(ticket.id, 'failed');
+      await rm(dir, { recursive: true, force: true });
+      this.turnSecrets.delete(ticket.id);
+      return;
+    } else if (ticket.session_id) {
+      lost = lostSessionText(ticket.session_id, ticket.note, this.chatDigest(ticket.id, batch));
+      this.emit(ticket.id, 'note', {
+        text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here; Claude doesn't remember the earlier turns, so it starts from ${lost.entries ? `its status note and its last ${lost.entries} chat entries` : 'its status note'}.`,
+      });
+      this.store.updateTicket(ticket.id, { session_id: null });
+    }
+    // The Taskmaster's auto-memory moved to the repo memory (#98); bring its old notes along once.
+    // shortcut: mergeMemory's own calls are sync, but a merge renames the old folder away, so after the first turn this off-thread look is all that runs.
+    const oldMemory = memoryDir && join(configDir, 'projects', projectSlug(ticket.cwd), 'memory');
+    if (memoryDir && oldMemory && (await exists(oldMemory))) {
+      try {
+        mergeMemory(oldMemory, memoryDir);
+      } catch (err) {
+        this.emit(ticket.id, 'note', { text: `Could not move the Taskmaster's old memory into ${memoryDir}: ${thrown(err).message}` });
+      }
+    }
+
+    if (hold && !keepalive) {
+      let d = hold.decision;
+      // A session that turned out lost starts a new one. The held prompt and its note together are the current rules,
+      // so it keeps both and the new session adopts the hold (ran fills in its id); only a note about going back is moot.
+      if (lost) {
+        d = { ...d, record: { ...d.record, session: null } };
+        if (d.note && !d.held) {
+          delete parts.turn.rulesChanged;
+          context = promptText(parts.turn);
+        }
+      }
+      // A /compact step carries no note, so it has delivered none.
+      this.promptHolds.save(ticket.id, step ? { ...d, record: { ...d.record, pending: undefined } } : d);
+      if (d.reload) console.log(`[prompt-hold] minion ${ticket.id}: takes the current prompt (${d.reload})`);
+    }
+    const prompt =
+      step === 'compact'
+        ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
+        : keepalive
+          ? promptMessage(batch)
+          : promptMessage([
+              ...(context ? [{ author: 'System', text: context, images: [] }] : []),
+              ...(github ? [{ author: 'System', text: github.line, images: [] }] : []),
+              ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []),
+              ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []),
+              ...handBack,
+              ...cancelledLine,
+              ...digestLine,
+              ...stuckLine,
+              ...batch,
+            ]);
+    await writeFile(join(dir, 'prompt.jsonl'), prompt);
+    for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) await writeFile(join(dir, f), '');
+    if (codex) {
+      // The Claude conversation from its last compaction, then any Codex turns on another person's Codex, verbatim:
+      // a new thread starts from it (the shim skips it when it resumes the thread).
+      let claudeJsonl = '';
+      try {
+        if (transcript) claudeJsonl = await readFile(transcript, 'utf8');
+      } catch {
+        // No transcript: the hand-over is the Codex turns alone, if any.
+      }
+      await writeFile(join(dir, 'handover.md'), fitLog([...claudeParts(claudeJsonl), ...readParts(codexThread?.log ?? '')]));
+      if (!same) this.store.setSetting(codexThreadKey(ticket.id), { thread: null, person: person!, log: codexThread?.log ?? '' });
+    }
+    // Holds the turn's token: private, and the wrapper deletes it once read.
+    await writeFile(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
+    if (plan.spawn.how === 'container') await containerFiles(dir, place as Extract<TurnPlace, { host: false }>);
+    // Nothing more to await: a stop or a dismissal meanwhile means no turn, and nothing of the minion's changed. A message
+    // to a minion already dismissed does run its turn (it reopens it).
+    const still = this.store.getTicket(ticket.id);
+    if (this.launching.get(ticket.id)?.stopped || !still || (still.status === 'closed' && ticket.status !== 'closed') || this.noTurns) {
+      this.turnSecrets.delete(ticket.id);
+      void rm(dir, { recursive: true, force: true }).catch(() => {});
+      return;
+    }
     // A keepalive changes nothing of the minion's: who it runs for, its state, note and replies stay as the last real turn left them.
     if (!keepalive) {
       if (asker !== null && asker !== person) this.store.setSetting(askerKey(ticket.id), asker);
@@ -3498,96 +3688,6 @@ export class Runner {
       // One-tap replies answer the turn that offered them; a new turn makes them stale.
       if (ticket.replies) this.store.updateTicket(ticket.id, { replies: null });
     }
-
-    // The session's transcript, task list and memory live in the database too; put back anything this
-    // config dir lacks (another account, a fresh machine) before resuming.
-    let restoreFailed = false;
-    let had: Set<string> | null = null;
-    // A session that is gone for good: the fresh one starts from a short digest of the chat (#899).
-    let lost: { text: string; entries: number } | null = null;
-    try {
-      const restored = restoreSession(this.store, ticket, project, configDir);
-      // Everything stored is in the config dir now, so the end-of-turn save may prune what the turn deletes.
-      had = storedPaths(this.store, ticket, project);
-      if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
-    } catch (err) {
-      this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${thrown(err).message}` });
-      restoreFailed = true;
-    }
-    // With no copy of its transcript on this login or in the database, --resume would fail every turn from now on.
-    // A restore that failed (disk full, say) still resumes and fails loudly: the database's copy may be fine.
-    const transcript = ticket.session_id ? transcriptPath(configDir, ticket.cwd, ticket.session_id) : null;
-    if (ticket.session_id && transcript && (restoreFailed || existsSync(transcript))) {
-      if (!codex) args.push('--resume', ticket.session_id);
-    } else if (keepalive) {
-      // No session to keep warm: its next real turn says so.
-      this.stopSeries(ticket.id, 'failed');
-      rmSync(dir, { recursive: true, force: true });
-      this.turnSecrets.delete(ticket.id);
-      return;
-    } else if (ticket.session_id) {
-      lost = lostSessionText(ticket.session_id, ticket.note, this.chatDigest(ticket.id, batch));
-      this.emit(ticket.id, 'note', {
-        text: `This minion's conversation (session ${ticket.session_id}) isn't on this Claude login or in the database, so this turn starts a fresh session. Its branch, worktree and chat are all still here; Claude doesn't remember the earlier turns, so it starts from ${lost.entries ? `its status note and its last ${lost.entries} chat entries` : 'its status note'}.`,
-      });
-      this.store.updateTicket(ticket.id, { session_id: null });
-    }
-    // The Taskmaster's auto-memory moved to the repo memory (#98); bring its old notes along once.
-    if (memoryDir) {
-      try {
-        mergeMemory(join(configDir, 'projects', projectSlug(ticket.cwd), 'memory'), memoryDir);
-      } catch (err) {
-        this.emit(ticket.id, 'note', { text: `Could not move the Taskmaster's old memory into ${memoryDir}: ${thrown(err).message}` });
-      }
-    }
-
-    if (hold && !keepalive) {
-      let d = hold.decision;
-      // A session that turned out lost starts a new one. The held prompt and its note together are the current rules,
-      // so it keeps both and the new session adopts the hold (ran fills in its id); only a note about going back is moot.
-      if (lost) {
-        d = { ...d, record: { ...d.record, session: null } };
-        if (d.note && !d.held) {
-          delete parts.turn.rulesChanged;
-          context = promptText(parts.turn);
-        }
-      }
-      // A /compact step carries no note, so it has delivered none.
-      this.promptHolds.save(ticket.id, step ? { ...d, record: { ...d.record, pending: undefined } } : d);
-      if (d.reload) console.log(`[prompt-hold] minion ${ticket.id}: takes the current prompt (${d.reload})`);
-    }
-    const prompt =
-      step === 'compact'
-        ? JSON.stringify({ type: 'user', message: { role: 'user', content: COMPACT_COMMAND } }) + '\n'
-        : keepalive
-          ? promptMessage(batch)
-          : promptMessage([
-              ...(context ? [{ author: 'System', text: context, images: [] }] : []),
-              ...(github ? [{ author: 'System', text: github.line, images: [] }] : []),
-              ...(handoff ? [{ author: 'System', text: freshStartText(handoff), images: [] }] : []),
-              ...(lost ? [{ author: 'System', text: lost.text, images: [] }] : []),
-              ...handBack,
-              ...cancelledLine,
-              ...digestLine,
-              ...stuckLine,
-              ...batch,
-            ]);
-    writeFileSync(join(dir, 'prompt.jsonl'), prompt);
-    for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
-    if (codex) {
-      // The Claude conversation from its last compaction, then any Codex turns on another person's Codex, verbatim:
-      // a new thread starts from it (the shim skips it when it resumes the thread).
-      let claudeJsonl = '';
-      try {
-        if (transcript) claudeJsonl = readFileSync(transcript, 'utf8');
-      } catch {
-        // No transcript: the hand-over is the Codex turns alone, if any.
-      }
-      writeFileSync(join(dir, 'handover.md'), fitLog([...claudeParts(claudeJsonl), ...readParts(codexThread?.log ?? '')]));
-      if (!same) this.store.setSetting(codexThreadKey(ticket.id), { thread: null, person: person!, log: codexThread?.log ?? '' });
-    }
-    // Holds the turn's token: private, and the wrapper deletes it once read.
-    writeFileSync(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
     const turn: TurnState = {
       ...(Object.keys(retries).length ? { retries } : {}),
       dir,
@@ -3612,12 +3712,23 @@ export class Runner {
       ...(machines.some((m) => m.owner_id !== null) ? { owned: machines.filter((m) => m.owner_id !== null).map((m) => m.id) } : {}),
       ...(keepalive ? { keepalive: true as const } : {}),
       ...(fp ? { fp, fpParts: fpParts! } : {}),
+      // A deploy or close_self that came while it launched (deployLive, closeAfterTurn) is saved with it, as for a running turn.
+      ...(this.deployedMidTurn.has(ticket.id) ? { deployed: true as const } : {}),
+      ...(this.closing.has(ticket.id) ? { closing: this.closing.get(ticket.id) } : {}),
       ...(!keepalive && this.turnFrom.has(ticket.id) ? { from: this.turnFrom.get(ticket.id) } : {}),
       ...(!keepalive && this.parkedAs.has(ticket.id) ? { parkedAs: this.parkedAs.get(ticket.id) } : {}),
     };
     this.store.setSetting(turnKey(ticket.id), turn);
     const live = this.follow(ticket.id, turn);
     live.had = had;
+    // A refresh of the scheme's snapshots since this one's was taken didn't know this turn: it gets the newest now.
+    if ((this.refsSeq.get(project.id) ?? 0) !== built.refsSeq) {
+      try {
+        this.writeRefs(join(dir, 'scheme-refs.json'), ticket);
+      } catch {
+        // A stale snapshot only means a card goes unchecked.
+      }
+    }
     // A keepalive never shows as running: the list and the chat don't know it happened.
     if (keepalive) this.keepalives.add(ticket.id);
     else {
@@ -3638,12 +3749,12 @@ export class Runner {
     // Its step on the lane lasts until it has ended and its session is saved (finish).
     if (plan.spawn.how === 'container') {
       this.spawnInContainer(place as Exclude<TurnPlace, { host: true }>, dir, plan.spawn.wrapper, ticket.id);
-      return live.ended;
+      return { ended: live.ended };
     }
     const { wrapper } = plan.spawn;
     if (plan.spawn.how === 'child') {
       this.spawnWrapper(wrapper, dir);
-      return live.ended;
+      return { ended: live.ended };
     }
     const { systemdRun, scope } = plan.spawn;
     const inUnit = () =>
@@ -3660,7 +3771,7 @@ export class Runner {
       // Not taken: its wrapper unit starts now, and rescue stays armed until the turn's pid.json is there.
       void handTurn(this.supervisorSpec(), dir, scope).then((taken) => taken || inUnit());
     } else inUnit();
-    return live.ended;
+    return { ended: live.ended };
   }
 
   /** Which system prompt a turn runs with (src/prompt-hold.ts): the one its session last ran with while it is warm. */
@@ -3674,7 +3785,7 @@ export class Runner {
    * question's fork (#932, src/side-ask.ts) builds its own here too, so its tools and prompt, the cached prefix,
    * are its minion's turn's. Throws, removing the folder, when the launch can't be built.
    */
-  buildLaunch(
+  async buildLaunch(
     project: Project,
     ticket: Ticket,
     f: {
@@ -3699,13 +3810,14 @@ export class Runner {
     // the tripwire hook must still be there for a turn that outlives it.
     const dir = join(place.host ? this.turnsDir : place.turnsDir, f.name);
     const pin = join(dir, 'pin');
-    mkdirSync(dir, { recursive: true });
+    // Every file call here goes through fs/promises (#1808): on a busy disk a launch's sync calls held the server's thread ~1.2 s.
+    await mkdir(dir, { recursive: true });
     try {
       const pins = turnPins();
-      copyPinned(pins.MCP_DIR, pin, !!place.host);
+      await copyPinned(pins.MCP_DIR, pin, !!place.host);
       // Kit skills the scheme turned off on its Skills page (#1062) aren't in this turn's copy at all. Not for Codex:
       // codex-turn.ts installs this kit into the person's shared Codex home, so pruning here would cut it from their other schemes too.
-      if (!codex) pruneKit(join(pin, basename(pins.KIT)), offSkills(project));
+      if (!codex) await pruneKit(join(pin, basename(pins.KIT)), offSkills(project));
       // Deploys, pending-deploy and previews only mean something in the scheme whose code this server runs.
       // Sticky once true (#1276): a `git cat-file` that fails under load would flip it off for one turn, and with it the system prompt.
       const deploys = ticket.kind !== 'coordinator' && !!project.repo_dir && (this.deploysRepos.has(project.repo_dir) || (runsRepo(project.repo_dir, this.liveHead()) && !!this.deploysRepos.add(project.repo_dir)));
@@ -3762,15 +3874,20 @@ export class Runner {
       const hold = codex ? null : this.holdFor(ticket, current);
       if (hold) parts.system = hold.system;
       const system = promptText(parts.system);
-      writeFileSync(join(dir, 'system-prompt.md'), system);
+      await writeFile(join(dir, 'system-prompt.md'), system);
       // The scheme's review set (Build 4), fresh each turn so a page edit or a kit starter fix reaches the next turn's critics.
       const reviewDir = join(dir, 'review-set');
       const reviews = withoutGoneAgents(this.store.reviews.list(project.id), readAgentFiles(project.repo_dir));
       // Phase 3: people's recorded verdicts, and the minion's ask for entries that read the requester's words.
       const verdicts = this.store.reviews.verdicts(project.id);
-      const reviewOn = renderSet(reviews, reviewDir, verdicts, reviews.some((e) => e.enabled && e.context.requester) ? this.store.reviews.requesterWords(ticket.id) : null);
+      const reviewFiles = new Map<string, string>();
+      const reviewOn = renderSet(reviews, reviewDir, verdicts, reviews.some((e) => e.enabled && e.context.requester) ? this.store.reviews.requesterWords(ticket.id) : null, reviewFiles);
       // A scheme with no reviewers on gets no review-set line; the kit line says only what it changed from the kit's defaults.
-      parts.turn.reviewSet = [reviewOn ? reviewSetLine(reviewDir, reviewOn, reviews) : '', kitLine(reviews, join(dir, 'review-kit'), verdicts, this.store.reviews.lessons(project.id))].filter(Boolean);
+      parts.turn.reviewSet = [reviewOn ? reviewSetLine(reviewDir, reviewOn, reviews) : '', kitLine(reviews, join(dir, 'review-kit'), verdicts, this.store.reviews.lessons(project.id), reviewFiles)].filter(Boolean);
+      for (const [file, text] of reviewFiles) {
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(file, text);
+      }
       // Its budget (#1114) each turn: what its kind of work usually costs and what it has used.
       const budget = ticket.kind === 'ticket' ? budgetFor(this.store, ticket) : null;
       if (budget) parts.turn.budget = [turnLine(budget, this.store.ticketCost(ticket.id))];
@@ -3791,8 +3908,9 @@ export class Runner {
       }
       // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
       // A file, not an argument: a scheme's minion list outgrows a command line.
-      const refsFile = join(dir, 'scheme-refs.json');
-      this.writeRefs(refsFile, ticket, undefined, true);
+      // A refresh before follow() misses this turn: launchTurn rewrites it when one ran (refsSeq).
+      const refsSeq = this.refsSeq.get(project.id) ?? 0;
+      await writeFile(join(dir, 'scheme-refs.json'), this.refsText(ticket));
       // A host turn has no Codex hook, so the server login's Codex reviews run in its Codex container (#398): woken
       // (by the caller) if it stopped (a reboot) without replacing one a review may be running in.
       const codexAt = place.host && person !== null ? (this.codexPlaceFor?.(person) ?? null) : null;
@@ -3800,8 +3918,9 @@ export class Runner {
       // CITADEL_, not COORDINATOR_: a warm turn's flag must not move the keepalive fingerprint (src/keepalive.ts).
       const coordinator = { ...this.coordinatorEnv(ticket), ...(hold?.warm ? { CITADEL_TOOL_HOLD: '1' } : {}) };
       const heavy = this.heavyEnv(ticket, person);
-      // The person's own GitHub token (or none, so it can't push), and a line saying whose it is.
-      const github = this.githubFor?.(f.github === undefined ? person : f.github, dir) ?? null;
+      // The person's own GitHub token (or none, so it can't push), and a line saying whose it is. Its empty gh folder made here, off the thread (#1808).
+      const github = this.githubFor?.(f.github === undefined ? person : f.github, dir, true) ?? null;
+      if (github?.env.GH_CONFIG_DIR) await mkdir(github.env.GH_CONFIG_DIR, { recursive: true, mode: 0o700 });
       const typer = f.typedBy ? this.store.getUser(f.typedBy) : undefined;
       const homeOf = this.store
         .listContraptions()
@@ -3856,9 +3975,9 @@ export class Runner {
         claudeBin: this.claudeBin,
         ...(f.side ? { side: true } : {}),
       });
-      return { plan, dir, system, parts, context, pins, github, unit, reviewAt, hold: hold && { decision: hold, current } };
+      return { plan, dir, system, parts, context, pins, github, unit, reviewAt, refsSeq, hold: hold && { decision: hold, current } };
     } catch (err) {
-      rmSync(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true });
       throw err;
     }
   }
@@ -3869,7 +3988,7 @@ export class Runner {
    * `prompt` as its message. Nothing of the minion's changes: not its session, state or queue. Throws with a reason
    * people can read when it can't start.
    */
-  sideLaunch(ticketId: number, asker: number, prompt: string, resume: { id: string; fork: boolean }) {
+  async sideLaunch(ticketId: number, asker: number, prompt: string, resume: { id: string; fork: boolean }) {
     if (this.noTurns) throw new Error('This is a preview: it never runs turns.');
     const ticket = this.store.getTicket(ticketId);
     const project = ticket && this.store.getProject(ticket.project_id);
@@ -3883,7 +4002,7 @@ export class Runner {
     const person = ticket.person_id;
     const turnAsker = this.store.turnAsker(ticket.id) ?? person;
     const machines = this.machines(project, turnAsker !== null ? [turnAsker] : []);
-    const { plan, dir } = this.buildLaunch(project, ticket, {
+    const { plan, dir } = await this.buildLaunch(project, ticket, {
       place,
       person,
       asker: turnAsker,
@@ -3899,17 +4018,18 @@ export class Runner {
       side: true,
     });
     try {
-      for (const f of plan.files) writeFileSync(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
+      for (const f of plan.files) await writeFile(join(dir, f.name), f.text, f.mode === undefined ? {} : { mode: f.mode });
       // The asker's login may lack the minion's session: put back the database's copy, as of its last finished turn.
       // shortcut: mid-turn on another login, the fork sees the session as its last turn left it; copying the live transcript across would show the turn so far.
-      if (resume.fork) restoreSession(this.store, ticket, project, plan.configDir);
-      if (!existsSync(transcriptPath(plan.configDir, ticket.cwd, resume.id)!)) throw new Error(resume.fork ? 'This minion has no session to ask yet.' : 'This side thread has ended; ask a new question.');
+      if (resume.fork) await restoreSession(this.store, ticket, project, plan.configDir);
+      if (!(await exists(transcriptPath(plan.configDir, ticket.cwd, resume.id)!))) throw new Error(resume.fork ? 'This minion has no session to ask yet.' : 'This side thread has ended; ask a new question.');
       plan.args.push('--resume', resume.id, ...(resume.fork ? ['--fork-session'] : []));
-      writeFileSync(join(dir, 'prompt.jsonl'), prompt);
-      for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
-      writeFileSync(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
+      await writeFile(join(dir, 'prompt.jsonl'), prompt);
+      for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) await writeFile(join(dir, f), '');
+      await writeFile(join(dir, 'spec.json'), JSON.stringify(wrapperSpec(plan, ticket.cwd)), { mode: 0o600 });
+      if (plan.spawn.how === 'container') await containerFiles(dir, place as Extract<TurnPlace, { host: false }>);
     } catch (err) {
-      rmSync(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true });
       throw err;
     }
     if (plan.spawn.how === 'container') this.spawnInContainer(place as Extract<TurnPlace, { host: false }>, dir, plan.spawn.wrapper, ticket.id);
@@ -3926,9 +4046,8 @@ export class Runner {
    * tells wrapperAlive to go by its heartbeat instead, and on a stale one by whether the wrapper is still in /proc.
    */
   private spawnInContainer(place: Extract<TurnPlace, { host: false }>, dir: string, wrapper: string[], ticketId: number) {
-    writeFileSync(join(dir, 'container'), place.container);
-    const beat = () => writeFileSync(join(dir, 'beat'), '');
-    beat();
+    // Its `container` and first beat are written already (containerFiles); later beats go off the thread too (#1808).
+    const beat = () => void writeFile(join(dir, 'beat'), '').catch(() => {});
     // Starting the container (building its image, the first time) can take minutes; it counts as running meanwhile.
     const starting = setInterval(beat, 5_000);
     // Both return as soon as the wrapper is started. One that hangs (a stuck podman lock) would keep the turn "running" for good.
@@ -3937,15 +4056,15 @@ export class Runner {
         execFile(cmd, args, { timeout: this.containerStartMs }, (err, _out, stderr) => (err ? reject(new Error(err.killed ? `${cmd} did not return within ${this.containerStartMs / 1000} s` : String(stderr).trim() || err.message)) : resolve()));
       });
     // Stopped while it started (stop() wrote exit.json), and maybe finished since: nothing more to start or to say.
-    const over = () => !existsSync(dir) || existsSync(join(dir, 'exit.json'));
+    const over = async () => !(await exists(dir)) || exists(join(dir, 'exit.json'));
     const exec = ['podman', 'exec', '-d', place.container, ...wrapper];
     const scoped = ['systemd-run', '--user', '--scope', '--collect', '--quiet', `--unit=citadel-turn-${this.unitTag}-${basename(dir)}`, `--slice=${TURN_SLICE}`, ...exec];
     place
       .ensure()
       // As with host turns, a failed systemd-run still runs the turn, though a restart then SIGKILLs its conmon.
       // Only an exec that then starts counts as a fallback: one that fails both ways was podman's trouble.
-      .then(() =>
-        over()
+      .then(async () =>
+        (await over())
           ? undefined
           : this.units
             ? run(scoped).then(
@@ -3954,7 +4073,8 @@ export class Runner {
               )
             : run(exec),
       )
-      .catch((err) => !over() && writeFileSync(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
+      .catch(async (err) => !(await over()) && writeFile(join(dir, 'exit.json'), JSON.stringify({ code: null, signal: null, error: `${place.container}: ${err.message}` })))
+      .catch((err) => console.error(`Minion ${ticketId}: could not write its turn's exit.json:`, err))
       .finally(() => clearInterval(starting));
   }
 
@@ -4269,16 +4389,23 @@ export class Runner {
       this.store.deleteSetting(savingKey(ticketId));
       return live.end();
     }
-    // Not running now, so each acts as it would have on the idle minion; a message that came in meanwhile keeps it open.
     // Even after a failed keepalive: unlike a real turn's, its failure is hidden upkeep and says nothing about the dismissal.
+    this.actOnDeferred(ticketId, closing, closeReason, deployed);
+    // A message that came in meanwhile waits behind it in the queue, as behind any turn.
+    this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
+  }
+
+  /**
+   * A dismissal or live deploy that waited for a keepalive, or for a launch that started no turn (#1808): not running
+   * now, so each acts as it would have on the idle minion; a message that came in meanwhile keeps it open.
+   */
+  private actOnDeferred(ticketId: number, closing: boolean, closeReason: string | null, deployed: boolean, kept: string | null = null) {
     if (closing) {
-      const keep = this.queue.msgs(ticketId).some((m) => !m.fyi) ? 'a new message arrived' : this.keptOpen(ticketId);
+      const keep = kept ?? (this.queue.msgs(ticketId).some((m) => !m.fyi) ? 'a new message arrived' : this.keptOpen(ticketId));
       if (keep) this.emit(ticketId, 'note', { text: `${(closeReason ?? 'It was set to be dismissed.').replace(/,? so it dismissed this fix minion\.?$/, '.')} It stays open: ${keep}.` });
       else void this.close(ticketId, closeReason ?? 'Claude dismissed this minion.');
     }
-    if (deployed) this.deployLive(ticketId);
-    // A message that came in meanwhile waits behind it in the queue, as behind any turn.
-    this.saveAfterTurn(ticketId, live.configDir, live.had).then(live.end);
+    if (deployed && !kept) this.deployLive(ticketId);
   }
 
   /** Copy a minion's session into the database after its turn (or a restart cut that off); never rejects. Counted for settled() (#1437). */
@@ -5174,11 +5301,7 @@ export class Runner {
    * writes it before returning (a launch: the turn reads it from its first reply); a refresh goes through putRefs.
    */
   private writeRefs(file: string, ticket: Ticket, shared = this.refsShared(ticket.project_id), now = false) {
-    const { project, projects, tickets, openOf, links, settled } = shared;
-    // Only the turn's own cards say where each sits (`placed`).
-    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => (t.id === ticket.id ? this.cardLinks(t, true, openOf.get(t.id)) : links.get(t.id)!)) };
-    const refs = { ...schemeRefs(project, projects, tickets, cards), settled };
-    const text = JSON.stringify(refs);
+    const text = this.refsText(ticket, shared);
     if (now) {
       // Whole or not at all: the link check may read it mid-turn.
       writeFileSync(`${file}.new`, text);
@@ -5188,6 +5311,17 @@ export class Runner {
       if (held) held.text = text;
     } else this.putRefs(file, text);
   }
+
+  /** A turn's scheme-refs snapshot (scheme-refs.ts) as text: its scheme's minions and the cards waiting on people. */
+  private refsText(ticket: Ticket, shared = this.refsShared(ticket.project_id)) {
+    const { project, projects, tickets, openOf, links, settled } = shared;
+    // Only the turn's own cards say where each sits (`placed`).
+    const cards = { self: ticket.kind === 'coordinator' ? null : ticket.number, cards: tickets.flatMap((t) => (t.id === ticket.id ? this.cardLinks(t, true, openOf.get(t.id)) : links.get(t.id)!)) };
+    return JSON.stringify({ ...schemeRefs(project, projects, tickets, cards), settled });
+  }
+
+  /** Per scheme: how many refreshes of its turns' snapshots have run, so a launch can tell it missed one (#1808). */
+  private refsSeq = new Map<number, number>();
 
   /** Per snapshot file: the newest text still to write (null once taken), and its writes' end. */
   private refsWrites = new Map<string, { text: string | null; done: Promise<void> }>();
@@ -5267,6 +5401,7 @@ export class Runner {
   private writeSchemeRefs(projectId: number, only?: number, own?: number) {
     // The gap starts only once a refresh read something: a card in a scheme with no turn running costs nothing.
     if (only === undefined) this.refsLast.delete(projectId);
+    this.refsSeq.set(projectId, (this.refsSeq.get(projectId) ?? 0) + 1);
     let shared: ReturnType<Runner['refsShared']> | undefined;
     for (const [id, turn] of this.turns) {
       if (only !== undefined && id !== only) continue;

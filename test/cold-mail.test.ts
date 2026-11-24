@@ -244,11 +244,11 @@ test("held mail outlives a turn whose Claude can't start, and rides along with t
   runner.placeFor = () => ({ refused: "Cara's Claude sign-in expired, so this message waits here." });
   try {
     runner.send(tm.id, 'Cara', 'first try');
-    assert.equal(runner.isRunning(tm.id), false);
+    await until('the refused launch', () => !runner.isRunning(tm.id));
     assert.ok(store.getSetting<any>(`minion-queue:${tm.id}`)?.held ?? null, 'the held mail stays held');
     // The sweep's cap meets the same refusal: the mail still waits.
     runner.coldSweep(NOW + COLD_HOLD_MAX_MS);
-    assert.equal(runner.isRunning(tm.id), false);
+    await until('the refused launch', () => !runner.isRunning(tm.id));
     assert.ok(store.getSetting<any>(`minion-queue:${tm.id}`)?.held ?? null, 'the sweep keeps it held too');
   } finally {
     runner.placeFor = undefined;

@@ -41,6 +41,8 @@ const PREAMBLE =
 
 export class SideAsks {
   private threads = new Map<number, SideThread>();
+  /** Follow-ups whose fork is launching (#1808): not yet running, but a second one must still wait. */
+  private launching = new Set<number>();
   private timer: NodeJS.Timeout | null = null;
   private offsets = new Map<number, number>();
   private found = new Map<number, { forkId?: string; result?: any }>();
@@ -70,17 +72,24 @@ export class SideAsks {
    * Ask `text` on the side of a minion, as `asker` (who pays, on their own login), in a new thread or in `thread`, one
    * of their own. Returns the 'side' event; the answer follows as a 'side_answer' event. Throws with a reason people read.
    */
-  ask(ticketId: number, asker: number, name: string, text: string, thread?: number) {
+  async ask(ticketId: number, asker: number, name: string, text: string, thread?: number) {
     const ticket = this.store.getTicket(ticketId);
     if (!ticket?.session_id) throw new Error('This minion has no session to ask yet.');
     const t = thread === undefined ? null : this.threads.get(thread);
     if (thread !== undefined) {
       if (!t || t.ticketId !== ticketId || !t.forkId) throw new Error('This side thread has ended; ask a new question.');
       if (t.asker !== asker) throw new Error('Only the person who started a side thread can follow it up; ask your own question.');
-      if (t.run) throw new Error('This side thread is still answering.');
+      if (t.run || this.launching.has(t.id)) throw new Error('This side thread is still answering.');
     }
     const prompt = promptMessage([{ author: name, text: t ? text : `${PREAMBLE}\n\n${text}`, images: [] }]);
-    const launch = this.runner.sideLaunch(ticketId, asker, prompt, t ? { id: t.forkId!, fork: false } : { id: ticket.session_id, fork: true });
+    // Its launch writes its files off the server's thread (#1808): a second follow-up meanwhile is refused as above.
+    if (t) this.launching.add(t.id);
+    let launch: Awaited<ReturnType<Runner['sideLaunch']>>;
+    try {
+      launch = await this.runner.sideLaunch(ticketId, asker, prompt, t ? { id: t.forkId!, fork: false } : { id: ticket.session_id, fork: true });
+    } finally {
+      if (t) this.launching.delete(t.id);
+    }
     const ev = this.runner.emit(ticketId, 'side', { thread: t?.id ?? null, by: name, uid: asker, q: text });
     const id = t?.id ?? ev.id;
     const row: SideThread = t ?? { id, ticketId, asker, forkId: null, configDir: launch.configDir, cwd: launch.cwd, account: launch.account, lastAt: 0, run: null };

@@ -118,7 +118,7 @@ test("a turn's pin copy links the files instead of copying their bytes, so a lau
   try {
     mkdirSync(join(d, 'src', 'sub'), { recursive: true });
     writeFileSync(join(d, 'src', 'sub', 'a.txt'), 'hello');
-    copyPinned(join(d, 'src'), join(d, 'dst'));
+    await copyPinned(join(d, 'src'), join(d, 'dst'));
     assert.equal(readFileSync(join(d, 'dst', 'sub', 'a.txt'), 'utf8'), 'hello');
     assert.equal(statSync(join(d, 'dst', 'sub', 'a.txt')).ino, statSync(join(d, 'src', 'sub', 'a.txt')).ino);
   } finally {
@@ -134,7 +134,7 @@ test('a turn start takes a spare copy made off the loop: one rename, links for a
   const pins = testPins();
   const early = join(pins.dataDir, 'run', 'turns', '4-1', 'pin');
   mkdirSync(dirname(early), { recursive: true });
-  copyPinned(pins.MCP_DIR, early, true); // before any spares: copied on the loop, and later fills still work
+  await copyPinned(pins.MCP_DIR, early, true); // before any spares: copied with fs/promises, and later fills still work
   assert.equal(statSync(join(early, pins.TRIPWIRE.split('/').pop()!)).ino, statSync(pins.TRIPWIRE).ino);
   await fillPinSpares();
   assert.equal(readySpares('link').length, SPARES.link);
@@ -151,8 +151,8 @@ test('a turn start takes a spare copy made off the loop: one rename, links for a
     box = join(turns, 'person-7', '5-2', 'pin');
   mkdirSync(dirname(host), { recursive: true });
   mkdirSync(dirname(box), { recursive: true });
-  copyPinned(pins.MCP_DIR, host, true);
-  copyPinned(pins.MCP_DIR, box, false);
+  await copyPinned(pins.MCP_DIR, host, true);
+  await copyPinned(pins.MCP_DIR, box, false);
   assert.equal(statSync(host).ino, made.host, 'the spare itself, moved: nothing copied on the loop');
   assert.equal(statSync(box).ino, made.box);
   const name = pins.TRIPWIRE.split('/').pop()!;

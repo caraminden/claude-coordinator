@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { stopTurns, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -51,7 +51,7 @@ test('a minion shows as running while its turn is live, however stale the row th
   );
   try {
     runner.send(t.id, 'Cara', 'look into it');
-    await until('the turn to start', () => runner.isRunning(t.id));
+    await until('the turn to start', () => followed(runner, t.id)); // past its launch (#1808): the keepalive check below needs the followed turn
     const stale = { ...store.getTicket(t.id)!, status: 'new' as const };
     assert.equal(runner.view(stale).status, 'running', 'the row said new, but the turn (and its token) had started');
     assert.equal(runner.view({ ...stale, status: 'idle' }).status, 'running');

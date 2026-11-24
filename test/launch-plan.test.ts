@@ -73,8 +73,8 @@ test("the environment is the server's filtered one plus the turn's own, and noth
   const tripwire = JSON.parse(p.files.find((f) => f.name === 'settings.json')!.text).hooks.PreToolUse.find((m: any) => m.hooks[0].onFailure === 'block').hooks[0].command;
   assert.equal(p.env.CITADEL_HOOK_CACHE, join(dir, 'pin', '.compile-cache'));
   assert.ok(tripwire.startsWith(`NODE_COMPILE_CACHE='${p.env.CITADEL_HOOK_CACHE}' `), tripwire);
-  // The turn's pinned tools come first on PATH (the Android toolchain may follow, when this machine has one).
-  assert.ok(p.env.PATH.startsWith(`${join(dir, 'pin', 'bin')}:/usr/bin`), p.env.PATH);
+  // The turn's pinned tools come first on PATH, bin/heavy's wrappers before them when the pinned folder has it (the Android toolchain may follow, when this machine has one).
+  assert.ok(p.env.PATH.startsWith(`${pins.PIN_HAS.heavy ? `${join(dir, 'pin', 'bin', 'heavy')}:` : ''}${join(dir, 'pin', 'bin')}:/usr/bin`), p.env.PATH);
   assert.equal(p.configDir, '/srv/claude');
 });
 
@@ -261,12 +261,12 @@ test('copyPinned links the pinned files instead of copying their bytes, and keep
     chmodSync(join(src, 'bin', 'tool'), 0o755);
     symlinkSync('/usr/bin/node', join(src, 'bin', 'citadel-node'));
     const dst = join(root, 'pin');
-    copyPinned(src, dst);
+    await copyPinned(src, dst);
     assert.equal(statSync(join(dst, 'tripwire.ts')).ino, statSync(join(src, 'tripwire.ts')).ino, 'a link, not a copy');
     assert.equal(statSync(join(dst, 'bin', 'tool')).mode & 0o777, 0o755);
     assert.ok(lstatSync(join(dst, 'bin', 'citadel-node')).isSymbolicLink());
     assert.equal(readlinkSync(join(dst, 'bin', 'citadel-node')), '/usr/bin/node');
-    copyPinned(src, join(root, 'boxed'), false);
+    await copyPinned(src, join(root, 'boxed'), false);
     assert.notEqual(statSync(join(root, 'boxed', 'tripwire.ts')).ino, statSync(join(src, 'tripwire.ts')).ino, 'a container turn gets copies');
     rmSync(src, { recursive: true });
     assert.equal(readFileSync(join(dst, 'tripwire.ts'), 'utf8'), 'guard', "the turn's copy outlives the server's");

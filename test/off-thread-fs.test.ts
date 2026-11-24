@@ -13,13 +13,19 @@ import { Waits } from '../src/waits.ts';
 import { Runner } from '../src/runner.ts';
 import { FakeClock } from './fake-clock.ts';
 import type { SchemeRefs } from '../src/scheme-refs.ts';
+import { gzipSync } from 'node:zlib';
+import { fillPinSpares, readySpares, SPARES } from '../src/pin-spares.ts';
+import { stopTurns, testPins, until, followed, runnerInsides } from './helpers.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'off-thread-fs-'));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(async () => {
+  await stopTurns(root);
+  rmSync(root, { recursive: true, force: true }); // timing-ok: own temp dir
+});
 
 /** Runs `fn` and returns the synchronous fs calls made under `dir` before it returned its promise's result. */
 async function syncCallsUnder<T>(dir: string, fn: () => T | Promise<T>): Promise<string[]> {
-  const names = ['readFileSync', 'readdirSync', 'writeFileSync', 'renameSync', 'existsSync', 'statSync', 'openSync', 'accessSync'] as const;
+  const names = ['readFileSync', 'readdirSync', 'writeFileSync', 'renameSync', 'existsSync', 'statSync', 'openSync', 'accessSync', 'mkdirSync', 'rmSync', 'linkSync', 'symlinkSync', 'cpSync', 'copyFileSync', 'appendFileSync', 'lstatSync', 'readlinkSync', 'utimesSync'] as const;
   const real = Object.fromEntries(names.map((n) => [n, fs[n]]));
   const seen: string[] = [];
   for (const n of names)
@@ -144,4 +150,127 @@ test("the waits poll reads the land line and the heavy folder with no synchronou
     [1, 2],
   );
   assert.equal(waits.line[0].tests?.done, 3);
+});
+
+/** A server's data folder with its pinned files and spares, a stored session, and a turn folder left by another turn. */
+async function launchBox(name: string) {
+  const data = join(root, name);
+  mkdirSync(data);
+  const pins = testPins(data);
+  await fillPinSpares();
+  const config = join(data, 'claude');
+  process.env.CLAUDE_CONFIG_DIR = config;
+  const fake = join(data, 'fake-claude');
+  writeFileSync(fake, '#!/bin/sh\nexit 0\n');
+  chmodSync(fake, 0o755);
+  const store = new Store(join(data, 'db.sqlite'));
+  store.typedHandlesUpTo = 0;
+  const runner = new Runner(
+    store,
+    () => {},
+    () => ({}),
+    fake,
+  );
+  runner.pollMs = 600_000; // the tail of a started turn isn't the launch
+  const p = store.createProject('Launch', null);
+  const turns = join(data, 'run', 'turns');
+  mkdirSync(join(turns, '999-1'), { recursive: true }); // another minion's old turn: the stray check reads the folder
+  const minion = (title: string) => {
+    const t = store.createTicket({ project_id: p.id, title, permission_mode: 'bypassPermissions', created_by: 'Cara' });
+    const cwd = join(data, `wt-${t.id}`);
+    mkdirSync(cwd);
+    store.setTicketDir(t.id, cwd, null);
+    // A stored file the config folder lacks, and one it already has: the restore checks both.
+    const body = Buffer.from('{}\n');
+    for (const path of [`projects/x-${t.id}/a.jsonl`, `projects/x-${t.id}/b.jsonl`]) store.putClaudeState({ path, project_id: p.id, ticket_id: t.id, size: body.length, mtime: 1_700_000_000_000, data: gzipSync(body) });
+    mkdirSync(join(config, `projects/x-${t.id}`), { recursive: true });
+    writeFileSync(join(config, `projects/x-${t.id}/b.jsonl`), body);
+    return t;
+  };
+  return { pins, store, runner, turns, config, minion };
+}
+
+test("a turn launches with no synchronous file call in the run and session folders on the server's thread", async () => {
+  const { runner, turns, config, minion } = await launchBox('launch');
+  const t = minion('Launch');
+  const run = join(root, 'launch', 'run');
+  const calls = [
+    ...(await syncCallsUnder(config, async () => {
+      runner.send(t.id, 'Cara', 'Go');
+      await until('the turn is running', () => followed(runner, t.id));
+    })),
+  ];
+  // The run folder is checked by its own trap, around a second minion's launch, so the two lists say which folder.
+  const u = minion('Second');
+  calls.push(
+    ...(await syncCallsUnder(run, async () => {
+      runner.send(u.id, 'Cara', 'Go');
+      await until('the second turn is running', () => followed(runner, u.id));
+    })),
+  );
+  assert.deepEqual(calls, []);
+  // The launch did its work: a spare became the turn's pin copy, the stored file is back, the prompt is written.
+  const dir = runnerInsides(runner).turns.get(t.id)!.dir;
+  assert.ok(dir.startsWith(turns));
+  assert.equal(readFileSync(join(config, `projects/x-${t.id}/a.jsonl`), 'utf8'), '{}\n');
+  assert.match(readFileSync(join(dir, 'prompt.jsonl'), 'utf8'), /Go/);
+  assert.ok(fs.existsSync(join(dir, 'pin')));
+});
+
+test('a burst of turns launching at once takes each spare once and starts every turn', async () => {
+  const { runner, turns, minion } = await launchBox('burst');
+  const ts = Array.from({ length: SPARES.link + 3 }, (_, i) => minion(`Burst ${i}`));
+  const spares = readySpares('link');
+  assert.equal(spares.length, SPARES.link);
+  for (const t of ts) runner.send(t.id, 'Cara', 'Go');
+  await until('every turn is running', () => ts.every((t) => followed(runner, t.id)));
+  const dirs = ts.map((t) => runnerInsides(runner).turns.get(t.id)!.dir);
+  assert.equal(new Set(dirs).size, ts.length);
+  // Every turn has a whole pin copy: the spares went to one turn each, and the rest were copied.
+  const inos = dirs.map((d) => fs.statSync(join(d, 'pin')).ino);
+  assert.equal(new Set(inos).size, ts.length, 'no two turns share one pin folder');
+  for (const d of dirs) assert.ok(fs.readdirSync(join(d, 'pin')).length > 0, `${d} has its pinned files`);
+  const taken = spares.filter((s) => !fs.existsSync(s)).length;
+  assert.equal(taken, SPARES.link, 'every spare ready at the burst went to a turn');
+  assert.ok(dirs.every((d) => d.startsWith(turns)));
+});
+
+test('a stop while a turn is still launching starts no turn, drops its queue and leaves no turn folder', async () => {
+  const { runner, store, turns, minion } = await launchBox('stop-launch');
+  const t = minion('Stopped');
+  // Stopped the moment its launch begins, so the stop lands while its files are still being written.
+  const launching = runnerInsides(runner).launching;
+  const set = launching.set.bind(launching);
+  let stopped: boolean | null = null;
+  launching.set = (id, mark) => {
+    set(id, mark);
+    if (id === t.id && stopped === null) {
+      assert.ok(runner.isRunning(t.id), 'a launching turn counts as running');
+      assert.equal(runner.view({ ...store.getTicket(t.id)!, status: 'idle' }).status, 'running', 'its token is minted: it shows running, however stale the row');
+      // Its ship ended as it launched: the dismissal waits for the turn, and a stopped start leaves the minion open.
+      assert.equal(runner.closeAfterTurn(t.id, 'Shipped.'), true);
+      stopped = runner.stop(t.id);
+    }
+    return launching;
+  };
+  runner.send(t.id, 'Cara', 'Go');
+  await until('the stop has landed', () => stopped !== null);
+  assert.equal(stopped, true);
+  await until('the launch has given up', () => !runner.isRunning(t.id));
+  await until('its folder is gone', () => !fs.readdirSync(turns).some((n) => n.startsWith(`${t.id}-`)));
+  assert.equal(followed(runner, t.id), false);
+  assert.equal(runner.queued(t.id), 0, 'the stop dropped the queued message');
+  const notes = store
+    .listEvents(t.id)
+    .filter((e) => e.kind === 'note')
+    .map((e) => (JSON.parse(e.data) as { text: string }).text);
+  assert.ok(notes.includes("Shipped. It stays open: its turn didn't start."), notes.join(' | '));
+  assert.notEqual(store.getTicket(t.id)!.status, 'closed');
+  assert.equal(runner.view(store.getTicket(t.id)!).closing, false, 'no dismissal mark left');
+  // The next message runs as usual, without the stopped one.
+  runner.send(t.id, 'Cara', 'Again');
+  await until('the next turn is running', () => followed(runner, t.id));
+  const prompt = readFileSync(join(runnerInsides(runner).turns.get(t.id)!.dir, 'prompt.jsonl'), 'utf8');
+  assert.match(prompt, /Again/);
+  assert.doesNotMatch(prompt, /\bGo\b/, 'the stopped batch is not run again');
 });

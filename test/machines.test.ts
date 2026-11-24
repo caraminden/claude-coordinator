@@ -701,6 +701,8 @@ test("a Taskmaster lists the machines its scheme can see and checks one through 
   // Only a Taskmaster: not a person, not a minion.
   await assert.rejects(call(`/api/projects/${shared.id}/machines`), /403/);
   const minion = await call(`/api/projects/${shared.id}/tickets`, { method: 'POST', body: { message: 'hi' } });
+  // Its token is minted as its turn launches, off the request (#1808): read it once that turn is over.
+  await until('its turn to end', async () => (await call(`/api/tickets/${minion.id}`)).ticket.status !== 'running');
   const asMinion = await fetch(`${base}/api/projects/${shared.id}/machines`, { headers: { Authorization: `Bearer ${agentToken(join(root, 'data'), minion.id)}` } });
   assert.equal(asMinion.status, 403);
 });

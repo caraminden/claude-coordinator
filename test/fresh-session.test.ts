@@ -9,7 +9,7 @@ import { Store } from '../src/db.ts';
 import { FRESH_CONTEXT_TOKENS, FRESH_IDLE_CONTEXT_TOKENS, FRESH_IDLE_MS, Runner } from '../src/runner.ts';
 import { transcriptPath } from '../src/sessions.ts';
 import { SEAM_CONTEXT_TOKENS, SEAM_TRIAL_KEY, type SeamTrial } from '../src/seam-trial.ts';
-import { jsonLines, lines, settled, stopTurns, testPins, until } from './helpers.ts';
+import { jsonLines, lines, settled, stopTurns, testPins, until, followed } from './helpers.ts';
 testPins();
 
 const root = mkdtempSync(join(tmpdir(), 'fresh-session-'));
@@ -84,7 +84,8 @@ function taskmaster(session = 'old', kind: 'coordinator' | null = 'coordinator')
 // The waits give up (helpers' until, 30 s): they, not a limit per test, fail a turn that never comes. Each turn costs
 // two node starts, so on a starved box a six-turn test takes 20 s and more without anything being wrong (#470).
 async function started(id: number) {
-  await until('the turn to start', () => runner.isRunning(id));
+  // Followed, not just launching (#1808): endTurn reads the turn the launch saves.
+  await until('the turn to start', () => followed(runner, id));
 }
 
 /** End the running turn; returns once the server has handled its end, though a queued turn may have started since. */

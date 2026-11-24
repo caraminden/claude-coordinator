@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { Runner, wrapperAlive } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { stopTurns, testPins, followed } from './helpers.ts';
 import { realClock } from '../src/clock.ts';
 import { FakeClock } from './fake-clock.ts';
 import { until } from './wait.ts';
@@ -165,6 +165,7 @@ test('a stop before claude has started signals it as soon as it starts, not at t
   const t = store.createTicket({ project_id: project.id, title: 'T', permission_mode: 'default', created_by: 'Cara' });
   store.setTicketDir(t.id, root, null);
   runner.send(t.id, 'Cara', 'wait');
+  await until('the turn is running', () => followed(runner, t.id));
   const dir = (runner as any).turns.get(t.id).dir;
   assert.ok(!existsSync(join(dir, 'pid.json')), 'stopped before the wrapper started claude');
   // The stop's kill timers run on a clock nobody moves: the turn can only end by the signal sent once claude

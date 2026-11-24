@@ -39,13 +39,13 @@ test("the list has every kit skill and Grunt type, and a scheme repo's own", () 
   );
 });
 
-test('off names are checked before they reach a path or a rule', () => {
+test('off names are checked before they reach a path or a rule', async () => {
   assert.deepEqual(offSkills({ skills_off: 'grilling ../etc  self-review' }), ['grilling', 'self-review']);
   assert.deepEqual(skillDenies(['grilling', '../x', 'a b']), ['Skill(citadel:grilling)']);
   const kit = join(root, 'kit');
   for (const s of ['grilling', 'bug-fixing']) mkdirSync(join(kit, 'skills', s), { recursive: true });
   writeFileSync(join(root, 'keep'), '');
-  pruneKit(kit, ['grilling', '../../keep']);
+  await pruneKit(kit, ['grilling', '../../keep']);
   assert.ok(!existsSync(join(kit, 'skills', 'grilling')));
   assert.ok(existsSync(join(kit, 'skills', 'bug-fixing')));
   assert.ok(existsSync(join(root, 'keep')));

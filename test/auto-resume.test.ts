@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
 import { MAX_RESUMES, Runner } from '../src/runner.ts';
-import { stopTurns, testPins } from './helpers.ts';
+import { stopTurns, testPins, followed } from './helpers.ts';
 import { until } from './wait.ts';
 testPins();
 
@@ -64,6 +64,8 @@ function newTicket() {
 
 /** The server dies mid-turn and its turn goes with it (no unit, or the unit died too): nothing records the turn's end. */
 async function crash(r: Runner, id: number) {
+  // The launch writes its files off the thread first (#1808).
+  await until('the turn to be followed', () => followed(r, id));
   const dir: string = (r as any).turns.get(id).dir;
   await until("existsSync(join(dir, 'pid.json'))", () => existsSync(join(dir, 'pid.json')));
   // Its first line is in: claude had the prompt, so it resumes (a turn killed before that reruns its batch, #1364).
@@ -237,6 +239,7 @@ test('a turn that vanished while the server was down keeps the text it wrote mea
   const id = newTicket();
   const before = server();
   before.send(id, 'Cara', 'write something');
+  await until('the turn to be followed', () => followed(before, id));
   const dir: string = (before as any).turns.get(id).dir;
   await crash(before, id);
   const words = 'Words written while the server was down.';
@@ -258,6 +261,7 @@ test('a turn whose reply came in while the server was down is not resumed after 
   const id = newTicket();
   const before = server();
   before.send(id, 'Cara', 'answer me');
+  await until('the turn to be followed', () => followed(before, id));
   const dir: string = (before as any).turns.get(id).dir;
   await crash(before, id);
   writeFileSync(prompts, '');

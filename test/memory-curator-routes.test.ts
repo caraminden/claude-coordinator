@@ -106,7 +106,7 @@ test('a run proposes; the card waits, nothing is written, and the run cannot app
 
 test('applying the ticked changes leaves the unticked delete, tells the run, and Put back undoes it', async () => {
   const { open } = await proposals();
-  const out = await call('Cara', `/api/projects/${project.id}/memory-proposals/${open.id}/decide`, { method: 'POST', body: { apply: [1, 3] } });
+  const out: any = await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${open.id}/decide`, { method: 'POST', body: { apply: [1, 3] } }));
   assert.deepEqual(out.changes.map((c: any) => c.outcome), ['applied', 'turned down', 'applied']);
   assert.equal(read('a.md'), 'alpha and beta\n');
   assert.equal(read('b.md'), B);
@@ -126,12 +126,11 @@ test('applying the ticked changes leaves the unticked delete, tells the run, and
 
 test('a newer proposal supersedes the open one, and turning it all down changes nothing', async () => {
   const first = await propose([{ action: 'flag', file: 'b.md', reason: 'live state: make it a pointer' }]);
-  const second = await propose([{ action: 'delete', file: 'b.md', reason: 'stale' }]);
+  const second = await answered(() => propose([{ action: 'delete', file: 'b.md', reason: 'stale' }])) as any; // its supersede wakes the run
   const cards = await events('plan');
   assert.equal(cards.find((c: any) => c.memory?.proposal === first.proposal).status, 'superseded');
   await assert.rejects(call('Cara', `/api/projects/${project.id}/memory-proposals/${first.proposal}/decide`, { method: 'POST', body: { apply: [] } }), /409 A newer tidy replaced this one/);
-  await idle();
-  await call('Cara', `/api/projects/${project.id}/memory-proposals/${second.proposal}/decide`, { method: 'POST', body: { apply: [] } });
+  await answered(() => call('Cara', `/api/projects/${project.id}/memory-proposals/${second.proposal}/decide`, { method: 'POST', body: { apply: [] } }));
   assert.equal(read('b.md'), B);
   assert.equal((await events('plan')).find((c: any) => c.memory?.proposal === second.proposal).status, 'rejected');
   assert.match((await events('user_message')).at(-1).text, /^Cara turned the memory tidy down; nothing changed/);

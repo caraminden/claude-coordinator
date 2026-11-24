@@ -83,7 +83,7 @@ test('a slow request splits into the server time it was stamped with and the net
   assert.equal(req.page, '#/p/7');
   assert.equal(req.server, 400);
   assert.ok(req.network > 0 && req.network < req.total - 400 + 1, JSON.stringify(req));
-  assert.ok(req.tab_ms < SLOW, JSON.stringify(req));
+  assert.ok(req.tab_ms < 500, JSON.stringify(req));
 });
 
 test('opening a page that waits over the line is one row, named by its slowest request', { skip }, async () => {

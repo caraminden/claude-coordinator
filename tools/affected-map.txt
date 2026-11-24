@@ -76,6 +76,13 @@ src/theme.ts: test/ui-contract.test.ts test/theme.test.ts
 test/ui-contract.json: test/ui-contract.test.ts
 src/previews.ts: test/relative-urls.test.ts
 
+# The type-check ratchet (#1789): tsc plus the any/@ts-ignore counts, about 8 CPU-s (tsc is multithreaded; 5 on one
+# thread), so it runs by path, not from always-tests.txt. A .mjs edit can raise a count in a .ts file that imports it.
+**/*.ts: test/typecheck.test.ts
+**/*.mjs: test/typecheck.test.ts
+tsconfig.json: test/typecheck.test.ts
+package-lock.json: test/typecheck.test.ts
+
 # PowerShell scripts are linted with pwsh.
 **/*.ps1: test/ps1-lint.test.ts
 tools/ci-runner/**: test/ps1-lint.test.ts test/ci-runner-choice.test.ts test/runner-linux-scripts.test.ts test/runner-agent.test.ts

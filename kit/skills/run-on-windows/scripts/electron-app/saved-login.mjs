@@ -58,11 +58,16 @@ async function connect() {
   const ws = new WebSocket(browserWs);
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
   let id = 0; const waits = new Map();
-  ws.onmessage = (m) => { const d = JSON.parse(m.data); const w = waits.get(d.id); if (w) { waits.delete(d.id); d.error ? w.j(new Error(d.error.message)) : w.r(d.result); } };
+  ws.onmessage = (m) => {
+    const d = JSON.parse(m.data);
+    if (d.method === 'Runtime.exceptionThrown') console.log('page error:', d.params.exceptionDetails.exception?.description ?? d.params.exceptionDetails.text);
+    if (d.method === 'Runtime.consoleAPICalled' && ['error', 'warning'].includes(d.params.type)) console.log(`page ${d.params.type}:`, d.params.args.map((a) => a.value ?? a.description).join(' '));
+    const w = waits.get(d.id); if (w) { waits.delete(d.id); d.error ? w.j(new Error(d.error.message)) : w.r(d.result); } };
   const send = (method, params = {}, sessionId) => new Promise((r, j) => { const n = ++id; waits.set(n, { r, j }); ws.send(JSON.stringify({ id: n, method, params, sessionId })); });
   let page;
   for (let i = 0; i < 60 && !page; i++) { page = (await send('Target.getTargets')).targetInfos.find((t) => t.type === 'page'); if (!page) await sleep(500); }
   const s = (await send('Target.attachToTarget', { targetId: page.targetId, flatten: true })).sessionId;
+  await send('Runtime.enable', {}, s);
   const ev = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, s)).result.value;
   return {
     ev,
@@ -156,7 +161,11 @@ try {
   const seen = await c?.ev(`(async () => { const f = ${form}; const r = await window.citadelDesktop?.savedLogin?.().catch((x) => String(x));
     return { url: location.href, form: !!f, login: f?.login.value, password: f ? f.password.value.length : null, file: null,
       bridge: r && (typeof r === 'string' ? r : { canSave: r.canSave, login: r.login?.login, password: r.login ? r.login.password.length : null }) }; })()`).catch((x) => String(x));
-  console.log('seen', JSON.stringify(seen), 'file', existsSync(file));
+  console.log('seen', JSON.stringify(seen), 'file', existsSync(file), 'state', JSON.stringify(await c?.ev(STATE).catch(() => null)));
+  // The same page loaded fresh: does it fill then?
+  await c?.send('Page.reload', {}).catch(() => {});
+  await sleep(4000);
+  console.log('after a reload', JSON.stringify(await c?.ev(`(() => { const f = ${form}; return f && { login: f.login.value, password: f.password.value.length }; })()`).catch((x) => String(x))));
 }
 
 c?.close();

@@ -1,6 +1,7 @@
 // CI numbers kept per commit, and the step-up flag (#1369, src/ci-numbers.ts).
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -170,5 +171,36 @@ test('pipeline runs are their own series: 140 s front-end runs then 210-280 s pi
 test('tests.yml records a run that ran the pipeline test files as suite-time-pipeline (#1700)', () => {
   const yml = readFileSync(new URL('../.github/workflows/tests.yml', import.meta.url), 'utf8');
   assert.match(yml, /grep -q '\^run-tests: tier all' "\$RUNNER_TEMP\/tests\.log" \|\| series=suite-time-pipeline/);
-  assert.match(yml, /nums=\("\$series=\$\(cat "\$RUNNER_TEMP\/suite-secs"\)s"\)/);
+  assert.match(yml, /nums\+=\("\$series=\$\(cat "\$RUNNER_TEMP\/suite-secs"\)s"\)/);
+});
+
+test('tests.yml keeps no suite time for a run that overlapped another suite run, and logs its window for the others (#1811)', () => {
+  const yml = readFileSync(new URL('../.github/workflows/tests.yml', import.meta.url), 'utf8');
+  assert.match(yml, /echo "\$wstart 0" >"\$me"/); // an open window is written before the suite starts
+  assert.match(yml, /echo "\$wstart \$wend" >"\$me"/); // and closed after it, red or green
+  assert.match(yml, /if \[ "\$s" -lt "\$wend" \] && \[ "\$e" -gt "\$wstart" \]; then echo "\$f" >"\$RUNNER_TEMP\/suite-overlap"/);
+  assert.match(yml, /\[ -e "\$RUNNER_TEMP\/suite-overlap" \] \|\| nums\+=\("\$series=/);
+  assert.match(yml, /nums\+=\("front-end-size=/); // the size still records
+});
+
+// The overlap loop from the workflow, run for real on window files.
+test('the overlap check flags crossing windows and open recent ones, not disjoint ones (#1811)', () => {
+  const yml = readFileSync(new URL('../.github/workflows/tests.yml', import.meta.url), 'utf8');
+  const loop = yml.match(/( *)for f in "\$win"\/\*; do\n[\s\S]*?\n\1done\n/)![0];
+  const run = (others: string[]) => {
+    const d = mkdtempSync(join(root, 'ovl-'));
+    const win = join(d, 'w');
+    mkdirSync(win);
+    writeFileSync(join(win, 'me'), '100 200\n');
+    others.forEach((o, i) => writeFileSync(join(win, `o${i}`), `${o}\n`));
+    const out = spawnSync('bash', ['-c', `win=${win}; me=${win}/me; wstart=100; wend=200; RUNNER_TEMP=${d}\n${loop}`]);
+    assert.equal(out.status, 0, String(out.stderr));
+    return existsSync(join(d, 'suite-overlap'));
+  };
+  assert.equal(run([]), false);
+  assert.equal(run(['10 90']), false);
+  assert.equal(run(['210 300']), false);
+  assert.equal(run(['150 300']), true);
+  assert.equal(run(['120 150']), true);
+  assert.equal(run(['150 0']), true); // still open, file just written
 });

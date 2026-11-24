@@ -214,8 +214,21 @@ jobs:
           tail -n +1 -f "$RUNNER_TEMP/tests.log" & tailer=$!
           # The file counts and failed files so far, on to the Releases page (#1368); it never fails the step.
           node tools/ci-progress.ts "$RUNNER_TEMP/tests.progress" & poster=$!
+          # The window this suite ran in, kept on the machine's disk where every runner on it can read it (#1811): a suite that
+          # shared the machine with another suite run reads slow for that reason, not the code's, so the numbers step skips it.
+          win=/tmp/citadel-suite-windows-$(id -u); mkdir -p "$win"; find "$win" -type f -mmin +1440 -delete 2>/dev/null || true
+          me="$win/${GITHUB_RUN_ID:-0}-$$"; wstart=$(date +%s); echo "$wstart 0" >"$me"
           started=$SECONDS
           DEPLOY_TEST_CPU_WEIGHT= DEPLOY_RERUN_LATER="$RUNNER_TEMP/reruns" nice -n "$NICENESS" tools/run-tests.sh "$RUNNER_TEMP/tests.log" || rc=$?
+          wend=$(date +%s); echo "$wstart $wend" >"$me"
+          # Overlapped: another run's window started before this one ended and ended after it began (or is still open, written in the last 2 h).
+          rm -f "$RUNNER_TEMP/suite-overlap"
+          for f in "$win"/*; do
+            [ "$f" != "$me" ] || continue
+            read -r s e <"$f" || continue
+            [ "$e" != 0 ] || { [ -n "$(find "$f" -mmin -120)" ] && e=$wend || continue; }
+            if [ "$s" -lt "$wend" ] && [ "$e" -gt "$wstart" ]; then echo "$f" >"$RUNNER_TEMP/suite-overlap"; break; fi
+          done
           [ "$rc" != 0 ] || echo "$((SECONDS - started))" >"$RUNNER_TEMP/suite-secs" # a green run's wall time, for the numbers step
           kill "$poster" 2>/dev/null || true # it ends by itself with no run token: bash -e would fail the step on that kill
           wait "$poster" || true # its last send, the final counts (#1667): 5 s at most
@@ -233,7 +246,10 @@ jobs:
           # it runs ~70-80 s longer, so mixed into suite-time a run of pipeline ships read as a step up (#1700). Runs from before keep suite-time.
           series=suite-time
           ! grep -q '^run-tests: tier all' "$RUNNER_TEMP/tests.log" || series=suite-time-pipeline
-          nums=("$series=$(cat "$RUNNER_TEMP/suite-secs")s")
+          # A suite that shared the machine with another suite run keeps no suite time at all (#1811): load made it slow, not the
+          # code, and in either series it would read as a step up against runs that had the machine to themselves. Old rows stay.
+          nums=()
+          [ -e "$RUNNER_TEMP/suite-overlap" ] || nums+=("$series=$(cat "$RUNNER_TEMP/suite-secs")s")
           nums+=("front-end-size=$(find public -type f -printf '%s\n' | awk '{s+=$1} END {print s}')B")
           tools/ci-numbers.sh "${nums[@]}" || true
       # The full suite's failed files, each rerun alone once to label it flake or real (tools/run-tests.sh), in a step of

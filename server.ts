@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, mkdir, writeFile, stat } from 'node:fs/promises';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { thrown } from './src/thrown.ts';
 import { createConnection, Server as NetServer, type AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { basename, extname, join } from 'node:path';
@@ -26,7 +27,8 @@ import { AnswerProbe } from './src/answer-time.ts';
 import { StatusPage, recordBoot, recordLive } from './src/status-page.ts';
 import { citadelSliceDir, MemoryStorms } from './src/memory-storms.ts';
 import { readGrowth } from './src/growth-alarm.ts';
-import { Reaper, shownCommand } from './src/reaper.ts';
+import type { Delivery } from './src/db/deliveries.ts';
+import { Reaper, shownCommand, type ReaperStore } from './src/reaper.ts';
 import { StandingChecks } from './src/standing-checks.ts';
 import { startRealtime } from './src/realtime.ts';
 import { markStop, restartDetail, startWatchdog, takeMark, readStop } from './src/sd-watchdog.ts';
@@ -137,7 +139,7 @@ import { Rollback } from './src/rollback.ts';
 import { HostJobs, jobLost } from './src/host-job.ts';
 import { FastMode, type FastState } from './src/fast-mode.ts';
 import { parseFlakes } from './src/flakes.ts';
-import { FlakeFixes } from './src/flake-fixes.ts';
+import { FlakeFixes, type FlakeFixDeps } from './src/flake-fixes.ts';
 import { shipFirst } from './src/ship-line.ts';
 import { StallWatch } from './src/stall-signals.ts';
 import { dispatch, OldApk, OtherKey, publish, rollBackApk } from './src/apk-release.ts';
@@ -273,7 +275,7 @@ if (process.env.NOCOW_DB === '1' || (!BOOT_CHECK && DATA_DIR === DEFAULT_DATA_DI
   }
 }
 const BOOT_AT = Date.now();
-let writerQueued = () => 0;
+let writerQueued: () => number = () => 0;
 if (!BOOT_CHECK) watchLoopLag((line) => (console.warn(line), deployWatch?.record('loop-lag', line.slice(0, 700))), 100, 500, { profile: true, backlog: () => writerQueued(), files: ['coordinator.db', 'state.db', 'events.db'].map((f) => join(DATA_DIR, f)) });
 // systemd restarts a hung server once these pings stop (#1135, deploy/claude-coordinator.service.d/watchdog.conf).
 const watchdog = startWatchdog();
@@ -496,8 +498,8 @@ const judgeNote = <A extends unknown[]>(schemeOf: (...a: A) => number | null | u
 deployWatch = new DeployWatch({
   store, dbPath: join(DATA_DIR, 'coordinator.db'), bootAt: BOOT_AT, head: () => waiters.head, scheme: ownScheme,
   commits: gitCommits(import.meta.dirname),
-  wake: judged('deploy-watch', 'wake', (id, text) => runner.send(id, APP_NAME, text), () => {}, judgeNote((id) => store.getTicket(id)?.project_id)),
-  mail: judged('deploy-watch', 'mail', (id, text) => runner.leaveMail(id, APP_NAME, text), () => {}, judgeNote((id) => store.getTicket(id)?.project_id)),
+  wake: judged<[number, string], unknown>('deploy-watch', 'wake', (id, text) => runner.send(id, APP_NAME, text), () => {}, judgeNote((id) => store.getTicket(id)?.project_id)),
+  mail: judged<[number, string], unknown>('deploy-watch', 'mail', (id, text) => runner.leaveMail(id, APP_NAME, text), () => {}, judgeNote((id) => store.getTicket(id)?.project_id)),
 });
 // The last run was stopped by systemd's watchdog: a health event, with the last stall it recorded before (#1135).
 const watchdogAt = takeMark(DATA_DIR);
@@ -612,7 +614,7 @@ contraptionTurns.machines = (person) => machines.online().filter((m) => m.owner_
 contraptionTurns.apiUrl = () => `http://${LOCAL_HOST.includes(':') ? `[${LOCAL_HOST}]` : LOCAL_HOST}:${boundPort}`;
 const ultrareviews = new UltraReviews({
   claudeBin: process.env.CLAUDE_BIN ?? 'claude', place: (uid) => claudeLink.place(uid), scratch: (uid) => claudeLink.turnsDir(uid),
-  emit: (ticketId, kind, data) => runner.emit(ticketId, kind, data), getSetting: (k) => store.getSetting(k), setSetting: (k, v) => store.setSetting(k, v), hostEnv: turnEnv(process.env),
+  emit: (ticketId, kind, data) => runner.emit(ticketId, kind, data), getSetting: <T>(k: string) => store.getSetting<T>(k) as T | undefined, setSetting: (k, v) => store.setSetting(k, v), hostEnv: turnEnv(process.env),
   jobsDir: join(DATA_DIR, 'run', 'ultrareviews'), units: () => runner.units,
   // Draft PRs for ultra reviews (#1399) go out only as the person who asked, never the box's login or anyone else's.
   github: (uid) => {
@@ -624,7 +626,7 @@ const ultrareviews = new UltraReviews({
 // A boot check's or preview's copy names the live reviews' folders: only the live server may clear them.
 if (!BOOT_CHECK) ultrareviews.recover();
 // Side questions (#932): forks of minions' sessions on the asker's login; a restart ends them and deletes the forks.
-const sideAsks = new SideAsks(store, runner, broadcast);
+const sideAsks = new SideAsks(store, runner, broadcast as (msg: unknown) => void);
 if (!BOOT_CHECK) sideAsks.recover();
 // Who is in which chat (#695): in memory, swept for late heartbeats and old writes.
 const presence = new Presence({ projectOf: (id) => store.getTicket(id)?.project_id, broadcast });
@@ -780,18 +782,18 @@ runner.wakesOn = (id) => {
 // The list chip's waits (src/waits-readout.ts): the outbox's rows, plus what the old keys still hold until their steps move.
 // A row added or changed re-sends its minion's view, so the chip never shows a wait that already went (a Taskmaster's waits have no chip).
 for (const fn of ['addDelivery', 'updateDelivery'] as const) {
-  const orig = (store as any)[fn].bind(store);
-  (store as any)[fn] = (...a: any[]) => {
+  const orig = (store[fn] as (...a: unknown[]) => unknown).bind(store);
+  Object.assign(store, { [fn]: (...a: unknown[]) => {
     const r = orig(...a);
-    const row = fn === 'addDelivery' ? r : store.getDelivery(a[0]);
+    const row = (fn === 'addDelivery' ? r : store.getDelivery(a[0] as number)) as Delivery | undefined;
     if (row?.to_kind === 'minion') queueMicrotask(() => runner.broadcastTicket(row.to_id));
     return r;
-  };
+  } });
 }
 runner.outboxWaits = (t) => waitsFor(store, t, (id) => [
   ...waiters.chains().filter((c) => c.ticket === id && c.id == null && !c.held).map((c) => {
     const lead = store.getTicket(c.after), n = `#${lead?.number ?? c.after}`;
-    return { kind: 'chain', chip: `⇢ ${n}`, headline: `Starts when ${n} ${c.when === 'merged' ? 'ships' : 'is live'}`, link: lead ? { project: lead.project_id, number: lead.number } : null, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null };
+    return { kind: 'chain', chip: `⇢ ${n}`, headline: `Starts when ${n} ${c.when === 'merged' ? 'ships' : 'is live'}`, link: lead ? { project: lead.project_id, number: lead.number! } : null, what: waiters.heldFor(id) ?? 'its leader', set_by: c.from, since: c.since ? c.since * 1000 : null };
   }),
   ...waiters.legacy().filter((w) => w.ticket === id).map((w) => ({ kind: 'wake_when_live', chip: '⇢ live', headline: w.commit ? `Wakes when ${w.commit.slice(0, 7)} is live` : 'Wakes after the next deploy', what: w.reason, set_by: `minion:${id}`, since: null })),
   ...runnerWaiters(store).filter((w) => w.ticket === id).map((w) => ({ kind: 'runners_back', chip: '⇢ CI', what: w.reason, set_by: `minion:${id}`, since: null })),
@@ -809,7 +811,7 @@ waiters.hold = (c, why) => {
   if (coordinator) runner.send(coordinator.id, APP_NAME, `${why}, so #${t.number} ${t.title}, chained on it, is held and hasn't started. Ask people whether to start it (message_ticket with start_now starts it with its brief) or dismiss it.`);
 };
 // A closed minion's processes (#1365): its close and an hourly sweep stop them; the host-load page lists them by minion.
-const reaper = new Reaper({ store, dataDir: DATA_DIR, commit: BOOT_COMMIT ?? null });
+const reaper = new Reaper({ store: store as ReaperStore, dataDir: DATA_DIR, commit: BOOT_COMMIT ?? null });
 if (!BOOT_CHECK) {
   // A dismissal can be what a chained minion waits for.
   const stopPreview = runner.onClose;
@@ -1196,7 +1198,7 @@ const rollback = new Rollback({
       const t = targetFinder.list('apk').find((f) => f.projectId === tv.target.projectId && f.id === tv.target.id);
       const p = store.getProject(tv.target.projectId);
       if (!t?.contraption || !p?.repo_dir) throw new HttpError(409, `${tv.target.name} has no app or repo to roll back with`);
-      const code = await rollBackApk({ name: tv.target.name, workflow: t.workflow ?? null, slug: repoSlug(p.repo_url), current: tv.current?.number, copy: services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR, as: githubOf(p.repo_dir), branch: ROLLBACK_BRANCH }, to);
+      const code = await rollBackApk({ name: tv.target.name, workflow: t.workflow ?? null, slug: repoSlug(p.repo_url), current: tv.current?.number, copy: !!services.opts.off || DATA_DIR !== DEFAULT_DATA_DIR, as: githubOf(p.repo_dir), branch: ROLLBACK_BRANCH }, to);
       apkReader.started(t);
       void releases.refresh();
       return { code };
@@ -1418,8 +1420,8 @@ async function mandateAlert(what: string, project: Pick<Project, 'id' | 'name'>,
     // 403: she switched the scheme off in Mandate, which keeps it off; asking again won't change that.
     if (status === 200 || status === 403) return true;
     console.error(`${what}: Mandate answered ${status} for ${person.name}'s ${key}:`, JSON.stringify(answer).slice(0, 300));
-  } catch (err: any) {
-    console.error(`${what}: ${err?.message ?? err}`);
+  } catch (err) {
+    console.error(`${what}: ${thrown(err).message ?? err}`);
   }
   return false;
 }
@@ -1439,7 +1441,7 @@ const ciHealth = new CiHealth(store, {
   home: () => store.getProject(alertScheme(0)),
   // Wakes (a red on main, any trigger, #774/#968; a problem that rings, #983) or held mail (back to green) for the scheme's Taskmaster.
   // The CI-red judge's one act (#1503): log-only turns every Taskmaster wake and mail from CI health into a retro-log line.
-  tell: judged('ci-red', 'tell', (project, text, wake, people) => {
+  tell: judged<[Project, string, boolean | undefined, number[] | undefined], boolean | number>('ci-red', 'tell', (project, text, wake, people) => {
     const to = taskmastersFor(store, project.id, people);
     if (!to.length) return false;
     // One wake per problem (a cold context each, and each would start its own fix minion): the first person's Taskmaster; the others get held mail.
@@ -1509,14 +1511,14 @@ if (!BOOT_CHECK && !PREVIEW) every('fast mode', 30_000, () => fastMode.tick());
 // starting one minion, and a fix held after 50 clean runs on the desktop. The minion runs for the scheme's owner, like a schedule's.
 const flakeFixes = new FlakeFixes({
   store, sharedDir: (id) => projectSharedDir(DATA_DIR, id),
-  start: judged('flake-counter', 'start', async (project, brief) => {
+  start: judged<Parameters<FlakeFixDeps['start']>, ReturnType<FlakeFixDeps['start']>>('flake-counter', 'start', async (project, brief) => {
     const { id } = await newMinion(project, { title: brief.title, props: { type: 'bug' }, model: brief.model, effort: brief.effort }, APP_NAME);
     store.updateTicket(id, { person_id: project.owner_id ?? null });
     runner.emit(id, 'note', { text: 'Started by the flaky-test rule (a third sighting in 7 days, or a held fix that flaked again): the Test health tab shows its owner, age and clean runs.' });
     await heldStarts.start({ ticket: id, from: APP_NAME, message: brief.message, opts: { brief: true } }, () => runner.send(id, APP_NAME, brief.message, [], { brief: true }));
     return { id };
   }, async () => ({ id: -1 }), judgeNote((project) => project.id)),
-  wake: judged('flake-counter', 'wake', (p, text) => { tellHome(p.id, text); return !!store.getOverlord(p.id); }, () => true, judgeNote((p) => p.id)),
+  wake: judged<[Project, string], boolean>('flake-counter', 'wake', (p, text) => { tellHome(p.id, text); return !!store.getOverlord(p.id); }, () => true, judgeNote((p) => p.id)),
   runs: (p, branch) => ciHealth.workflowRuns(p, 'flake-proof.yml', branch),
   jobs: (p, run) => ciHealth.runJobs(p, run),
   front: (p, ticketId, reason) => shipFirst({ store, releases, waits }, p.id, ticketId, { name: 'The broken-test rule', taskmaster: true }, reason),
@@ -1525,13 +1527,13 @@ const flakeFixes = new FlakeFixes({
 if (!BOOT_CHECK && !PREVIEW) every('flake fixes', 5 * 60_000, () => flakeFixes.tick(store.listProjects().filter((p) => p.repo_dir)));
 // The live probe (#1741): a big ship's own check of itself, run by the server once it is live (src/live-probe.ts).
 const liveProbes = new LiveProbes({
-  store, runner, from: APP_NAME, log: probeLog(DATA_DIR),
+  store: store as ConstructorParameters<typeof LiveProbes>[0]['store'], runner, from: APP_NAME, log: probeLog(DATA_DIR),
   run: (id, p) => {
     const t = store.getTicket(id);
     const person = t?.person_id != null ? store.getUser(t.person_id) : null;
     // GETs signed in as the minion's own person, from this process to its own loopback only; what they answer never reaches the chat.
     // An app's path goes to the app's own host when apps have one (src/apps.ts moves them off Citadel's host).
-    const headers = (path: string) => {
+    const headers = (path: string): Record<string, string> | null => {
       if (!person || person.disabled_at) return null;
       const app = APPS_DOMAIN ? /^\/apps\/([^/?#]+)/.exec(path)?.[1] : undefined;
       return app ? { 'x-forwarded-host': `${app}.${APPS_DOMAIN}`, cookie: auth.issueAppCookie(app, person, false).split(';')[0] } : { cookie: auth.issueCookie(person, false).split(';')[0] };
@@ -1897,9 +1899,9 @@ runner.onStatusTrailer = (id, fields) => {
   if (landings.hasHandoff(id)) fields = { replies: fields.replies };
   try {
     setLabels(app, ticket, fields, AGENT_NAME, id);
-  } catch (err: any) {
-    console.log(`[status] minion ${id}: refused a status trailer, ${err.message}`);
-    runner.emit(id, 'note', { text: `The reply's status line was refused: ${err.message}` });
+  } catch (err) {
+    console.log(`[status] minion ${id}: refused a status trailer, ${thrown(err).message}`);
+    runner.emit(id, 'note', { text: `The reply's status line was refused: ${thrown(err).message}` });
   }
 };
 // What a minion armed for CI goes out when CI passes, with no turn (#715).
@@ -1961,7 +1963,7 @@ setTimeout(readStatics, Number(process.env.STATIC_BACKFILL_MS ?? 20_000)).unref(
 // the request's own writes land, and a stream (an agent's connect, a page's events) stays open by design once it answers.
 const inFlight = new Map<ServerResponse, string>();
 // writeHead(status, headers) leaves getHeader() blind, so read the head as sent.
-const isEventStream = (res: ServerResponse) => res.headersSent && !res.writableEnded && /^content-type:\s*text\/event-stream/im.test(String((res as any)._header ?? ''));
+const isEventStream = (res: ServerResponse) => res.headersSent && !res.writableEnded && /^content-type:\s*text\/event-stream/im.test(String((res as ServerResponse & { _header?: unknown })._header ?? ''));
 busySource(() => [...inFlight].filter(([res]) => !res.headersSent).map(([, what]) => `request ${what}`));
 // A test server's "is everything you were doing finished?" (#1437, test/helpers.ts settled()): only with CITADEL_TEST_SETTLED=1.
 const SETTLED_ROUTE = process.env.CITADEL_TEST_SETTLED === '1';
@@ -2047,11 +2049,11 @@ const server = createServer({ shouldUpgradeCallback: (req) => upgrades(req, APPS
     } else {
       await serveStatic(req, res, url.pathname);
     }
-  } catch (err: any) {
+  } catch (err) {
     const status = err instanceof HttpError ? err.status : 500;
     if (status === 500) console.error(err);
     // Ids in the path would split one failing route into many readings.
-    if (countsAsServerFault(status, err)) deployWatch?.record('server-5xx', `${req.method} ${(req.url ?? '').split('?')[0].replace(/\d+/g, '#')}: ${String(err?.message ?? err).slice(0, 200)}`);
+    if (countsAsServerFault(status, err)) deployWatch?.record('server-5xx', `${req.method} ${(req.url ?? '').split('?')[0].replace(/\d+/g, '#')}: ${String(thrown(err).message ?? err).slice(0, 200)}`);
     // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.
     if (!res.headersSent) json(res, status, { error: err instanceof HttpError ? err.message : 'Internal error' });
     else res.end();
@@ -2146,8 +2148,8 @@ server.on('listening', () => void services.interrupted().then((cut) => {
     try {
       startDeploy(app, row, d.by, null, d.uid, true, d.to);
       console.log(`${d.name}'s deploy, cut short by the restart, starts again.`);
-    } catch (err: any) {
-      console.error(`Couldn't start ${d.name}'s deploy again:`, err.message);
+    } catch (err) {
+      console.error(`Couldn't start ${d.name}'s deploy again:`, thrown(err).message);
     }
   }
 }, (err) => console.error('Reading deploys cut short failed:', err)));
@@ -2292,7 +2294,7 @@ if (MACHINES_URL) {
       else if ((url.pathname === '/machine-agent.mjs' || url.pathname === '/runner-agent.mjs') && req.method === 'GET') await serveStatic(req, res, url.pathname);
       else if (SETUP_PATH.test(url.pathname) && req.method === 'GET') await serveRunnerFile(res, url.pathname);
       else throw new HttpError(404, 'Not found');
-    } catch (err: any) {
+    } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
       if (status === 500) console.error(err);
       // An HttpError's words were written for the caller, a 500 too; only an unexpected throw stays vague.

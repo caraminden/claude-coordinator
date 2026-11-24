@@ -61,6 +61,7 @@ import type { GithubEnv } from './scheme-repo.ts';
 import { pacific } from './pacific.ts';
 import { failuresIn, ghText } from './flake-evidence.ts';
 
+import { thrown } from './thrown.ts';
 import type { LongJob } from './long-jobs.ts';
 import { clock, humanText, VERDICTS, WAIT_MS, HUNG_MS, RED_FIX_MS, type Problem, type WakeAt, WAKE_AT, problemLink, WAKE_STEPS, itemText, at, short, runUrl, workflowFile, quietWorkflow, HEAVY_WORKFLOW, DISPATCH_SINCE, trackOffline, servers, stuckProblems, hungProblems, deadGroups, deadProblem, orphanRuns, place, type RedMark, type Fix, redProblem, startedRed, verdictPair, skippedJobs, bundleTitle, ciPage, CI_SENDER, BUNDLE_ITEM, itemKey } from './ci-problems.ts';
 export { humanText, WAIT_MS, HUNG_MS, RED_FIX_MS, ORPHAN_MS, type Problem, type ProblemLink, type WakeAt, problemLink, itemText, clock, trackOffline, servers, stuckProblems, hungProblems, neverStarted, deadGroups, deadProblem, orphanRuns, type RedMark, type Fix, redProblem, verdictPair, skippedJobs, computerOf, sharedHost, bundleTitle, ciPage, CI_SENDER, itemKey } from './ci-problems.ts';
@@ -77,7 +78,7 @@ export const START_DELAY_MS = 45_000;
 const LAST_TICK = 'ci-health:lastTick';
 const PAUSED_UNTIL = 'ci-health:pausedUntil';
 /** #1005: when a start's first read comes. The last read and the rate-limit pause survive restarts, so lands that restart the server every few minutes can't push reads later than one poll past the previous. */
-export function firstTickDelay(lastTick: number | undefined, pausedUntil: number | undefined, now: number): number {
+export function firstTickDelay(lastTick: number | null | undefined, pausedUntil: number | undefined, now: number): number {
   return Math.max(START_DELAY_MS, (lastTick ?? 0) + POLL_MS - now, (pausedUntil ?? 0) - now);
 }
 // Runs looked at for jobs that didn't start or wait for a runner; older ones are history.
@@ -121,6 +122,20 @@ export interface Job {
   labels: string[];
   steps?: unknown[];
 }
+/** The parts of a GitHub list answer this file reads (the others are left out). */
+interface GhBody {
+  workflows?: { id: number; name: string; path?: string; state?: string }[];
+  workflow_runs?: Run[];
+  runners?: Runner[];
+  jobs?: Job[];
+  artifacts?: { id: number; name: string; expired: boolean; expires_at?: string | null }[];
+  default_branch?: string;
+  commit?: { sha?: string };
+  value?: unknown;
+  message?: string;
+}
+/** One annotation on a check run. */
+interface GhNote { annotation_level?: string; message?: string }
 export interface Runner {
   name: string;
   status: string;
@@ -360,7 +375,7 @@ export class CiHealth {
   private store: Store;
   private deps: CiHealthDeps;
   private get: GhGet;
-  private cache = new Map<string, { etag: string | null; body: any }>();
+  private cache = new Map<string, { etag: string | null; body: unknown }>();
   // Finished runs' jobs and annotations don't change.
   private jobsOf = new Map<string, Job[]>();
   private reasons = new Map<number, string | null>();
@@ -410,13 +425,13 @@ export class CiHealth {
         if (!slug) continue;
         try {
           await this.check(p, slug, now);
-        } catch (err: any) {
+        } catch (err) {
           if (err instanceof RateLimited) {
             this.pausedUntil = now + RATE_LIMITED_MS;
             console.error('GitHub rate limit reached; pausing CI health checks.');
             break;
           }
-          this.sayOnce(`fail:${p.id}:${err?.message}`, `CI health check of ${p.name} failed (said once until a restart): ${err?.message ?? err}`);
+          this.sayOnce(`fail:${p.id}:${thrown(err).message}`, `CI health check of ${p.name} failed (said once until a restart): ${thrown(err).message ?? err}`);
         }
       }
       this.wakeShared(now);
@@ -604,7 +619,7 @@ export class CiHealth {
   }
 
   /** The one alert's problems as the Taskmaster's wake tells them (#869): the land alarm with each fallen-back run's link, failed step and runner. */
-  private async parts(open: { scheme: string; problem: Problem; id: number }[], land: LandWatch | undefined): Promise<AlertPart[]> {
+  private async parts(open: { scheme: string; problem: Problem; id: number }[], land: LandWatch | null | undefined): Promise<AlertPart[]> {
     return Promise.all(open.map(async ({ scheme, problem, id }) => {
       const part: AlertPart = { id: `${id}:${problem.key}`, title: `${scheme}: ${itemText(problem).replace(/^CI: /, '')}` };
       const p = this.store.getProject(id);
@@ -623,7 +638,7 @@ export class CiHealth {
 
   async problems(p: Project, slug: string, saved: Saved, now: number): Promise<Problem[]> {
     const as = this.deps.as(p);
-    const workflows = ((await this.listWorkflows(p, slug, as))?.workflows ?? []).filter((w: any) => w.state === 'active');
+    const workflows = ((await this.listWorkflows(p, slug, as))?.workflows ?? []).filter((w) => w.state === 'active');
     // A repo with no CI costs one conditional request a poll.
     if (!workflows.length) {
       saved.offline = {};
@@ -668,7 +683,7 @@ export class CiHealth {
       const skipped = pair ? skippedJobs(await this.jobs(slug, pair[0], as), await this.jobs(slug, pair[1], as)) : [];
       shown.push({ name: w.name, file: String(w.path ?? '').split('/').pop() ?? '', verdict: verdict ? viewRun(slug, verdict, minion) : null, skipped });
     }
-    this.store.setSetting<CiView>(`ci-health:view:${p.id}`, {
+    this.store.setSetting(`ci-health:view:${p.id}`, {
       at: now, slug, branch,
       runners: runners && runners.map((r) => ({
         name: r.name, status: r.status, busy: !!r.busy, labels: (r.labels ?? []).map((l) => l.name),
@@ -803,8 +818,8 @@ export class CiHealth {
       try {
         const a = await (this.deps.post ?? ghPost)(`repos/${slug}/actions/runs/${r.id}/cancel`, as);
         console.log(`CI sweep: cancelled orphan run ${r.id} (${r.head_branch}, queued since ${r.created_at}) on ${slug}: HTTP ${a.status}${a.status >= 300 ? ' (not cancelled)' : ''}`);
-      } catch (err: any) {
-        console.error(`CI sweep: could not cancel run ${r.id} (${r.head_branch}) on ${slug}: ${err?.message ?? err}`);
+      } catch (err) {
+        console.error(`CI sweep: could not cancel run ${r.id} (${r.head_branch}) on ${slug}: ${thrown(err).message ?? err}`);
       }
     }
   }
@@ -1083,7 +1098,7 @@ export class CiHealth {
       this.busy = true;
       try {
         await this.check(p, slug, Date.now());
-      } catch (err: any) {
+      } catch (err) {
         if (err instanceof RateLimited) this.pausedUntil = Date.now() + RATE_LIMITED_MS;
       } finally {
         this.busy = false;
@@ -1150,8 +1165,8 @@ ${text}`);
       try {
         const { status } = await (this.deps.post ?? ghPost)(`repos/${slug}/actions/workflows/${w}/dispatches`, as, { ref: branch });
         if (status < 200 || status >= 300) next.error = status === 422 ? `HTTP 422 (${file} may have no workflow_dispatch trigger)` : `HTTP ${status}`;
-      } catch (err: any) {
-        next.error = String(err?.message ?? err).slice(0, 200);
+      } catch (err) {
+        next.error = String(thrown(err).message ?? err).slice(0, 200);
       }
       save();
     }
@@ -1237,11 +1252,11 @@ ${text}`);
   /** A failed job's error annotations, the generic "Process completed with exit code" left out: at most 5, each cut short. */
   private async errorLines(slug: string, j: Job, as: GithubEnv): Promise<string[]> {
     const path = `repos/${slug}/check-runs/${j.id}/annotations`;
-    const notes = await this.read(path, as, true);
+    const notes = await this.read<GhNote[]>(path, as, true);
     this.cache.delete(path);
     if (!Array.isArray(notes)) return [];
     return notes.filter((n) => n?.annotation_level === 'failure' && typeof n.message === 'string' && !/^Process completed with exit code \d+\.?$/.test(n.message.trim()))
-      .slice(0, 5).map((n) => { const m = n.message.replace(/\s+/g, ' ').trim(); return m.length > 200 ? `${m.slice(0, 199)}…` : m; });
+      .slice(0, 5).map((n) => { const m = n.message!.replace(/\s+/g, ' ').trim(); return m.length > 200 ? `${m.slice(0, 199)}…` : m; });
   }
 
   /** The outbox's rows waiting on this scheme's runners: met once one is online, or when the list can't be read (they are told to ask). The outbox sends, retries and holds them for a dismissed minion. */
@@ -1316,7 +1331,7 @@ ${text}`);
    * The scheme's workflows, its first read. A 404 here is the whole repo hidden from the login it reads as (a private
    * repo whose invite that login hasn't accepted: FuckSpamTexts after its move, #607), so it says that, not a bare path.
    */
-  private async listWorkflows(p: Project, slug: string, as: GithubEnv): Promise<any> {
+  private async listWorkflows(p: Project, slug: string, as: GithubEnv): Promise<GhBody | null> {
     try {
       return await this.read(`repos/${slug}/actions/workflows?per_page=100`, as);
     } catch (err) {
@@ -1328,10 +1343,10 @@ ${text}`);
   }
 
   /** A GitHub answer's body, from cache on a 304; null for a 404 or 403 when `quiet`; anything else throws. */
-  private async read(path: string, as: GithubEnv, quiet = false): Promise<any> {
+  private async read<T = GhBody>(path: string, as: GithubEnv, quiet = false): Promise<T | null> {
     const had = this.cache.get(path);
     const r = await this.get(path, had?.etag ?? null, as);
-    if (r.status === 304 && had) return had.body;
+    if (r.status === 304 && had) return had.body as T;
     if (r.status === 200) {
       this.cache.set(path, { etag: r.etag, body: r.body });
       return r.body;
@@ -1359,7 +1374,7 @@ ${text}`);
   /** GitHub's own words on why a job didn't start: its check run's first annotation. */
   private async reason(slug: string, j: Job, as: GithubEnv): Promise<string | null> {
     if (!this.reasons.has(j.id)) {
-      const notes = await this.read(`repos/${slug}/check-runs/${j.id}/annotations`, as, true);
+      const notes = await this.read<GhNote[]>(`repos/${slug}/check-runs/${j.id}/annotations`, as, true);
       this.reasons.set(j.id, Array.isArray(notes) && typeof notes[0]?.message === 'string' ? notes[0].message.replace(/\s+/g, ' ').trim() : null);
       this.cache.delete(`repos/${slug}/check-runs/${j.id}/annotations`);
       if (this.reasons.size > 500) this.reasons.delete(this.reasons.keys().next().value!);

@@ -1,6 +1,6 @@
 // Minions and Taskmasters: the tickets table, who owns and touches a minion, Taskmaster splits and digests, and model picks
 // (#1313: src/db.ts by area).
-import type { Store, Ticket, TicketKind } from '../db.ts';
+import type { Store, Ticket, TicketKind, User } from '../db.ts';
 import { askerKey, buildOwnerKey, pagePlanKey, planKey } from '../db-keys.ts';
 import { GLOBAL_OWNER } from '../properties.ts';
 import { copyRow, inScope, scoped, warm } from '../read-scope.ts';
@@ -150,7 +150,7 @@ export const minionQueries = {
   },
 
   /** Whether a person is still in a scheme: here, enabled, its owner or a member. Admin reach doesn't count; hiding it doesn't take them out (push drops a hidden one itself). */
-  hearsScheme(this: Store, userId: number, projectId: number, user = this.getUser(userId)): boolean {
+  hearsScheme(this: Store, userId: number, projectId: number, user: User | undefined = this.getUser(userId)): boolean {
     return !!user && !user.disabled_at && this.memberSchemes(user.id).has(projectId);
   },
 

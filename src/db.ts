@@ -1,5 +1,5 @@
 import { dirname, join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { NOT_PEOPLE } from './auth.ts';
 import { GLOBAL_OWNER, Registry } from './properties.ts';
 import { Schedules } from './schedules.ts';
@@ -15,6 +15,8 @@ import { Memory } from './memory.ts';
 import { MinionIndex, MINION_INDEX_SCHEMA } from './minion-index.ts';
 import type { PromptHashes } from './prompt-hashes.ts';
 import type { KeepaliveRow } from './keepalive.ts';
+import { thrown } from './thrown.ts';
+import type { ClaudeEvent, ModelUsage, TokenUsage } from './claude-events.ts';
 import { ciNumberQueries } from './db/ci-numbers.ts';
 import { contraptionRunQueries } from './db/contraption-runs.ts';
 import { deliveryQueries } from './db/deliveries.ts';
@@ -519,7 +521,7 @@ export interface PushSubscriptionRow {
 export interface Turn {
   id: number;
   ticket_id: number;
-  /** The turn's stored result event, if any. */
+  /** The turn's stored result event, if it has one. */
   event_id: number | null;
   session_id: string | null;
   ended_at: number;
@@ -567,7 +569,7 @@ export interface TurnResult {
   ended_at: number;
   session_cost_usd: number;
   duration_ms?: number | null;
-  usage?: any;
+  usage?: TokenUsage;
   payer?: number | null;
   /** What it was launched with (#878, src/prompt-hashes.ts). */
   hashes?: PromptHashes | null;
@@ -578,7 +580,7 @@ export interface TurnResult {
   fork_of?: string | null;
   account?: number | null;
   /** The result's `modelUsage`: each model's running session cost, Grunts' models included (#905). */
-  modelUsage?: any;
+  modelUsage?: Record<string, ModelUsage>;
 }
 
 /** A person's own named property filter in a scheme (#194): key → the values ticked for it. */
@@ -2217,7 +2219,7 @@ export class Store {
   instructionHistory(projectId: number, limit: number): { by: string; at: number; old_text: string; new_text: string }[] {
     return this.db
       .prepare('SELECT by, at, old_text, new_text FROM instruction_history WHERE project_id = ? ORDER BY id DESC LIMIT ?')
-      .all(projectId, limit) as any[];
+      .all(projectId, limit) as { by: string; at: number; old_text: string; new_text: string }[];
   }
 
   /** The Citadel-wide instructions every minion and Taskmaster in every scheme gets; '' when unset. */
@@ -2268,12 +2270,12 @@ export class Store {
   /** A person's latest saves for one scope, newest first. */
   personalInstructionHistory(userId: number, projectId: number | null, limit: number): { at: number; old_text: string; new_text: string }[] {
     return this.db.prepare('SELECT at, old_text, new_text FROM personal_instructions WHERE user_id = ? AND project_id IS ? ORDER BY id DESC LIMIT ?')
-      .all(userId, projectId, limit) as any[];
+      .all(userId, projectId, limit) as { at: number; old_text: string; new_text: string }[];
   }
 
   /** The latest Citadel-wide instruction saves, newest first. */
   appInstructionHistory(limit: number): { by: string; at: number; old_text: string; new_text: string }[] {
-    return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as any[];
+    return this.db.prepare('SELECT by, at, old_text, new_text FROM app_instruction_history ORDER BY id DESC LIMIT ?').all(limit) as { by: string; at: number; old_text: string; new_text: string }[];
   }
 
   setProjectSettings(id: number, fields: Partial<Pick<Project, 'approval_rules' | 'plugin_dirs' | 'optional_plugin_dirs' | 'default_effort' | 'onboarding' | 'onboarding_mode' | 'list_groups' | 'ci_quiet' | 'ci_watch' | 'land_mode' | 'fable_ok' | 'builds' | 'grill' | 'gh_runners' | 'shot_widths' | 'shot_themes' | 'shots_required' | 'shot_note' | 'ship_path' | 'go_from' | 'try_first' | 'msg_loop_limit' | 'msg_loop_min' | 'msg_cold_min' | 'msg_hold_h' | 'msg_never_hold' | 'rules_review' | 'skills_off'>>) {
@@ -2303,8 +2305,8 @@ export class Store {
     if (!trimmed) throw new Error('The scheme name cannot be empty');
     try {
       this.db.prepare('UPDATE projects SET name = ? WHERE id = ?').run(trimmed, id);
-    } catch (err: any) {
-      if (/UNIQUE/.test(err.message)) throw new Error(`There is already a scheme called "${trimmed}"`);
+    } catch (err) {
+      if (/UNIQUE/.test(thrown(err).message ?? '')) throw new Error(`There is already a scheme called "${trimmed}"`);
       throw err;
     }
     return this.getProject(id)!;
@@ -2438,7 +2440,7 @@ export class Store {
   listMembers(projectId: number): (Pick<User, 'id' | 'name' | 'login'> & { owner: boolean })[] {
     return (this.db.prepare(`SELECT u.id, u.name, u.login, u.id = p.owner_id AS owner FROM users u JOIN projects p ON p.id = ?
       LEFT JOIN project_members m ON m.project_id = p.id AND m.user_id = u.id
-      WHERE u.id = p.owner_id OR m.user_id IS NOT NULL ORDER BY owner DESC, m.added_at`).all(projectId) as any[]).map((r) => ({ ...r, owner: !!r.owner }));
+      WHERE u.id = p.owner_id OR m.user_id IS NOT NULL ORDER BY owner DESC, m.added_at`).all(projectId) as (Pick<User, 'id' | 'name' | 'login'> & { owner: number })[]).map((r) => ({ ...r, owner: !!r.owner }));
   }
 
   addMember(projectId: number, userId: number) {
@@ -2715,7 +2717,7 @@ export class Store {
       .prepare('INSERT INTO events (id, ticket_id, kind, data, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(id, ticketId, kind, json, now);
     // A message or an approval click is its author's latest action in the scheme, for the recap (Store.recap).
-    const actor = kind === 'user_message' ? (data as any)?.author : kind === 'approval_result' ? (data as any)?.by : null;
+    const actor = kind === 'user_message' ? (data as { author?: unknown } | null)?.author : kind === 'approval_result' ? (data as { by?: unknown } | null)?.by : null;
     if (typeof actor === 'string') {
       this.db.prepare(`INSERT INTO last_actions (name, project_id, at) SELECT ?, project_id, ? FROM tickets WHERE id = ?
         ON CONFLICT (name, project_id) DO UPDATE SET at = MAX(at, excluded.at)`).run(actor, now, ticketId);
@@ -2751,7 +2753,7 @@ export class Store {
         `SELECT a.*, t.title AS ticket_title, t.kind AS ticket_kind, t.number AS ticket_number FROM artifacts a JOIN tickets t ON t.id = a.ticket_id
          WHERE a.project_id = ? ORDER BY a.mtime DESC`,
       )
-      .all(projectId) as any;
+      .all(projectId) as unknown as (Artifact & { ticket_title: string; ticket_kind: TicketKind; ticket_number: number | null })[];
   }
 
   /** Drop artifact rows whose path `keep` rejects. */
@@ -3304,7 +3306,7 @@ export class Store {
     const put = this.db.prepare('INSERT OR REPLACE INTO card_fates (card_id, ticket_id, cid, reply, result, up_to) VALUES (?, ?, ?, ?, ?, ?)');
     try {
       this.db.exec('BEGIN');
-      for (const r of rows) put.run(...(r as any[]));
+      for (const r of rows) put.run(...(r as SQLInputValue[]));
       this.db.exec('COMMIT');
       return true;
     } catch {
@@ -3382,9 +3384,9 @@ export class Store {
   }
 
   /** Pass every stored Claude event through `fn` and save what it returns (null deletes the event). */
-  rewriteClaudeEvents(fn: (data: any) => any): { changed: number; deleted: number } {
+  rewriteClaudeEvents(fn: (data: ClaudeEvent) => unknown): { changed: number; deleted: number } {
     const changes: { id: number; data: string | null }[] = [];
-    for (const row of this.db.prepare("SELECT id, data FROM events WHERE kind = 'claude'").iterate() as Iterable<any>) {
+    for (const row of this.db.prepare("SELECT id, data FROM events WHERE kind = 'claude'").iterate() as Iterable<{ id: number; data: string }>) {
       const next = fn(JSON.parse(row.data));
       const data = next == null ? null : JSON.stringify(next);
       if (data !== row.data) changes.push({ id: row.id, data });
@@ -3485,7 +3487,7 @@ export class Store {
     const was = this.db.prepare('SELECT session_cost_usd FROM turn_models WHERE turn_id = ? AND model = ?');
     const add = this.db.prepare('INSERT INTO turn_models (turn_id, model, cost_usd, session_cost_usd) VALUES (?, ?, ?, ?)');
     const totals = models.flatMap(([model, m]) => {
-      const total = (m as any)?.costUSD;
+      const total = m?.costUSD;
       return typeof total === 'number' && Number.isFinite(total) && total >= 0 && model ? [[model.slice(0, 100), total] as const] : [];
     });
     // The session's previous turn ran before the split was kept: its share of each model is unknown, so split this turn's cost pro rata.
@@ -3517,7 +3519,7 @@ export class Store {
   /** A minion's latest turns' hash logs (#878), newest first, with how much of each turn's prompt came from the cache. */
   promptHashes(ticketId: number, limit = 1): { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; hashes: PromptHashes }[] {
     const rows = this.db.prepare(`SELECT ended_at, cache_read_tokens, cache_write_tokens, prompt_digest FROM turns
-        WHERE ticket_id = ? AND prompt_digest IS NOT NULL ORDER BY id DESC LIMIT ?`).all(ticketId, limit) as any[];
+        WHERE ticket_id = ? AND prompt_digest IS NOT NULL ORDER BY id DESC LIMIT ?`).all(ticketId, limit) as { ended_at: number; cache_read_tokens: number | null; cache_write_tokens: number | null; prompt_digest: string }[];
     return rows.map(({ prompt_digest, ...r }) => ({ ...r, hashes: JSON.parse(prompt_digest) }));
   }
 
@@ -3737,7 +3739,7 @@ export class Store {
   flakeCounts(projectId: number, since: number, limit = 10): { file: string; count: number; last: number; ticketId: number | null }[] {
     return this.db.prepare(`SELECT file, COUNT(*) AS count, MAX(at) AS last,
         (SELECT e2.ticket_id FROM flake_events e2 WHERE e2.project_id = e.project_id AND e2.file = e.file ORDER BY e2.at DESC, e2.id DESC LIMIT 1) AS ticketId
-      FROM flake_events e WHERE project_id = ? AND at >= ? GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`).all(projectId, since, limit) as any;
+      FROM flake_events e WHERE project_id = ? AND at >= ? GROUP BY file ORDER BY count DESC, last DESC LIMIT ?`).all(projectId, since, limit) as { file: string; count: number; last: number; ticketId: number | null }[];
   }
 
   /** Whether `file` already has a sighting within `tolMs` of `at`: a retro-log line the server already counted from the land's own output. */
@@ -3773,12 +3775,12 @@ export class Store {
   updateFlakeFix(id: number, patch: Partial<Omit<FlakeFix, 'id' | 'project_id' | 'file'>>) {
     const keys = Object.keys(patch) as (keyof typeof patch)[];
     if (!keys.length) return;
-    this.db.prepare(`UPDATE flake_fixes SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => patch[k] as any), id);
+    this.db.prepare(`UPDATE flake_fixes SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => patch[k] as SQLInputValue), id);
   }
 
   /** The newest `n` failing outputs kept for a file. */
   flakeDetails(projectId: number, file: string, n = 3): { at: number; detail: string }[] {
-    return this.db.prepare("SELECT at, detail FROM flake_events WHERE project_id = ? AND file = ? AND detail != '' ORDER BY at DESC, id DESC LIMIT ?").all(projectId, file, n) as any;
+    return this.db.prepare("SELECT at, detail FROM flake_events WHERE project_id = ? AND file = ? AND detail != '' ORDER BY at DESC, id DESC LIMIT ?").all(projectId, file, n) as { at: number; detail: string }[];
   }
 
   /** How many `kind` readings fell in [from, to), the first one's time, and the commonest details with their counts. */
@@ -3791,7 +3793,7 @@ export class Store {
   /** The readings in [from, to), oldest first, at most `limit`, of `kinds` only if given: an incident's timeline (#1145). */
   healthBetween(from: number, to: number, limit: number, kinds?: string[]): { at: number; kind: string; commit_sha: string | null; detail: string }[] {
     const only = kinds?.length ? ` AND kind IN (${kinds.map(() => '?').join(', ')})` : '';
-    return this.db.prepare(`SELECT at, kind, commit_sha, detail FROM health_events WHERE at >= ? AND at < ?${only} ORDER BY at, id LIMIT ?`).all(from, to, ...(kinds ?? []), limit) as any;
+    return this.db.prepare(`SELECT at, kind, commit_sha, detail FROM health_events WHERE at >= ? AND at < ?${only} ORDER BY at, id LIMIT ?`).all(from, to, ...(kinds ?? []), limit) as { at: number; kind: string; commit_sha: string | null; detail: string }[];
   }
 
   /** The newest `kind` reading before `before` (#1135: the last stall before a watchdog restart), or null. */

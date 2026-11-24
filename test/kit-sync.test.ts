@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { until } from './wait.ts';
 import { spawnSync } from 'node:child_process';
-import { byHandNote, CHECK_SCRIPT, git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
+import { byHandNote, CHECK_SCRIPT, dupCaseLabels, git, KIT_FILES, lineDistance, merge3, pickBase, planScheme, schemeRepos, templateHistory, TRAILER } from '../src/kit-sync.ts';
 
 const ID = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const LAND = KIT_FILES[0];
@@ -379,4 +379,9 @@ test('the by-hand note gives the template diff between the last sync and the kit
   assert.match(note, /--self-test[\s\S]*2 minutes[\s\S]*background/);
   assert.match(note, /npm ci/);
   assert.match(note, new RegExp(`${TRAILER}: ${'f'.repeat(40)}`));
+});
+
+test('a case line with a trailing comment still opens a case', () => {
+  assert.deepEqual(dupCaseLabels('case "$1" in # kinds\n  a) : ;;\n  a) : ;;\nesac\n'), ['a']);
+  assert.deepEqual(dupCaseLabels('case "$1" in # outer\n  a) case "$2" in # inner\n  *) : ;;\nesac ;;\n  *) : ;;\nesac\n'), []);
 });

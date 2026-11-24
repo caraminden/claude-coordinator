@@ -186,7 +186,7 @@ export function dupCaseLabels(text: string): string[] {
       top.set(label, n);
       if (n > 1) dupes.add(label);
     }
-    if (/^\s*case\s.*\sin\s*$/.test(line)) frames.push(new Map());
+    if (/^\s*case\s.*\sin\s*(#.*)?$/.test(line)) frames.push(new Map());
   }
   return [...dupes];
 }

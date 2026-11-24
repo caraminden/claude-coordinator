@@ -1716,7 +1716,7 @@ const THREAD_TOOLS = () => ([
     // Always loaded (ALWAYS_LOAD, #1275), so every word here is in every minion's prompt: the how-to lives in the self-review skill.
     description:
       // Its other rules are in its refusals (uncommitted work, a conflict, a missing go) and its result (#1575).
-      'Ship: the server runs tools/land.sh in your worktree; pass summary, risk, risk_reason and learned (a public/ diff needs the ui-screenshots critic run first, self-review 3).',
+      'Ship: the server runs tools/land.sh in your worktree (a public/ diff needs the ui-screenshots critic run first, self-review 3).',
     inputSchema: {
       type: 'object',
       properties: {

@@ -16,6 +16,8 @@ export interface ContentBlock {
   tool_use_id?: string;
   content?: string | ContentBlock[];
   is_error?: boolean;
+  /** image */
+  source?: { type?: string; media_type?: string; data?: string };
 }
 
 /** A model's token counts, on an assistant message and on the result event. */
@@ -44,6 +46,9 @@ export interface ClaudeMessage {
   usage?: TokenUsage;
 }
 
+/** A plugin or MCP server that failed to load, as init reports it: a bare message or an object naming it. */
+export type LoadError = string | { plugin?: string; name?: string; server?: string; error?: string; message?: string } | null;
+
 /** One stream-json line: system (init and others), assistant, user, result, rate_limit_event and the rest. */
 export interface ClaudeEvent {
   type: string;
@@ -57,6 +62,7 @@ export interface ClaudeEvent {
   is_error?: boolean;
   total_cost_usd?: number;
   duration_ms?: number;
+  num_turns?: number;
   usage?: TokenUsage;
   modelUsage?: Record<string, ModelUsage>;
   /** system init */
@@ -65,12 +71,20 @@ export interface ClaudeEvent {
   tools?: string[];
   mcp_servers?: { name: string; status: string }[];
   slash_commands?: string[];
+  terminal_slash_commands?: string[];
   plugins?: { name: string; path: string }[];
   claude_code_version?: string;
-  plugin_errors?: unknown[];
-  mcp_server_errors?: unknown[];
+  plugin_errors?: LoadError[];
+  mcp_server_errors?: LoadError[];
   /** rate_limit_event */
   rate_limit_info?: Record<string, unknown>;
+  /** The Codex adapter's own lines (src/codex-turn.ts): codex_waiting, codex_gate, codex_rate_limits, and codex_* on init. */
+  codex_thread?: string;
+  codex_resume_failed?: string;
+  waited_ms?: number;
+  refreshed?: boolean;
+  serial?: boolean;
+  rate_limits?: Record<string, unknown>;
 }
 
 /** A message's content as blocks: a bare string or a missing content reads as none. */

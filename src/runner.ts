@@ -12,7 +12,7 @@ import { AGENT_NAME } from './auth.ts';
 import { MSG_DEFAULTS, msgSettings } from './msg-settings.ts';
 import { Relay, clip, loopHolds, loopKey, MINION_PAIRS, minionPairKey, pairKey, LOOP_LIMIT, LOOP_WINDOW_MS, type LoopState } from './minion-relay.ts';
 export { LOOP_LIMIT, LOOP_WINDOW_MS };
-import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket } from './db.ts';
+import { askerKey, buildOwnerKey, onboardingOpen, pagePlanKey, planKey, type EventRow, type FinishedStep, type Project, type Store, type Ticket, type TicketState } from './db.ts';
 import { APP_NAME } from './appname.ts';
 import type { Claim } from './claims.ts';
 import { fableMeter } from './costs.ts';
@@ -28,6 +28,8 @@ import { track } from './settled.ts';
 import { claudeConfigDir, lastEffort, mergeMemory, projectSlug, restoreAhead, restoreSession, saveSession, storedPaths, transcriptPath, validSessionId } from './sessions.ts';
 import { Lanes } from './lanes.ts';
 import { buildBranch, landsBuilds, projectDir, recoverTicketDir, restoreTicketDir, surveyReports } from './workspace.ts';
+import { thrown } from './thrown.ts';
+import type { ClaudeEvent, ContentBlock, LoadError, ModelUsage } from './claude-events.ts';
 import { buildPreviewPath, previewKey } from './previews.ts';
 import { readScope } from './read-scope.ts';
 import { accountUsageKey, usageKey } from './account-pick.ts';
@@ -110,7 +112,23 @@ export interface Usage {
   updatedAt: number;
 }
 
-function usageWindow(w: any): UsageWindow | null {
+/** A rate_limit_event's `rate_limit_info`: each window's reading, by name (seven_day, five_hour). */
+interface RateLimitInfo {
+  unifiedWindows?: Record<string, Record<string, unknown> | null | undefined>;
+}
+
+/** One window of Codex's account/rateLimits. */
+interface CodexWindow {
+  usedPercent?: unknown;
+  windowDurationMins?: unknown;
+  resetsAt?: unknown;
+}
+interface CodexLimits {
+  primary?: CodexWindow | null;
+  secondary?: CodexWindow | null;
+}
+
+function usageWindow(w: Record<string, unknown> | null | undefined): UsageWindow | null {
   if (!w || typeof w.utilization !== 'number') return null;
   return {
     utilization: w.utilization,
@@ -184,7 +202,7 @@ interface TurnState {
   /** The minion whose relay started it (Runner.turnFrom): a restart mid-turn keeps whose minion a Taskmaster's create_ticket makes (R3, #1452). */
   from?: number;
   /** A held minion's state and note at its start (Runner.parkedAs, #261), put back at its end (R4, #1452). */
-  parkedAs?: { state: string | null; note: string | null };
+  parkedAs?: { state: TicketState | null; note: string | null };
   /** Its reply's last status trailer (Runner.statuses), applied with its result (R6, #1452). */
   status?: StatusFields;
   /** A reply of its was sent back (Runner.sentBack, #281): its rewrite replaces it at the result (#1452). */
@@ -494,31 +512,34 @@ function truncate(s: string): string {
   return s.length > MAX_TOOL_OUTPUT ? s.slice(0, MAX_TOOL_OUTPUT) + `\n… [truncated ${s.length - MAX_TOOL_OUTPUT} chars]` : s;
 }
 
+/** A stored event's data as `strike` reads it: a Claude event, or a note or message with its `text`. */
+type StruckData = Partial<ClaudeEvent> & { text?: string; strikes?: { text: string; reason: string; at: number }[] };
+
 /**
  * Shrink a stream-json event before storing it, keeping only what the chat, the progress readout
  * and the coordinator's transcript read: thinking, usage, ids and background-task echoes are most
  * of a long thread's history and none of them are shown. Returns null for events not worth keeping.
  * `stored` is for events already in the database, whose tool output was capped when it was saved.
  */
-export function slimEvent(ev: any, stored = false): any {
+export function slimEvent(ev: ClaudeEvent, stored = false): ClaudeEvent | null {
   if (ev.type === 'system') {
     return ev.subtype === 'init'
       ? { type: 'system', subtype: 'init', session_id: ev.session_id, model: ev.model, cwd: ev.cwd }
       : null;
   }
   if ((ev.type === 'assistant' || ev.type === 'user') && Array.isArray(ev.message?.content)) {
-    const content = ev.message.content.flatMap((block: any) => {
+    const content = ev.message!.content!.flatMap((block: ContentBlock): ContentBlock[] => {
       if (block?.type === 'thinking' || block?.type === 'redacted_thinking') return [];
       if (block?.type === 'text' && typeof block.text === 'string') return [{ ...block, text: hideTokens(block.text) }];
       if (block?.type !== 'tool_result' || stored) return [block];
       let content = block.content;
       if (Array.isArray(content)) {
-        content = content.map((c: any) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
+        content = content.map((c) => (c.type === 'text' ? c.text : `[${c.type}]`)).join('\n');
       }
       return [{ ...block, content: truncate(hideTokens(String(content ?? ''))) }];
     });
     if (!content.length) return null;
-    const slim: any = { type: ev.type, message: { role: ev.message.role, content } };
+    const slim: ClaudeEvent = { type: ev.type, message: { role: ev.message!.role, content } };
     if (ev.parent_tool_use_id) slim.parent_tool_use_id = ev.parent_tool_use_id;
     return slim;
   }
@@ -538,9 +559,9 @@ export function pushKind(command: string): 'push' | 'pr' | null {
   return /\bgit\b(?:\s+-[cC]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*\s+push\b/.test(command) ? 'push' : null;
 }
 
-function describeActivity(ev: any): string | null {
+function describeActivity(ev: ClaudeEvent): string | null {
   if (ev.type !== 'assistant') return null;
-  const blocks: any[] = ev.message?.content ?? [];
+  const blocks = (ev.message?.content ?? []) as ContentBlock[];
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
     // A Grunt's report (a subagent's words) isn't what the minion is doing; its tool calls are.
@@ -571,7 +592,7 @@ export class Runner {
   /** The minion whose relayed message started each ticket's current turn, when a relay came before any person's message. */
   private turnFrom = new Map<number, number>();
   /** A sealed minion's state and note when a turn answering a message started: put back at its end, while still sealed (#261). */
-  private parkedAs = new Map<number, { state: string | null; note: string | null }>();
+  private parkedAs = new Map<number, { state: TicketState | null; note: string | null }>();
   private store: Store;
   private broadcast: Broadcast;
   private claudeBin: string;
@@ -671,7 +692,7 @@ export class Runner {
   /** What the server is doing for it with no turn of its own (#727): today its handed-off land (src/land.ts), set by the server. */
   serverWork: (ticketId: number, fresh?: boolean) => { kind: string } | null = () => null;
   /** Each stored stream event of a turn, after it is saved (the stall signals, #1139). */
-  onStreamEvent: (ticketId: number, ev: any) => void = () => {};
+  onStreamEvent: (ticketId: number, ev: ClaudeEvent) => void = () => {};
   /** Called when a turn's process has exited, however the turn ended. */
   onTurnEnd: (ticketId: number) => void = () => {};
   /** What a minion sealed on start_after waits for, or null (LiveWaiters.heldFor, set by the server). */
@@ -773,7 +794,7 @@ export class Runner {
     if (ticket.kind !== 'coordinator' || project.id !== GLOBAL_OWNER || asker === null || !this.store.isAdmin(this.store.getUser(asker))) return null;
     const others = this.store.listProjects().filter((p) => p.id !== project.id && p.repo_dir);
     return {
-      gitDirs: [...new Set(others.flatMap((p) => [p.repo_dir!, ...this.store.listTickets(p.id).filter((t) => t.status !== 'closed' && t.cwd).map((t) => t.cwd!)]))],
+      gitDirs: [...new Set(others.flatMap((p) => [p.repo_dir!, ...this.store.listTickets(p.id).filter((t: Ticket) => t.status !== 'closed' && t.cwd).map((t: Ticket) => t.cwd!)]))],
       // The folder is a link into its two slots (#801): rules match the path read, so both are listed.
       apps: this.store.listContraptions().flatMap((c) => [appFolder(c, homedir()), slotsOf(appFolder(c, homedir()))]),
       data: dirname(this.store.path),
@@ -1198,8 +1219,8 @@ export class Runner {
       if (ticket?.status === 'closed') {
         try {
           await clearTmpDirLater(this.tmpRoot(ticket.project_id), ticketId);
-        } catch (err: any) {
-          console.error(`Ticket ${ticketId}: could not clear its temp folder: ${err.message}`);
+        } catch (err) {
+          console.error(`Ticket ${ticketId}: could not clear its temp folder: ${thrown(err).message}`);
         }
       }
       await this.onClose(ticketId);
@@ -1290,10 +1311,10 @@ export class Runner {
     const asked = new Set(batch.map((m) => m.text));
     const out: string[] = [];
     for (const e of this.store.chatTextEvents(ticketId, 0, LOST_DIGEST_ENTRIES + batch.length + 20).reverse()) {
-      const d = JSON.parse(e.data);
+      const d: ClaudeEvent & { text?: string; author?: string } = JSON.parse(e.data);
       if (e.kind === 'user_message' && typeof d.text === 'string' && !asked.has(d.text)) out.push(`[${d.author}]: ${d.text}`);
       else if (e.kind === 'claude') {
-        const text = (d.message?.content ?? []).filter((b: any) => b?.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n');
+        const text = ((d.message?.content ?? []) as ContentBlock[]).filter((b) => b?.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
         if (text.trim()) out.push(`[You]: ${text}`);
       }
       if (out.length === LOST_DIGEST_ENTRIES) break;
@@ -1310,16 +1331,16 @@ export class Runner {
         // The caller's copy too: the turn about to start runs in it.
         Object.assign(ticket, { cwd, branch });
         this.emit(ticket.id, 'note', { text: `This minion had no worktree on record (its creation was cut off, #899), so it now uses ${cwd}${branch ? ` on branch ${branch}` : ''}.` });
-      } catch (err: any) {
-        this.emit(ticket.id, 'note', { text: `This minion has no worktree on record and Citadel could not make one: ${err.message}` });
+      } catch (err) {
+        this.emit(ticket.id, 'note', { text: `This minion has no worktree on record and Citadel could not make one: ${thrown(err).message}` });
       }
       return;
     }
     try {
       const note = restoreTicketDir(ticket.cwd, project.repo_dir, ticket.branch, savedRef(String(ticket.id)));
       if (note) this.emit(ticket.id, 'note', { text: note });
-    } catch (err: any) {
-      this.emit(ticket.id, 'note', { text: `Could not recreate the worktree: ${err.message}` });
+    } catch (err) {
+      this.emit(ticket.id, 'note', { text: `Could not recreate the worktree: ${thrown(err).message}` });
     }
   }
 
@@ -1388,8 +1409,8 @@ export class Runner {
               const bytes = await removeWorktree(p.repo_dir!, dir);
               removed(what, bytes, s.saved ? `, its uncommitted work saved in ${ref}` : '');
               this.emit(t.id, 'note', { text: `Removed this dismissed minion's worktree (${size(bytes)}). Its branch ${t.branch} stays, and a reopen brings the folder back${s.saved ? ` with its uncommitted work, saved meanwhile in ${ref}` : ''}.` });
-            } catch (err: any) {
-              keep(what, `could not remove: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+            } catch (err) {
+              keep(what, `could not remove: ${String(thrown(err).stderr || thrown(err).message).trim().split('\n')[0]}`);
             }
           });
         }
@@ -1467,8 +1488,8 @@ export class Runner {
           continue;
         }
         removed(what, await removeWorktree(p.repo_dir!, g.path), s.saved ? `, its uncommitted work saved in ${ref}` : '');
-      } catch (err: any) {
-        keep(what, `could not remove: ${String(err.stderr || err.message).trim().split('\n')[0]}`);
+      } catch (err) {
+        keep(what, `could not remove: ${String(thrown(err).stderr || thrown(err).message).trim().split('\n')[0]}`);
       }
     }
   }
@@ -1693,7 +1714,7 @@ export class Runner {
           this.approvals.restore(t.id, this.store.eventsOfKinds(t.id, ['approval', 'approval_result']), turn?.startedAt);
           try {
             if (turn?.dir && this.reattach(t.id, turn)) continue;
-          } catch (err: any) {
+          } catch (err) {
             console.error(`Ticket ${t.id}: could not re-attach to its turn, so it counts as interrupted:`, err);
           }
           // Its turn is gone, so nobody's click can count for them now.
@@ -1800,8 +1821,8 @@ export class Runner {
         return sweepTmpDirs(this.tmpRoot(Number(name)), keep);
       });
       if (gone.length) console.log(`Cleared the temp folders of ${gone.length} dismissed or deleted minion${gone.length === 1 ? '' : 's'}.`);
-    } catch (err: any) {
-      if (err.code !== 'ENOENT') console.error(`Could not sweep the temp folders: ${err.message}`);
+    } catch (err) {
+      if (thrown(err).code !== 'ENOENT') console.error(`Could not sweep the temp folders: ${thrown(err).message}`);
     }
   }
 
@@ -1953,9 +1974,9 @@ export class Runner {
         const place = this.placeFor?.(person(ticket, project), warmKey(ticket)) ?? { host: true as const };
         if (!('refused' in place)) ahead = restoreAhead(this.store, ticket, project, place.host ? place.configDir ?? claudeConfigDir(process.env) : place.configDir);
       }
-    } catch (err: any) {
+    } catch (err) {
       // The turn's start meets the same trouble itself, and says so.
-      console.error(`Ticket ${ticketId}: could not check its session files before the turn: ${err.message}`);
+      console.error(`Ticket ${ticketId}: could not check its session files before the turn: ${thrown(err).message}`);
     }
     if (!ahead) return step();
     return ahead.then(
@@ -2070,7 +2091,7 @@ export class Runner {
    */
   private limitCleared(payer: number | null, model?: string | null) {
     const list = this.resumes.limit.all();
-    const gaveUp = this.store.limitedTickets().filter((t) => t.status === 'error' && t.note?.startsWith('Usage limit: gave up') && !list.some((w) => w.ticket === t.id) && !this.isRunning(t.id));
+    const gaveUp = this.store.limitedTickets().filter((t: Ticket) => t.status === 'error' && t.note?.startsWith('Usage limit: gave up') && !list.some((w) => w.ticket === t.id) && !this.isRunning(t.id));
     if (!list.length && !gaveUp.length) return;
     const onPlan = (id: number) => {
       const t = this.store.getTicket(id);
@@ -2084,14 +2105,14 @@ export class Runner {
     const now = Date.now();
     const early = list.filter((w) => w.at > now && !w.codex && onPlan(w.ticket));
     for (const w of early) { w.at = now; w.proven = true; }
-    const back = gaveUp.filter((t) => onPlan(t.id)).map((t) => ({ ticket: t.id, at: now, tries: 1, proven: true as const }));
+    const back = gaveUp.filter((t: Ticket) => onPlan(t.id)).map((t) => ({ ticket: t.id, at: now, tries: 1, proven: true as const }));
     if (early.length || back.length) this.resumes.saveLimits([...list, ...back]);
   }
 
   /** A cut-off turn's values (OwedResume.carry), back in memory for the resume that carries the turn on (#1452). */
   private carryIn(ticketId: number, carry: OwedResume['carry']) {
     if (carry?.from) this.turnFrom.set(ticketId, carry.from);
-    if (carry?.parkedAs) this.parkedAs.set(ticketId, carry.parkedAs);
+    if (carry?.parkedAs) this.parkedAs.set(ticketId, carry.parkedAs as { state: TicketState | null; note: string | null });
     if (carry?.status) this.statuses.set(ticketId, carry.status as StatusFields);
   }
 
@@ -2382,10 +2403,10 @@ export class Runner {
    * it. A note with the reason goes in that chat, and in `by`'s own if that's another one.
    */
   strike(by: number, quote: string, reason: string): { ticketId: number } {
-    const texts = (e: EventRow, data: any): string[] =>
-      e.kind === 'claude' ? (data.type === 'assistant' ? (data.message?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text) : []) : [data.text ?? ''];
+    const texts = (e: EventRow, data: StruckData): string[] =>
+      e.kind === 'claude' ? (data.type === 'assistant' ? ((data.message?.content ?? []) as ContentBlock[]).filter((b) => b.type === 'text').map((b) => b.text!) : []) : [data.text ?? ''];
     let e: EventRow | undefined;
-    let data: any;
+    let data!: StruckData;
     // Find it first: leaving the loop closes the read before anything is written.
     for (const w of this.store.wordsBy(by, STRIKE_SEARCH)) {
       data = JSON.parse(w.data);
@@ -2654,12 +2675,12 @@ export class Runner {
    * Keep the slash commands a turn loaded (Claude Code's init event lists them), for the composer's menu and its
    * check of what it sends (#937). Terminal-only ones and internal `__` ones are left out. Written only on a change.
    */
-  private saveCommands(ticketId: number, ev: any) {
+  private saveCommands(ticketId: number, ev: ClaudeEvent) {
     const terminal = new Set(Array.isArray(ev.terminal_slash_commands) ? ev.terminal_slash_commands : []);
-    const names = [...new Set<string>(ev.slash_commands.filter((n: unknown) => typeof n === 'string' && n && !n.startsWith('__') && !terminal.has(n)))];
+    const names = [...new Set<string>(ev.slash_commands!.filter((n: unknown) => typeof n === 'string' && n && !n.startsWith('__') && !terminal.has(n)))];
     const plugins = (Array.isArray(ev.plugins) ? ev.plugins : [])
-      .filter((p: any) => typeof p?.name === 'string' && typeof p.path === 'string' && p.path.startsWith('/'))
-      .map((p: any) => ({ name: p.name, path: p.path }));
+      .filter((p) => typeof p?.name === 'string' && typeof p.path === 'string' && p.path.startsWith('/'))
+      .map((p) => ({ name: p.name, path: p.path }));
     const loaded: LoadedCommands = { names, plugins, cwd: typeof ev.cwd === 'string' ? ev.cwd : '' };
     const ticket = this.store.getTicket(ticketId);
     if (JSON.stringify(this.store.getSetting(commandsKey(ticketId))) !== JSON.stringify(loaded)) this.store.setSetting(commandsKey(ticketId), loaded);
@@ -2843,9 +2864,9 @@ export class Runner {
   }
 
   /** A keepalive's result: costed apart, and its miss stops its series; too many misses in a day switch keepalives off. */
-  private keepaliveResult(ticketId: number, ev: any) {
+  private keepaliveResult(ticketId: number, ev: ClaudeEvent) {
     this.store.recordTurn(ticketId, {
-      session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: Date.now(), session_cost_usd: ev.total_cost_usd,
+      session_id: typeof ev.session_id === 'string' ? ev.session_id : null, ended_at: Date.now(), session_cost_usd: ev.total_cost_usd!,
       duration_ms: ev.duration_ms, usage: ev.usage, payer: this.payerOf(this.store.getSetting<TurnState>(turnKey(ticketId))?.person), keepalive: true,
       account: this.store.getSetting<TurnState>(turnKey(ticketId))?.account ?? null, modelUsage: ev.modelUsage,
     });
@@ -3010,9 +3031,9 @@ export class Runner {
     if (!cards.length) return;
     let reply = '';
     for (const w of this.store.wordsBy(ticketId, 6)) {
-      const d = JSON.parse(w.data);
+      const d: ClaudeEvent = JSON.parse(w.data);
       if (w.kind !== 'claude' || w.created_at < started) continue;
-      reply = (d.message?.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n\n').trim();
+      reply = ((d.message?.content ?? []) as ContentBlock[]).filter((b) => b.type === 'text').map((b) => b.text).join('\n\n').trim();
       if (reply) break;
     }
     if (!reply) return;
@@ -3145,7 +3166,7 @@ export class Runner {
     const cancelledLine = cancelled ? [{ author: 'System', text: `Your close_self in your last turn was cancelled: ${cancelled}, so this minion is still open. Once nothing is left for people, call close_self again.`, images: [] }] : [];
     // What this scheme's other Taskmasters did since this one's last turn (#919), written by code, at most ten lines.
     const digest = ticket.kind === 'coordinator' && !step && !keepalive ? this.store.digestFor(ticket.id) : [];
-    const digestLine = digest.length ? [{ author: 'System', text: `Since your last turn, this scheme's other ${AGENT_NAME}s:\n${digest.map((l) => `- ${l}`).join('\n')}`, images: [] }] : [];
+    const digestLine = digest.length ? [{ author: 'System', text: `Since your last turn, this scheme's other ${AGENT_NAME}s:\n${digest.map((l: string) => `- ${l}`).join('\n')}`, images: [] }] : [];
     // Its minions and cards that have waited with nothing set to move them (#1506), only on a turn a person started: no wakes of its own.
     const stuck = ticket.kind === 'coordinator' && !step && !keepalive && batch.some((m) => m.own && !m.from) ? this.stuckText(ticket) : null;
     const stuckLine = stuck ? [{ author: 'System', text: stuck, images: [] }] : [];
@@ -3159,14 +3180,14 @@ export class Runner {
         place, person, asker, machines, model, effort, typedBy, secrets, name: `${ticket.id}-${Date.now()}`,
         folders: { files: filesDir, shared: sharedDir, memory: memoryDir }, codex: codex ? { thread: same || null } : null,
       });
-    } catch (err: any) {
+    } catch (err) {
       // A launch that can't be built (a settings file past Claude Code's cap, #661; claude not on the PATH) fails the turn with its reason, in the chat.
       console.error(`Minion ${ticket.id}: its launch could not be built:`, err);
-      const event = this.emit(ticket.id, 'error', { text: `Could not start the turn: ${err.message}` });
-      const note = `Could not start: ${err.message}`;
+      const event = this.emit(ticket.id, 'error', { text: `Could not start the turn: ${thrown(err).message}` });
+      const note = `Could not start: ${thrown(err).message}`;
       this.setFailNote(ticket.id, { note: note.length > 60 ? `${note.slice(0, 59)}…` : note });
       this.setStatus(ticket.id, 'error');
-      this.onTurnError(ticket.id, err.message, event.id);
+      this.onTurnError(ticket.id, thrown(err).message!, event.id);
       return;
     }
     const { plan, dir, system, parts, pins, github, unit, reviewAt, hold } = built;
@@ -3247,8 +3268,8 @@ export class Runner {
       // Everything stored is in the config dir now, so the end-of-turn save may prune what the turn deletes.
       had = storedPaths(this.store, ticket, project);
       if (restored) console.log(`Ticket ${ticket.id}: restored the Claude session from the database (${restored} file${restored === 1 ? '' : 's'}).`);
-    } catch (err: any) {
-      this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${err.message}` });
+    } catch (err) {
+      this.emit(ticket.id, 'note', { text: `Could not restore the session from the database: ${thrown(err).message}` });
       restoreFailed = true;
     }
     // With no copy of its transcript on this login or in the database, --resume would fail every turn from now on.
@@ -3271,8 +3292,8 @@ export class Runner {
     if (memoryDir) {
       try {
         mergeMemory(join(configDir, 'projects', projectSlug(ticket.cwd), 'memory'), memoryDir);
-      } catch (err: any) {
-        this.emit(ticket.id, 'note', { text: `Could not move the Taskmaster's old memory into ${memoryDir}: ${err.message}` });
+      } catch (err) {
+        this.emit(ticket.id, 'note', { text: `Could not move the Taskmaster's old memory into ${memoryDir}: ${thrown(err).message}` });
       }
     }
 
@@ -3437,8 +3458,8 @@ export class Runner {
       let tmp: string | null = null;
       try {
         tmp = makeTmpDir(this.tmpRoot(project.id), ticket.id);
-      } catch (err: any) {
-        this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${err.message}` });
+      } catch (err) {
+        this.emit(ticket.id, 'note', { text: `Could not make this minion's temp folder, so it uses the shared one: ${thrown(err).message}` });
       }
       // The link check reads the reply against the folders the chat serves this turn's files from (ticketRoots).
       // A file, not an argument: a scheme's minion list outgrows a command line.
@@ -3464,7 +3485,7 @@ export class Runner {
         project, ticket, dir, pins, place, machines, model, effort, deploys, unit, pool: this.pool && !codex && !(place.host && !unit && this.units),
         folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
           // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
-          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
+          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t: Ticket) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t: Ticket) => t.cwd!) : undefined },
         codex,
         codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
         env: { server: process.env, coordinator, heavy, github: github?.env ?? null, secrets: secretEnv(f.secrets) },
@@ -3517,7 +3538,7 @@ export class Runner {
       // The asker's login may lack the minion's session: put back the database's copy, as of its last finished turn.
       // shortcut: mid-turn on another login, the fork sees the session as its last turn left it; copying the live transcript across would show the turn so far.
       if (resume.fork) restoreSession(this.store, ticket, project, plan.configDir);
-      if (!existsSync(transcriptPath(plan.configDir, ticket.cwd, resume.id))) throw new Error(resume.fork ? 'This minion has no session to ask yet.' : 'This side thread has ended; ask a new question.');
+      if (!existsSync(transcriptPath(plan.configDir, ticket.cwd, resume.id)!)) throw new Error(resume.fork ? 'This minion has no session to ask yet.' : 'This side thread has ended; ask a new question.');
       plan.args.push('--resume', resume.id, ...(resume.fork ? ['--fork-session'] : []));
       writeFileSync(join(dir, 'prompt.jsonl'), prompt);
       for (const f of ['stream.jsonl', 'stderr.log', 'steer.jsonl']) writeFileSync(join(dir, f), '');
@@ -3614,7 +3635,7 @@ export class Runner {
           this.finish(ticketId, live, null);
         } else this.keepSupervisor(live);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(`Ticket ${ticketId}: following its turn failed:`, err);
     }
   }
@@ -3699,8 +3720,8 @@ export class Runner {
           start = stop + 1;
           try {
             this.handleLine(ticketId, line, (error, text) => this.saveTurn(ticketId, { result: { error, text } }));
-          } catch (err: any) {
-            this.emit(ticketId, 'note', { text: `Could not process output line: ${err.message}` });
+          } catch (err) {
+            this.emit(ticketId, 'note', { text: `Could not process output line: ${thrown(err).message}` });
           }
           // Saved per line, so a restart carries on from the next one: nothing shown twice or skipped.
           live.offset = base + Math.min(start, take);
@@ -3894,7 +3915,7 @@ export class Runner {
   }
 
   /** Write a note about a failure, remembered so the next turn that ends well can clear it. */
-  private setFailNote(ticketId: number, fields: { note: string; state?: string }) {
+  private setFailNote(ticketId: number, fields: { note: string; state?: TicketState }) {
     this.store.updateTicket(ticketId, fields);
     this.store.setSetting(failNoteKey(ticketId), fields.note);
   }
@@ -4036,7 +4057,7 @@ export class Runner {
 
   private handleLine(ticketId: number, line: string, onResult: (isError: boolean, result: string | null) => void) {
     if (!line.trim()) return;
-    let ev: any;
+    let ev: ClaudeEvent;
     const secrets = this.secretsOfTurn(ticketId);
     try {
       ev = JSON.parse(line);
@@ -4085,7 +4106,7 @@ export class Runner {
     if (ev.type === 'result' && ev.modelUsage && typeof ev.modelUsage === 'object') {
       // Grunts' models are in modelUsage too: the window is the main model's.
       const main = this.mainModels.get(ticketId);
-      const mu: any = main ? ev.modelUsage[main] ?? ev.modelUsage[main.replace(/\[1m\]$/i, '')] : null;
+      const mu: ModelUsage | null = main ? ev.modelUsage[main] ?? ev.modelUsage[main.replace(/\[1m\]$/i, '')] : null;
       if (mu && Number(mu.contextWindow) > 0) this.store.setSetting(windowKey(ticketId), Number(mu.contextWindow));
     }
     if (ev.type === 'result') this.contextShown.delete(ticketId);
@@ -4097,8 +4118,8 @@ export class Runner {
       // An alert is extra: a failure in it must not cost the line its place in the chat.
       try {
         this.meterSpend(ticketId, ev);
-      } catch (err: any) {
-        console.error(`[spend] minion ${ticketId}: metering failed:`, err.message);
+      } catch (err) {
+        console.error(`[spend] minion ${ticketId}: metering failed:`, thrown(err).message);
       }
     }
     if (DROPPED_TYPES.has(ev.type)) return;
@@ -4137,8 +4158,8 @@ export class Runner {
     const row = this.emit(ticketId, 'claude', slim);
     try {
       this.onStreamEvent(ticketId, slim);
-    } catch (err: any) {
-      console.error(`[stall] minion ${ticketId}: counting failed:`, err.message);
+    } catch (err) {
+      console.error(`[stall] minion ${ticketId}: counting failed:`, thrown(err).message);
     }
     // The stored event's own time, so a step's start matches what a replay of the events (history, the backfill) finds.
     applyEvent(progress, 'claude', slim, row.created_at);
@@ -4151,7 +4172,7 @@ export class Runner {
     }
     if (ev.type === 'result') this.savePlan(ticketId, progress, row.id);
     if (ev.type === 'result' && !ev.is_error) this.carryReply(ticketId);
-    if (ev.type === 'user' && (ev.message?.content ?? []).some?.((b: any) => typeof b?.text === 'string' && b.text.includes(SENT_BACK)) && !this.sentBack.has(ticketId)) {
+    if (ev.type === 'user' && ((ev.message?.content ?? []) as ContentBlock[]).some?.((b) => typeof b?.text === 'string' && b.text.includes(SENT_BACK)) && !this.sentBack.has(ticketId)) {
       this.sentBack.add(ticketId);
       this.saveTurn(ticketId, { sentBack: true });
     }
@@ -4171,11 +4192,11 @@ export class Runner {
       const ticket = this.store.getTicket(ticketId);
       if (ticket?.kind === 'ticket') this.checkBudget(ticketId, budgetFor(this.store, ticket), this.store.ticketCost(ticketId), false);
     }
-    if (ev.type === 'user' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'tool_result')) {
+    if (ev.type === 'user' && Array.isArray(ev.message?.content) && (ev.message!.content as ContentBlock[]).some((b) => b?.type === 'tool_result')) {
       this.onFilesMayChange(ticketId, false);
     }
     // A reply that links a file shows it in the artifacts list as it lands (the scan's own test: replyTexts).
-    if (ev.type === 'assistant' && Array.isArray(ev.message?.content) && ev.message.content.some((b: any) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(']('))) {
+    if (ev.type === 'assistant' && Array.isArray(ev.message?.content) && (ev.message!.content as ContentBlock[]).some((b) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(']('))) {
       this.onFilesMayChange(ticketId, true);
     }
     this.notePushes(ticketId, ev);
@@ -4194,7 +4215,7 @@ export class Runner {
    * Count an assistant message (main thread or Grunt) toward the turn's estimated cost, and post the alert card (and push)
    * when it passes a stage. Saved in the TurnState, so a restart carries on where it was; Codex turns aren't metered.
    */
-  private meterSpend(ticketId: number, ev: any) {
+  private meterSpend(ticketId: number, ev: ClaudeEvent) {
     const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
     if (!turn?.startedAt || turn.codex) return;
     let spend = this.spends.get(ticketId);
@@ -4247,8 +4268,8 @@ export class Runner {
   private costReason(ticketId: number): string | null {
     const ask = this.store.eventsOfKinds(ticketId, ['note']).findLast((e) => JSON.parse(e.data).text?.startsWith('Budget:'));
     const texts = this.store.eventsOfKinds(ticketId, ['claude'], ask?.id ?? 0).filter((e) => e.data.includes(REASON)).flatMap((e) => {
-      const d = JSON.parse(e.data);
-      return d.type === 'assistant' && !d.parent_tool_use_id && Array.isArray(d.message?.content) ? d.message.content.filter((c: any) => c?.type === 'text' && typeof c.text === 'string').map((c: any) => c.text) : [];
+      const d: ClaudeEvent = JSON.parse(e.data);
+      return d.type === 'assistant' && !d.parent_tool_use_id && Array.isArray(d.message?.content) ? d.message.content.filter((c) => c?.type === 'text' && typeof c.text === 'string').map((c) => c.text!) : [];
     });
     return costReason(texts);
   }
@@ -4294,9 +4315,9 @@ export class Runner {
   }
 
   /** A main-thread message without its status trailer, remembering the last good one for the turn's end; a bad one is noted once. */
-  private stripStatus(ticketId: number, ev: any): any {
+  private stripStatus(ticketId: number, ev: ClaudeEvent): ClaudeEvent {
     let changed = false;
-    const content = ev.message.content.flatMap((b: any) => {
+    const content = (ev.message!.content as ContentBlock[]).flatMap((b): ContentBlock[] => {
       if (b?.type !== 'text' || typeof b.text !== 'string') return [b];
       const { text, status, bad } = takeStatus(b.text);
       if (text === b.text) return [b];
@@ -4326,14 +4347,14 @@ export class Runner {
 
   private replaceSentBack(ticketId: number, resultId: number) {
     // A Grunt's words aren't the reply.
-    const words = (data: any) => data.type === 'assistant' && !data.parent_tool_use_id && (data.message?.content ?? []).some((b: any) => b?.type === 'text' && b.text?.trim());
-    const sentBack = (data: any) => data.type === 'user' && Array.isArray(data.message?.content)
-      && data.message.content.some((b: any) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(SENT_BACK));
+    const words = (data: ClaudeEvent) => data.type === 'assistant' && !data.parent_tool_use_id && ((data.message?.content ?? []) as ContentBlock[]).some((b) => b?.type === 'text' && b.text?.trim());
+    const sentBack = (data: ClaudeEvent) => data.type === 'user' && Array.isArray(data.message?.content)
+      && data.message.content.some((b) => b?.type === 'text' && typeof b.text === 'string' && b.text.includes(SENT_BACK));
     const swaps: { original: EventRow; rewrite?: EventRow }[] = [];
     let last: EventRow | null = null;
     for (const e of this.store.eventsPage(ticketId, resultId, 1).events) {
       if (e.kind !== 'claude') continue;
-      const data = JSON.parse(e.data);
+      const data: ClaudeEvent = JSON.parse(e.data);
       if (sentBack(data)) {
         if (last) swaps.push({ original: last });
       } else if (words(data)) {
@@ -4342,12 +4363,12 @@ export class Runner {
         if (open && open.original !== e) open.rewrite = e;
       }
     }
-    const text = (data: any) => data.message.content.filter((b: any) => b?.type === 'text').map((b: any) => b.text).join('').trim();
+    const text = (data: ClaudeEvent) => (data.message!.content as ContentBlock[]).filter((b) => b?.type === 'text').map((b) => b.text).join('').trim();
     for (const { original, rewrite } of swaps) {
       if (!rewrite) continue;
       // A bare KEEP stands by the first version (#404): the KEEP is what gives way.
       const [gone, by] = text(JSON.parse(rewrite.data)).replace(/[*_.!]/g, '').toUpperCase() === KEEP ? [rewrite, original] : [original, rewrite];
-      const data = JSON.parse(gone.data);
+      const data: ClaudeEvent & { replaced?: number } = JSON.parse(gone.data);
       if (data.replaced) continue;
       this.store.setEventData(gone.id, { ...data, replaced: by.id });
       this.emit(ticketId, 'replaced', { event: gone.id, by: by.id });
@@ -4362,7 +4383,7 @@ export class Runner {
   private mainModels = new Map<number, string>();
 
   /** The usage ledger (#1306): each tool, skill and Grunt type a main-thread message calls. Never throws. */
-  private countUse(blocks: any[]) {
+  private countUse(blocks: ContentBlock[]) {
     try {
       for (const b of blocks) {
         if (b?.type !== 'tool_use' || typeof b.name !== 'string') continue;
@@ -4378,16 +4399,16 @@ export class Runner {
   private pushCalls = new Map<string, 'push' | 'pr'>();
 
   /** A note in the chat for each push or pull request, saying whose GitHub it went out as (Cara's pick: "only a chat note"). */
-  private notePushes(ticketId: number, ev: any) {
-    const blocks: any[] = Array.isArray(ev.message?.content) ? ev.message.content : [];
+  private notePushes(ticketId: number, ev: ClaudeEvent) {
+    const blocks: ContentBlock[] = Array.isArray(ev.message?.content) ? ev.message.content : [];
     for (const b of blocks) {
       if (ev.type === 'assistant' && b?.type === 'tool_use' && b.name === 'Bash' && typeof b.input?.command === 'string' && typeof b.id === 'string') {
         const kind = pushKind(b.input.command);
         if (kind) this.pushCalls.set(b.id, kind);
       }
-      if (ev.type !== 'user' || b?.type !== 'tool_result' || !this.pushCalls.has(b.tool_use_id)) continue;
-      const kind = this.pushCalls.get(b.tool_use_id)!;
-      this.pushCalls.delete(b.tool_use_id);
+      if (ev.type !== 'user' || b?.type !== 'tool_result' || !this.pushCalls.has(b.tool_use_id!)) continue;
+      const kind = this.pushCalls.get(b.tool_use_id!)!;
+      this.pushCalls.delete(b.tool_use_id!);
       const turn = this.store.getSetting<TurnState>(turnKey(ticketId));
       // Absent: GitHub linking isn't set up, and the box's own login pushes as before.
       if (turn?.github === undefined) continue;
@@ -4401,7 +4422,7 @@ export class Runner {
    * Say so in the chat (as an error, which pushes) when the turn's own MCP server didn't connect:
    * without it a minion can't set its status or ask questions, and a Taskmaster can't manage minions.
    */
-  private checkMcp(ticketId: number, servers: any[]) {
+  private checkMcp(ticketId: number, servers: NonNullable<ClaudeEvent['mcp_servers']>) {
     const role = this.store.getTicket(ticketId)?.kind === 'coordinator' ? 'coordinator' : 'thread';
     const status = servers.find((s) => s?.name === role)?.status;
     // Pending: still starting after Claude Code's startup wait; it may yet connect.
@@ -4416,8 +4437,8 @@ export class Runner {
    * A plugin or MCP server that fails to load is skipped and the turn still exits 0 (AG-03): say so in the chat as an error
    * and on the minion's note. It warns and doesn't end the turn: a missing thread/coordinator server already has checkMcp's error.
    */
-  private checkLoadErrors(ticketId: number, ev: any) {
-    const line = (e: any, kind: string) => {
+  private checkLoadErrors(ticketId: number, ev: ClaudeEvent) {
+    const line = (e: LoadError, kind: string) => {
       const name = typeof e === 'object' ? e?.plugin ?? e?.name ?? e?.server : null;
       const why = typeof e === 'string' ? e : e?.error ?? e?.message ?? JSON.stringify(e);
       return `${name ? `${name} ` : ''}${kind}: ${why}`;
@@ -4425,8 +4446,8 @@ export class Runner {
     const role = this.store.getTicket(ticketId)?.kind === 'coordinator' ? 'coordinator' : 'thread';
     // The turn's own server already got checkMcp's error.
     const lines = [
-      ...(Array.isArray(ev.plugin_errors) ? ev.plugin_errors.map((e: any) => line(e, 'plugin')) : []),
-      ...(Array.isArray(ev.mcp_server_errors) ? ev.mcp_server_errors.filter((e: any) => e?.name !== role).map((e: any) => line(e, 'MCP server')) : []),
+      ...(Array.isArray(ev.plugin_errors) ? ev.plugin_errors.map((e) => line(e, 'plugin')) : []),
+      ...(Array.isArray(ev.mcp_server_errors) ? ev.mcp_server_errors.filter((e) => (typeof e === 'string' ? undefined : e?.name) !== role).map((e) => line(e, 'MCP server')) : []),
     ];
     if (!lines.length) return;
     const text = `This turn started with load errors, so some of its skills, hooks or tools are missing: ${lines.join('; ')}`.slice(0, 1500);
@@ -4597,10 +4618,10 @@ export class Runner {
   }
 
   /** Record a Codex turn's usage windows (account/rateLimits) as its person's, for their usage bar. */
-  updateCodexUsage(l: any, person: number | null) {
-    const w = (x: any) => (x && typeof x.usedPercent === 'number' ? { usedPercent: x.usedPercent, windowDurationMins: typeof x.windowDurationMins === 'number' ? x.windowDurationMins : null, resetsAt: typeof x.resetsAt === 'number' ? x.resetsAt : null } : null);
+  updateCodexUsage(l: unknown, person: number | null) {
+    const w = (x: CodexWindow | null | undefined) => (x && typeof x.usedPercent === 'number' ? { usedPercent: x.usedPercent, windowDurationMins: typeof x.windowDurationMins === 'number' ? x.windowDurationMins : null, resetsAt: typeof x.resetsAt === 'number' ? x.resetsAt : null } : null);
     if (person === null || !l) return;
-    this.store.setSetting(codexUsageKey(person), { primary: w(l.primary), secondary: w(l.secondary), updatedAt: Date.now() });
+    this.store.setSetting(codexUsageKey(person), { primary: w((l as CodexLimits).primary), secondary: w((l as CodexLimits).secondary), updatedAt: Date.now() });
     this.broadcast({ type: 'codex', codex: this.codexView(person), to: person });
   }
 
@@ -4621,14 +4642,14 @@ export class Runner {
   }
 
   /** Record a turn's plan usage: the server login's (the top bar's meter), or a container turn's payer's own (#213). */
-  private updateUsage(info: any, ticketId?: number) {
+  private updateUsage(info: unknown, ticketId?: number) {
     const turn = ticketId === undefined ? null : this.store.getSetting<TurnState>(turnKey(ticketId));
     this.recordUsage(info, turn?.container && turn.person ? turn.person : null, turn?.person ?? null, turn?.account);
   }
 
   /** Record a Claude turn's `rate_limit_info` on `account` of `payer` (null: the server login), a minion's or an app's (#793). */
-  recordUsage(info: any, payer: number | null, person: number | null, account?: number) {
-    const windows = info?.unifiedWindows;
+  recordUsage(info: unknown, payer: number | null, person: number | null, account?: number) {
+    const windows = (info as RateLimitInfo | null | undefined)?.unifiedWindows;
     if (!windows) return;
     const key = accountUsageKey(payer, account);
     const was = this.store.getSetting<Usage>(key);

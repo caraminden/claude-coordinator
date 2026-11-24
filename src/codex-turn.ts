@@ -20,6 +20,119 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { callLine, CODEX_NOTE, isTurnNote, codexModelFor, saveGenerated, toCodexPreamble } from './codex.ts';
 import { codexLock, LOCK_ENV, startTime } from './codex-lock.ts';
+import type { ClaudeEvent, ClaudeMessage } from './claude-events.ts';
+
+/** Claude's --mcp-config file: each server is a stdio command or an HTTP url. */
+interface McpServer {
+  type?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  /** Milliseconds. */
+  timeout?: number;
+}
+interface McpConfig {
+  mcpServers?: Record<string, McpServer>;
+}
+
+/** One entry of a turn's `input` for Codex. */
+interface CodexInput {
+  type: string;
+  text?: string;
+  text_elements?: unknown[];
+  url?: string;
+}
+
+/** One usage window of Codex's account/rateLimits. */
+interface CodexWindow {
+  usedPercent?: number;
+  resetsAt?: number;
+}
+interface CodexLimits {
+  primary?: CodexWindow | null;
+  secondary?: CodexWindow | null;
+  rateLimitReachedType?: unknown;
+}
+
+/** A part of an MCP tool call's result content. */
+interface CodexContent {
+  type?: string;
+  text?: string;
+}
+
+/** An item of Codex's app-server protocol (item/started, item/completed): the fields each type carries, all optional. */
+interface CodexItem {
+  type?: string;
+  id: string;
+  /** agentMessage */
+  text?: string;
+  /** commandExecution */
+  command?: string;
+  aggregatedOutput?: string;
+  status?: string;
+  exitCode?: number;
+  /** fileChange */
+  changes?: { kind?: { type?: string } | string; path?: string; diff?: string }[];
+  /** mcpToolCall */
+  server?: string;
+  tool?: string;
+  arguments?: object;
+  error?: { message?: string };
+  /** An mcpToolCall's { content } or an imageGeneration's base64. */
+  result?: unknown;
+  /** webSearch, imageView, imageGeneration */
+  query?: string;
+  path?: string;
+  revisedPrompt?: string;
+  prompt?: string;
+  savedPath?: string;
+}
+
+interface CodexTurn {
+  id?: string;
+  status?: string;
+  error?: { message?: string; codexErrorInfo?: unknown };
+}
+
+/** A notification's params, by method: only what main() reads. */
+interface CodexParams {
+  item?: CodexItem;
+  delta?: unknown;
+  run?: { status?: string; entries?: { text?: string }[]; statusMessage?: string };
+  plan?: { step?: string; status?: string }[];
+  tokenUsage?: { last?: { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens?: number; outputTokens: number } };
+  rateLimits?: CodexLimits;
+  name?: string;
+  status?: unknown;
+  willRetry?: boolean;
+  error?: { message?: string };
+  turn?: CodexTurn;
+}
+
+/** What `call` resolves to: the result of thread/start, thread/resume, turn/start, account/rateLimits/read. */
+interface CodexResult {
+  thread?: { id: string };
+  turn?: CodexTurn;
+  rateLimits?: CodexLimits;
+}
+
+/** One JSON-RPC line from `codex app-server`: a response (id, result or error), a request or a notification (method, params). */
+interface CodexMessage {
+  id?: number;
+  method?: string;
+  params?: CodexParams;
+  result?: CodexResult;
+  error?: { message?: string };
+}
+
+/** A user line waiting for its turn. */
+interface QueuedLine {
+  content: ClaudeMessage['content'];
+  uuid?: string;
+  line: ClaudeEvent;
+}
 
 export const QUIET_MS = 30 * 60 * 1000;
 /** Codex's session files (rollouts) older than this are deleted when a turn starts. */
@@ -42,14 +155,14 @@ export function parseArgs(argv: string[]): Map<string, string[]> {
  * server's headers) moved into `env` and named by reference: Codex forwards env_vars and env_http_headers
  * from its own environment, so no token sits in its config or session files.
  */
-export function mcpServers(mcp: any, turnEnv: Record<string, string | undefined>, toolTimeoutSec: number): { config: Record<string, object>; env: Record<string, string>; names: string[] } {
+export function mcpServers(mcp: McpConfig | null | undefined, turnEnv: Record<string, string | undefined>, toolTimeoutSec: number): { config: Record<string, object>; env: Record<string, string>; names: string[] } {
   const config: Record<string, object> = {};
   const env: Record<string, string> = {};
   const names: string[] = [];
   // A stdio server gets the turn's own Citadel variables, as Claude's do (the thread server's token and ticket).
   const citadel = Object.keys(turnEnv).filter((k) => /^(COORDINATOR_|CITADEL_(?!CODEX_)|MCP_TOOL_TIMEOUT$)/.test(k));
   let n = 0;
-  for (const [name, s] of Object.entries<any>(mcp?.mcpServers ?? {})) {
+  for (const [name, s] of Object.entries(mcp?.mcpServers ?? {})) {
     if (!/^[\w-]+$/.test(name)) continue;
     const timeout = typeof s.timeout === 'number' ? Math.ceil(s.timeout / 1000) : toolTimeoutSec;
     if (s.type === 'http' || s.url) {
@@ -70,9 +183,9 @@ export function mcpServers(mcp: any, turnEnv: Record<string, string | undefined>
 }
 
 /** A Claude stream-json user line's content as Codex input; images become data URLs. */
-export function codexInput(content: any): any[] {
+export function codexInput(content: ClaudeMessage['content']): CodexInput[] {
   if (typeof content === 'string') return [{ type: 'text', text: content, text_elements: [] }];
-  const out: any[] = [];
+  const out: CodexInput[] = [];
   for (const b of Array.isArray(content) ? content : []) {
     if (b?.type === 'text' && typeof b.text === 'string') out.push({ type: 'text', text: b.text, text_elements: [] });
     else if (b?.type === 'image' && b.source?.type === 'base64') out.push({ type: 'image', url: `data:${b.source.media_type};base64,${b.source.data}` });
@@ -80,13 +193,13 @@ export function codexInput(content: any): any[] {
   return out;
 }
 
-const errorKind = (info: any): string => (typeof info === 'string' ? info : info && typeof info === 'object' ? Object.keys(info)[0] ?? '' : '');
+const errorKind = (info: unknown): string => (typeof info === 'string' ? info : info && typeof info === 'object' ? Object.keys(info)[0] ?? '' : '');
 
 /** Claude Code's words for a usage limit, which the runner's USAGE_LIMIT wait already handles. */
-export function limitWords(limits: any, now = Date.now(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
+export function limitWords(limits: CodexLimits | null | undefined, now = Date.now(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): string {
   const windows = [limits?.primary, limits?.secondary].filter((w) => w && typeof w.resetsAt === 'number');
-  const full = windows.filter((w) => w.usedPercent >= 100);
-  const at = Math.max(0, ...(full.length ? full : windows).map((w) => w.resetsAt * 1000));
+  const full = windows.filter((w) => w!.usedPercent! >= 100);
+  const at = Math.max(0, ...(full.length ? full : windows).map((w) => w!.resetsAt! * 1000));
   if (!at || at <= now) return "You've hit your Codex usage limit";
   const time = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit', hour12: true }).format(at).replace(/\s/g, '').toLowerCase();
   const day = at - now > 20 * 3600_000 ? `${new Intl.DateTimeFormat('en-US', { timeZone, month: 'short', day: 'numeric' }).format(at)}, ` : '';
@@ -201,12 +314,12 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const child = spawn(env.CITADEL_CODEX_BIN || 'codex', codexArgs, { cwd, env: { ...env, ...mcp.env, ...lockEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stderr!.on('data', (b) => process.stderr.write(b));
   let nextId = 1;
-  const waiting = new Map<number, (m: any) => void>();
+  const waiting = new Map<number, (m: CodexMessage) => void>();
   const send = (m: object) => child.stdin!.write(JSON.stringify(m) + '\n');
   const call = (method: string, params: object) =>
-    new Promise<any>((resolve, reject) => {
+    new Promise<CodexResult>((resolve, reject) => {
       const id = nextId++;
-      waiting.set(id, (m) => (m.error ? reject(new Error(`${method}: ${m.error.message ?? JSON.stringify(m.error)}`)) : resolve(m.result)));
+      waiting.set(id, (m) => (m.error ? reject(new Error(`${method}: ${m.error.message ?? JSON.stringify(m.error)}`)) : resolve(m.result!)));
       send({ id, method, params });
     });
 
@@ -223,10 +336,10 @@ export async function main(argv: string[], env: Record<string, string | undefine
   /** Steers sent and not yet answered: one Codex refuses still starts a turn, so the run can't end before it's answered. */
   let steering = 0;
   let lastText = '';
-  let rateLimits: any = null;
-  let usage: any = null;
+  let rateLimits: CodexLimits | null = null;
+  let usage: CodexParams['tokenUsage'] = undefined;
   const errors: string[] = [];
-  const queue: { content: any; uuid?: string; line: any }[] = [];
+  const queue: QueuedLine[] = [];
   const mcpStatus = new Map<string, string>();
   let quiet: NodeJS.Timeout;
   const finish = (code: number) => {
@@ -246,12 +359,12 @@ export async function main(argv: string[], env: Record<string, string | undefine
     }, quietMs);
   };
 
-  const taken = (q: { uuid?: string; line: any }) => {
+  const taken = (q: QueuedLine) => {
     if (replay) out({ ...q.line, isReplay: true });
   };
-  const startTurn = async (q: { content: any; uuid?: string; line: any }) => {
+  const startTurn = async (q: QueuedLine) => {
     busy = true;
-    const text = typeof q.content === 'string' ? q.content : (q.content ?? []).filter((b: any) => b?.type === 'text' && !isTurnNote(String(b.text ?? ''))).map((b: any) => b.text).join('\n');
+    const text = typeof q.content === 'string' ? q.content : (q.content ?? []).filter((b) => b?.type === 'text' && !isTurnNote(String(b.text ?? ''))).map((b) => b.text).join('\n');
     log(`[Message] ${text}`);
     const input = [...(preamble ? [{ type: 'text', text: preamble, text_elements: [] }] : []), ...codexInput(q.content)];
     preamble = null;
@@ -261,7 +374,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
     if (busy && !turnId) turnId = r?.turn?.id ?? null;
     taken(q);
   };
-  const userLine = async (line: any) => {
+  const userLine = async (line: ClaudeEvent) => {
     const q = { content: line.message?.content, uuid: line.uuid, line };
     if (!threadId || (busy && !turnId)) return void queue.push(q);
     if (!busy) return void startTurn(q).catch(fail);
@@ -287,13 +400,13 @@ export async function main(argv: string[], env: Record<string, string | undefine
   const assistant = (id: string, content: object[]) => out({ type: 'assistant', message: { id, type: 'message', role: 'assistant', model, content }, parent_tool_use_id: null });
   const result = (id: string, content: unknown, isError: boolean) => out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] }, parent_tool_use_id: null });
   const started = new Set<string>();
-  const use = (item: any, name: string, input: object) => {
+  const use = (item: CodexItem, name: string, input: object) => {
     if (started.has(item.id)) return;
     started.add(item.id);
     assistant(`msg_${item.id}`, [{ type: 'tool_use', id: item.id, name, input }]);
     log(callLine(name, input));
   };
-  const onItem = (item: any, done: boolean) => {
+  const onItem = (item: CodexItem | undefined, done: boolean) => {
     switch (item?.type) {
       case 'agentMessage':
         if (!done && partial) out({ type: 'stream_event', event: { type: 'message_start', message: { id: item.id } }, parent_tool_use_id: null });
@@ -313,9 +426,9 @@ export async function main(argv: string[], env: Record<string, string | undefine
         return;
       case 'fileChange': {
         const changes = Array.isArray(item.changes) ? item.changes : [];
-        use(item, 'apply_patch', { files: changes.map((ch: any) => `${ch.kind?.type ?? ch.kind ?? 'update'} ${ch.path}`) });
+        use(item, 'apply_patch', { files: changes.map((ch) => `${(typeof ch.kind === 'string' ? undefined : ch.kind?.type) ?? ch.kind ?? 'update'} ${ch.path}`) });
         if (done) {
-          const text = changes.map((ch: any) => `${ch.path}\n${ch.diff ?? ''}`).join('\n');
+          const text = changes.map((ch) => `${ch.path}\n${ch.diff ?? ''}`).join('\n');
           result(item.id, text, item.status !== 'completed');
           log(text, true);
         }
@@ -324,9 +437,9 @@ export async function main(argv: string[], env: Record<string, string | undefine
       case 'mcpToolCall':
         use(item, `mcp__${item.server}__${item.tool}`, item.arguments ?? {});
         if (done) {
-          const content = item.error ? String(item.error.message ?? 'failed') : (item.result?.content ?? []);
+          const content = item.error ? String(item.error.message ?? 'failed') : ((item.result as { content?: CodexContent[] } | undefined)?.content ?? []);
           result(item.id, content, !!item.error);
-          log(typeof content === 'string' ? content : content.map((b: any) => (b?.type === 'text' ? b.text : `[${b?.type}]`)).join('\n'), true);
+          log(typeof content === 'string' ? content : content.map((b) => (b?.type === 'text' ? b.text : `[${b?.type}]`)).join('\n'), true);
         }
         return;
       case 'webSearch':
@@ -360,7 +473,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
   let hookCalls = 0;
   let sentLimits = '';
   /** Codex's usage windows, passed on when they say something new. */
-  const limits = (l: any) => {
+  const limits = (l: CodexLimits | null | undefined) => {
     if (!l || (!l.primary && !l.secondary)) return;
     rateLimits = l;
     const j = JSON.stringify({ primary: l.primary, secondary: l.secondary, reached: l.rateLimitReachedType });
@@ -368,7 +481,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
     sentLimits = j;
     out({ type: 'codex_rate_limits', rate_limits: l });
   };
-  const onMessage = (m: any) => {
+  const onMessage = (m: CodexMessage) => {
     const p = m.params ?? {};
     switch (m.method) {
       case 'item/started':
@@ -382,15 +495,15 @@ export async function main(argv: string[], env: Record<string, string | undefine
         // A tripwire block: the call never runs, so it has no item; show it as Claude shows a hook's block.
         if (p.run?.status !== 'blocked') return;
         const id = `hook_${++hookCalls}`;
-        const why = (p.run.entries ?? []).map((e: any) => e.text).join('\n') || p.run.statusMessage || 'Blocked by the tripwire.';
+        const why = (p.run.entries ?? []).map((e) => e.text).join('\n') || p.run.statusMessage || 'Blocked by the tripwire.';
         assistant(`msg_${id}`, [{ type: 'tool_use', id, name: 'Tripwire', input: { blocked: true } }]);
         result(id, why, true);
         log(`[Tripwire] ${why}`, true);
         return;
       }
       case 'turn/plan/updated': {
-        const status = (s: string) => (s === 'inProgress' || s === 'in_progress' ? 'in_progress' : s === 'completed' ? 'completed' : 'pending');
-        const todos = (p.plan ?? []).map((s: any) => ({ content: String(s.step), activeForm: String(s.step), status: status(s.status) }));
+        const status = (s: string | undefined) => (s === 'inProgress' || s === 'in_progress' ? 'in_progress' : s === 'completed' ? 'completed' : 'pending');
+        const todos = (p.plan ?? []).map((s) => ({ content: String(s.step), activeForm: String(s.step), status: status(s.status) }));
         assistant(`msg_plan_${Date.now()}`, [{ type: 'tool_use', id: `plan_${Date.now()}`, name: 'TodoWrite', input: { todos } }]);
         return;
       }
@@ -409,7 +522,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
         if (busy && !turnId) turnId = p.turn?.id ?? null;
         return;
       case 'turn/completed': {
-        const turn = p.turn ?? {};
+        const turn: CodexTurn = p.turn ?? {};
         turnId = null;
         busy = false;
         if (stopping) return finish(143);
@@ -440,7 +553,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
       const line = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
       if (!line) continue;
-      let m: any;
+      let m: CodexMessage;
       try {
         m = JSON.parse(line);
       } catch {
@@ -452,7 +565,7 @@ export async function main(argv: string[], env: Record<string, string | undefine
         waiting.delete(m.id);
       } else if (m.id !== undefined) {
         // Requests from Codex: nobody can answer an approval here (the tripwire hook already checked the call).
-        if (/requestApproval$|^(applyPatch|execCommand)Approval$/.test(m.method)) send({ id: m.id, result: { decision: 'decline' } });
+        if (/requestApproval$|^(applyPatch|execCommand)Approval$/.test(m.method!)) send({ id: m.id, result: { decision: 'decline' } });
         else if (m.method === 'mcpServer/elicitation/request') send({ id: m.id, result: { action: 'decline' } });
         else send({ id: m.id, error: { code: -32601, message: `${m.method} isn't available in a Citadel turn` } });
       } else onMessage(m);
@@ -498,13 +611,13 @@ export async function main(argv: string[], env: Record<string, string | undefine
     const thread = { cwd, model, approvalPolicy: 'never', sandbox: 'danger-full-access', config: mcp.config, developerInstructions };
     const resume = one('--codex-thread');
     let fresh = !resume;
-    let r: any = null;
+    let r: CodexResult | null = null;
     if (resume) r = await call('thread/resume', { threadId: resume, ...thread }).catch(() => null);
     if (!r) {
       fresh = true;
       r = await call('thread/start', thread);
     }
-    threadId = r.thread.id;
+    threadId = r.thread!.id;
     out({ type: 'system', subtype: 'init', model, cwd, codex_thread: threadId, mcp_servers: mcp.names.map((name) => ({ name, status: mcpStatus.get(name) === 'failed' ? 'failed' : 'connected' })), tools: [], ...(resume && fresh ? { codex_resume_failed: resume } : {}) });
     const handover = one('--codex-handover');
     const handoverLog = fresh && handover && existsSync(handover) ? readFileSync(handover, 'utf8').trim() : '';
@@ -513,8 +626,8 @@ export async function main(argv: string[], env: Record<string, string | undefine
     const first = queue.shift();
     if (first) await startTurn(first);
     else if (inputEnded) finish(0);
-  } catch (err: any) {
-    fail(err);
+  } catch (err) {
+    fail(err as Error);
   }
 }
 

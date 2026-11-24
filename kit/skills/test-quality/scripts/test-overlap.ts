@@ -14,7 +14,7 @@
 // (imports, setup) are ignored. containment = weighted |A∩B| / min(|A|,|B|) (a small file inside a big one scores 1.0, which
 // Jaccard hides); jaccard = weighted |A∩B| / |A∪B|. Ranked by containment, then jaccard, then shared lines.
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
 
 export type Covered = Map<string, Set<string>>; // test file -> set of "source:line" keys it ran
@@ -82,7 +82,7 @@ export function scorePairs(covered: Covered, opts: { min?: number; minLines?: nu
 export function nodeArgs(script: string): { launcher: string; flags: string[] } {
   const first = script.trim().split(/\s+/)[0] ?? '';
   const launcher = /--test\b/.test(script) && first && first !== 'node' && !first.includes('=') ? first : 'node';
-  const flags = [...script.matchAll(/(?:^|\s)(--test-global-setup=\S+|--test-timeout=\S+|--experimental-[\w-]+(?:=\S+)?|--(?:import|require)(?:=|\s+)\S+)/g)].flatMap((m) => m[1].split(/\s+/));
+  const flags = [...script.matchAll(/(?:^|\s)(--test-global-setup=\S+|--test-timeout=\d+|--experimental-[\w-]+(?:=\S+)?|--(?:import|require)(?:=|\s+)\S+)/g)].flatMap((m) => m[1].split(/\s+/));
   return { launcher, flags: flags.map((f) => f.replace(/^['"]|['"]$/g, '')) };
 }
 
@@ -105,7 +105,10 @@ function runOne(cmd: string[], cwd: string, timeoutMs: number): Promise<number |
       clearTimeout(t);
       resolve(code);
     });
-    p.on('error', () => resolve(null));
+    p.on('error', () => {
+      clearTimeout(t);
+      resolve(null);
+    });
   });
 }
 
@@ -148,6 +151,7 @@ async function main(): Promise<void> {
         const cmd = [launcher, '--test', ...flags, '--experimental-test-coverage', `--test-coverage-exclude=${dir === '.' ? '**/*.test.*' : `${dir}/**`}`, '--test-coverage-exclude=**/node_modules/**', '--test-reporter=lcov', `--test-reporter-destination=${dest}`, f];
         const code = await runOne(cmd, root, 300_000);
         if (code !== 0) failed.push(`${f} (exit ${code})`);
+        if (code === null) rmSync(dest, { force: true }); // killed or never started: a partial report must not be kept and reused
       }
       done++;
       if (done % 25 === 0) console.error(`${done}/${files.length} files, ${Math.round((Date.now() - started) / 1000)} s`);

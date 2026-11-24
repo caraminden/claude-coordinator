@@ -89,8 +89,10 @@ and check different things, and both stay. The rule in section 0 holds.
    `citadel-heavy node <kit>/skills/test-quality/scripts/test-overlap.ts --out "$TMPDIR/overlap" --jobs 3`
    (the kit's folder is this session's citadel plugin dir). Run it in the background and wait with
    `citadel-wait pid <pid>`; it resumes where it stopped if killed. Only inside the audit: it starts one process per
-   test file (Citadel's 634 files took about 21 min to measure at 3 jobs, plus 4 min to score), so never in CI or a ship script. An
-   audit that scopes to changed files passes them as arguments; the list then only covers pairs among those.
+   test file (one repo's 634 files took about 21 min to measure at 3 jobs, plus 4 min to score), so never in CI or
+   a ship script. Run it over the whole suite every audit, also when the audit's scope is only the files changed since
+   the last report: a new test duplicates an old one, so for the Grunt keep the pairs with at least one changed file
+   (`awk -F'\t' 'NR==1 || $4 ~ /<changed>/ || $5 ~ /<changed>/' pairs.tsv`, the changed names as a regex).
 2. **Read the output** `pairs.tsv`: containment (the share of the smaller file's lines the larger also runs, with
    lines nearly every test runs weighted down), jaccard, shared lines and the source files they share, ranked.
    A group of files that all score 1.00 against each other, on the same few source files, usually loaded one shared

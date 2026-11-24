@@ -37,5 +37,6 @@ test('nodeArgs keeps the test script launcher, global setup and timeout', () => 
   const r = nodeArgs('tools/citadel-node --test --test-timeout=$(( 60 * 1000 )) --test-global-setup=test/leak-guard.ts test/');
   assert.equal(r.launcher, 'tools/citadel-node');
   assert.ok(r.flags.includes('--test-global-setup=test/leak-guard.ts'));
+  assert.ok(!r.flags.some((f) => f.includes('$')), `a shell expression is not a flag: ${r.flags}`);
   assert.equal(nodeArgs('node --test').launcher, 'node');
 });

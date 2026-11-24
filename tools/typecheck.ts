@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 /**
- * Citadel's type check as a ratchet (#1789). Nothing checked Citadel's types until then: Node strips them and runs.
- * This runs tsc (tsconfig.json, strict, no emit) and counts, per file, two things:
+ * Type check as a ratchet (Citadel #1789; this is Citadel's copy of the kit's scheme-setup template typecheck.ts,
+ * kept the same outside its config block by test/typecheck.test.ts). It runs tsc (no emit) and counts, per file, two things:
  *  - errors: tsc's errors in that file;
  *  - escapes: the ways round the checker, an explicit `any` in a type or a `@ts-ignore`, `@ts-expect-error` or
- *    `@ts-nocheck` comment (Cara, 2026-11-24: "make sure citadel ... don't cheat and use 'any'").
- * test/typecheck-baseline.json holds each file's counts as of the last lowering. test/typecheck.test.ts fails when a
- * file's count goes above its baseline or a file not in the baseline has any; a count below it passes, and
- * `--update` lowers the baseline to match. Nothing here ever raises a count.
+ *    `@ts-nocheck` comment (Cara, 2026-11-24: "make sure citadel and the rest of our typescript schemes don't cheat
+ *    and use 'any'").
+ * The baseline file holds each file's counts as of the last lowering. The check fails when a file's count goes above
+ * its baseline, or a file not in the baseline has any; a count below it passes, and `--update` lowers the baseline to
+ * match. Nothing here ever raises a count, except `--update --moved` after moving code, and only when no total rose.
+ * Needs Node 22.18+ (it runs as TypeScript and uses module.stripTypeScriptTypes) and typescript in node_modules; with
+ * no tsconfig it counts escapes only.
  *
- *   node tools/typecheck.ts            what went up, what went down (exit 1 when anything went up)
+ *   node tools/typecheck.ts            what went up, what went down (exit 1 when anything went up: the gate)
+ *   node tools/typecheck.ts --init     write the first baseline (once)
  *   node tools/typecheck.ts --update   lower the baseline to today's counts (refuses while anything went up)
  *   node tools/typecheck.ts --update --moved   after moving or splitting code: take today's counts file by file,
  *                                      refused if the repo's total errors or escapes went up
@@ -18,28 +22,37 @@
 import { execFile } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import * as nodeModule from 'node:module';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 
-const run = promisify(execFile);
+// --- config: set these to this repo (everything below is the kit's, the same in every scheme) ---
 export const ROOT = join(import.meta.dirname, '..');
 export const BASELINE = join(ROOT, 'test', 'typecheck-baseline.json');
-const TSC = join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
+/** The tsconfigs tsc checks, from ROOT; one that isn't there is skipped. */
+export const PROJECTS = ['tsconfig.json'];
+// --- end of config ---
+
+const run = promisify(execFile);
 
 export type Counts = { errors: number; escapes: number };
 export type Table = Record<string, Counts>;
 export type TscError = { file: string; line: number; col: number; code: string; text: string };
 
-/** tsc's errors, one per diagnostic (its follow-on lines folded into the text). Paths are relative to `root`. */
-export async function tscErrors(root = ROOT): Promise<TscError[]> {
-  if (!existsSync(TSC)) throw new Error('typescript is not installed in node_modules: run `npm ci` (a devDependency since #1789)');
-  // tsc exits 2 when it found errors; anything else on stderr with no parsed error is tsc itself failing.
-  const out = await run(process.execPath, [TSC, '-p', join(root, 'tsconfig.json'), '--pretty', 'false'], { cwd: root, maxBuffer: 64 * 1024 * 1024 })
-    .then((r) => r.stdout, (e: { stdout?: string; stderr?: string; message: string }) => {
-      if (e.stdout && /error TS\d+/.test(e.stdout)) return e.stdout;
-      throw new Error(`tsc failed to run: ${e.stderr || e.message}`);
-    });
-  return parseTsc(out, root);
+/** tsc's errors over every project, one per diagnostic (its follow-on lines folded into the text), paths from `root`. */
+export async function tscErrors(root = ROOT, projects = PROJECTS): Promise<TscError[]> {
+  const out: TscError[] = [];
+  for (const p of projects.map((p) => join(root, p)).filter((p) => existsSync(p))) {
+    const tsc = [root, dirname(p), ROOT].map((d) => join(d, 'node_modules', 'typescript', 'bin', 'tsc')).find((t) => existsSync(t));
+    if (!tsc) throw new Error('typescript is not installed in node_modules: run `npm ci` (the type check needs it as a devDependency)');
+    // tsc exits 2 when it found errors; anything else on stderr with no parsed error is tsc itself failing.
+    const stdout = await run(process.execPath, [tsc, '-p', p, '--noEmit', '--pretty', 'false'], { cwd: root, maxBuffer: 64 * 1024 * 1024 })
+      .then((r) => r.stdout, (e: { stdout?: string; stderr?: string; message: string }) => {
+        if (e.stdout && /error TS\d+/.test(e.stdout)) return e.stdout;
+        throw new Error(`tsc failed to run: ${e.stderr || e.message}`);
+      });
+    out.push(...parseTsc(stdout, root));
+  }
+  return out;
 }
 
 /** Parse `--pretty false` output: `file(line,col): error TSnnnn: text`, with indented continuation lines. */
@@ -63,7 +76,7 @@ type Strip = (code: string, opts: { mode: 'strip' }) => string;
 const strip = (nodeModule as unknown as { stripTypeScriptTypes?: Strip }).stripTypeScriptTypes;
 let warned = false;
 
-/** Node's own type stripping, minus its one-time "experimental" warning. */
+/** Node's own type stripping, minus its one-time "experimental" warning. Throws on code it can't parse (JSX). */
 function stripTypes(code: string): string {
   if (!strip) throw new Error(`node ${process.version} has no module.stripTypeScriptTypes, which the escape count needs`);
   if (warned) return strip(code, { mode: 'strip' });
@@ -78,36 +91,66 @@ function stripTypes(code: string): string {
 }
 
 const DIRECTIVE = /^[ \t]*(?:\/\/|\/\*+)[ \t]*@ts-(?:ignore|expect-error|nocheck)\b/gm;
+const WORD = /(?<![\w$])any(?![\w$])/g;
+
+/** Code with comments and string literals blanked to spaces, so positions stay put. Template `${}` holes are kept. */
+function blankText(code: string): string {
+  return code.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|\$\{[^}]*\}|[^`\\])*`/g, (m) => {
+    if (m[0] !== '`') return m.replace(/[^\n]/g, ' ');
+    return m.replace(/\$\{([^}]*)\}|[^\n]/g, (part, hole: string | undefined) => (hole === undefined ? ' ' : `  ${hole} `));
+  });
+}
+
+/**
+ * The `any`s in type positions, read from the text alone: for what Node's stripper can't parse (a .tsx file).
+ * shortcut: a pattern, not a parser; an `any` it misses or miscounts is counted the same way on both sides of the ratchet.
+ */
+function anysByPattern(code: string): number {
+  const text = blankText(code);
+  let n = 0;
+  for (const m of text.matchAll(WORD)) {
+    const before = text.slice(Math.max(0, m.index - 12), m.index);
+    const after = text.slice(m.index + 3, m.index + 6);
+    if (/(?:[:<|&]|\bas|\bextends|\bsatisfies|\bkeyof)\s*$/.test(before) || (/,\s*$/.test(before) && /^\s*[>,\]]/.test(after)) || /^\s*\[\]/.test(after)) n++;
+  }
+  return n;
+}
 
 /**
  * How many ways round the checker one TypeScript file takes: each `any` in a type, and each `@ts-ignore`,
  * `@ts-expect-error` or `@ts-nocheck` comment at the start of a line.
  * Types are found by Node's own stripper, which blanks every type in place: an `any` the stripper blanked was a type,
  * one it kept is a value, a property or text in a comment or string. A `.d.ts` is all types, so there every `any`
- * outside a comment counts.
+ * outside a comment counts. What the stripper can't parse (JSX) falls back to a pattern.
  */
 export function escapes(code: string, file = 'x.ts'): number {
   const directives = code.match(DIRECTIVE)?.length ?? 0;
-  const word = /(?<![\w$])any(?![\w$])/g;
   if (/\.d\.[cm]?ts$/.test(file)) {
     const bare = code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-    return directives + (bare.match(word)?.length ?? 0);
+    return directives + (bare.match(WORD)?.length ?? 0);
   }
-  const stripped = stripTypes(code);
+  let stripped: string;
+  try {
+    if (file.endsWith('.tsx')) throw new Error('JSX');
+    stripped = stripTypes(code);
+  } catch (e) {
+    if (!strip) throw e;
+    return directives + anysByPattern(code);
+  }
   let anys = 0;
-  for (const m of code.matchAll(word)) if (stripped.slice(m.index, m.index + 3) !== 'any') anys++;
+  for (const m of code.matchAll(WORD)) if (stripped.slice(m.index, m.index + 3) !== 'any') anys++;
   return directives + anys;
 }
 
-/** The TypeScript files git tracks, the escape count's files: every one, kit templates and public's .d.ts included. */
+/** The TypeScript files git tracks, the escape count's files. */
 export async function tsFiles(root = ROOT): Promise<string[]> {
-  const { stdout } = await run('git', ['ls-files', '-z', '--', '*.ts', '*.mts', '*.cts'], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
+  const { stdout } = await run('git', ['ls-files', '-z', '--', '*.ts', '*.tsx', '*.mts', '*.cts'], { cwd: root, maxBuffer: 16 * 1024 * 1024 });
   return stdout.split('\0').filter(Boolean).filter((f) => existsSync(join(root, f)));
 }
 
 /** Today's counts: every file with an error or an escape, and nothing else. */
-export async function measure(root = ROOT): Promise<{ table: Table; errors: TscError[] }> {
-  const [errors, files] = await Promise.all([tscErrors(root), tsFiles(root)]);
+export async function measure(root = ROOT, projects = PROJECTS): Promise<{ table: Table; errors: TscError[] }> {
+  const [errors, files] = await Promise.all([tscErrors(root, projects), tsFiles(root)]);
   const table: Table = {};
   const row = (f: string) => (table[f] ??= { errors: 0, escapes: 0 });
   for (const e of errors) row(e.file).errors++;
@@ -146,9 +189,10 @@ export function lowered(baseline: Table, now: Table): Table {
   return sorted(out);
 }
 
+const total = (t: Table, k: keyof Counts) => Object.values(t).reduce((s, c) => s + c[k], 0);
+
 /** After a move or split (a file's errors now in a new file): today's counts, or null when either total went up. */
 export function moved(baseline: Table, now: Table): Table | null {
-  const total = (t: Table, k: keyof Counts) => Object.values(t).reduce((s, c) => s + c[k], 0);
   if (total(now, 'errors') > total(baseline, 'errors') || total(now, 'escapes') > total(baseline, 'escapes')) return null;
   return sorted(Object.fromEntries(Object.entries(now).filter(([, c]) => c.errors || c.escapes)));
 }
@@ -172,6 +216,18 @@ export function describe(c: Change): string {
   return `${c.file}: ${c.kind} ${c.was} → ${c.now}`;
 }
 
+/** The gate's failure text: what went up, and how to fix it. */
+export function upMessage(up: Change[], errors: TscError[]): string {
+  const detail = up.filter((c) => c.kind === 'errors').flatMap((c) => errors.filter((e) => e.file === c.file).map((e) => `  ${e.file}(${e.line},${e.col}) ${e.code} ${e.text.split('\n')[0]}`));
+  return [
+    `A file has more type errors or escapes (an explicit \`any\`, or a @ts-ignore / @ts-expect-error / @ts-nocheck) than ${relative(ROOT, BASELINE)} allows:`,
+    ...up.map((c) => `  ${describe(c)}`),
+    'Fix them with real types (`unknown` and a narrowing, not `any`); the baseline only goes down. `node tools/typecheck.ts <file>` lists a file\'s errors.',
+    'Moved or split code (its old file went down as much)? `node tools/typecheck.ts --update --moved` re-files the counts when the totals did not rise.',
+    ...detail.slice(0, 40),
+  ].join('\n');
+}
+
 async function main(args: string[]) {
   const { table, errors } = await measure();
   const files = args.filter((a) => !a.startsWith('--'));
@@ -185,9 +241,7 @@ async function main(args: string[]) {
   }
   const baseline = existsSync(BASELINE) ? readBaseline() : {};
   const { up, down } = compare(baseline, table);
-  const total = (t: Table, k: keyof Counts) => Object.values(t).reduce((s, c) => s + c[k], 0);
   console.log(`typecheck: ${total(table, 'errors')} errors, ${total(table, 'escapes')} escapes (baseline ${total(baseline, 'errors')}, ${total(baseline, 'escapes')})`);
-  for (const c of up) console.log(`  UP    ${describe(c)}`);
   for (const c of down) console.log(`  down  ${describe(c)}`);
   if (args.includes('--init')) {
     // The first baseline only: from then on --update can only lower it.
@@ -207,17 +261,16 @@ async function main(args: string[]) {
     console.log(`typecheck: re-filed the counts in ${relative(ROOT, BASELINE)} (totals did not rise)`);
     return;
   }
-  if (args.includes('--update')) {
-    if (up.length) {
-      console.log('typecheck: not updating while a count is above its baseline: fix those first (`node tools/typecheck.ts <file>` lists them)');
-      process.exitCode = 1;
-      return;
-    }
-    writeFileSync(BASELINE, formatBaseline(lowered(baseline, table)));
-    console.log(`typecheck: lowered ${down.length} count(s) in ${relative(ROOT, BASELINE)}`);
+  if (up.length) {
+    console.log(upMessage(up, errors));
+    if (args.includes('--update')) console.log('typecheck: not updating while a count is above its baseline: fix those first');
+    process.exitCode = 1;
     return;
   }
-  if (up.length) process.exitCode = 1;
+  if (args.includes('--update')) {
+    writeFileSync(BASELINE, formatBaseline(lowered(baseline, table)));
+    console.log(`typecheck: lowered ${down.length} count(s) in ${relative(ROOT, BASELINE)}`);
+  }
 }
 
 if (import.meta.main) await main(process.argv.slice(2));

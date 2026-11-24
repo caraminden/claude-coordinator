@@ -11,6 +11,7 @@ import { flailBrakeHook, FLAIL_LINE } from '../kit/hooks/flail-brake.ts';
 import { bigReadHook } from '../kit/hooks/big-read.ts';
 import { heavyNudgeHook, HEAVY_NUDGE } from '../kit/hooks/heavy-nudge.ts';
 import { gruntModelHook, jobTable } from '../kit/hooks/grunt-model.ts';
+import { anyNudgeHook } from '../kit/hooks/any-nudge.ts';
 import { BIG_READ_MATCHER } from '../src/hook-matchers.ts';
 import { hookRunMatcher } from '../src/hook-run.ts';
 
@@ -384,6 +385,32 @@ test('after-call runner: on a recorded session it says and logs exactly what the
   // Calls no old entry took start nothing, and a broken input says nothing.
   for (const [event, tool] of [['PostToolUse', 'Agent'], ['PostToolUseFailure', 'Read'], ['PostToolUseFailure', 'Edit']]) assert.ok(!(hooks[event] ?? []).some((m: any) => exact(m.matcher).test(tool)), `${event} ${tool}`);
   assert.equal(script('run.ts', 'not json', now), '');
+});
+
+test('any nudge: an edit that adds an explicit any or @ts-ignore to a TypeScript file says so; one that keeps or drops them says nothing (#1789)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kit-any-'));
+  try {
+    const call = (tool: string, file: string, text: string, input: object) => {
+      writeFileSync(join(dir, file), text);
+      return anyNudgeHook({ hook_event_name: 'PostToolUse', tool_name: tool, cwd: dir, tool_input: { file_path: join(dir, file), ...input } });
+    };
+    const said = (out: string | null) => out && JSON.parse(out).hookSpecificOutput.additionalContext;
+    // An Edit is undone on today's text to count the file before it.
+    assert.match(said(call('Edit', 'a.ts', 'let a: any = 1;\nlet b: any = 2;\n', { old_string: 'let b: number = 2;', new_string: 'let b: any = 2;' })) ?? '', /added 1 explicit `any`.* to a\.ts \(2 now\)/);
+    assert.equal(call('Edit', 'a.ts', 'let a: any = 1;\nlet b: unknown = 2;\n', { old_string: 'let b: any = 2;', new_string: 'let b: unknown = 2;' }), null);
+    assert.equal(call('Edit', 'a.ts', 'let a: any = 1; // any\nconst any = "any";\n', { old_string: 'let a: any = 1;', new_string: 'let a: any = 1; // any\nconst any = "any";' }), null);
+    assert.match(said(call('Edit', 'b.ts', '// @ts-ignore\nf(1);\n', { old_string: 'f(1);', new_string: '// @ts-ignore\nf(1);', replace_all: true })) ?? '', /added 1 /);
+    // A MultiEdit is undone edit by edit, last first.
+    assert.match(said(call('MultiEdit', 'c.tsx', 'const x = <div y={z as any} />;\nlet q: any[] = [];\n', { edits: [{ old_string: 'z', new_string: 'z as any' }, { old_string: 'let q = [];', new_string: 'let q: any[] = [];' }] })) ?? '', /added 2 .* to c\.tsx/);
+    // A Write: what it replaced, or nothing for a new file.
+    assert.equal(call('Write', 'd.ts', 'let a: any;\n', {}), JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: JSON.parse(call('Write', 'd.ts', 'let a: any;\n', {})!).hookSpecificOutput.additionalContext } }));
+    assert.equal(anyNudgeHook({ hook_event_name: 'PostToolUse', tool_name: 'Write', cwd: dir, tool_input: { file_path: join(dir, 'd.ts') }, tool_response: { originalFile: 'let a: any;\n' } }), null);
+    // Not TypeScript, or a deletion that today's text can't undo: nothing.
+    assert.equal(call('Write', 'e.js', 'let a = /** @type {any} */ (1);\n', {}), null);
+    assert.equal(call('Edit', 'f.ts', 'let a: any;\n', { old_string: 'let b: any;\n', new_string: '' }), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
+  }
 });
 
 test('grunt-model guard: sends back an Agent call with no deliberate model or effort, lets pinned ones and forks through', () => {

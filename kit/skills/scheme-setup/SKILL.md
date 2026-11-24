@@ -87,6 +87,11 @@ content folder, the deploy scripts) goes in a path-scoped rule instead (step 7, 
    The plan's check commands also include a size budget: copy `templates/size-budget.test.ts` to the repo's
    `test/`, set its source folders and file extensions, and list each file already over the line limit at its current size with a
    one-line reason, so files can shrink but not grow (Citadel's is `test/size-budget.test.ts`).
+   A repo with TypeScript also gets the type check: copy `templates/typecheck.ts` to `tools/typecheck.ts`, set its
+   config block (baseline path, tsconfigs; none counts `any` only), add `typescript` as a devDependency, run
+   `node tools/typecheck.ts --init`, and make `node tools/typecheck.ts` (exit 1 when a file gains a type error, an
+   explicit `any` or a `@ts-ignore`) part of the check commands, with a line on fixing it with real types and
+   `--update` after lowering counts (Cara, 2026-11-24: "don't cheat and use 'any'"; Citadel's is `test/typecheck.test.ts`).
 2. **Working rules**: only this repo's own (its stack's traps, a file never to edit by hand).
    The Citadel-wide layer and the scheme instructions already reach every session, so nothing
    of theirs is repeated. A native-app scheme (the plan names a Real hardware part or the

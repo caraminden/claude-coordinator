@@ -3,7 +3,7 @@
  * flail-brake.ts (with the batch trial, batch-nudge.ts) used to start a node each. Here they run in that order, each
  * only on the calls its old hooks.json entry took, and each fails open on its own, as alone: each loads with its own
  * dynamic import, so one that can't load or throws leaves the others running. Their context lines merge into one
- * answer, joined by newlines. Never blocks.
+ * answer, joined by newlines. Never blocks. After an edit any-nudge.ts (#1789) runs between test-first and flail-brake.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 type Hook = (input: any) => string | null | void;
 const retroHook = async (): Promise<Hook> => (await import('./retro-log.ts')).retroHook;
 const testFirstHook = async (): Promise<Hook> => (await import('./test-first.ts')).testFirstHook;
+const anyNudgeHook = async (): Promise<Hook> => (await import('./any-nudge.ts')).anyNudgeHook;
 const flailBrakeOutput = async (): Promise<Hook> => (await import('./flail-brake.ts')).flailBrakeOutput;
 
 const BASH = new Set(['Bash']);
@@ -23,7 +24,7 @@ function hooksFor(input: any): (() => Promise<Hook>)[] {
   if (BASH.has(tool)) return [retroHook, testFirstHook, flailBrakeOutput];
   if (input?.hook_event_name !== 'PostToolUse') return [];
   if (READS.has(tool)) return [flailBrakeOutput];
-  if (EDITS.has(tool)) return [testFirstHook, flailBrakeOutput];
+  if (EDITS.has(tool)) return [testFirstHook, anyNudgeHook, flailBrakeOutput];
   return [];
 }
 

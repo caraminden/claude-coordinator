@@ -33,12 +33,15 @@ its own copy with `--plugin-dir`, so the kit only changes through `tools/land.sh
     red three times in a row with no Edit, Write, MultiEdit or NotebookEdit between, it adds one
     line pointing at `citadel:diagnosing-bugs`. Once per streak; a green test run, another test command or an
     edit resets it; other Bash calls don't. A file changed from Bash (`sed -i`) is invisible to it.
+  - `any-nudge.ts` (PostToolUse on Write, Edit and MultiEdit, never blocks; #1789): when an edit leaves a TypeScript
+    file with more explicit `any` types or `@ts-ignore`-style comments than before, it adds one line saying to use real
+    types. Every scheme, every time; it counts with the type check's counter (`scheme-setup/templates/typecheck.ts`).
   - `batch-nudge.ts` (a one-week trial from 2026-11-20, #1278; runs inside `flail-brake.ts`'s process, which is also
     registered for Read, Grep and Glob; never blocks): after a minion's third single read-only call in a row (Read,
     Grep, Glob, or a Bash that only reads) it adds one line saying to send independent lookups in one message. Only
     minions with an even number (the other half is the control); Grunts and Taskmasters never. A call sent with
     others in one message, an edit or a writing Bash ends the run. The trial's readout decides whether it stays.
-  - `run.ts` (PostToolUse and PostToolUseFailure): test-first, flail-brake (with batch-nudge) and retro-log's
+  - `run.ts` (PostToolUse and PostToolUseFailure): test-first, any-nudge, flail-brake (with batch-nudge) and retro-log's
     after-call lines in one node process per call (#1296), each as it ran alone; one that throws says nothing.
   - `big-read.ts` (PreToolUse on Read and Bash, every Citadel turn, Grunts included; not in hooks.json: it runs inside
     the turn's one PreToolUse process, `src/hook-run.ts`, #1296): sends back a

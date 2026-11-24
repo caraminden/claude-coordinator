@@ -3,22 +3,23 @@
 // test/typecheck-baseline.json fails the ship; lower counts pass, and `node tools/typecheck.ts --update` records them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compare, describe, escapes, lowered, measure, moved, parseTsc, readBaseline, tscErrors } from '../tools/typecheck.ts';
+import { ROOT, compare, describe, escapes, lowered, measure, moved, parseTsc, readBaseline, tscErrors, upMessage } from '../tools/typecheck.ts';
 
 test('no file has more type errors or escapes than its baseline', async () => {
   const { table, errors } = await measure();
   const { up, down } = compare(readBaseline(), table);
   if (down.length) console.log(`typecheck: ${down.length} count(s) went down; record them with \`node tools/typecheck.ts --update\`:\n  ${down.map(describe).join('\n  ')}`);
-  const detail = up.filter((c) => c.kind === 'errors').flatMap((c) => errors.filter((e) => e.file === c.file).map((e) => `  ${e.file}(${e.line},${e.col}) ${e.code} ${e.text.split('\n')[0]}`));
-  assert.deepEqual(up.map(describe), [], [
-    'A file has more type errors or escapes (an explicit `any`, or a @ts-ignore / @ts-expect-error / @ts-nocheck) than test/typecheck-baseline.json allows.',
-    'Fix them with real types (`unknown` and a narrowing, not `any`); the baseline only goes down. `node tools/typecheck.ts <file>` lists a file\'s errors.',
-    'Moved or split code (its old file went down as much)? `node tools/typecheck.ts --update --moved` re-files the counts when the totals did not rise.',
-    ...detail.slice(0, 40),
-  ].join('\n'));
+  assert.deepEqual(up.map(describe), [], upMessage(up, errors));
+});
+
+test('tools/typecheck.ts is the kit template outside its config block', () => {
+  const body = (path: string) => readFileSync(path, 'utf8').split('// --- end of config ---')[1];
+  assert.ok(body(join(ROOT, 'tools', 'typecheck.ts')));
+  assert.equal(body(join(ROOT, 'tools', 'typecheck.ts')), body(join(ROOT, 'kit', 'skills', 'scheme-setup', 'templates', 'typecheck.ts')),
+    'a fix to tools/typecheck.ts goes into kit/skills/scheme-setup/templates/typecheck.ts too (other schemes copy it)');
 });
 
 test('an any in a type counts; an any that is a value, a property, a comment or text does not', () => {
@@ -30,6 +31,11 @@ test('an any in a type counts; an any that is a value, a property, a comment or 
 test('@ts-ignore, @ts-expect-error and @ts-nocheck count; a mention mid-line does not', () => {
   assert.equal(escapes('// @ts-nocheck\n  // @ts-ignore: why\nlet a = 1;\n/* @ts-expect-error */\nlet b = 2;\n'), 3);
   assert.equal(escapes('const s = "see // @ts-ignore";\n'), 0);
+});
+
+test('in a .tsx file, which Node cannot strip, an any in a type still counts and one in text does not', () => {
+  const tsx = 'const a: any = 1;\nconst b = <div x={c as any} />;\nfunction f(m: Map<string, any>, l: any[]): Array<any> { return []; }\nconst any2 = "any"; // any\nconst t = `any ${any}`;\n';
+  assert.equal(escapes(tsx, 'x.tsx'), 5);
 });
 
 test('in a .d.ts every any outside a comment counts', () => {

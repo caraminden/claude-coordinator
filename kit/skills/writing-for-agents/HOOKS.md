@@ -25,10 +25,11 @@ Prefer a narrow matcher and the end of a turn over every call.
 | `big-read.ts` | PreToolUse on Read, Bash (runs inside the turn's `hook-run.ts`; not in hooks.json) | A whole read of a big file | sends back |
 | `heavy-nudge.ts` | PreToolUse on Bash (runs inside the turn's `hook-run.ts`; not in hooks.json) | A whole-workspace cargo build/test/check/clippy, a release or cross-target build, a full `npm test`: adds the citadel-heavy line (#1577) | adds context |
 | `test-first.ts` | PostToolUse on edits, Bash (runs inside `run.ts`) | A source edit before any red test run | reminds, once per session |
+| `any-nudge.ts` | PostToolUse on Write, Edit, MultiEdit to a `.ts`/`.tsx` file (runs inside `run.ts`) | An edit that raises the file's count of explicit `any` and `@ts-ignore`-style comments (#1789) | adds context, each time |
 | `flail-brake.ts` | PostToolUse on edits, Bash (runs inside `run.ts`) | Same test red three times with no edit | reminds, once per streak |
 | `batch-nudge.ts` | PostToolUse on Read, Grep, Glob, Bash, edits (runs inside flail-brake.ts) | Third single read-only call in a row, even-numbered minions only; a one-week trial (#1278) | reminds, once per run |
 | `retro-log.ts` | PostToolUse on Bash (inside `run.ts`), Stop, SubagentStop | Writes the retro log the other modes count into | counts |
-| `run.ts` | PostToolUse on Bash, file tools, Read, Grep, Glob | Runs test-first, flail-brake (with batch-nudge) and retro-log in one node process, in hooks.json's old order (#1296) | as each check |
+| `run.ts` | PostToolUse on Bash, file tools, Read, Grep, Glob | Runs test-first, any-nudge, flail-brake (with batch-nudge) and retro-log in one node process, in hooks.json's old order (#1296) | as each check |
 | `after-compact.sh` | SessionStart after a compaction | Puts back the branch, head and what to re-read | reminds |
 
 ## Citadel's turn hooks (`src/`, installed per turn by `src/turn-launch.ts`): every scheme

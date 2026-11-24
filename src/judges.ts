@@ -159,6 +159,15 @@ export const JUDGES: Judge[] = [
     callers: ['kit/hooks/test-first.ts'],
   },
   {
+    id: 'any-nudge', name: 'Any nudge (PostToolUse, #1789)', mode: 'act', replay: true,
+    acts: 'adds a line to the session when an edit raises a TypeScript file\'s count of explicit any and @ts-ignore-style comments',
+    pins: [
+      { path: 'kit/hooks/any-nudge.ts', symbols: ['TS', 'before', 'anyNudgeHook'] },
+      { path: 'kit/skills/scheme-setup/templates/typecheck.ts', symbols: ['strip', 'stripTypes', 'DIRECTIVE', 'WORD', 'blankText', 'anysByPattern', 'escapes'] },
+    ],
+    callers: ['kit/hooks/any-nudge.ts'],
+  },
+  {
     id: 'big-read', name: 'Big-read guard (PreToolUse)', mode: 'act',
     replay: { notYet: 'replays over kept transcripts' },
     acts: 'sends back a whole read of a big file',

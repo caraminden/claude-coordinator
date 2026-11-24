@@ -36,6 +36,9 @@ test('@ts-ignore, @ts-expect-error and @ts-nocheck count; a mention mid-line doe
 test('in a .tsx file, which Node cannot strip, an any in a type still counts and one in text does not', () => {
   const tsx = 'const a: any = 1;\nconst b = <div x={c as any} />;\nfunction f(m: Map<string, any>, l: any[]): Array<any> { return []; }\nconst any2 = "any"; // any\nconst t = `any ${any}`;\n';
   assert.equal(escapes(tsx, 'x.tsx'), 5);
+  // The pattern also reads type aliases and arrow return types.
+  assert.equal(escapes('type G = any;\ntype H<T> = any;\nlet f: () => any;\nconst g = (x: number): any => x;\n', 'y.tsx'), 4);
+  assert.equal(escapes('const any = 1;\nlet b = any;\nconst h = () => any;\n', 'y.tsx'), 1, 'a value named any is not a type, except after => where the pattern cannot tell');
 });
 
 test('in a .d.ts every any outside a comment counts', () => {
@@ -70,6 +73,9 @@ test('tsc runs and its errors are read per file', async () => {
     writeFileSync(join(dir, 'bad.ts'), 'export const n: number = "one";\nexport function f(a) { return a; }\n');
     const errors = await tscErrors(dir);
     assert.deepEqual(errors.map((e) => `${e.file}:${e.line} ${e.code}`), ['bad.ts:1 TS2322', 'bad.ts:2 TS7006']);
+    // A listed tsconfig that isn't there is a mistake, not zero errors (#1789 review); a scheme with none lists none.
+    await assert.rejects(tscErrors(dir, ['tsconfig.json', 'tsconfig.typo.json']), /tsconfig\.typo\.json/);
+    assert.deepEqual(await tscErrors(dir, []), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

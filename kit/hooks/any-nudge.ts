@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, isAbsolute, join, relative } from 'node:path';
-import { escapes } from '../skills/scheme-setup/templates/typecheck.ts';
+import { countEscapes } from '../skills/scheme-setup/templates/typecheck.ts';
 
 const TS = /\.(?:[cm]?ts|tsx)$/;
 
@@ -58,9 +58,12 @@ export function anyNudgeHook(input: { hook_event_name?: unknown; tool_name?: unk
   const now = readFileSync(path, 'utf8');
   const was = before(input, now, path);
   if (was === null) return null;
-  const after = escapes(now, path);
-  const added = after - escapes(was, path);
+  // Both sides counted the same way: when the stripper can't read one (a file broken mid-edit), the pattern reads both.
+  let after = countEscapes(now, path);
+  let prior = countEscapes(was, path);
+  if (after.by !== prior.by) [after, prior] = [countEscapes(now, path, true), countEscapes(was, path, true)];
+  const added = after.n - prior.n;
   if (added <= 0) return null;
   const shown = cwd && !relative(cwd, path).startsWith('..') ? relative(cwd, path) : path;
-  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: nudgeText(shown, added, after) } });
+  return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: nudgeText(shown, added, after.n) } });
 }

@@ -1,12 +1,12 @@
 {
   "any-nudge": {
-    "hash": "4337bffa64db9d40",
+    "hash": "8eb86add1fd71daf",
     "at": "2026-11-24",
     "days": 3,
-    "inputs": "1637 TypeScript file changes in 596 commits",
-    "hits": 113,
+    "inputs": "1645 TypeScript file changes in 597 commits",
+    "hits": 112,
     "real": 0,
-    "summary": "0 as before, 113 new, 0 gone"
+    "summary": "0 as before, 112 new, 0 gone"
   },
   "ci-red": {
     "hash": "b2067f02444741d4",

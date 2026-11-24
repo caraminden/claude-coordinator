@@ -403,11 +403,16 @@ test('any nudge: an edit that adds an explicit any or @ts-ignore to a TypeScript
     // A MultiEdit is undone edit by edit, last first.
     assert.match(said(call('MultiEdit', 'c.tsx', 'const x = <div y={z as any} />;\nlet q: any[] = [];\n', { edits: [{ old_string: 'z', new_string: 'z as any' }, { old_string: 'let q = [];', new_string: 'let q: any[] = [];' }] })) ?? '', /added 2 .* to c\.tsx/);
     // A Write: what it replaced, or nothing for a new file.
-    assert.equal(call('Write', 'd.ts', 'let a: any;\n', {}), JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: JSON.parse(call('Write', 'd.ts', 'let a: any;\n', {})!).hookSpecificOutput.additionalContext } }));
+    assert.match(said(call('Write', 'd.ts', 'let a: any;\n', {})) ?? '', /added 1 .* to d\.ts \(1 now\)/);
     assert.equal(anyNudgeHook({ hook_event_name: 'PostToolUse', tool_name: 'Write', cwd: dir, tool_input: { file_path: join(dir, 'd.ts') }, tool_response: { originalFile: 'let a: any;\n' } }), null);
     // Not TypeScript, or a deletion that today's text can't undo: nothing.
     assert.equal(call('Write', 'e.js', 'let a = /** @type {any} */ (1);\n', {}), null);
     assert.equal(call('Edit', 'f.ts', 'let a: any;\n', { old_string: 'let b: any;\n', new_string: '' }), null);
+    // One side the stripper can't parse: both sides are counted by the pattern, never one each way (#1789 review).
+    // Mending a file whose regex backticks hide an `any` from the pattern is no new any:
+    assert.equal(call('Edit', 'g.ts', 'const r = /`/;\nlet a: any = 1;\nconst q = /`/;\nconst s = new Set([]);\n', { old_string: 'new Set((;', new_string: 'new Set([]);' }), null);
+    // and an any added in an edit that leaves the file broken is still one:
+    assert.match(said(call('Edit', 'h.ts', 'let a: any = 1;\nconst s = new Set((;\n', { old_string: 'let a = 1;\n', new_string: 'let a: any = 1;\nconst s = new Set((;\n' })) ?? '', /added 1 /);
   } finally {
     rmSync(dir, { recursive: true, force: true }); // timing-ok: own temp dir
   }

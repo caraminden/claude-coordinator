@@ -163,7 +163,7 @@ export const JUDGES: Judge[] = [
     acts: 'adds a line to the session when an edit raises a TypeScript file\'s count of explicit any and @ts-ignore-style comments',
     pins: [
       { path: 'kit/hooks/any-nudge.ts', symbols: ['TS', 'before', 'anyNudgeHook'] },
-      { path: 'kit/skills/scheme-setup/templates/typecheck.ts', symbols: ['strip', 'stripTypes', 'DIRECTIVE', 'WORD', 'blankText', 'anysByPattern', 'escapes'] },
+      { path: 'kit/skills/scheme-setup/templates/typecheck.ts', symbols: ['strip', 'stripTypes', 'DIRECTIVE', 'WORD', 'blankText', 'anysByPattern', 'escapes', 'countEscapes'] },
     ],
     callers: ['kit/hooks/any-nudge.ts'],
   },

@@ -28,7 +28,7 @@ import { promisify } from 'node:util';
 // --- config: set these to this repo (everything below is the kit's, the same in every scheme) ---
 export const ROOT = join(import.meta.dirname, '..');
 export const BASELINE = join(ROOT, 'typecheck-baseline.json');
-/** The tsconfigs tsc checks, from ROOT; one that isn't there is skipped. */
+/** The tsconfigs tsc checks, from ROOT; `[]` counts escapes only, with no tsc. A listed one that isn't there is an error. */
 export const PROJECTS = ['tsconfig.json'];
 // --- end of config ---
 
@@ -41,7 +41,8 @@ export type TscError = { file: string; line: number; col: number; code: string; 
 /** tsc's errors over every project, one per diagnostic (its follow-on lines folded into the text), paths from `root`. */
 export async function tscErrors(root = ROOT, projects = PROJECTS): Promise<TscError[]> {
   const out: TscError[] = [];
-  for (const p of projects.map((p) => join(root, p)).filter((p) => existsSync(p))) {
+  for (const p of projects.map((p) => join(root, p))) {
+    if (!existsSync(p)) throw new Error(`${p} is in PROJECTS but isn't there: fix the config block (\`[]\` counts escapes only)`);
     const tsc = [root, dirname(p), ROOT].map((d) => join(d, 'node_modules', 'typescript', 'bin', 'tsc')).find((t) => existsSync(t));
     if (!tsc) throw new Error('typescript is not installed in node_modules: run `npm ci` (the type check needs it as a devDependency)');
     // tsc exits 2 when it found errors; anything else on stderr with no parsed error is tsc itself failing.
@@ -102,16 +103,18 @@ function blankText(code: string): string {
 }
 
 /**
- * The `any`s in type positions, read from the text alone: for what Node's stripper can't parse (a .tsx file).
- * shortcut: a pattern, not a parser; an `any` it misses or miscounts is counted the same way on both sides of the ratchet.
+ * The `any`s in type positions, read from the text alone: for what Node's stripper can't parse (a .tsx file, a .ts file
+ * with an enum or namespace, or one that doesn't parse yet).
+ * shortcut: a pattern, not a parser; it misses about one any in six that the stripper finds (a backtick in a regex hides
+ * text from it), and reads `=> any` as a type. A file counted this way is counted this way on both sides of the ratchet.
  */
 function anysByPattern(code: string): number {
   const text = blankText(code);
   let n = 0;
   for (const m of text.matchAll(WORD)) {
-    const before = text.slice(Math.max(0, m.index - 12), m.index);
+    const before = text.slice(Math.max(0, m.index - 80), m.index);
     const after = text.slice(m.index + 3, m.index + 6);
-    if (/(?:[:<|&]|\bas|\bextends|\bsatisfies|\bkeyof)\s*$/.test(before) || (/,\s*$/.test(before) && /^\s*[>,\]]/.test(after)) || /^\s*\[\]/.test(after)) n++;
+    if (/(?:[:<|&]|=>|\bas|\bextends|\bsatisfies|\bkeyof|\btype\s+[\w$]+\s*(?:<[^<>=]*>)?\s*=)\s*$/.test(before) || (/,\s*$/.test(before) && /^\s*[>,\]]/.test(after)) || /^\s*\[\]/.test(after)) n++;
   }
   return n;
 }
@@ -124,22 +127,30 @@ function anysByPattern(code: string): number {
  * outside a comment counts. What the stripper can't parse (JSX) falls back to a pattern.
  */
 export function escapes(code: string, file = 'x.ts'): number {
+  return countEscapes(code, file).n;
+}
+
+/**
+ * escapes(), saying how it counted: `types` (Node's stripper), `pattern` (the fallback), or `dts`. Two counts compared
+ * must be made the same way, so `byPattern` forces the fallback for a file the stripper read on the other side.
+ */
+export function countEscapes(code: string, file = 'x.ts', byPattern = false): { n: number; by: 'types' | 'pattern' | 'dts' } {
   const directives = code.match(DIRECTIVE)?.length ?? 0;
   if (/\.d\.[cm]?ts$/.test(file)) {
     const bare = code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-    return directives + (bare.match(WORD)?.length ?? 0);
+    return { n: directives + (bare.match(WORD)?.length ?? 0), by: 'dts' };
   }
   let stripped: string;
   try {
-    if (file.endsWith('.tsx')) throw new Error('JSX');
+    if (byPattern || file.endsWith('.tsx')) throw new Error('JSX');
     stripped = stripTypes(code);
   } catch (e) {
     if (!strip) throw e;
-    return directives + anysByPattern(code);
+    return { n: directives + anysByPattern(code), by: 'pattern' };
   }
   let anys = 0;
   for (const m of code.matchAll(WORD)) if (stripped.slice(m.index, m.index + 3) !== 'any') anys++;
-  return directives + anys;
+  return { n: directives + anys, by: 'types' };
 }
 
 /** The TypeScript files git tracks, the escape count's files. */

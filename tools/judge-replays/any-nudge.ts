@@ -1,8 +1,8 @@
 // The any nudge (kit/hooks/any-nudge.ts, #1789) over the repo's real commits: for each TypeScript file a commit changed,
-// the nudge's own counter (escapes, from the type check's template) on the file before and after; a rise is a nudge it
+// the nudge's own counter (countEscapes, from the type check's template) on the file before and after; a rise is a nudge it
 // would have given at least once while that commit was written. It never acted before #1789, so real is empty.
 import { execFileSync } from 'node:child_process';
-import { escapes } from '../../kit/skills/scheme-setup/templates/typecheck.ts';
+import { countEscapes } from '../../kit/skills/scheme-setup/templates/typecheck.ts';
 import type { Act, ReplayCtx, ReplayResult } from './types.ts';
 
 const TS = /\.(?:[cm]?ts|tsx)$/;
@@ -25,7 +25,10 @@ export async function replay(ctx: ReplayCtx): Promise<ReplayResult> {
       const now = show(sha, path);
       if (now === null) continue; // deleted
       files++;
-      const added = escapes(now, path) - escapes(show(`${sha}^`, path) ?? '', path);
+      const was = show(`${sha}^`, path) ?? '';
+      let [a, b] = [countEscapes(now, path), countEscapes(was, path)];
+      if (a.by !== b.by) [a, b] = [countEscapes(now, path, true), countEscapes(was, path, true)]; // as the hook does
+      const added = a.n - b.n;
       if (added > 0) hits.push({ at: Number(ct) * 1000, key: `${sha.slice(0, 9)}:${path}`, text: `+${added} in ${path} (${subject.join(' ').slice(0, 80)})` });
     }
   }

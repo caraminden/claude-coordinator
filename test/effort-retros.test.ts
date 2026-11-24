@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { Store, type Ticket } from '../src/db.ts';
-import { CHAIN_FLOOR, doneKey, EFFORT_KEY, effortFor, EffortRetros, effortsDue, NAMED_FLOOR, QUIET_MS } from '../src/effort-retros.ts';
+import { buildOwnerKey, Store, type Ticket } from '../src/db.ts';
+import { CHAIN_FLOOR, doneKey, EFFORT_KEY, effortFor, EffortRetros, effortsDue, NAMED_FLOOR, QUIET_MS, TRIES } from '../src/effort-retros.ts';
 
 const H = 3_600_000;
 const NOW = 1_800_000_000_000;
 let n = 0;
 const t = (over: Partial<Ticket> = {}): Ticket => ({ id: ++n, number: n, title: `T${n}`, kind: 'ticket', status: 'closed', closed_at: NOW - 7 * H, updated_at: NOW - 7 * H, created_at: NOW - 48 * H, build: null, person_id: null, ...over }) as Ticket;
-const due = (tickets: Ticket[], name: string, done = () => false, now = NOW) => effortsDue(tickets, new Map(tickets.map((x) => [x.id, name])), done, now);
+const due = (tickets: Ticket[], name: string, since: (n: string) => number | undefined = () => undefined, now = NOW, major = (_b: number) => true) =>
+  effortsDue(tickets, new Map(tickets.map((x) => [x.id, name])), since, now, major);
 
 test('a named effort retros at 3 closed minions, an unnamed chain only at 4 (#1751)', () => {
   assert.equal(NAMED_FLOOR, 3);
@@ -24,7 +25,16 @@ test('an effort waits until every minion has closed and stayed closed for the qu
   assert.deepEqual(due([t(), t(), t({ status: 'idle', closed_at: null })], 'X'), [], 'one still open');
   const recent = NOW - QUIET_MS + H;
   assert.deepEqual(due([t(), t(), t({ closed_at: recent, updated_at: recent })], 'X'), [], 'last closed under 6 hours ago');
-  assert.equal(due([t(), t(), t()], 'X', () => true).length, 0, 'one retro per effort');
+  assert.equal(due([t(), t(), t()], 'X', () => NOW - 20 * H).length, 0, 'one retro per effort');
+});
+
+test('a name reused for a later goal gets its own retro: only minions made after the last verdict count (#1751)', () => {
+  const cut = NOW - 30 * H;
+  const old = [t({ created_at: NOW - 60 * H }), t({ created_at: NOW - 60 * H }), t({ created_at: NOW - 60 * H })];
+  const fresh = () => t({ created_at: NOW - 20 * H });
+  assert.deepEqual(due([...old, fresh(), fresh()], 'CI speed-up', () => cut), [], 'two new ones are under the floor');
+  const [v] = due([...old, fresh(), fresh(), fresh()], 'CI speed-up', () => cut);
+  assert.equal(v.members.length, 3, 'the old effort\'s minions are not in the new retro');
 });
 
 test('an effort that is mostly one major build is skipped: the build retro covers it (#1751)', () => {
@@ -33,6 +43,8 @@ test('an effort that is mostly one major build is skipped: the build retro cover
   assert.match(v.why, /Build 4/);
   // Half or fewer in one build is still its own effort.
   assert.equal(due([t({ build: 4 }), t({ build: 5 }), t(), t()], 'Mixed')[0].act, 'start');
+  // A build number with no build minion (Delve's "found in" build on a bug) has no build retro to cover it.
+  assert.equal(due([t({ build: 4 }), t({ build: 4 }), t()], 'Bugs from Build 4', undefined, NOW, () => false)[0].act, 'start');
 });
 
 test('a new minion joins its leader\'s effort, else its parent\'s; an unnamed chain is named after its leader (#1751)', () => {
@@ -56,6 +68,7 @@ test('the tick starts one retro minion in a scheme that is not Citadel, and reco
   };
   for (let i = 0; i < 3; i++) mk(peek.id, 'Overlay rewrite');
   for (let i = 0; i < 3; i++) mk(other.id, 'Build work', 2);
+  store.setSetting(buildOwnerKey(other.id, 2), 999); // Build 2 has its own build minion, whose retro covers it
   mk(other.id, 'Too small');
   const made: { project: number; title: string; props: Record<string, string> }[] = [];
   const sent: { id: number; text: string }[] = [];
@@ -77,6 +90,7 @@ test('the tick starts one retro minion in a scheme that is not Citadel, and reco
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /citadel:retro/);
   assert.match(sent[0].text, /"Overlay rewrite" in Peek/);
+  assert.ok(store.getSetting<{ at?: number }>(doneKey(peek.id, 'Overlay rewrite'))?.at, 'a start keeps its time, for the replay');
   assert.equal(store.getSetting<{ act: string }>(doneKey(other.id, 'Build work'))?.act, 'skip');
   assert.equal(store.getSetting(doneKey(other.id, 'Too small')), null);
   assert.equal(said.length, 2);
@@ -116,4 +130,48 @@ test('log-only notes the retro it would start, and acting later starts it after 
   assert.equal(notes.length, 1, 'noted once');
   await new EffortRetros({ ...deps, mode: 'act' }).tick();
   assert.deepEqual(made, ['Retro: Overlay rewrite']);
+});
+
+test('a start that fails is tried again on later ticks, three times in all (#1751)', async () => {
+  const store = new Store(':memory:');
+  const peek = store.createProject('Peek', null);
+  for (let i = 0; i < 3; i++) {
+    const x = store.createTicket({ project_id: peek.id, title: 'part', permission_mode: 'default', created_by: 'Cara' });
+    store.props.set('minion', x.id, peek.id, { [EFFORT_KEY]: 'Overlay rewrite' }, 'test');
+    store.updateTicket(x.id, { status: 'closed' });
+  }
+  let fails = 0;
+  let made = 0;
+  const retros = new EffortRetros({
+    store,
+    by: 'Citadel',
+    now: () => Date.now() + QUIET_MS + H,
+    newMinion: async (project, m) => {
+      if (fails-- > 0) throw new Error('no worktree');
+      made++;
+      const x = store.createTicket({ project_id: project.id, title: m.title, permission_mode: 'default', created_by: 'Citadel' });
+      return { id: x.id, number: x.number };
+    },
+    runner: { emit: () => {}, send: () => {} } as any,
+    note: () => {},
+    mode: 'act',
+  });
+  const errors = console.error;
+  console.error = () => {};
+  try {
+    fails = 1;
+    await retros.tick();
+    assert.equal(store.getSetting<{ act: string }>(doneKey(peek.id, 'Overlay rewrite'))?.act, 'failed');
+    await retros.tick();
+    assert.equal(made, 1, 'the next tick starts it');
+    // One that keeps failing stops after TRIES.
+    store.deleteSetting(doneKey(peek.id, 'Overlay rewrite'));
+    made = 0;
+    fails = 99;
+    for (let i = 0; i < TRIES + 2; i++) await retros.tick();
+    assert.equal(fails, 99 - TRIES);
+    assert.equal(made, 0);
+  } finally {
+    console.error = errors;
+  }
 });

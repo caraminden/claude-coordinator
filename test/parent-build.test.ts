@@ -113,6 +113,16 @@ test('a new minion rides its parent\'s build unless the create sets one', async 
   t = await made({ parent: 2, start_after: 3 });
   assert.deepEqual([t.parent, t.build], [2, 5]);
 
+  // Its effort (#1751): an unnamed chain is named after its leader, and the leader takes the name too.
+  const leader3 = store.listTickets(Delve.id).find((x) => x.number === 3)!;
+  assert.equal(t.props.effortName, 'chain from #3');
+  assert.equal(store.props.forTarget('minion', leader3.id).effortName, 'chain from #3');
+  // A name given in another spelling is the same key, not a second one; the minions it starts carry it.
+  const named = await made({ start_after: 3, parent: null, properties: { type: 'chore', effort_name: 'Overlay rewrite' } });
+  assert.equal(named.props.effortName, 'Overlay rewrite');
+  t = await made({ parent: named.number });
+  assert.equal(t.props.effortName, 'Overlay rewrite');
+
   // Another scheme's minion (Citadel #30) is no parent here: refused, and nothing is made.
   const before = store.listTickets(Delve.id).length;
   for (const parent of [30, 'x', 0]) {

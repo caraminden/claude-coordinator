@@ -1278,7 +1278,9 @@ export const projectRoutes: Route[] = [
       // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
       const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
       if (typeof props !== 'object' || Array.isArray(props)) throw new HttpError(400, 'properties must be an object of key: value');
-      const given = (key: string) => Object.keys(props).some((k) => k.toLowerCase() === key.toLowerCase());
+      // Spelled as the registry matches keys (src/properties.ts `loose`): effort_name is effortName.
+      const loose = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const given = (key: string) => Object.keys(props).some((k) => loose(k) === loose(key));
       if (!caller && !given('requestedBy')) props.requestedBy = session.name;
       // The minion it is started for (#273): `parent` (#N, null for none), else the minion whose relay the Taskmaster's turn answers.
       const parent = body.parent !== undefined ? parentMinion(store, project.id, body.parent) : caller ? sameScheme(store, project.id, runner.relayedBy(caller.id)) : null;

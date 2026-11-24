@@ -86,7 +86,7 @@ export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<st
   // Off its start_after chain, still sealed (#1823): its held brief becomes held mail, read when it is unsealed or messaged with unpark.
   if (body.start_after !== undefined) {
     if (body.start_after !== null) throw new HttpError(400, 'start_after can only be set to null here: it takes a minion off its chain (a chain is made by create_ticket)');
-    if (ticket.kind === 'coordinator' || caller === id) throw new HttpError(400, `Only the ${AGENT_NAME} or a person takes a minion off its chain`);
+    if (ticket.kind === 'coordinator' || caller === id) throw new HttpError(400, `A minion can't take itself, or the ${AGENT_NAME}, off a chain`);
     if (!takeOffChain(ticket, name, { store, runner, waiters: app.waiters }, body.note === undefined)) throw new HttpError(409, `#${ticket.number} isn't sealed waiting on another minion's work`);
   }
   // The view's replies are a list; compare the stored JSON.

@@ -57,11 +57,19 @@ export function staleReasons(rec: BenchRecord | null, root = ROOT, lessons?: str
   return out;
 }
 
-/** The lessons Citadel's pre-ship review has now, from the live database read-only; null when it can't be read. */
+/** The lessons Citadel's pre-ship review has now, from a read-only look at the live database (copied into memory: ReviewSet writes its schema); null when it can't be read. */
 async function liveLessons(project: number): Promise<string[] | null> {
   try {
-    const { replayStore, LIVE_DB } = await import('../judge-replays/store.ts');
-    return replayStore(LIVE_DB, []).lessons(project).map((l) => l.kind);
+    const { LIVE_DB } = await import('../judge-replays/store.ts');
+    const { ReviewSet } = await import('../../src/review-set.ts');
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(':memory:');
+    db.exec('CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT)'); // the entries' foreign key
+    const set = new ReviewSet(db);
+    db.prepare('ATTACH DATABASE ? AS live').run(`file:${LIVE_DB}?mode=ro`);
+    db.exec('INSERT INTO projects (id) SELECT id FROM live.projects');
+    for (const t of ['review_entries', 'review_refutes']) db.exec(`INSERT INTO ${t} SELECT * FROM live.${t}`);
+    return set.lessons(project).map((l) => l.kind);
   } catch {
     return null;
   }

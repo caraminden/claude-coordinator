@@ -33,9 +33,10 @@ The picks the brief left to the minion (#1751):
   - It's a research-tier minion (`pickFor('research')`), assigned to the first minion's person, and its turns run for them.
   - It writes `effort-<slug>.md` in the scheme's retro folder.
   - It makes the scheme's own fixes itself and puts kit fixes in a handoff for Citadel.
-- **Judge:** `effort-retros` in `src/judges.ts` is registered log-only, as every new judge is (#1503).
+- **Judge:** `effort-retros` in `src/judges.ts` was built log-only, as every new judge is (#1503), and acts since her answer below.
   - While log-only, it notes the retro it would start in the scheme's retro log and marks the effort `would`.
   - Once it's switched to act, those efforts' retros start too, so nothing is lost while it watches.
   - At ship time its replay had no efforts to read: none were named before this change.
-  - This is at odds with Cara's "Starts by itself", so it went to her on #1751's card along with the chain floor and
-    parent inheritance. Her answer is logged here when it comes.
+  - That was at odds with her "Starts by itself", so it went to her on #1751's card (2026-11-24). She picked "Start for real
+    now": the judge acts from the start, on an empty replay. She also kept "4 for an unnamed chain" and "Follow-ups join"
+    (minions a minion asks for join its effort).

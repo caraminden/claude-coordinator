@@ -794,7 +794,7 @@ export class Runner {
     if (ticket.kind !== 'coordinator' || project.id !== GLOBAL_OWNER || asker === null || !this.store.isAdmin(this.store.getUser(asker))) return null;
     const others = this.store.listProjects().filter((p) => p.id !== project.id && p.repo_dir);
     return {
-      gitDirs: [...new Set(others.flatMap((p) => [p.repo_dir!, ...this.store.listTickets(p.id).filter((t: Ticket) => t.status !== 'closed' && t.cwd).map((t: Ticket) => t.cwd!)]))],
+      gitDirs: [...new Set(others.flatMap((p) => [p.repo_dir!, ...this.store.listTickets(p.id).filter((t) => t.status !== 'closed' && t.cwd).map((t) => t.cwd!)]))],
       // The folder is a link into its two slots (#801): rules match the path read, so both are listed.
       apps: this.store.listContraptions().flatMap((c) => [appFolder(c, homedir()), slotsOf(appFolder(c, homedir()))]),
       data: dirname(this.store.path),
@@ -3485,7 +3485,7 @@ export class Runner {
         project, ticket, dir, pins, place, machines, model, effort, deploys, unit, pool: this.pool && !codex && !(place.host && !unit && this.units),
         folders: { files: filesDir, shared: sharedDir, memory: memoryDir, tmp, tickets: this.ticketsDir(project), data: dirname(this.store.path),
           // A Taskmaster's git rules cover only open minions' worktrees (coordinatorAccess).
-          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t: Ticket) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t: Ticket) => t.cwd!) : undefined },
+          openTickets: ticket.kind === 'coordinator' ? this.store.listTickets(project.id).filter((t) => t.kind !== 'coordinator' && t.status !== 'closed' && t.cwd).map((t) => t.cwd!) : undefined },
         codex,
         codexReview: reviewAt ? { container: reviewAt.container, turnsDir: reviewAt.turnsDir, env: reviewAt.env } : null,
         env: { server: process.env, coordinator, heavy, github: github?.env ?? null, secrets: secretEnv(f.secrets) },

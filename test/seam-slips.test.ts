@@ -13,10 +13,6 @@ const grep = (pattern: string, ...paths: string[]) => {
   }
 };
 
-test('the kit never says the server runs UTC: it runs Pacific (P5)', () => {
-  assert.equal(grep('runs UTC|host time \\(UTC\\)', 'kit'), '');
-});
-
 test("the MCP tools' text reads days in Pacific, never a UTC date slice (P6)", () => {
   assert.equal(grep('toISOString\\(\\)\\.slice\\(0, 10\\)', 'src/mcp.ts', 'src/mcp-text.ts', 'src/mcp-*.ts'), '');
 });

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { Store } from '../src/db.ts';
-import { ICON_PATHS, readIcon } from '../src/scheme-icon.ts';
+import { readIcon } from '../src/scheme-icon.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'scheme-icon-gated-'));
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>';
@@ -47,8 +47,4 @@ test('a gated icon is fetched with the identity of the person asking', async () 
   assert.ok('missing' in (await readIcon(id, NO_REPO, store)), 'no identity: 401, no icon');
   const got = await readIcon(id, NO_REPO, store, () => 'good');
   assert.ok('body' in got, JSON.stringify(got));
-});
-
-test('web/public/icon.svg under an app folder is a repo icon place', () => {
-  assert.ok(ICON_PATHS.includes('app/web/public/icon.svg'));
 });

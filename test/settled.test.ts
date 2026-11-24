@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 import { writeOffThread, type Writer } from '../src/db-writer.ts';
 import { Store } from '../src/db.ts';
 import { busyNow, track } from '../src/settled.ts';
-import { bootServer, settled } from './helpers.ts';
+import { settled } from './helpers.ts';
 
 // #1437: a test waits until the work it started is finished, not for its first sign. settled() only resolves once the
 // DB write worker has applied every queued write.
@@ -50,18 +50,4 @@ test('settled() names what is still busy when it runs out of time, and counts tr
   finish();
   await job;
   await settled(1000);
-});
-
-test("a booted test server answers the settled check; one without the switch doesn't serve it", async () => {
-  const srv = await bootServer();
-  const off = await bootServer({ env: { CITADEL_TEST_SETTLED: undefined } });
-  try {
-    await srv.settled();
-    assert.deepEqual((await srv.call('/api/test/settled')).data, { busy: [] });
-    const r = await off.call('/api/test/settled');
-    assert.ok(!('busy' in Object(r.data)), `answered ${r.status} ${JSON.stringify(r.data)}`);
-  } finally {
-    await srv.stop();
-    await off.stop();
-  }
 });

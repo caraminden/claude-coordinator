@@ -111,21 +111,6 @@ test('a re-pin makes a new folder and spares for new turns, keeps the old one fo
   }
 });
 
-test("a turn's pin copy links the files instead of copying their bytes, so a launch is not a 7 s stall", async () => {
-  const { copyPinned } = await import('../src/turn-launch.ts');
-  const { mkdirSync, mkdtempSync: mk, statSync, writeFileSync } = await import('node:fs');
-  const d = mk(join(tmpdir(), 'pincopy-'));
-  try {
-    mkdirSync(join(d, 'src', 'sub'), { recursive: true });
-    writeFileSync(join(d, 'src', 'sub', 'a.txt'), 'hello');
-    await copyPinned(join(d, 'src'), join(d, 'dst'));
-    assert.equal(readFileSync(join(d, 'dst', 'sub', 'a.txt'), 'utf8'), 'hello');
-    assert.equal(statSync(join(d, 'dst', 'sub', 'a.txt')).ino, statSync(join(d, 'src', 'sub', 'a.txt')).ino);
-  } finally {
-    rmSync(d, { recursive: true, force: true });
-  }
-});
-
 // #1414: even linked, a turn's copy was ~370 calls on the loop at its start, 3 to 10.8 s held with a cold disk cache.
 test('a turn start takes a spare copy made off the loop: one rename, links for a host turn, bytes for a container turn', async () => {
   const { copyPinned } = await import('../src/turn-launch.ts');

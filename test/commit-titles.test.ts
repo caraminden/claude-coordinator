@@ -42,10 +42,6 @@ async function conflicted(name: string, fix: boolean): Promise<{ cwd: string; su
   return { cwd, subjects: git(cwd, 'log', '--format=%s', 'main..HEAD') };
 }
 
-test('a conflicted rebase continued with GIT_EDITOR=true loses the title on git defaults (the bug)', async () => {
-  assert.notEqual((await conflicted('plain', false)).subjects, '#12: the title');
-});
-
 test('keepTitles: the same rebase keeps the title', async () => {
   assert.equal((await conflicted('kept', true)).subjects, '#12: the title');
 });

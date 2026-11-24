@@ -188,6 +188,18 @@ export const troubleKey = (ticketId: number, kind: Trouble) => `trouble-retro:${
 export const postMortemOfKey = (ticketId: number) => `post-mortem-of:${ticketId}`;
 const WHAT: Record<Trouble, string> = { budget: 'went past twice its budget', stepup: "had its model stepped up by the Taskmaster, so a fix didn't hold" };
 
+const MODEL_RANK = ['haiku', 'sonnet', 'opus', 'fable'];
+const EFFORT_RANK = ['low', 'medium', 'high', 'xhigh', 'max'];
+const rank = (list: string[], v: string | null, by: (x: string) => boolean) => list.findIndex((x) => by(x) && v != null && (v.includes(x) || v === x));
+/** Whether `to` is a higher tier than `from`: a better model, or the same model at more effort. */
+function stepsUp(from: { model: string | null; effort: string | null }, to: { model: string | null; effort: string | null }): boolean {
+  const [a, b] = [rank(MODEL_RANK, from.model, () => true), rank(MODEL_RANK, to.model, () => true)];
+  if (a !== b) return b > a;
+  return EFFORT_RANK.indexOf(to.effort ?? '') > EFFORT_RANK.indexOf(from.effort ?? '');
+}
+/** A tick starts at most this many post-mortems, so switching the judge to act can't start a backlog at once. */
+export const PER_TICK = 5;
+
 export interface TroubleVerdict { name: string; ticket: Ticket; kinds: Trouble[]; why: string }
 
 export function troubleBrief(project: Pick<Project, 'name'>, v: TroubleVerdict, owner: string | null): string {
@@ -216,8 +228,9 @@ export class TroubleRetros {
     const out: Trouble[] = [];
     const asked = store.getSetting<BudgetState>(budgetKey(t.id))?.asked;
     if (asked != null && asked >= since) out.push('budget');
-    // The first pick is the start's own; a later one by the Taskmaster is a step-up.
-    if (store.picksOf(t.id).slice(1).some((p) => p.by === 'Taskmaster' && p.at >= since)) out.push('stepup');
+    // The first pick is the start's own; a later one by the Taskmaster that moves the model or effort up is a step-up (a step down isn't trouble).
+    const picks = store.picksOf(t.id);
+    if (picks.some((p, i) => i > 0 && p.by === 'Taskmaster' && p.at >= since && stepsUp(picks[i - 1], p))) out.push('stepup');
     // Marked already is done, except a `would` once the judge acts and a failed start with tries left.
     return out.filter((k) => {
       const m = store.getSetting<Marker>(troubleKey(t.id, k));
@@ -241,7 +254,7 @@ export class TroubleRetros {
         if (t.kind === 'coordinator' || t.status !== 'closed' || (t.closed_at ?? 0) < since || family(t.model ?? t.last_model) == null) continue;
         if (store.getSetting(postMortemOfKey(t.id)) != null) continue;
         const kinds = this.due(t, since, mode);
-        if (!kinds.length) continue;
+        if (!kinds.length || said.length >= PER_TICK) continue;
         const v: TroubleVerdict = { name: `#${t.number} ${t.title}`, ticket: t, kinds, why: kinds.map((k) => WHAT[k]).join(', ') };
         const before = store.getSetting<Marker>(troubleKey(t.id, kinds[0]));
         try {
@@ -268,11 +281,12 @@ export class TroubleRetros {
     const assigned = store.props.forTarget('minion', t.id).assigned;
     const owner = typeof assigned === 'string' ? assigned : null;
     const made = await this.d.newMinion(project, { title: `Post-mortem: #${t.number} ${t.title}`.slice(0, 120), model: 'claude-sonnet-5-5', effort: 'medium', props: { type: 'research', ...(owner ? { assigned: owner } : {}) } }, by);
+    // Recorded the moment it exists: a throw after this must not start a second one.
     store.setSetting(postMortemOfKey(made.id), t.number);
+    for (const k of v.kinds) store.setSetting(troubleKey(t.id, k), { act: 'start', why: v.why, at: this.d.now?.() ?? Date.now(), ticket: made.number });
     // Its cap: the create route sets the estimate, and this path doesn't go through it, so its alarms would count from the usual cost.
     store.setSetting(budgetKey(made.id), { estimate: 3 } satisfies BudgetState);
     store.updateTicket(made.id, { person_id: t.person_id ?? null });
-    for (const k of v.kinds) store.setSetting(troubleKey(t.id, k), { act: 'start', why: v.why, at: this.d.now?.() ?? Date.now(), ticket: made.number });
     runner.emit(made.id, 'note', { text: `Started by the trouble trigger: #${t.number} ${v.why}.` });
     runner.send(made.id, by, troubleBrief(project, v, owner), [], { brief: true });
     return `started #${made.number} (${v.why})`;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { budgetKey } from '../src/minion-budget.ts';
 import { Store } from '../src/db.ts';
-import { TroubleRetros, troubleKey, SINCE_KEY, postMortemOfKey } from '../src/effort-retros.ts';
+import { TroubleRetros, troubleKey, SINCE_KEY, postMortemOfKey, PER_TICK } from '../src/effort-retros.ts';
 
 const H = 3_600_000;
 const T0 = Date.now(); // updateTicket stamps closed_at with the real clock
@@ -61,6 +61,23 @@ test('a minion a Taskmaster stepped up (its fix did not hold) gets exactly one p
   await s.retros.tick();
   assert.equal(s.made.length, 1);
   assert.match(s.sent[0], /fix didn't hold|step-up/i);
+});
+
+test('a step down, or a change by nobody above the first pick, is not trouble (#1796)', async () => {
+  const s = setup();
+  const x = s.minion();
+  s.store.addPick(x.id, 'claude-sonnet-5-5', 'low', 'Taskmaster', 'cheaper', T0);
+  assert.deepEqual(await s.retros.tick(), []);
+  const y = s.minion();
+  s.store.addPick(y.id, 'claude-sonnet-5-5', 'high', 'Taskmaster', 'more effort', T0);
+  assert.equal((await s.retros.tick()).length, 1);
+});
+
+test('a tick starts at most PER_TICK post-mortems (#1796)', async () => {
+  const s = setup();
+  for (let i = 0; i < PER_TICK + 2; i++) s.over(s.minion().id);
+  assert.equal((await s.retros.tick()).length, PER_TICK);
+  assert.equal((await s.retros.tick()).length, 2);
 });
 
 test('both triggers on one minion share one post-mortem; each trigger is marked (#1796)', async () => {

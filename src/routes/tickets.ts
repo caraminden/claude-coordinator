@@ -299,6 +299,12 @@ export async function unparkTicket(app: App, ticket: Ticket, by: string, author:
       app.store.setEventData(card.id, { ...JSON.parse(card.data), settled });
       app.runner.emit(ticket.id, 'question_result', { id: hold.card, settled });
     }
+    // Not sealed since #1757 and not chained: this Unseal is its go.
+    if (ticket.state !== 'parked' && !app.runner.heldFor(ticket.id)) {
+      if (!quiet) app.runner.startHeld(ticket.id, author, 'I OK\'d your start.');
+      await ownWrites();
+      return;
+    }
   }
   // A scheduled run or flaky-test fixer waiting for the box (#1302): Unseal is its "Start now", with no pressure check.
   if (app.held?.release(ticket.id, `${by} unsealed it`)) return;
@@ -976,8 +982,9 @@ export const ticketRoutes: Route[] = [
         const added = answers[0].other ? ` They added: ${answers[0].other}` : '';
         runner.recordAnswer(id, session.name, `My answer to your start card: ${pick}.${added}`, { answer: { questionId: body.questionId, answers } });
         if (pick === START) {
-          if (!runner.heldFor(id) && store.getTicket(id)?.state === 'parked') runner.unpark(id, session.name, session.name);
-          else runner.emit(id, 'note', { text: `${session.name} OK'd its start; it starts once its leader's work is in.` });
+          if (runner.heldFor(id)) runner.emit(id, 'note', { text: `${session.name} OK'd its start; it starts once its leader's work is in.` });
+          else if (store.getTicket(id)?.state === 'parked') runner.unpark(id, session.name, session.name);
+          else runner.startHeld(id, session.name, `I picked ${START} on your start card: go ahead.`);
         } else {
           await runner.close(id, `${session.name} picked ${SPLIT} on its start card, so it was dismissed before it ran.`);
           await tellTaskmaster(app, ticket, `${session.name} picked "${SPLIT}" on the start card of #${ticket.number} ${ticket.title} (expected ${money(data.startCost)}): it was dismissed without running.${added} Split its brief (and the handoff it names) into minions expected at ${money(START_CARD_USD)} or less each, with an "Expected cost" line in each, and start those.`, false, true, 'ask');

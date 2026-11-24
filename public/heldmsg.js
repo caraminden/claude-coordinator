@@ -20,6 +20,8 @@ export function heldLine(data, eventId, ticket) {
 /** The one-line hint over the composer while the open minion is parked (a message waits), or null. */
 export function composerHint(t) {
   if (parkedChat(t)) return "This minion is sealed: messages wait until it's unsealed.";
+  // Not sealed (#1757), but nothing runs until a person answers its start card.
+  if (t.start_hold && t.kind !== 'coordinator' && t.status !== 'closed') return 'This minion waits for a go on its start card: messages wait until it starts.';
   return asleepChat(t) ? "This minion is asleep: a message or a card's answer wakes it." : null;
 }
 

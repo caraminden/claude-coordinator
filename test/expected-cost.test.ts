@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { ASK, askText, type Budget, expectedCost, markOf, START_CARD_USD, turnLine, WAKE, withEstimate } from '../src/minion-budget.ts';
 import { agentToken, bootServer } from './helpers.ts';
@@ -54,13 +56,23 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     assert.equal(big.status, 201, JSON.stringify(big.data));
     const id = big.data.id;
     assert.match(big.data.notes.join('\n'), /expects about \$45, over \$30.*start card/);
-    assert.equal(big.data.state, 'parked');
+    // Not sealed (#1757; Cara, 2026-11-24: "that minion needs human interaction, sealing it makes that less likely to happen"):
+    // it waits on a person, in their Needs you, its note saying so.
+    assert.equal(big.data.state, null, 'not sealed');
+    assert.deepEqual(big.data.start_hold, { usd: 45 });
+    assert.match(big.data.note, /person's go.*start card/);
     assert.equal(big.data.budget.usd, 45, 'its marks scale from the estimate');
+    const inbox = (await s.call(`/api/projects/${p.id}/inbox`)).data.items as { kind: string; ticketId: number }[];
+    assert.ok(inbox.some((i) => i.ticketId === id && i.kind === 'question'), `its start card is in Needs you: ${JSON.stringify(inbox)}`);
     const held = await card(id);
     assert.ok(held, 'a start card in its chat');
     assert.deepEqual(held.d.questions[0].options.map((o: { label: string }) => o.label), ['Start', 'Split first']);
     const brief = (await events(id)).find((e) => e.kind === 'user_message');
     assert.equal(JSON.parse(brief!.data).parked, true, 'its brief is held, no turn');
+    // A message to it is held too, and no turn runs.
+    const msg = await s.call(`/api/tickets/${id}/messages`, { text: 'Any news?' });
+    assert.equal(msg.data.held, 'parked', JSON.stringify(msg.data));
+    assert.equal((await s.call(`/api/tickets/${id}`)).data.ticket.status, 'new', 'no turn ran');
 
     // The Taskmaster can't start it around the card, and can't answer cards at all.
     const unseal = await asTaskmaster(`/api/tickets/${id}/unpark`, {});
@@ -71,7 +83,8 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     // A person's Start: the hold ends and its turn starts with the brief.
     const start = await s.call(`/api/tickets/${id}/answer`, { questionId: held.d.id, answers: [{ selected: ['Start'] }] });
     assert.equal(start.status, 202, JSON.stringify(start.data));
-    await until('it starts', async () => (await s.call(`/api/tickets/${id}`)).data.ticket.state !== 'parked');
+    await until('it starts', async () => (await s.call(`/api/tickets/${id}`)).data.ticket.status !== 'new');
+    assert.equal((await s.call(`/api/tickets/${id}`)).data.ticket.start_hold, null, 'the hold is gone');
     assert.ok((await events(id)).some((e) => e.kind === 'user_message' && JSON.parse(e.data).answer), 'its answer is recorded');
 
     // Split first: dismissed, and the Taskmaster is told to split the brief.
@@ -85,15 +98,16 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     // $30 or under starts as today; no estimate starts too, with a nudge for one.
     const small = await create('Small', 'Fix it.\nExpected cost: $30', { expected_cost: 30 });
     assert.notEqual(small.data.state, 'parked');
+    assert.equal(small.data.start_hold, null);
     assert.equal(await card(small.data.id), undefined);
     const none = await create('None', 'Fix it.');
     assert.notEqual(none.data.state, 'parked');
     assert.match(none.data.notes.join('\n'), /no "Expected cost: \$N" line/);
     // The larger of the param and the line counts, so a low param can't slip a big brief past its card.
     const param = await create('Param', 'Fix it.\nExpected cost: $5', { expected_cost: 40 });
-    assert.equal(param.data.state, 'parked');
+    assert.ok(param.data.start_hold);
     const lowParam = await create('Low param', 'Do it all.\nExpected cost: ~$80', { expected_cost: 5 });
-    assert.equal(lowParam.data.state, 'parked');
+    assert.ok(lowParam.data.start_hold);
 
     // Dismissed another way, its start card can't start it.
     const gone = await create('Gone', 'Do it all.\nExpected cost: $50');
@@ -109,5 +123,38 @@ test('a Taskmaster brief over $30 waits for a person\'s start card; under it, or
     assert.equal(await card(own.data.id), undefined);
   } finally {
     await s.stop();
+  }
+});
+
+test('a minion sealed on its start card before #1757 moves out of the seal at boot; another seal stays', async () => {
+  const root = mkdtempSync(join(resolve(tmpdir()), 'start-hold-'));
+  let s = await bootServer({ root });
+  let ids: number[];
+  try {
+    const { data: p } = await s.call('/api/projects', { name: 'Delve' });
+    const tm = (await s.call(`/api/projects/${p.id}`)).data.coordinator;
+    const create = (title: string, message: string) => fetch(`${s.base}/api/projects/${p.id}/tickets`, {
+      method: 'POST', headers: { Authorization: `Bearer ${agentToken(s.data, tm.id)}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, message, model: 'claude-opus-5-5', effort: 'high', properties: { type: 'feature' } }),
+    }).then(async (r) => (await r.json()).id as number);
+    ids = [await create('Old big', 'Do it all.\nExpected cost: $35'), await create('Plain seal', 'Fix it.\nExpected cost: $5')];
+  } finally {
+    await s.stop();
+  }
+  // As #1674 left them: the big one sealed with its old note; another sealed for its own reasons.
+  const db = new DatabaseSync(join(s.data, 'coordinator.db'), { timeout: 30_000 });
+  db.prepare("UPDATE tickets SET state = 'parked', note = 'waits for its start card: expected $35' WHERE id = ?").run(ids[0]);
+  db.prepare("UPDATE tickets SET state = 'parked', note = 'parked until Monday' WHERE id = ?").run(ids[1]);
+  db.close();
+  s = await bootServer({ root });
+  try {
+    const big = (await s.call(`/api/tickets/${ids[0]}`)).data.ticket;
+    assert.equal(big.state, null, 'moved out of sealed');
+    assert.equal(big.note, "waits for a person's go on its start card: expected $35");
+    assert.deepEqual(big.start_hold, { usd: 35 }, 'still held');
+    assert.equal((await s.call(`/api/tickets/${ids[1]}`)).data.ticket.state, 'parked', 'a seal of its own stays');
+  } finally {
+    await s.stop();
+    rmSync(root, { recursive: true, force: true }); // timing-ok: own temp dir
   }
 });

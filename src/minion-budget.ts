@@ -118,6 +118,12 @@ const usd = money;
 
 /** A minion waiting on its start card (#1674): its estimate and the card's question id; deleted once a person answers or unseals it. */
 export const startHoldKey = (ticketId: number) => `start_hold:${ticketId}`;
+export const START_HOLD_PREFIX = 'start_hold:';
+/**
+ * Its note while it waits: not sealed (#1757; Cara, 2026-11-24: "that minion needs human interaction, sealing it makes that
+ * less likely to happen"), so it lists and counts as waiting on a person; the hold itself is the setting above.
+ */
+export const startNote = (estimate: number) => `waits for a person's go on its start card: expected ${usd(estimate)}`;
 export const START = 'Start';
 export const SPLIT = 'Split first';
 /** The start card for a brief expected over START_CARD_USD. */

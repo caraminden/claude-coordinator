@@ -50,7 +50,7 @@ import { EFFORT_KEY, effortFor } from '../effort-retros.ts';
 import { chainsOf, type Chain as ChainView, type WaitLink } from '../chains.ts';
 import { cloneProject, projectDir, projectSharedDir, removeProjectDir } from '../workspace.ts';
 import { briefWarning, namedFiles } from '../brief-lint.ts';
-import { budgetKey, type BudgetState, expectedCost, money, START_CARD_USD, startCard, startHoldKey } from '../minion-budget.ts';
+import { budgetKey, type BudgetState, expectedCost, money, START_CARD_USD, startCard, startHoldKey, startNote } from '../minion-budget.ts';
 import { relayFile } from '../taskmaster-files.ts';
 import { mergedAfter, mergedPage } from '../history.ts';
 import { KIT_DIR, listSkills, offSkills } from '../skills.ts';
@@ -1375,8 +1375,9 @@ export const projectRoutes: Route[] = [
         const to = owner != null ? store.getUser(owner)?.name : undefined;
         const card = postCard(app, t, { questions: [startCard(t.number, title, estimate)], startCost: estimate, ...(to ? { to } : {}) });
         store.setSetting(startHoldKey(id), { usd: estimate, card: card.id });
-        if (!follow) store.updateTicket(id, { state: 'parked', note: `waits for its start card: expected ${money(estimate)}` });
-        notes.push(`Held: its brief expects about ${money(estimate)}, over ${money(START_CARD_USD)}, so no turn runs until a person answers its start card (${card.href}): Start, or Split first (it is dismissed and you split the brief). Link that card in your reply; you can't answer or unseal it.`);
+        // Not sealed (#1757): it waits on a person, so it lists and counts as needing one; the setting above holds its turns.
+        if (!follow) store.updateTicket(id, { note: startNote(estimate) });
+        notes.push(`Held: its brief expects about ${money(estimate)}, over ${money(START_CARD_USD)}, so no turn runs until a person answers its start card (${card.href}): Start, or Split first (it is dismissed and you split the brief). It isn't sealed: it shows as waiting on a person. Link that card in your reply; you can't answer it or start it yourself.`);
       }
       if (follow) {
         const { leader, when } = follow;

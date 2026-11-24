@@ -635,7 +635,7 @@ const TOOLS = () => ([
         reason: PICK_REASON,
         workflow: WORKFLOW,
         plugin_folders: PLUGIN_FOLDERS,
-        expected_cost: { type: 'number', description: 'What the brief expects this minion to cost, in dollars (its "Expected cost: ~$N" line, citadel:briefing part 8; left out, that line is read). Its budget alarms count from the larger of this and the usual cost; over $30 it is created sealed and waits for a person\'s start card (Start, or Split first).' },
+        expected_cost: { type: 'number', description: 'What the brief expects this minion to cost, in dollars (its "Expected cost: ~$N" line, citadel:briefing part 8; left out, that line is read). Its budget alarms count from the larger of this and the usual cost; over $30 no turn runs until a person answers its start card (Start, or Split first): it isn\'t sealed but shows as waiting on a person, and messages to it are held until it starts.' },
         not_duplicate: { type: 'boolean', description: 'true when create_ticket refused because open minions looked like the same work, or one open or closed in the last 3 days started from the same handoff file, and you checked it is not the same work' },
       },
       // properties is asked for but not required, so a client holding an older schema isn't refused before the fallback below.
@@ -2207,7 +2207,7 @@ async function runTool(name: string, args: any): Promise<string> {
       // Unseal (#718; start_now is its old name): the server unseals it first if it's sealed, and this message wakes it.
       const unpark = args.unpark === true || args.start_now === true;
       const t = await call('POST', `/api/tickets/${ticketId}/messages`, { text: args.text ?? args.message, ...(unpark ? { unpark: true } : {}) });
-      if (t.held === 'parked') return `Held for #${t.number}: it is sealed, so the message shows in its chat now and reaches it when it is unsealed or woken (its deploy wait or chained start). Do not resend it; message_ticket with \`unpark\` wakes it now.\n${ticketLine(t)}`;
+      if (t.held === 'parked') return `Held for #${t.number}: it is sealed or waits for its start card, so the message shows in its chat now and reaches it when it is unsealed or woken (its deploy wait or chained start). Do not resend it; message_ticket with \`unpark\` wakes it now.\n${ticketLine(t)}`;
       return t.held ? `${HELD()} Finish your turn.\n${ticketLine(t)}` : `Sent. ${ticketLine(t)}`;
     }
     case 'message_taskmaster': {
@@ -2368,7 +2368,7 @@ async function runTool(name: string, args: any): Promise<string> {
       const r = await call('POST', `/api/tickets/${C().TICKET}/minion-message`, { to: n, text: args.text ?? args.message, ...(args.wake === false ? { wake: false } : {}), ...(args.unpark === true ? { unpark: true } : {}) });
       const who = `#${r.number} ${r.title}`;
       if (r.held === true) return `${heldToolText(C().MSG, `you and #${r.number}`)} Finish your turn.`;
-      if (r.held === 'parked') return `Held for ${who}: it is sealed, so the message shows in its chat now and reaches it when it is unsealed or woken. Do not resend it; if it is sealed on you, resend with \`unpark: true\`.`;
+      if (r.held === 'parked') return `Held for ${who}: it is sealed or waits for its start card, so the message shows in its chat now and reaches it when it is unsealed or woken. Do not resend it; if it is sealed on you, resend with \`unpark: true\`.`;
       if (r.held === 'mail') return `Left as held mail: ${who} reads it on its next turn, whoever wakes it. Do not resend it.`;
       return `Sent. ${who} runs it now, or after its current turn.`;
     }

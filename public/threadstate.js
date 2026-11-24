@@ -44,7 +44,8 @@ export function rowState(t, usage, now = Date.now()) {
  * server_work, not here.
  */
 export function workingBy(t) {
-  if (t.status === 'running' || (t.status === 'new' && !t.parked_for && t.state !== 'parked' && !isCoordinator(t))) return 'turn';
+  // Nor one waiting on its start card (#1757): it hasn't run, and its card is a person's to answer.
+  if (t.status === 'running' || (t.status === 'new' && !t.parked_for && !t.start_hold && t.state !== 'parked' && !isCoordinator(t))) return 'turn';
   return t.status !== 'closed' && t.server_work ? 'server' : null;
 }
 

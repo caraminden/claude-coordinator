@@ -61,7 +61,7 @@ import { checkProcess, longestTool, noteEvent, quietAt, type Activity, type Proc
 import { activityLabel, applyEvent, createProgress, isWorkTool, planEstimate, planTrack, progressLine, stepInfo } from '../public/progress.js';
 import { packPlan, unpackPlan } from './history.ts';
 import { readGrunts } from './grunts.ts';
-import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, startHoldKey, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
+import { ASK, askText, type Budget, budgetCard, budgetFor, budgetKey, type BudgetState, startHoldKey, START_HOLD_PREFIX, startNote, CARD, chatNote, costReason, markOf, passed, REASON, turnLine, WAKE, wakeLevel, wakeText } from './minion-budget.ts';
 import { openSpend, SpendMeter, type SpendState, spendText, STAGES_SETTING, stagesFrom } from './spend-alert.ts';
 import { isAppTurnsRun } from './schedules.ts';
 import { kitLine, readAgentFiles, renderSet, reviewSetLine, withoutGoneAgents } from './review-set.ts';
@@ -1021,6 +1021,8 @@ export class Runner {
       asks: closed ? [] : this.approvals.pending().filter((a) => a.ticketId === ticket.id).map(({ at, card }) => ({ at, card })),
       // Sealed on start_after: what it waits for, for Start now.
       parked_for: this.heldFor(ticket.id),
+      // Waiting on its start card (#1757): not sealed, not working either; its card is the person's to answer.
+      start_hold: closed ? null : this.startHold(ticket.id),
       held_brief: closed ? null : this.heldBrief(ticket.id),
       // What wakes it by itself (start_after, wake_when_live, runners back): the list shows such a sealed minion as Waiting, not Sealed.
       wakes_on: ticket.state === 'parked' ? this.wakesOn(ticket.id) : null,
@@ -1648,6 +1650,7 @@ export class Runner {
   recover() {
     // Up before the first turn, so it doesn't start in a wrapper for want of one (a deploy brings a new version).
     if (this.supervisor) ensureSupervisor(this.supervisorSpec());
+    this.unsealStartHolds();
     const later: (() => void)[] = [];
     for (const p of this.store.listProjects()) {
       for (const t of this.store.listTickets(p.id)) {
@@ -2231,9 +2234,44 @@ export class Runner {
     this.relays.leaveMail(to, author, text);
   }
 
-  /** Sealed (#718): on hold on purpose (state sealed) or waiting on start_after, and not dismissed. A message to it is held. */
+  /**
+   * Held (#718): on hold on purpose (state sealed), waiting on start_after, or on its start card (#1757, which isn't sealed
+   * but runs nothing until a person answers), and not dismissed. A message to it is held.
+   */
   parked(t: Ticket): boolean {
-    return t.kind !== 'coordinator' && t.status !== 'closed' && (t.state === 'parked' || !!this.heldFor(t.id));
+    return t.kind !== 'coordinator' && t.status !== 'closed' && (t.state === 'parked' || !!this.heldFor(t.id) || !!this.startHold(t.id));
+  }
+
+  /** Its start card's estimate while it waits on one (#1674), for the list: { usd }, or null. */
+  startHold(ticketId: number): { usd: number } | null {
+    const hold = this.store.getSetting<{ usd: number }>(startHoldKey(ticketId));
+    return hold ? { usd: hold.usd } : null;
+  }
+
+  /**
+   * A person OK'd a held start (#1757): its first turn starts with their go, then its held brief and anything left for it.
+   * The caller has deleted the hold.
+   */
+  startHeld(ticketId: number, author: string, how: string) {
+    this.dropDisabled(ticketId);
+    this.send(ticketId, author, `${how} Your brief, and anything left for you while you waited, follow.`);
+    this.broadcastTicket(ticketId);
+  }
+
+  /**
+   * Minions created sealed on their start card before #1757 move out of the seal, once at boot (it finds none after):
+   * state cleared, their note the new one. One chained on start_after stays sealed on its chain. Returns how many moved.
+   */
+  unsealStartHolds(): number {
+    let moved = 0;
+    for (const { key, value } of this.store.settingsWithPrefix<{ usd: number }>(START_HOLD_PREFIX)) {
+      const t = this.store.getTicket(Number(key.slice(START_HOLD_PREFIX.length)));
+      if (!t || t.status === 'closed' || t.state !== 'parked' || this.heldFor(t.id)) continue;
+      this.store.updateTicket(t.id, { state: null, note: startNote(value.usd) });
+      moved++;
+    }
+    if (moved) console.log(`start cards: ${moved} minion${moved === 1 ? '' : 's'} waiting on a start card moved out of sealed (#1757)`);
+    return moved;
   }
 
   /** Messages held for this minion's next turn (#718's sealed ones and held mail). */

@@ -45,7 +45,7 @@ test('a card reaches a running turn\'s snapshot with no synchronous file call on
   const clock = new FakeClock();
   runner.clock = clock;
   const p = store.createProject('Busy', null);
-  const [a, b] = ['A', 'B'].map((title) => store.createTicket({ project_id: p.id, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }));
+  const [a, b, c] = ['A', 'B', 'C'].map((title) => store.createTicket({ project_id: p.id, title, permission_mode: 'bypassPermissions', created_by: 'Cara' }));
   const turns = join(root, 'turns');
   const dir = join(turns, 'a');
   mkdirSync(dir, { recursive: true });
@@ -55,16 +55,23 @@ test('a card reaches a running turn\'s snapshot with no synchronous file call on
   // A turn whose folder is already gone gets no file made for it.
   (runner as any).turns.set(b.id, { dir: join(turns, 'gone') });
 
+  // Other minions' cards (C has no turn running) reach A's snapshot off the thread: the first refreshes the scheme at
+  // once, the second waits for the gap's end, while the first write may still be under way.
   const calls = await syncCallsUnder(turns, async () => {
-    // The other minion's card refreshes the scheme at once; its own card inside the gap goes at once too, while the
-    // first write may still be under way; the gap's end refreshes once more.
-    runner.emit(b.id, 'question', { id: 'q1', questions: [{ header: 'A', question: '?' }] });
-    runner.emit(a.id, 'question', { id: 'own', questions: [{ header: 'O', question: '?' }] });
-    runner.emit(b.id, 'question', { id: 'q2', questions: [{ header: 'B', question: '?' }] });
+    runner.emit(c.id, 'question', { id: 'q1', questions: [{ header: 'A', question: '?' }] });
+    runner.emit(c.id, 'question', { id: 'q2', questions: [{ header: 'B', question: '?' }] });
     clock.advance(2_000);
     await runner.refsWritten();
   });
   assert.deepEqual(calls, []);
+  // A's own card is in its snapshot before emit returns, even with a refresh for the file still on its way: its reply
+  // may be checked against the file as soon as its tool call is answered.
+  runner.emit(c.id, 'question_result', { id: 'q1', answers: {} });
+  clock.advance(2_000);
+  runner.emit(a.id, 'question', { id: 'own', questions: [{ header: 'O', question: '?' }] });
+  assert.equal((JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs).cards!.some((x) => x.minion === a.number), true);
+  clock.advance(2_000);
+  await runner.refsWritten();
   // Writes to one file run one at a time and the newest text wins: the file is whole and has the last refresh's cards.
   const refs = JSON.parse(readFileSync(file, 'utf8')) as SchemeRefs;
   assert.equal(refs.self, a.number);
@@ -81,15 +88,16 @@ test('the flake log is read with no synchronous file call on the server\'s threa
   const shared = join(dir, 'shared');
   mkdirSync(join(shared, 'retro-log', '2026-11-20'), { recursive: true });
   const line = (t: string, branch: string) => `- ${t}Z · flake · test/x.test.ts · load 17.0 · ticket/${branch} · in CI`;
-  writeFileSync(join(shared, 'retro-log', '2026-11-20', 'land.md'), `# Retro log\n\n${[line('04:16:14', 'a'), line('05:08:44', 'b'), line('05:16:02', 'c')].join('\n')}\n`);
+  writeFileSync(join(shared, 'retro-log', '2026-11-20', 'land.md'), `# Retro log\n\n${[line('05:00:14', 'a'), line('05:08:44', 'b'), line('05:16:02', 'c')].join('\n')}\n`);
   const woken: string[] = [];
   const fx = new FlakeFixes({ store, sharedDir: () => shared, wake: (_p: unknown, text: string) => void woken.push(text) } as any);
   const now = Date.parse('2026-11-20T05:20:00Z');
   let found = 0;
   const calls = await syncCallsUnder(shared, async () => {
     found = await fx.ingest(project, now);
-    await fx.alarm(project, now).catch(() => 0);
+    await fx.alarm(project, now);
   });
   assert.deepEqual(calls, []);
   assert.equal(found, 3);
+  assert.equal(woken.length, 1);
 });

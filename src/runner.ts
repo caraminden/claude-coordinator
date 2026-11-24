@@ -88,6 +88,8 @@ export function schemeRefs(project: Project, projects: Project[], tickets: Ticke
 
 /** The chat event kinds that post or settle a card waiting on people (a person's message answers one). */
 const CARD_KINDS = new Set(['question', 'question_more', 'plan', 'approval', 'question_result', 'plan_result', 'approval_result', 'user_message']);
+/** The card kinds a turn posts itself: its own snapshot has them before its tool call returns (refreshRefs). */
+const POSTED_KINDS = new Set(['question', 'question_more', 'plan', 'approval']);
 const EVERYONES = new Set(['question', 'plan', 'approval']);
 
 // Stream events that carry no information for the ticket view.
@@ -4629,7 +4631,7 @@ export class Runner {
     if (lord) data = { ...(data as object), everyone: true };
     const row = this.store.addEvent(ticketId, kind, data, reserved);
     this.broadcast({ type: 'event', event: row });
-    if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId);
+    if (CARD_KINDS.has(kind)) this.refreshRefs(ticketId, POSTED_KINDS.has(kind));
     return row;
   }
 
@@ -4707,6 +4709,9 @@ export class Runner {
       // Whole or not at all: the link check may read it mid-turn.
       writeFileSync(`${file}.new`, text);
       renameSync(`${file}.new`, file);
+      // A refresh still on its way to this file would put older text back: it writes this one last.
+      const held = this.refsWrites.get(file);
+      if (held) held.text = text;
     } else this.putRefs(file, text);
   }
 
@@ -4755,14 +4760,17 @@ export class Runner {
    * link check knows it. At most once per refsGapMs per scheme (#1562): the first card refreshes at once, and the cards
    * after it within the gap share one refresh at its end. The card's own minion gets its snapshot at once either way:
    * its link check may read it before the gap ends, and a missing card there bounces its reply (cardlessChoices).
+   * `posted` (the turn posted the card itself) writes that one snapshot before returning, so it is there when the
+   * turn's tool call is answered; every other turn's goes off the server's thread (putRefs).
    */
-  private refreshRefs(ticketId: number) {
+  private refreshRefs(ticketId: number, posted = false) {
     const projectId = this.store.getTicket(ticketId)?.project_id;
     if (projectId === undefined) return;
     const last = this.refsLast.get(projectId);
     const wait = last ? last.at + this.refsGapMs - this.clock.now() : 0;
-    if (!last?.due && wait <= 0) return this.writeSchemeRefs(projectId);
-    this.writeSchemeRefs(projectId, ticketId);
+    const own = posted ? ticketId : undefined;
+    if (!last?.due && wait <= 0) return this.writeSchemeRefs(projectId, undefined, own);
+    this.writeSchemeRefs(projectId, ticketId, own);
     if (last?.due) return;
     const due = this.clock.setTimeout(() => {
       try {
@@ -4775,8 +4783,11 @@ export class Runner {
     this.refsLast.set(projectId, { at: last!.at, due });
   }
 
-  /** Rewrite the snapshot of every turn running in `projectId`, or only `only`'s, outside the gap (refreshRefs). */
-  private writeSchemeRefs(projectId: number, only?: number) {
+  /**
+   * Rewrite the snapshot of every turn running in `projectId`, or only `only`'s, outside the gap (refreshRefs). `own`'s
+   * is written before returning, the rest off the server's thread.
+   */
+  private writeSchemeRefs(projectId: number, only?: number, own?: number) {
     // The gap starts only once a refresh read something: a card in a scheme with no turn running costs nothing.
     if (only === undefined) this.refsLast.delete(projectId);
     let shared: ReturnType<Runner['refsShared']> | undefined;
@@ -4786,7 +4797,10 @@ export class Runner {
       if (t?.project_id !== projectId) continue;
       if (!shared && only === undefined) this.refsLast.set(projectId, { at: this.clock.now() });
       try {
-        this.writeRefs(join(turn.dir, 'scheme-refs.json'), t, shared ??= this.refsShared(projectId));
+        const file = join(turn.dir, 'scheme-refs.json');
+        // A turn that ended took its folder with it (putRefs checks the same, off the thread).
+        if (id === own && !existsSync(file)) continue;
+        this.writeRefs(file, t, shared ??= this.refsShared(projectId), id === own);
       } catch {
         // A stale snapshot only means a card goes unchecked.
       }

@@ -100,6 +100,14 @@ test('units run with the build\'s toolchain: the app\'s .mise.toml trusted and a
   assert.ok(own.get('citadel-app-toc.service')!.includes('Environment="MISE_TRUSTED_CONFIG_PATHS=/h/apps/toc:/h/other"'), 'an app\'s own trusted paths are kept');
 });
 
+test('units stop mise at the app folder\'s parent, so a repo-root mise.toml above a subfolder app is never read', () => {
+  const manifest = parseManifest(JSON.stringify({ start: ['node', 'server.ts'], timers: { backup: { command: ['node', 'b.ts'], on_calendar: 'daily' } } }));
+  const files = unitFiles({ row: row('cantrips', 7350), manifest, folder: '/h/apps/.cantrips/a/apps/cantrips', keysDir: '', citadelUrl: '', home: '/h' });
+  for (const unit of ['citadel-app-cantrips.service', 'citadel-app-cantrips-backup.service']) {
+    assert.ok(files.get(unit)!.includes('Environment="MISE_CEILING_PATHS=/h/apps/.cantrips/a/apps"'), unit);
+  }
+});
+
 test('only the live server, or a dev copy with stand-ins for both systemctl and the unit folder, touches systemd', () => {
   const rest = { keysDir: () => '', citadelUrl: () => '' };
   assert.equal(serviceOptions({}, true, false, rest).off, null);

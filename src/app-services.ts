@@ -183,6 +183,8 @@ export function unitFiles({ row, manifest, folder, keysDir, citadelUrl, home }: 
     CITADEL_HEAVY: join(TOOLS, 'citadel-app-heavy'),
     // The build trusts the app's .mise.toml, so its units do too; an app's own trusted paths are kept after it.
     MISE_TRUSTED_CONFIG_PATHS: [folder, own.MISE_TRUSTED_CONFIG_PATHS].filter(Boolean).join(':'),
+    // mise reads every mise.toml above its folder: a subfolder app's repo root has one the unit doesn't trust. A ceiling stops the walk at the folder's parent without trusting (loading) the root's env templates.
+    MISE_CEILING_PATHS: dirname(folder),
   };
   // systemd finds a bare program name on its own path, not the unit's PATH: point it at the build's, so `node` is mise's shim.
   const search = `ExecSearchPath=${toolPath(home).replace(/%/g, '%%')}`;

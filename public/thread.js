@@ -12,6 +12,7 @@ import { recapEvent, showRecap } from './recap.js';
 import { narrationSorter } from './narration.js';
 import { gist, groupTitle, gruntName, gruntOf } from './grunts.js';
 import { stepMark } from './ui/chat.js';
+import { replyStartsOpen } from './cardreply.js';
 import { pushNote, pushRun, pushRunParts, senderTone, shortDuration, shortNote } from './chattext.js';
 import { ultraCard, ultraResult } from './ultrareview.js';
 import { payerLine } from './payer.js';
@@ -968,7 +969,7 @@ function replyShows(data) {
 /** The reply an everyone card was asked in, above the card wherever it shows (#1581); open from the first render (#1630). */
 function cardReply(text, ticketId) {
   const el = h('details', { class: 'card-reply' }, h('summary', {}, 'The reply this card belongs to'), markdown(text, ticketId));
-  el.open = true; // always open (#1630): the reply reads as part of the exchange; a person can still collapse it
+  el.open = replyStartsOpen(text);
   return el;
 }
 

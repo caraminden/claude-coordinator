@@ -8,6 +8,7 @@ import { Contraptions } from '../src/contraptions.ts';
 import { checkGrowth, readGrowth, KIND, SUPERVISOR_SLACK } from '../src/growth-alarm.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'growth-alarm-'));
+// timing-ok: own temp dir
 after(() => rmSync(root, { recursive: true, force: true }));
 
 const H = 3_600_000;

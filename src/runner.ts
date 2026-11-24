@@ -1146,6 +1146,24 @@ export class Runner {
     this.broadcast({ type: 'claims', projectId });
   }
 
+  /** True once an hour per account-error text; texts older than that hour are forgotten, so the map stays small. */
+  firstAccountPush(text: string, now = Date.now()): boolean {
+    const hour = 60 * 60 * 1000;
+    for (const [k, at] of this.accountPushes) if (now - at > hour) this.accountPushes.delete(k);
+    if (this.accountPushes.has(text)) return false;
+    this.accountPushes.set(text, now);
+    return true;
+  }
+
+  /** A closed minion's entries in the per-minion caches; each is rebuilt or set again if it is reopened (runner-turn-maps.test.ts says how). */
+  forgetMaps(ticketId: number) {
+    this.progress.delete(ticketId);
+    this.mainModels.delete(ticketId);
+    this.gateCounted.delete(ticketId);
+    this.contextSizes.delete(ticketId);
+    this.contextShown.delete(ticketId);
+  }
+
   /**
    * Close a ticket that is not running. Its worktree and branch are kept. Its temp folder, preview and
    * build output (#336) go on its lane, after its last turn's save; resolves once they are gone.
@@ -1165,6 +1183,7 @@ export class Runner {
     // At once, not on the lane: a closed minion holds nothing for a next turn, and next() must find nothing to start.
     this.dropQueue(ticketId);
     this.freeClaims(ticketId);
+    this.forgetMaps(ticketId);
     // A split scheme's Taskmasters read it in their next turn's digest (#919's noteDigest).
     const gone = this.store.getTicket(ticketId);
     if (gone && gone.kind !== 'coordinator' && this.store.isSplit(gone.project_id)) this.store.noteDigest(gone.project_id, 0, `#${gone.number} ${gone.title} was dismissed`);
@@ -3908,9 +3927,7 @@ export class Runner {
     if (out.kind === 'account-error') {
       this.emit(ticketId, 'error', { text: `${text}\nThis needs a person to sort out the Claude account; it won't retry by itself.` });
       if (!keepState) this.setFailNote(ticketId, { state: 'blocked', note: short(`Needs a person: ${first.replace(/^API Error: \d+ /, '')}`) });
-      const last = this.accountPushes.get(first);
-      if (last === undefined || Date.now() - last > 60 * 60 * 1000) {
-        this.accountPushes.set(first, Date.now());
+      if (this.firstAccountPush(first)) {
         this.onTurnError(ticketId, first);
       }
       return;

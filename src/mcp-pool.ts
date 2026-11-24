@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { handle } from './mcp.ts';
 import { poolAlive } from './pool-client.mjs';
-import { turnStore, type TurnContext } from './pool-context.ts';
+import { beatWhileOpen, turnStore, type TurnContext } from './pool-context.ts';
 import { dropLinks, machineRequest } from './pool-machine.ts';
 
 const [dir, version] = process.argv.slice(2);
@@ -96,9 +96,9 @@ async function serve(req: IncomingMessage, res: ServerResponse, turn: TurnContex
     return send(res, 202);
   }
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
-  const beat = setInterval(() => res.write(': beat\n\n'), 15_000);
+  const stopBeat = beatWhileOpen(res);
   const answer = await turnStore.run(turn, () => run(msg)).catch((err: any) => ({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: err.message } }));
-  clearInterval(beat);
+  stopBeat();
   res.end(`event: message\ndata: ${JSON.stringify(answer)}\n\n`);
 }
 

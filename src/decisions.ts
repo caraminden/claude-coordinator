@@ -402,6 +402,8 @@ export function adrDir(claudeMd: string): string {
 }
 
 /** Each commit that changed a dated line in these paths, as before/after pairs per file (oldest first). Cached by HEAD. */
+/** At most this many scheme/path sets are kept; the oldest goes first. */
+export const HISTORY_CACHE_MAX = 8;
 const historyCache = new Map<string, { head: string; edits: Map<string, Edit[]> }>();
 export async function gitEdits(repo: string, paths: string[], href: (file: string, sha: string) => string | null): Promise<Map<string, Edit[]>> {
   const head = await gitOut(['rev-parse', 'HEAD'], repo);
@@ -427,6 +429,7 @@ export async function gitEdits(repo: string, paths: string[], href: (file: strin
     list.push({ before, after, at: p.at, by: p.by, href: href(p.file, p.sha) ?? undefined });
     edits.set(p.file, list);
   }
+  if (historyCache.size >= HISTORY_CACHE_MAX) historyCache.delete(historyCache.keys().next().value!);
   historyCache.set(key, { head, edits });
   return edits;
 }
@@ -472,3 +475,6 @@ export function memTitle(text: string): string {
   const d = description.replace(/\\"/g, '"').split(/\s+[—–]\s+|;\s+/)[0].replace(/^\p{Lu}\p{Ll}+,?\s+20\d\d-\d\d-\d\d[:,]?\s*/u, '').trim();
   return lastSentence(d || name.replace(/-/g, ' ')).slice(0, 120);
 }
+
+/** How many scheme/path sets the git-history cache holds now (for its test). */
+export const historyCacheSize = () => historyCache.size;

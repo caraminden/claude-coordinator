@@ -9,10 +9,10 @@
 // Exits 0, 2 on a bad map or a missing base, 3 for `full`. --paths stands in for the git diff (the tests use it).
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, normalize, resolve } from 'node:path';
 
 export type Rule = { line: number; glob: string; re: RegExp; tests: string[] };
-export type Map = { tests: RegExp[]; fallback: 'always' | 'full'; rules: Rule[]; sameName: RegExp[] };
+export type Map = { tests: RegExp[]; fallback: 'always' | 'full'; rules: Rule[]; sameName: RegExp[]; imports: RegExp[] };
 
 // A glob over a repo path: `*` and `?` stay inside a folder name, `**` crosses folders, `**/` may be no folder at all.
 export function globRe(glob: string): RegExp {
@@ -29,7 +29,7 @@ export function globRe(glob: string): RegExp {
 }
 
 export function parseMap(text: string): Map {
-  const map: Map = { tests: [], fallback: 'always', rules: [], sameName: [] };
+  const map: Map = { tests: [], fallback: 'always', rules: [], sameName: [], imports: [] };
   const fail = (n: number, why: string): never => { throw new Error(`map line ${n}: ${why}`); };
   text.split('\n').forEach((raw, i) => {
     const n = i + 1;
@@ -40,6 +40,7 @@ export function parseMap(text: string): Map {
       const [name, ...vals] = line.slice(1).split(/\s+/);
       if (name === 'tests') { if (!vals.length) fail(n, '@tests needs a glob'); map.tests.push(...vals.map(globRe)); }
       else if (name === 'samename') { if (!vals.length) fail(n, '@samename needs a glob'); map.sameName.push(...vals.map(globRe)); }
+      else if (name === 'imports') { if (!vals.length) fail(n, '@imports needs a glob'); map.imports.push(...vals.map(globRe)); }
       else if (name === 'fallback') { if (vals.length !== 1 || !['always', 'full'].includes(vals[0])) fail(n, '@fallback is "always" or "full"'); map.fallback = vals[0] as 'always' | 'full'; }
       else fail(n, `unknown directive @${name}`);
       return;
@@ -66,12 +67,22 @@ export function changedPaths(root: string, base: string): string[] {
   return [...new Set([...names([`${base}...HEAD`]), ...names(['HEAD']), ...git(root, ['ls-files', '--others', '--exclude-standard'])])].sort();
 }
 
+// The repo paths a test file imports directly with a relative specifier (from, import(), require()); `./x.ts` from test/ is test/x.ts.
+export function directImports(root: string, file: string): string[] {
+  let text: string;
+  try { text = readFileSync(join(root, file), 'utf8'); } catch { return []; }
+  const out = new Set<string>();
+  for (const m of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\(\s*)['"](\.{1,2}\/[^'"]+)['"]/g)) out.add(normalize(join(dirname(file), m[1])));
+  return [...out];
+}
+
 export type Answer = { run: { test: string; why: string[] }[]; unmapped: string[]; empty: boolean; full: boolean };
 
 export function affected(map: Map, changed: string[], tracked: string[], root: string): Answer {
   const picked = new Map<string, string[]>();
   const add = (test: string, why: string) => { const w = picked.get(test) ?? []; if (!w.includes(why)) w.push(why); picked.set(test, w); };
   const unmapped: string[] = [];
+  let imports: globalThis.Map<string, string[]> | undefined;
   for (const p of changed) {
     const isTest = map.tests.some((re) => re.test(p));
     if (isTest && existsSync(join(root, p))) add(p, 'touched');
@@ -92,6 +103,11 @@ export function affected(map: Map, changed: string[], tracked: string[], root: s
         const b = t.slice(t.lastIndexOf('/') + 1);
         if (b === `${stem}.test.ts` || b === `${stem}.test.js`) { add(t, `name ${p}`); covered = true; }
       }
+    }
+    // @imports: a changed source file also runs every tracked test file that imports it directly (#1809).
+    if (!isTest && map.imports.some((re) => re.test(p))) {
+      imports ??= new Map(tracked.filter((t) => map.tests.some((re) => re.test(t))).map((t) => [t, directImports(root, t)]));
+      for (const [t, deps] of imports) if (deps.includes(p)) { add(t, `imports ${p}`); covered = true; }
     }
     if (!covered) unmapped.push(p);
   }

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { affected, globRe, parseMap } from '../tools/affected.ts';
+import { affected, directImports, globRe, parseMap } from '../tools/affected.ts';
 
 // tools/affected.ts and tools/affected-map.txt (#1112): the format is specs/affected-tests-map.md in the shared folder.
 const repo = join(import.meta.dirname, '..');
@@ -84,7 +84,7 @@ test('the route test runs for the paths that can move the route table, and not o
 test('the command prints which rule picked each test', () => {
   const r = spawnSync('node', ['tools/affected.ts', '--paths', 'src/db.ts', 'NOTES.txt'], { cwd: repo, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^run\ttest\/db-setup\.test\.ts\tmap:\d+ src\/db\.ts$/m);
+  assert.match(r.stdout, /^run\ttest\/db-setup\.test\.ts\tmap:\d+ src\/db\.ts(, imports src\/db\.ts)?$/m);
   assert.match(r.stdout, /^unmapped\tNOTES\.txt$/m);
 });
 
@@ -156,4 +156,30 @@ test('a source file picks its same-name test by basename (.ts or .js), and only 
 
 test('any public/ change picks the boot-check test', () => {
   for (const p of ['public/base.js', 'public/ui/chat.js', 'public/style.css', 'public/x/new-file.html']) assert.ok(lines([p]).run.some((r) => r.test === 'test/boot-check.test.ts'), p);
+});
+
+test('a test that directly imports a src/, public/ or tools/ module is picked when that module changes (#1809)', () => {
+  const missed: string[] = [];
+  for (const t of tracked.filter((f) => map.tests.some((re) => re.test(f)))) {
+    for (const dep of directImports(repo, t)) {
+      if (!/^(src|public|tools)\//.test(dep) || !tracked.includes(dep)) continue;
+      if (!lines([dep]).run.some((r) => r.test === t)) missed.push(`${t} imports ${dep}`);
+    }
+  }
+  assert.deepEqual(missed, [], 'add the file to the map\'s @imports glob, or a rule line for it');
+});
+
+test('@imports picks only the test files that import the changed file directly', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'aff-imp-'));
+  try {
+    mkdirSync(join(dir, 'src')); mkdirSync(join(dir, 'test'));
+    writeFileSync(join(dir, 'src', 'a.ts'), '');
+    writeFileSync(join(dir, 'test', 'x.test.ts'), "import { a } from '../src/a.ts';\n");
+    writeFileSync(join(dir, 'test', 'y.test.ts'), "const z = await import('../src/b.ts');\n");
+    const m = parseMap('@tests test/*.test.ts\n@imports src/**\n');
+    const tr = ['src/a.ts', 'test/x.test.ts', 'test/y.test.ts'];
+    assert.deepEqual(affected(m, ['src/a.ts'], tr, dir).run.map((r) => r.test), ['test/x.test.ts']);
+    assert.deepEqual(affected(m, ['src/b.ts'], tr, dir).run.map((r) => r.test), ['test/y.test.ts']);
+    assert.deepEqual(affected(parseMap('@tests test/*.test.ts\n'), ['src/a.ts'], tr, dir).run, []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

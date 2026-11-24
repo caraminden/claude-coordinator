@@ -8,6 +8,9 @@
 @fallback always
 # A changed source file also runs the test files named after it (#1622): src/x.ts and public/x.js run test/x.test.ts and x.test.js.
 @samename src/** public/** tools/**
+# A changed source file also runs every test file that imports it directly (#1809), so a test needs no line here for a module it imports.
+# test/affected.test.ts fails when a test imports a module and its change would not pick that test.
+@imports src/** public/** tools/**
 
 # The database: its schema, its secrets list, and the first-run commit budget.
 src/db.ts: test/db-setup.test.ts test/host-check.test.ts test/db-areas.test.ts

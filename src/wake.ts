@@ -16,7 +16,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { buildRefOf, madeCommits } from './branch.ts';
-import type { Store } from './db.ts';
+import type { Store, Ticket } from './db.ts';
 import { scoped } from './read-scope.ts';
 import type { Delivery, DeliveryState, NewDelivery } from './db/deliveries.ts';
 import { githubRepo } from './github.ts';
@@ -1135,4 +1135,18 @@ export class TimedWakes {
       this.outbox.clock(),
     );
   }
+}
+
+/**
+ * update_ticket's `start_after: null` (#1823): take sealed `ticket` off its chain, leaving it sealed with its brief as held mail
+ * (read when it is unsealed or woken with unpark). `note`: also set its note to say so. False when it isn't chained.
+ */
+export function takeOffChain(ticket: Ticket, by: string, { store, runner, waiters }: { store: Store; runner: Pick<Runner, 'emit' | 'send' | 'broadcastTicket'>; waiters: LiveWaiters }, note: boolean): boolean {
+  const leader = store.getTicket(waiters.chains().find((c) => c.ticket === ticket.id)?.after ?? 0);
+  const gone = waiters.unchain(ticket.id, (c) => (c.message ? runner.send(ticket.id, c.from, c.message, [], { brief: true, hold: true }).event.id : null));
+  if (!gone) return false;
+  runner.emit(ticket.id, 'note', { text: `${by} took this minion off its chain${leader ? ` behind #${leader.number}` : ''}: it stays sealed and no longer starts when that work is in. Unseal it, or message it with unpark, to start it.` });
+  store.updateTicket(ticket.id, { state: 'parked', ...(note ? { note: 'sealed, off its chain' } : {}) });
+  runner.broadcastTicket(ticket.id);
+  return true;
 }

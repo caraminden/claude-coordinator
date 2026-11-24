@@ -3,7 +3,7 @@
 // `"mode": "verify"` runs a verifier instead (#1740): it boots the change as shipped and drives it (verifier.md).
 // README.md beside this file; `node tools/review-escapes/run.ts --help`.
 import { spawn, execFileSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -104,7 +104,9 @@ function claude(args: string[], input: string, cwd: string, file: string, timeou
     const p = spawn('claude', args, { cwd, env: { ...cleanEnv(tmp), ...extraEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '', err = '';
     const timer = setTimeout(() => p.kill('SIGTERM'), timeoutMs);
-    p.stdout.on('data', (d) => (out += d));
+    // As it runs, for the verifier's stay hook, which reads what it has done so far.
+    writeFileSync(file, '');
+    p.stdout.on('data', (d) => { out += d; appendFileSync(file, d); });
     p.stderr.on('data', (d) => (err += d));
     p.on('close', (code) => {
       clearTimeout(timer);
@@ -167,6 +169,10 @@ async function verify(c: Case, arm: Arm, out: string, kit: string): Promise<void
   git('-C', repo, 'branch', '-q', 'main', 'origin/main');
   git('-C', repo, 'remote', 'remove', 'origin');
   copyFileSync(join(HERE, 'verifier-boot.mjs'), join(dir, 'boot.mjs'));
+  // The state kit (boot.mjs --turns, --clock): the dev copy's stand-in claude and its clock.
+  copyFileSync(join(HERE, 'fake-claude.mjs'), join(dir, 'fake-claude.mjs'));
+  chmodSync(join(dir, 'fake-claude.mjs'), 0o755);
+  copyFileSync(join(HERE, 'verifier-clock.mjs'), join(dir, 'clock.mjs'));
   mkdirSync(join(dir, 'tools'));
   copyFileSync(join(REPO, 'tools/ui-shot.ts'), join(dir, 'tools/ui-shot.ts'));
   // ui-shot starts its browser through heavy-unit, whose systemd-run is stubbed here: run it in place, in this case's tree.
@@ -180,7 +186,10 @@ async function verify(c: Case, arm: Arm, out: string, kit: string): Promise<void
   writeFileSync(join(dir, 'brief.md'), brief);
   const chrome = join(process.env.HOME ?? '', '.cache/ms-playwright');
   writeFileSync(join(dir, 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: '.*',
-    hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'verifier-guard.ts')}' '${dir}' '${kit}' '${chrome}' '${dirname(dirname(process.execPath))}'`, timeout: 10 }] }] } }));
+    hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'verifier-guard.ts')}' '${dir}' '${kit}' '${chrome}' '${dirname(dirname(process.execPath))}'`, timeout: 10 }] }],
+  // It may not stop until it has driven the copy enough, for long enough (verifier-stay.mjs).
+  Stop: [{ hooks: [{ type: 'command', command: `'${process.execPath}' '${join(HERE, 'verifier-stay.mjs')}' '${dir}'`, timeout: 10 }] }] } }));
+  writeFileSync(join(dir, 'started-at'), String(Date.now()));
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions',
     '--model', arm.model, '--effort', arm.effort, '--disallowedTools', 'Agent,Task,WebFetch,WebSearch',
     '--settings', join(dir, 'settings.json'), '--setting-sources', 'project', '--strict-mcp-config',
@@ -191,10 +200,11 @@ async function verify(c: Case, arm: Arm, out: string, kit: string): Promise<void
   for (const pid of left) try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
   if (r.error && !r.cost) { execFileSync('rm', ['-rf', dir]); return console.log(`${arm.name} ${c.id}: not run, rerun to retry: ${r.error}`); }
   // Keep the report, the stream, the logs and its screenshots; the clone and the data are big and rebuilt on demand.
-  execFileSync('rm', ['-rf', repo, join(dir, 'data'), join(dir, 'scratch')]);
+  execFileSync('rm', ['-rf', repo, join(dir, 'data'), join(dir, 'scratch'), join(dir, 'home')]);
   writeFileSync(join(dir, 'review.md'), r.text);
   const { text, ...meta } = r;
-  writeFileSync(join(dir, 'meta.json'), JSON.stringify({ ...meta, leftovers: left.length }, null, 1));
+  const stays = existsSync(join(dir, 'stay-blocks')) ? Number(readFileSync(join(dir, 'stay-blocks'), 'utf8')) : 0;
+  writeFileSync(join(dir, 'meta.json'), JSON.stringify({ ...meta, leftovers: left.length, stays }, null, 1));
   console.log(`${arm.name} ${c.id}: $${meta.cost.toFixed(2)} ${Math.round(meta.ms / 1000)}s ${countFindings(text)} findings${left.length ? ` (${left.length} leftover processes stopped)` : ''}${meta.error ? ' ERROR ' + meta.error : ''}`);
 }
 

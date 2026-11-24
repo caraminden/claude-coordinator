@@ -31,6 +31,9 @@ goes on working out what was meant. Eight parts, in this order, cut that down.
    A change to how saved things are stored, read or applied (records, settings, saved files, a person's
    own items) also says here what happens to the ones saved before it: migrated, left as they are on
    purpose, or flagged to their owner.
+   A cause, count or size the brief states ("about 15 files leak", "run the prompt eval") carries the
+   command that showed it, or is labelled a guess. A guess that reads as a fact was the steadiest ship
+   lesson of Nov 10 to 24 (`docs/retros/2026-11-10-24.md`).
 7. **Read first**: paths to the handoffs, specs, reports and code worth reading, each with a clause
    on why. Paths, never pasted text: the minion reads the file itself.
 8. **Model and effort**, with one line of why from the Taskmaster's model table: `Opus 5.5 high:

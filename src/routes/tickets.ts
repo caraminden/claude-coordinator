@@ -52,6 +52,8 @@ export { postPlan };
 import { ensureCoordinatorFor, LINE_FIELDS, schemeTarget } from './projects.ts';
 import { pacificTime, parseWakeTime, type Relay, relayDests } from '../wake.ts';
 import { gitOut } from '../git.ts';
+import { thrown } from '../thrown.ts';
+import type { ContentBlock } from '../claude-events.ts';
 import { MachineJobs } from '../machine-jobs.ts';
 import { NOT_NOW as KIT_NOT_NOW, SHIP as KIT_SHIP } from '../kit-sync.ts';
 import { stopMinionShip } from '../ship-stop.ts';
@@ -62,7 +64,7 @@ import { stopMinionShip } from '../ship-stop.ts';
  * build, model, effort, workflow and plugin_dirs, with their checks (a bad one throws HttpError). `name` is who set
  * them and `caller` the agent's ticket, if an agent did. Returns why a pending close_self was cancelled, if it was.
  */
-export function setLabels(app: App, ticket: Ticket, body: any, name: string, caller: number | null): string | null {
+export function setLabels(app: App, ticket: Ticket | TicketView, body: Record<string, unknown>, name: string, caller: number | null): string | null {
   const { id } = ticket;
   const { store, runner } = app;
   // Any of title, state, note, replies, build, model, effort, workflow and plugin_dirs; null (or "") clears all but the title.
@@ -92,7 +94,7 @@ export function setLabels(app: App, ticket: Ticket, body: any, name: string, cal
     // A new model or effort changes why it runs where it does (#1061): a Taskmaster's change is a step-up after a stall, a person's is theirs.
     if ('model' in fields || 'effort' in fields) {
       fields.picked_because = pickReason(caller !== null && caller !== id ? 'step-up' : name, null, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
-      store.addPick(id, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, caller !== null && caller !== id ? 'Taskmaster' : name, fields.picked_because);
+      store.addPick(id, 'model' in fields ? fields.model ?? null : stored.model, 'effort' in fields ? fields.effort ?? null : stored.effort, caller !== null && caller !== id ? 'Taskmaster' : name, fields.picked_because!);
     }
     store.updateTicket(id, fields);
     if (fields.state === 'pending-deploy') runner.deployPending(id);
@@ -131,10 +133,13 @@ function pluginPicks(store: App['store'], ticket: { kind: string; project_id: nu
   if (ticket.kind === 'coordinator') throw new HttpError(400, 'Only minions pick plugin folders');
   try {
     return cleanPluginPicks(v, store.getProject(ticket.project_id)?.optional_plugin_dirs ?? '');
-  } catch (err: any) {
-    throw new HttpError(400, err.message);
+  } catch (err) {
+    throw new HttpError(400, thrown(err).message!);
   }
 }
+
+/** One area of a batch ask as sent. */
+interface RawArea { paths?: unknown; name?: unknown; question?: unknown }
 
 const ULTRAREVIEW_REFUSE = 'Only a person can start an ultra review: it is billed to their own Claude account';
 const ULTRAREVIEW_PREP_REFUSE = "Only a person, or this chat's own minion for the person its turn runs for, can prep ultra reviews";
@@ -166,8 +171,16 @@ const DESCRIBED_RECOMMENDED = /^\s*recommended(?:\s*[.:;,!\u2013\u2014-]+\s*|\s*
 
 interface SecretAsk { name: string; scope: SecretScope; why?: string }
 
+/** A question card's option as stored, once cleanQuestions has checked it. */
+interface CardOption { label: string; description?: string; image?: string; recommended?: true }
+/** A question card's question as stored. */
+interface CardQuestion { question: string; header?: string; multiSelect: boolean; options: CardOption[] }
+/** An option or a question as the ask sends it, before the checks. */
+interface RawOption { label?: unknown; description?: unknown; image?: unknown; recommended?: unknown }
+interface RawQuestion { question?: unknown; header?: unknown; multiSelect?: unknown; options?: unknown }
+
 /** A secret card's ask (#838): the name it saves under, whose it is (the answerer's own unless "scheme"), and why. */
-function secretAsk(raw: any): SecretAsk {
+function secretAsk(raw: Record<string, unknown> | null | undefined): SecretAsk {
   if (!raw || typeof raw !== 'object') throw new HttpError(400, 'secret must be an object with a name');
   const scope = oneOf(raw.scope ?? 'person', ['person', 'scheme'], 'secret.scope') as SecretScope;
   return { name: secretName(raw.name), scope, ...(raw.why ? { why: str(raw.why, 'secret.why', 300) } : {}) };
@@ -194,30 +207,30 @@ export function untaggedFence(text: string): boolean {
   return false;
 }
 
-async function cleanQuestions(app: App, ticket: Ticket, raw: unknown) {
+async function cleanQuestions(app: App, ticket: Ticket | TicketView, raw: unknown) {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 4) throw new HttpError(400, 'questions must be a list of 1 to 4 questions');
-  const questions = raw.map((q: any, i: number) => {
+  const questions = raw.map((q: RawQuestion, i: number) => {
     const n = `Question ${i + 1}`;
     if (!q || typeof q !== 'object') throw new HttpError(400, `${n} must be an object`);
     if (!Array.isArray(q.options) || q.options.length < 2 || q.options.length > 6) throw new HttpError(400, `${n} needs 2 to 6 options`);
-    const flagged = q.options.some((o: any) => o?.recommended === true || o?.recommended === 'true');
-    const options = q.options.map((o: any, j: number) => {
+    const flagged = q.options.some((o: RawOption | null | undefined) => o?.recommended === true || o?.recommended === 'true');
+    const options = q.options.map((o: RawOption | null | undefined, j: number): CardOption => {
       const says = typeof o?.label === 'string' && SAYS_RECOMMENDED.test(o.label);
       const described = !flagged && typeof o?.description === 'string' && DESCRIBED_RECOMMENDED.test(o.description);
-      const description = described ? o.description.replace(DESCRIBED_RECOMMENDED, '') : o?.description;
+      const description = described ? (o!.description as string).replace(DESCRIBED_RECOMMENDED, '') : o?.description;
       return {
-        label: str(says ? o.label.replace(SAYS_RECOMMENDED, '') : o?.label, `${n} option ${j + 1} label`, 80),
+        label: str(says ? (o!.label as string).replace(SAYS_RECOMMENDED, '') : o?.label, `${n} option ${j + 1} label`, 80),
         ...(description ? { description: str(description, `${n} option ${j + 1} description`, 300) } : {}),
         ...(o?.image ? { image: str(o.image, `${n} option ${j + 1} image`, 1000) } : {}),
         ...(o?.recommended === true || o?.recommended === 'true' || says || described ? { recommended: true } : {}),
       };
     });
-    if (new Set(options.map((o: any) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);
-    const recommended = options.filter((o: any) => o.recommended).length;
+    if (new Set(options.map((o) => o.label)).size !== options.length) throw new HttpError(400, `${n} has duplicate option labels`);
+    const recommended = options.filter((o) => o.recommended).length;
     if (!recommended) throw new HttpError(400, `${n} needs a recommended option: set "recommended": true on the one you would pick (exactly one; any number on a multiSelect question)`);
     if (recommended > 1 && q.multiSelect !== true) throw new HttpError(400, `${n} recommends ${recommended} options; mark just one`);
     const question = str(q.question, n, 500);
-    const untagged = [question, ...options.map((o: any) => o.description ?? '')].some(untaggedFence);
+    const untagged = [question, ...options.map((o) => o.description ?? '')].some(untaggedFence);
     if (untagged) throw new HttpError(400, `${n} has a code block with no tag. A command people run goes in a fenced block tagged with where it runs (${SHELL_TAGS.map((t) => '```' + t).join(', ')}): the card draws it with that header and a Copy button, as a reply does, and every value in it is filled in, no <placeholder> but a secret. Tag anything else \`\`\`text`);
     return {
       question,
@@ -236,7 +249,7 @@ async function cleanQuestions(app: App, ticket: Ticket, raw: unknown) {
 }
 
 /** The page a choices card opens (#804): a mock kit page with pick bars in the minion's folders, whose Send dock answers the card. */
-async function choicesDoc(app: App, ticket: Ticket, raw: unknown): Promise<{ path: string; title: string }> {
+async function choicesDoc(app: App, ticket: Ticket | TicketView, raw: unknown): Promise<{ path: string; title: string }> {
   const found = await resolveTicketFile(app, ticket, str(raw, 'doc', 1000));
   if (found?.type.kind !== 'html') throw new HttpError(400, 'doc must be an HTML page in your working directory or shared folder');
   const html = await readFile(found.file, 'utf8');
@@ -245,7 +258,7 @@ async function choicesDoc(app: App, ticket: Ticket, raw: unknown): Promise<{ pat
 }
 
 /** The stop button: the turn, its waiting test-box job and its running ship (unless past moving main: `ship` says which). */
-function stopMinion(app: App, ticket: Ticket, by: string) {
+function stopMinion(app: App, ticket: Ticket | TicketView, by: string) {
   const stopped = app.runner.stop(ticket.id);
   // Its test-box job still waiting for the screen leaves the line, turn or no turn: Citadel follows it after the turn ends (#1425).
   const followed = app.machines.minionStopped(ticket.id);
@@ -259,7 +272,7 @@ function stopMinion(app: App, ticket: Ticket, by: string) {
  * as their name (what the chat, the inbox and push go by); null for a card to everyone. Only the asking scheme's
  * members: a card never reaches anyone a message in its chat couldn't.
  */
-export function addressee(app: App, ticket: Ticket, raw: unknown): string | null {
+export function addressee(app: App, ticket: Ticket | TicketView, raw: unknown): string | null {
   if (raw == null || raw === '') return null;
   const want = String(raw).trim().replace(/^@/, '').toLowerCase();
   const members = app.store.listMembers(ticket.project_id);
@@ -284,7 +297,7 @@ export function deliverAnswer(app: App, ticketId: number, author: string, text: 
  * cleared and, unless a message follows (`quiet`), starts a turn. What was held for it rides along either way.
  * `author` is whom the waking message comes from: the person who pressed Unseal, or the app for the Taskmaster.
  */
-export async function unparkTicket(app: App, ticket: Ticket, by: string, author: string, quiet = false): Promise<void> {
+export async function unparkTicket(app: App, ticket: Ticket | TicketView, by: string, author: string, quiet = false): Promise<void> {
   if (ticket.kind === 'coordinator') throw new HttpError(400, `The ${AGENT_NAME} is never sealed`);
   if (ticket.status === 'closed') throw new HttpError(409, `#${ticket.number} is dismissed: reopen it instead`);
   // A brief expected over $30 (#1674) starts on a person's OK: a person's Unseal (`author` is their name) is one and
@@ -324,11 +337,11 @@ export async function unparkTicket(app: App, ticket: Ticket, by: string, author:
 }
 
 /** A person's picks for each question of a card: chosen option labels, plus optional free text. */
-function cleanAnswers(questions: any[], raw: unknown, pictured = false) {
+function cleanAnswers(questions: CardQuestion[], raw: unknown, pictured = false) {
   if (!Array.isArray(raw) || raw.length !== questions.length) throw new HttpError(400, 'Answer every question on the card (a question may have joined it since you opened it)');
   return questions.map((q, i) => {
-    const a: any = raw[i] ?? {};
-    const selected = Array.isArray(a.selected) ? [...new Set(a.selected.filter((l: unknown) => q.options.some((o: any) => o.label === l)))] as string[] : [];
+    const a: { selected?: unknown; other?: unknown } = raw[i] ?? {};
+    const selected = Array.isArray(a.selected) ? [...new Set(a.selected.filter((l: unknown) => q.options.some((o) => o.label === l)))] as string[] : [];
     const other = typeof a.other === 'string' ? a.other.trim().slice(0, 2000) : '';
     if (!q.multiSelect && selected.length > 1) throw new HttpError(400, `Pick one answer for question ${i + 1}`);
     // A picture sent with the answer counts for every question left blank (Cara, 2026-11-18).
@@ -374,15 +387,15 @@ async function ultrareviewSpec(app: App, ticket: TicketView, mode: unknown, rawP
   } else if (mode === 'area') {
     try {
       spec = { mode, repo, base, paths: cleanPaths(rawPaths) };
-    } catch (err: any) {
-      throw new HttpError(400, err.message);
+    } catch (err) {
+      throw new HttpError(400, thrown(err).message!);
     }
   } else throw new HttpError(400, 'mode must be branch or area');
   let size;
   try {
     size = await diffSize(spec);
-  } catch (err: any) {
-    throw new HttpError(400, String(err?.stderr || err?.message).trim().split('\n')[0]);
+  } catch (err) {
+    throw new HttpError(400, String(thrown(err).stderr || thrown(err).message).trim().split('\n')[0]);
   }
   if (!size.files) throw new HttpError(400, spec.mode === 'branch' ? `Nothing to review: ${spec.branch} has no changes against ${base}` : 'Nothing to review: those paths hold no files');
   return { spec, size };
@@ -413,8 +426,8 @@ export const ticketRoutes: Route[] = [
       try {
         const ev = await app.ultrareviews.start(ticket.id, session.uid, session.name, spec, size, app.sharedDir(row));
         return json(res, 202, ev);
-      } catch (err: any) {
-        throw new HttpError(409, err.message);
+      } catch (err) {
+        throw new HttpError(409, thrown(err).message!);
       }
     },
   },
@@ -446,14 +459,14 @@ export const ticketRoutes: Route[] = [
       if (!repo) throw new HttpError(400, 'This scheme has no repo to review');
       const base = await defaultBranch(repo);
       const refused: { index: number; name: string; error: string; size?: { files: number; lines: number } }[] = [];
-      for (const [index, a] of (body.areas as any[]).entries()) {
+      for (const [index, a] of (body.areas as RawArea[]).entries()) {
         let name = '';
         try {
           const paths = cleanPaths(a?.paths);
           name = typeof a?.name === 'string' && a.name.trim() ? a.name.trim().slice(0, 80) : paths.join(', ').slice(0, 80);
           const question = typeof a?.question === 'string' && a.question.trim() ? a.question.trim().slice(0, 2000) : undefined;
-          const size = await diffSize({ mode: 'area', repo, base, paths }).catch((err: any) => {
-            throw new Error(String(err?.stderr || err?.message).trim().split('\n')[0]);
+          const size = await diffSize({ mode: 'area', repo, base, paths }).catch((err: unknown) => {
+            throw new Error(String(thrown(err).stderr || thrown(err).message).trim().split('\n')[0]);
           });
           if (!size.files) throw new Error('Nothing to review: those paths hold no files');
           if (overLimit(size)) {
@@ -461,8 +474,8 @@ export const ticketRoutes: Route[] = [
             continue;
           }
           await app.ultrareviews.prep(ticket.id, who.uid, who.name, { repo, base, name, paths, question, size });
-        } catch (err: any) {
-          refused.push({ index, name, error: err.message });
+        } catch (err) {
+          refused.push({ index, name, error: thrown(err).message! });
         }
       }
       return json(res, 200, { rows: app.ultrareviews.rows(ticket.id, who.uid).map(rowView), refused, for: who.name });
@@ -479,8 +492,8 @@ export const ticketRoutes: Route[] = [
       if (!row) throw new HttpError(404, 'No such prepped review in this chat');
       try {
         return json(res, 202, await app.ultrareviews.startRow(row.id, session.uid, session.name, app.sharedDir(app.store.getTicket(ticket.id)!)));
-      } catch (err: any) {
-        throw new HttpError(409, err.message);
+      } catch (err) {
+        throw new HttpError(409, thrown(err).message!);
       }
     },
   },
@@ -492,8 +505,8 @@ export const ticketRoutes: Route[] = [
       const row = app.ultrareviews.rows(ticket.id, session.uid).find((x) => x.id === params.row);
       try {
         if (row) app.ultrareviews.discard(row.id, session.uid);
-      } catch (err: any) {
-        throw new HttpError(409, err.message);
+      } catch (err) {
+        throw new HttpError(409, thrown(err).message!);
       }
       return json(res, 200, { ok: true });
     },
@@ -511,8 +524,8 @@ export const ticketRoutes: Route[] = [
       if (thread !== undefined && !Number.isSafeInteger(thread)) throw new HttpError(400, 'thread must be a side thread\'s id');
       try {
         return json(res, 202, app.sideAsks.ask(ticket.id, session.uid, session.name, text, thread));
-      } catch (err: any) {
-        throw new HttpError(409, err.message);
+      } catch (err) {
+        throw new HttpError(409, thrown(err).message!);
       }
     },
   },
@@ -660,7 +673,7 @@ export const ticketRoutes: Route[] = [
       // cards only"), the first from a second member splits the scheme. The Overlord takes the words of anyone who has a
       // Taskmaster of their own (or no way to get one); a member without one gets theirs made first.
       const overlord = ctx.ticket.coordinator_of == null && app.store.isSplit(ctx.ticket.project_id);
-      if (!caller && ctx.ticket.kind === 'coordinator' && !(overlord && app.store.coordinatorFor(ctx.ticket.project_id, session.uid)?.coordinator_of === session.uid)) {
+      if (!caller && ctx.ticket.kind === 'coordinator' && !(overlord && app.store.coordinatorFor(ctx.ticket.project_id, session.uid!)?.coordinator_of === session.uid)) {
         const own = await ensureCoordinatorFor(app, app.store.getProject(ctx.ticket.project_id)!, session.uid);
         if (own.id !== ctx.ticket.id) ctx = { ...ctx, ticket: ticketView(app, own.id) };
       }
@@ -913,9 +926,9 @@ export const ticketRoutes: Route[] = [
       try {
         // It rewrites the message's whole data: a strike still queued (two sent at once) would be written over.
         return json(res, 200, await afterAllWrites(() => runner.strike(id, text, reason)));
-      } catch (err: any) {
+      } catch (err) {
         if (err instanceof HttpError) throw err;
-        throw new HttpError(/already/.test(err.message) ? 409 : 404, err.message);
+        throw new HttpError(/already/.test(thrown(err).message!) ? 409 : 404, thrown(err).message!);
       }
     },
   },
@@ -965,8 +978,8 @@ export const ticketRoutes: Route[] = [
         let line: string;
         try {
           line = await app.kitSync.decide({ ticket: id, question: data.id }, choice, { id: session.uid ?? -1, name: session.name });
-        } catch (err: any) {
-          throw new HttpError(409, err.message);
+        } catch (err) {
+          throw new HttpError(409, thrown(err).message!);
         }
         runner.send(id, session.name, `My answer to the kit sync card: ${choice}`, [], { answer: { questionId: body.questionId, answers }, hold: true });
         runner.emit(id, 'note', { text: line });
@@ -1000,7 +1013,7 @@ export const ticketRoutes: Route[] = [
         runner.recordAnswer(id, session.name, `My answer to your budget card: ${CARD_STOP}. I stopped your turn.`, { answer: { questionId: body.questionId, answers } });
         return json(res, 202, ticketView(app, id));
       }
-      const text = questions.map((q: any, i: number) => {
+      const text = questions.map((q: CardQuestion, i: number) => {
         const { selected, other } = answers[i];
         // The text typed with a pick expands on it; typed alone, it is the answer.
         const picked = !selected.length && !other ? '(no option picked; see the attachment)' : selected.length ? `${selected.join('; ')}${other ? `\n  Added: ${other}` : ''}` : `In their own words: ${other}`;
@@ -1282,8 +1295,8 @@ export const ticketRoutes: Route[] = [
         const d = JSON.parse(e.data);
         const keep = e.kind === 'user_message' ? { author: d.author, text: d.text ?? '', ...(d.comment ? { comment: { about: d.comment.about } } : {}) }
           : e.kind === 'note' || e.kind === 'error' ? { text: d.text ?? '' }
-          : e.kind === 'claude' && d.type === 'assistant' && !d.replaced && (d.message?.content ?? []).some((b: any) => b.type === 'text' && b.text.trim())
-            ? { type: 'assistant', message: { content: d.message.content.filter((b: any) => b.type === 'text') }, ...(d.parent_tool_use_id ? { parent_tool_use_id: d.parent_tool_use_id } : {}) }
+          : e.kind === 'claude' && d.type === 'assistant' && !d.replaced && (d.message?.content ?? []).some((b: ContentBlock) => b.type === 'text' && b.text!.trim())
+            ? { type: 'assistant', message: { content: d.message.content.filter((b: ContentBlock) => b.type === 'text') }, ...(d.parent_tool_use_id ? { parent_tool_use_id: d.parent_tool_use_id } : {}) }
           : e.kind === 'claude' && d.type === 'result' ? { type: 'result', is_error: !!d.is_error }
           : null;
         return keep ? [{ kind: e.kind, data: JSON.stringify(keep) }] : [];
@@ -1344,8 +1357,8 @@ export const ticketRoutes: Route[] = [
       let args: string[];
       try {
         args = landArgs(body ?? {}, ticket.cwd);
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message!);
       }
       const unjudged = await criticRefusal(app.store.reviews, ticket, args, body?.fix === true);
       if (unjudged) throw new HttpError(400, unjudged);
@@ -1418,8 +1431,8 @@ export const ticketRoutes: Route[] = [
         let proof;
         try {
           proof = parseFixProof(body.fix_proof);
-        } catch (err: any) {
-          throw new HttpError(400, err.message);
+        } catch (err) {
+          throw new HttpError(400, thrown(err).message!);
         }
         const why = await fixProofProblem(ticket.cwd, proof, app.store.props.forTarget('minion', ticket.id).type);
         if (why) throw new HttpError(400, `Not handed off as a fix without a go: ${why}. Ask with a ship card (kind ship) and hand it off with go instead`);
@@ -1452,8 +1465,8 @@ export const ticketRoutes: Route[] = [
         if (body.into !== undefined) throw new HttpError(400, 'A probe goes with a ship to main, not a merge into a build');
         try {
           h.probe = parseProbe(body.probe);
-        } catch (err: any) {
-          throw new HttpError(400, `${err.message}. ${PROBE_HELP}`);
+        } catch (err) {
+          throw new HttpError(400, `${thrown(err).message}. ${PROBE_HELP}`);
         }
         if (h.probe.kind === 'sql' && (await app.waiters.elsewhere(ticket.id))) throw new HttpError(400, "A sql probe reads this server's own database, so only the scheme it runs uses one: pick http or timing");
       } else if (body.into === undefined) {
@@ -1465,8 +1478,8 @@ export const ticketRoutes: Route[] = [
       let args: string[];
       try {
         args = landArgs(body, ticket.cwd);
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message!);
       }
       // The critic gate (#1504): a critic this change matches runs before the ship, a feeder's merge too.
       const unjudged = await criticRefusal(app.store.reviews, { ...ticket, cwd: ticket.cwd! }, args, body.fix === true);
@@ -1575,7 +1588,7 @@ export const ticketRoutes: Route[] = [
           const m = store.getTicketByNumber(ticket.project_id, n);
           if (!m || m.kind === 'coordinator') throw new HttpError(404, `There is no minion #${n} in this scheme`);
           if (m.id === ticket.id) throw new HttpError(400, 'That is you');
-          tos.push({ minion: m.id, number: m.number });
+          tos.push({ minion: m.id, number: m.number! });
         } else {
           const { project } = schemeTarget(app, ticket, target);
           tos.push({ scheme: project.name, taskmaster: (await ensureCoordinatorFor(app, project, null)).id }); // not for a member: the Overlord (#919)
@@ -1621,8 +1634,8 @@ export const ticketRoutes: Route[] = [
       let w;
       try {
         w = wakes.add(ticket.id, parseWakeTime(String(body.at)), note, session.name);
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message!);
       }
       // The row people see until it fires; the wake itself arrives as a message.
       runner.emit(ticket.id, 'note', { text: `Wake set for ${pacificTime(w.at)}: ${note}` });

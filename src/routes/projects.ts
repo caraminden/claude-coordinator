@@ -37,6 +37,7 @@ import { turnEnv, turnPins } from '../turn-launch.ts';
 import { byteSize } from '../prompts.ts';
 import { claudeConfigDir } from '../sessions.ts';
 import { deleteNote, indexNote, memoryFolders, noteFile, readFolder, saveNote } from '../memory-files.ts';
+import { thrown } from '../thrown.ts';
 import { loadDecisions, memoryLogins, recheckDecisions } from '../decisions-load.ts';
 import { timerBroken } from '../timer-alerts.ts';
 import { mailParksUnderOldRule } from '../rule-parks.ts';
@@ -230,7 +231,7 @@ function minionHits(app: App, hits: MemoryHit[]): (MemoryHit & { owner: string |
  * in a split scheme the Overlord hears of every start but its own as held mail, and gets a card when one reads like
  * another person's open minion (#921). Never blocks the start; a failed search says nothing.
  */
-async function startChecks(app: App, projectId: number, id: number, startedBy: string, caller: Ticket | undefined, text: string) {
+async function startChecks(app: App, projectId: number, id: number, startedBy: string, caller: Ticket | null | undefined, text: string) {
   const { store } = app;
   const minion = store.getTicket(id);
   const overlord = store.isSplit(projectId) ? store.getOverlord(projectId) : undefined;
@@ -433,7 +434,7 @@ export const projectRoutes: Route[] = [
       const busy = (t: Ticket) => isWorking({ status: t.status, approvals: runner.approvals.waiting(t.id), server_work: runner.serverWork(t.id) });
       const seenItems = store.seenItems(session.name);
       // In the order they dragged the shelf into (#649); one they haven't placed goes at the end.
-      const schemes = inOrder(visibleSchemes(store, session), (p) => p.id, session.uid === undefined ? [] : store.listOrder(session.uid, 'schemes'));
+      const schemes: Project[] = inOrder(visibleSchemes(store, session), (p: Project) => p.id, session.uid === undefined ? [] : store.listOrder(session.uid, 'schemes'));
       // Each scheme's part up to its icon's await runs in one read scope (src/read-scope.ts, #1527): the people, settings and waits it reads per minion come once.
       json(res, 200, await Promise.all(readScope(store.db, () => schemes.map(async (p) => {
         const tickets = store.listTickets(p.id);
@@ -614,7 +615,7 @@ export const projectRoutes: Route[] = [
             else await initRepo(dir, name, about);
           }
           app.store.setProjectRepoDir(project.id, dir);
-        } catch (err: any) {
+        } catch (err) {
           app.store.deleteProject(project.id);
           await removeProjectDir(app.dataDir, project.id);
           throw new HttpError(400, `${source === 'new' ? 'Could not make the repo' : 'Could not clone repo'}: ${errorText(err)}`);
@@ -727,7 +728,7 @@ export const projectRoutes: Route[] = [
       // Mine and Everyone (#920): person_id null is the Overlord. Empty until the scheme splits. updated_at and status: when its
       // offered replies count as seen in Needs you and whether its turn spins the pill, as for any minion (#1400).
       const all_tms = app.store.listCoordinators(project.id);
-      const own = !caller && all_tms.length > 1 ? app.store.coordinatorFor(project.id, session.uid) ?? coordinator : coordinator;
+      const own = !caller && all_tms.length > 1 ? app.store.coordinatorFor(project.id, session.uid!) ?? coordinator : coordinator;
       const taskmasters = all_tms.length > 1
         ? all_tms.map((t) => ({ id: t.id, person_id: t.coordinator_of, person_name: t.coordinator_of == null ? null : app.store.getUser(t.coordinator_of)?.name ?? null, updated_at: t.updated_at, status: t.status }))
         : [];
@@ -741,7 +742,7 @@ export const projectRoutes: Route[] = [
     async handler({ res, url, app, session, project }) {
       const { store } = app;
       const list = store.listCoordinators(project.id);
-      const own = store.coordinatorFor(project.id, session.uid) ?? list[0];
+      const own = store.coordinatorFor(project.id, session.uid!) ?? list[0];
       const everyone = url.searchParams.get('view') === 'everyone';
       // Someone who hasn't written yet has no Taskmaster of their own, so theirs is the Overlord: Mine filters it too.
       const parts = !own ? [] : [{ id: own.id, mine: !everyone && own.coordinator_of == null && list.length > 1 }, ...list
@@ -804,15 +805,15 @@ export const projectRoutes: Route[] = [
         if (body.shot_widths !== undefined) settings.shot_widths = cleanShotWidths(body.shot_widths);
         if (body.shot_themes !== undefined) settings.shot_themes = cleanShotThemes(body.shot_themes);
         if (body.shot_note !== undefined) settings.shot_note = cleanShotNote(body.shot_note);
-        } catch (err: any) {
-        throw new HttpError(400, err.message);
+        } catch (err) {
+        throw new HttpError(400, thrown(err).message!);
       }
       // Message settings (#1059): whole numbers inside src/msg-settings.ts's bounds.
       try {
         Object.assign(settings, cleanMsgSettings(body));
         if (body.msg_never_hold !== undefined) settings.msg_never_hold = cleanNeverHold(body.msg_never_hold);
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message!);
       }
       if (body.shots_required !== undefined) {
         if (typeof body.shots_required !== 'boolean') throw new HttpError(400, 'shots_required must be true or false');
@@ -843,8 +844,8 @@ export const projectRoutes: Route[] = [
         if (body.ci_quiet !== undefined) settings.ci_quiet = cleanWorkflows(body.ci_quiet);
         if (body.ci_watch !== undefined) settings.ci_watch = cleanWorkflows(body.ci_watch, 'Watched CI workflows');
         if (body.list_groups !== undefined) settings.list_groups = JSON.stringify(store.props.listGroups(project.id, body.list_groups));
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message!);
       }
       // Plugins load code from any folder on the server: an admin's, or an admin's scheme's Taskmaster's.
       // The optional ones too (#361): a minion picks from them without an admin, so registering one is the gate.
@@ -863,8 +864,8 @@ export const projectRoutes: Route[] = [
       let repoUrl: string | null = null;
       if (body.repo_url !== undefined) {
         repoUrl = typeof body.repo_url === 'string' ? body.repo_url.trim() : '';
-        if (!/^(https:\/\/|git@)/.test(repoUrl)) throw new HttpError(400, 'Repo URL must be https:// or git@');
-        if (/\s/.test(repoUrl) || /^https:\/\/[^/]*@/.test(repoUrl)) throw new HttpError(400, 'Repo URL cannot hold spaces or a login');
+        if (!/^(https:\/\/|git@)/.test(repoUrl!)) throw new HttpError(400, 'Repo URL must be https:// or git@');
+        if (/\s/.test(repoUrl!) || /^https:\/\/[^/]*@/.test(repoUrl!)) throw new HttpError(400, 'Repo URL cannot hold spaces or a login');
         if (repoUrl === project.repo_url) repoUrl = null;
         else if (project.repo_url && body.replace_repo !== true) {
           throw new HttpError(409, `This scheme's repo is already ${project.repo_url}; send replace_repo: true to point it at ${repoUrl} instead`);
@@ -880,8 +881,8 @@ export const projectRoutes: Route[] = [
       if (name !== project.name) {
         try {
           store.renameProject(project.id, name);
-        } catch (err: any) {
-          throw new HttpError(409, err.message);
+        } catch (err) {
+          throw new HttpError(409, thrown(err).message!);
         }
         const coordinator = store.getOverlord(project.id);
         if (coordinator) runner.emit(coordinator.id, 'note', { everyone: true, text: `${session.name} renamed the scheme from "${project.name}" to "${name}".` });
@@ -1145,13 +1146,13 @@ export const projectRoutes: Route[] = [
       // What the verdicts are for, in order, so the page can drop them if its list was different (a save in between).
       const places = found.map((o) => `${o.label}|${o.line}`);
       if (!found.length) return json(res, 200, { verdicts: [], places });
-      const place = app.claude.place(session.uid);
+      const place = app.claude.place(session.uid!);
       if (!place) return json(res, 200, { unlinked: "Your Claude plan isn't linked (Settings → Your account), so there's no login of yours to run the check on" });
       try {
-        const reply = await runDescribe(place, verdictPrompt(body.scope, before, text, found, (id) => ruleHome(app, project, id)), { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(session.uid), 'repeat-check'), timeoutMs: 30_000 });
+        const reply = await runDescribe(place, verdictPrompt(body.scope, before, text, found, (id) => ruleHome(app, project, id)), { claudeBin: process.env.CLAUDE_BIN ?? 'claude', hostEnv: turnEnv(process.env), cwd: join(app.claude.turnsDir(session.uid!), 'repeat-check'), timeoutMs: 30_000 });
         return json(res, 200, { verdicts: readVerdicts(reply, found.length), places });
-      } catch (err: any) {
-        return json(res, 200, { failed: String(err.message).slice(0, 300) });
+      } catch (err) {
+        return json(res, 200, { failed: String(thrown(err).message).slice(0, 300) });
       }
     },
   },
@@ -1191,8 +1192,8 @@ export const projectRoutes: Route[] = [
       let plugins = '';
       try {
         plugins = cleanPluginPicks(body.plugin_dirs, project.optional_plugin_dirs);
-      } catch (err: any) {
-        throw new HttpError(400, err.message);
+      } catch (err) {
+        throw new HttpError(400, thrown(err).message!);
       }
       // Properties are checked before the minion exists, so a bad one doesn't leave half a minion.
       const props: Record<string, unknown> = body.properties == null ? {} : body.properties;
@@ -1235,7 +1236,7 @@ export const projectRoutes: Route[] = [
       let because = pickReason(byHand ? session.name : 'table', planned.type?.[0], model, effort, typeof body.pick_reason === 'string' ? body.pick_reason.slice(0, 200) : '');
       // Third fix (#1157): a bug that looks like 2+ earlier fixes of the last 14 days starts with "diagnose first", one tier up from the table's pick.
       const repeat = planned.type?.[0] === 'bug' ? await findRepeats(store, project, { title, brief: ownBrief(message), at: Date.now() }).catch(() => []) : [];
-      const stepped = repeat.length ? steppedTier({ model, effort }, table, project.fable_ok !== 'off') : null;
+      const stepped = repeat.length ? steppedTier({ model: model!, effort: effort! }, table, project.fable_ok !== 'off') : null;
       const tierWas = tierLabel(model, effort);
       if (stepped) {
         ({ model, effort } = stepped);
@@ -1257,7 +1258,7 @@ export const projectRoutes: Route[] = [
       const build = body.build !== undefined ? buildNumber(body.build) : given('build') ? undefined : parent?.build ?? leader?.build ?? null;
       // Its effort (#1751, src/effort-retros.ts): its own, else its leader's, else its parent's; an unnamed chain is named after its leader.
       const effortOf = (t: Ticket | null | undefined) => (t ? (store.props.forTarget('minion', t.id)[EFFORT_KEY] as string | undefined) ?? null : null);
-      const joins = given(EFFORT_KEY) ? null : effortFor(null, leader ? { number: leader.number, effort: effortOf(leader) } : null, effortOf(parent));
+      const joins = given(EFFORT_KEY) ? null : effortFor(null, leader ? { number: leader.number!, effort: effortOf(leader) } : null, effortOf(parent));
       if (joins?.name) props[EFFORT_KEY] = joins.name;
       if (joins?.stampLeader && leader) store.props.set('minion', leader.id, project.id, { [EFFORT_KEY]: joins.name }, session.name);
       // The build's own minion (build branches, specs/build-branches.md): it keeps the list and lands the build.
@@ -1292,7 +1293,7 @@ export const projectRoutes: Route[] = [
         const t = store.getTicket(id)!;
         const owner = store.minionOwner(t);
         const to = owner != null ? store.getUser(owner)?.name : undefined;
-        const card = postCard(app, t, { questions: [startCard(t.number, title, estimate)], startCost: estimate, ...(to ? { to } : {}) });
+        const card = postCard(app, t, { questions: [startCard(t.number!, title, estimate)], startCost: estimate, ...(to ? { to } : {}) });
         store.setSetting(startHoldKey(id), { usd: estimate, card: card.id });
         // Not sealed (#1757): it waits on a person, so it lists and counts as needing one; the setting above holds its turns.
         if (!follow) store.updateTicket(id, { note: startNote(estimate) });
@@ -1347,9 +1348,9 @@ export const projectRoutes: Route[] = [
             if (typeof body.text !== 'string' || body.text.length > 200_000) throw new HttpError(400, 'text must be text under 200 KB');
             saveNote(folder.dir, file, body.text);
           }
-        } catch (err: any) {
+        } catch (err) {
           if (err instanceof HttpError) throw err;
-          throw new HttpError(err.status ?? 404, err.message);
+          throw new HttpError(thrown(err).status ?? 404, thrown(err).message!);
         }
       }
       return json(res, 200, { folders: folders.map((f) => readFolder(f, closed)) });
@@ -1638,7 +1639,7 @@ export const projectRoutes: Route[] = [
       const name = claimName(body.name);
       const note = body.note == null ? '' : str(body.note, 'Note', 300);
       const queue = body.queue == null ? null : queueOf(app, project.id, body.queue);
-      let holder = caller;
+      let holder: Ticket | null | undefined = caller;
       if (body.minion != null) {
         holder = app.store.getTicketByNumber(project.id, Number(body.minion));
         if (!holder || holder.kind === 'coordinator' || holder.status === 'closed') throw new HttpError(400, `No open minion #${Number(body.minion)} in this scheme`);

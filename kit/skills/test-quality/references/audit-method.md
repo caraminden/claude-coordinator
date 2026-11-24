@@ -89,10 +89,12 @@ and check different things, and both stay. The rule in section 0 holds.
    `citadel-heavy node <kit>/skills/test-quality/scripts/test-overlap.ts --out "$TMPDIR/overlap" --jobs 3`
    (the kit's folder is this session's citadel plugin dir). Run it in the background and wait with
    `citadel-wait pid <pid>`; it resumes where it stopped if killed. Only inside the audit: it starts one process per
-   test file (Citadel's 633 files took about 14 min at 3 jobs), so never in CI or a ship script. An
+   test file (Citadel's 634 files took about 21 min to measure at 3 jobs, plus 4 min to score), so never in CI or a ship script. An
    audit that scopes to changed files passes them as arguments; the list then only covers pairs among those.
 2. **Read the output** `pairs.tsv`: containment (the share of the smaller file's lines the larger also runs, with
    lines nearly every test runs weighted down), jaccard, shared lines and the source files they share, ranked.
+   A group of files that all score 1.00 against each other, on the same few source files, usually loaded one shared
+   harness or helper at the top: give the Grunt one pair from the group and say so, not every combination.
 3. **One Sonnet Grunt** (read-only, own brief) gets the top 15 to 25 pairs. For each it reads both test files whole,
    side by side, and answers REDUNDANT (name the cases to drop, from which file), SAME LINES, DIFFERENT CHECKS (what
    each guards that the other doesn't), or UNSURE. Judge its REDUNDANT calls yourself as in section 3.

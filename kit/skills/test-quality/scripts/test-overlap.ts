@@ -3,16 +3,16 @@
 // (kit/skills/test-quality/references/audit-method.md). Overlap only makes a pair a suspect: a unit test and an
 // end-to-end test can run the same lines and check different things, so a Grunt reads each pair side by side.
 //
-//   node test-overlap.ts [--out <dir>] [--jobs N] [--top N] [--min 0.6] [--min-lines 30] [--rescore] [test files...]
+//   node test-overlap.ts [--out <dir>] [--jobs N] [--top N] [--min 0.8] [--min-lines 30] [--rescore] [test files...]
 //
 // For node:test repos. With no files it takes every *.test.{ts,js,mjs} under the folder the package.json test
 // script names last (default test/). Each file runs ALONE under node's built-in coverage, with the test script's
 // own launcher and flags (its global setup and timeout), and its lcov goes to <out>/cov/. A finished file is kept,
 // so a rerun resumes. Writes <out>/pairs.tsv (ranked) and prints the top pairs.
 // Heavy: one process per test file. Run it under `citadel-heavy`, only inside an audit, never in CI or a ship.
-// Scores: each covered line weighs 1/(test files covering it), so lines every file runs (imports, setup) count
-// for almost nothing. containment = weighted |A∩B| / min(|A|,|B|) (a small file inside a big one scores 1.0, which
-// Jaccard hides); jaccard = weighted |A∩B| / |A∪B|. Ranked by containment, then jaccard.
+// Scores: each covered line weighs 1/(test files covering it), and lines over a quarter of the files run
+// (imports, setup) are ignored. containment = weighted |A∩B| / min(|A|,|B|) (a small file inside a big one scores 1.0, which
+// Jaccard hides); jaccard = weighted |A∩B| / |A∪B|. Ranked by containment, then jaccard, then shared lines.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
@@ -35,42 +35,47 @@ export function parseLcov(text: string): Set<string> {
 }
 
 /** Ranked pairs whose covered lines mostly overlap. Pairs under minLines (unweighted) on either side are skipped: a
- * test that runs a handful of lines sits "inside" everything. */
+ * test that runs a handful of lines sits "inside" everything. Lines that more than a quarter of the files run (load
+ * and setup code) are left out altogether, which also keeps the pair count down. */
 export function scorePairs(covered: Covered, opts: { min?: number; minLines?: number } = {}): Pair[] {
   const min = opts.min ?? 0.6;
   const minLines = opts.minLines ?? 30;
   const names = [...covered.keys()].filter((n) => covered.get(n)!.size >= minLines);
-  const df = new Map<string, number>();
-  for (const set of covered.values()) for (const k of set) df.set(k, (df.get(k) ?? 0) + 1);
-  const w = (k: string): number => 1 / (df.get(k) ?? 1);
-  const weight = new Map(names.map((n) => [n, [...covered.get(n)!].reduce((s, k) => s + w(k), 0)]));
-  const pairs: Pair[] = [];
-  for (let i = 0; i < names.length; i++) {
-    for (let j = i + 1; j < names.length; j++) {
-      const [a, b] = [names[i], names[j]];
-      const sa = covered.get(a)!;
-      const sb = covered.get(b)!;
-      const [small, big] = sa.size <= sb.size ? [sa, sb] : [sb, sa];
-      let inter = 0;
-      let shared = 0;
-      const perFile = new Map<string, number>();
-      for (const k of small) {
-        if (!big.has(k)) continue;
-        inter += w(k);
-        shared++;
-        const f = k.slice(0, k.lastIndexOf(':'));
-        perFile.set(f, (perFile.get(f) ?? 0) + w(k));
+  const byLine = new Map<string, number[]>(); // line -> indexes of the files running it
+  names.forEach((n, i) => {
+    for (const k of covered.get(n)!) (byLine.get(k) ?? byLine.set(k, []).get(k)!).push(i);
+  });
+  const cap = Math.max(4, names.length / 4);
+  const weight = new Array<number>(names.length).fill(0);
+  const inter = new Map<number, number>(); // i * n + j -> weighted shared lines
+  const shared = new Map<number, number>();
+  const perFile = new Map<number, Map<string, number>>();
+  for (const [k, idx] of byLine) {
+    if (idx.length > cap) continue;
+    const w = 1 / idx.length;
+    for (const i of idx) weight[i] += w;
+    if (idx.length < 2) continue;
+    const f = k.slice(0, k.lastIndexOf(':'));
+    for (let x = 0; x < idx.length; x++) {
+      for (let y = x + 1; y < idx.length; y++) {
+        const pk = idx[x] * names.length + idx[y];
+        inter.set(pk, (inter.get(pk) ?? 0) + w);
+        shared.set(pk, (shared.get(pk) ?? 0) + 1);
+        const m = perFile.get(pk) ?? perFile.set(pk, new Map()).get(pk)!;
+        m.set(f, (m.get(f) ?? 0) + w);
       }
-      if (!shared) continue;
-      const wa = weight.get(a)!;
-      const wb = weight.get(b)!;
-      const containment = inter / Math.min(wa, wb);
-      if (containment < min) continue;
-      const top = [...perFile].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([f]) => f);
-      pairs.push({ a, b, containment, jaccard: inter / (wa + wb - inter), shared, top });
     }
   }
-  return pairs.sort((x, y) => y.containment - x.containment || y.jaccard - x.jaccard);
+  const pairs: Pair[] = [];
+  for (const [pk, v] of inter) {
+    const i = Math.floor(pk / names.length);
+    const j = pk % names.length;
+    const containment = v / Math.min(weight[i], weight[j]);
+    if (containment < min) continue;
+    const top = [...perFile.get(pk)!].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([f]) => f);
+    pairs.push({ a: names[i], b: names[j], containment, jaccard: v / (weight[i] + weight[j] - v), shared: shared.get(pk)!, top });
+  }
+  return pairs.sort((x, y) => y.containment - x.containment || y.jaccard - x.jaccard || y.shared - x.shared);
 }
 
 /** The test script's launcher and the flags worth keeping, as base-check.ts does for one node --test file. */
@@ -115,7 +120,7 @@ async function main(): Promise<void> {
   const out = opt('--out', join(process.env.TMPDIR ?? '/tmp', 'test-overlap'));
   const jobs = Number(opt('--jobs', '4'));
   const top = Number(opt('--top', '20'));
-  const min = Number(opt('--min', '0.6'));
+  const min = Number(opt('--min', '0.8'));
   const minLines = Number(opt('--min-lines', '30'));
   const root = process.cwd();
   let script = '';

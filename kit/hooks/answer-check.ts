@@ -28,6 +28,10 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { note } from './retro-log.ts';
+import type { HookInput, TranscriptBlock, TranscriptEntry } from './hook-input.ts';
+
+/** An ask_question call's question, as the transcript holds it. */
+type AskedQuestion = { question?: unknown; options?: unknown };
 
 export const MIN_TOOL_CALLS = 5;
 export const MIN_ANSWER_CHARS = 200;
@@ -44,7 +48,7 @@ export type Turn = { toolCalls: string[]; finalText: string; steered: boolean; c
 
 const isNotification = (text: string) => /^\s*<task-notification>/.test(text);
 const textOf = (content: unknown): string =>
-  typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: any) => (b?.type === 'text' ? String(b.text ?? '') : '')).join('\n') : '';
+  typeof content === 'string' ? content : Array.isArray(content) ? content.map((b: TranscriptBlock | null) => (b?.type === 'text' ? String(b.text ?? '') : '')).join('\n') : '';
 
 /**
  * The turn of `promptId` in a transcript (JSONL): its tool calls, its last text, and whether a
@@ -52,7 +56,7 @@ const textOf = (content: unknown): string =>
  * starts at the last prompt a person or the Taskmaster sent.
  */
 export function readTurn(transcript: string, promptId?: string): Turn {
-  const entries: any[] = [];
+  const entries: (TranscriptEntry | null)[] = [];
   for (const raw of transcript.split('\n')) {
     if (!raw.trim()) continue;
     try {
@@ -61,7 +65,7 @@ export function readTurn(transcript: string, promptId?: string): Turn {
       // A line cut short mid-write.
     }
   }
-  const isPrompt = (e: any) => e?.type === 'user' && !e.isMeta && !e.isSidechain && !e.isCompactSummary && !(Array.isArray(e.message?.content) && e.message.content.some((b: any) => b?.type === 'tool_result'));
+  const isPrompt = (e: TranscriptEntry | null): e is TranscriptEntry => e?.type === 'user' && !e.isMeta && !e.isSidechain && !e.isCompactSummary && !(Array.isArray(e.message?.content) && e.message.content.some((b) => b?.type === 'tool_result'));
   let start = promptId ? entries.findIndex((e) => e?.promptId === promptId) : -1;
   if (start < 0) start = entries.findLastIndex(isPrompt);
   const turn: Turn = { toolCalls: [], finalText: '', steered: false };
@@ -82,7 +86,7 @@ export function readTurn(transcript: string, promptId?: string): Turn {
           if (/(^|__)set_thread_status$/.test(String(b.name ?? '')) && typeof b.input?.title === 'string' && b.input.title.trim()) turn.titled = true;
           if (/(^|__)ask_question$/.test(String(b.name ?? ''))) {
             const qs = Array.isArray(b.input?.questions) ? b.input.questions : [];
-            const parts = qs.flatMap((q: any) => [q?.question, ...(Array.isArray(q?.options) ? q.options.map((o: any) => o?.description) : [])]).filter((t: unknown) => typeof t === 'string');
+            const parts = qs.flatMap((q: AskedQuestion | null) => [q?.question, ...(Array.isArray(q?.options) ? q.options.map((o: { description?: unknown } | null) => o?.description) : [])]).filter((t: unknown) => typeof t === 'string');
             if (parts.length) turn.cardText = `${turn.cardText ?? ''}\n${parts.join('\n')}`;
           }
         }
@@ -245,7 +249,7 @@ export function shipReviewCheck(turn: Turn, transcript: string): string[] {
   if (turn.steered || !turn.toolCalls.some((n) => SHIP.test(n))) return [];
   for (const raw of transcript.split('\n')) {
     if (!raw.includes('"tool_use"')) continue;
-    let e: any;
+    let e: TranscriptEntry | null;
     try {
       e = JSON.parse(raw);
     } catch {
@@ -274,7 +278,7 @@ const REFUSED = /^proposal without a card/;
  * job-check.ts calls it, only for a stop it lets through: a refused stop isn't the turn's end.
  * `refusal` (job-check.ts passes it) lets a REFUSED shape send the stop back, once per prompt.
  */
-export function answerHook(input: any, env = process.env, refusal?: { stateDir?: string; out: { block?: string } }): string[] {
+export function answerHook(input: HookInput, env = process.env, refusal?: { stateDir?: string; out: { block?: string } }): string[] {
   const role = env.COORDINATOR_ROLE;
   if (role !== 'thread' && role !== 'coordinator') return [];
   let turn: Turn = { toolCalls: [], finalText: '', steered: false };
@@ -298,7 +302,7 @@ export function answerHook(input: any, env = process.env, refusal?: { stateDir?:
 }
 
 /** The reason to send this stop back for, the first time this prompt hits a REFUSED shape; else null. Without a prompt id, only a first stop. */
-function refusalFor(input: any, hits: string[], stateDir: string): string | null {
+function refusalFor(input: HookInput, hits: string[], stateDir: string): string | null {
   if (!hits.some((h) => REFUSED.test(h))) return null;
   const prompt = input?.prompt_id ?? null;
   const file = join(stateDir, `answer-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}.json`);

@@ -14,6 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { HookInput } from './hook-input.ts';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BUILT_INS = new Set(['general-purpose', 'Explore', 'Plan']);
@@ -84,7 +85,7 @@ export function jobTable(file = join(KIT, 'skills', 'subagents', 'SKILL.md')): {
 }
 
 /** One hook call; returns what to print (a deny, or the call in the foreground), or null to let the call run as it is. */
-export function gruntModelHook(input: any): string | null {
+export function gruntModelHook(input: HookInput): string | null {
   if (input?.tool_name !== 'Agent' && input?.tool_name !== 'Task') return null;
   const ti = input?.tool_input ?? {};
   // Only a plugin's hook may change a call's input; Claude Code refuses the call if a user's settings hook tries.

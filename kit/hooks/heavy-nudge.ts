@@ -8,6 +8,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import type { HookInput } from './hook-input.ts';
 
 export const HEAVY_NUDGE =
   "[citadel heavy] Long CPU work (a whole-workspace `cargo build`, `test`, `check` or `clippy`, a cross-target or release build, a full `npm test`) goes through `citadel-heavy <command...>`, as in `citadel-heavy cargo test --workspace`. It judges each job by its past runs: minutes of busy CPU take a heavy slot (the scheme's CI runners when the repo has a citadel-heavy workflow, else perigee's one small slot) and may queue; shorter or idle jobs, Claude-bound ones and unseen ones run here at once, so add `--heavy` to a first run you expect to be long. A heavy job may run elsewhere: its build outputs stay there and the variables you set in your shell do not go along (put them in the command: `citadel-heavy env FOO=1 cargo test`), so use `citadel-heavy --here` for a build whose files you need here (an APK to install, a binary to run) or a job that reads data only perigee has. Give it a long timeout or run it in the background. For CI jobs of an hour or more, `citadel-heavy --long <command...>` runs it at night and wakes you with the result: end your turn (state outside). Leave quick single-crate checks, evals, dev servers and watchers out, and don't wrap a script that takes its own lock (tools/land.sh) in it.";
@@ -62,7 +63,7 @@ function heavy(words: string[]): boolean {
 }
 
 /** One hook call; returns what to print (a context line), or null. */
-export function heavyNudgeHook(input: any): string | null {
+export function heavyNudgeHook(input: HookInput): string | null {
   if (input?.tool_name !== 'Bash') return null;
   const command = String(input?.tool_input?.command ?? '');
   if (!command || /^\s*(?:\S+=\S*\s+)*(?:env\s+)?citadel-heavy\b/.test(command)) return null;

@@ -292,7 +292,7 @@ test('big-read guard: sends back whole reads and plain cat/sed of big files, let
   writeFileSync(join(dir, 'wide.css'), Array.from({ length: 200 }, () => 'x'.repeat(200)).join('\n')); // 200 lines, 40k chars
   writeFileSync(join(dir, 'small.ts'), Array.from({ length: 300 }, (_, i) => `const line${i} = ${i};`).join('\n'));
   writeFileSync(join(dir, 'pic.png'), Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0]), Buffer.alloc(60_000, 1)]));
-  const read = (tool_input: object) => bigReadHook({ hook_event_name: 'PreToolUse', tool_name: 'Read', cwd: dir, tool_input });
+  const read = (tool_input: Record<string, unknown>) => bigReadHook({ hook_event_name: 'PreToolUse', tool_name: 'Read', cwd: dir, tool_input });
   const bash = (command: string) => bigReadHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd: dir, tool_input: { command } });
   const denied = (out: string | null, what: string) => {
     assert.ok(out, what);

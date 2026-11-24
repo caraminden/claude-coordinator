@@ -11,6 +11,7 @@ import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, writeFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { HookInput, TranscriptBlock, TranscriptEntry } from './hook-input.ts';
 
 const safe = (s: string) => s.replace(/[^\w.-]/g, '_') || 'unknown';
 
@@ -167,7 +168,7 @@ export function testRuns(command: string): [string, Runner][] {
 const readsRetroLog = (command: string) => /retro-log(?:\/|['"\s;|&)]|$)/.test(command);
 
 /** A Bash call's output, from PostToolUse (tool_response) or PostToolUseFailure (error). */
-function outputOf(input: any): string {
+function outputOf(input: HookInput): string {
   if (typeof input.error === 'string') return input.error;
   const r = input.tool_response;
   if (typeof r === 'string') return r;
@@ -175,7 +176,7 @@ function outputOf(input: any): string {
 }
 
 /** The retro lines one finished Bash call earns. */
-export function bashLines(input: any): [string, string][] {
+export function bashLines(input: HookInput): [string, string][] {
   const command = String(input?.tool_input?.command ?? '');
   if (!command || input?.tool_input?.run_in_background) return [];
   const out = outputOf(input);
@@ -199,7 +200,7 @@ export function refusals(transcript: string, promptId?: string): [string, string
   const found: [string, string, string, string][] = [];
   for (const raw of transcript.split('\n')) {
     if (!/\[(tripwire|guard)\]/.test(raw) || !raw.includes('PreToolUse:')) continue;
-    let entry: any;
+    let entry: TranscriptEntry | null;
     try {
       entry = JSON.parse(raw);
     } catch {
@@ -209,7 +210,7 @@ export function refusals(transcript: string, promptId?: string): [string, string
     const content = entry.message?.content;
     for (const block of Array.isArray(content) ? content : []) {
       if (block?.type !== 'tool_result' || !block.is_error) continue;
-      const text = typeof block.content === 'string' ? block.content : (block.content ?? []).map((c: any) => c?.text ?? '').join('\n');
+      const text = typeof block.content === 'string' ? block.content : (block.content ?? []).map((c: TranscriptBlock | null) => c?.text ?? '').join('\n');
       const tool = text.match(/^PreToolUse:(\S+) hook error/)?.[1];
       const m = text.match(/\]: \[(tripwire|guard)\] ([^\n]*)/) ?? text.match(/\[(tripwire|guard)\] ([^\n]*)/);
       if (tool && m) found.push([String(block.tool_use_id ?? ''), m[1], tool, m[2]]);
@@ -219,7 +220,7 @@ export function refusals(transcript: string, promptId?: string): [string, string
 }
 
 /** Logs the refusals a transcript holds, each once per session (a blocked Stop fires again). */
-function logRefusals(input: any, transcriptPath: string | undefined, promptId?: string): void {
+function logRefusals(input: HookInput, transcriptPath: string | undefined, promptId?: string): void {
   if (!transcriptPath) return;
   const found = refusals(readFileSync(transcriptPath, 'utf8'), promptId);
   if (!found.length) return;
@@ -237,7 +238,7 @@ function logRefusals(input: any, transcriptPath: string | undefined, promptId?: 
 }
 
 /** One hook call: `input` is Claude Code's hook input. */
-export function retroHook(input: any): void {
+export function retroHook(input: HookInput): void {
   if (!process.env.COORDINATOR_SHARED_DIR) return;
   const event = input?.hook_event_name;
   if (event === 'PostToolUse' || event === 'PostToolUseFailure') {

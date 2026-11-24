@@ -9,6 +9,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { HookInput } from './hook-input.ts';
 
 const LINES = 600;
 const CHARS = 25_000;
@@ -107,7 +108,7 @@ function bashReason(command: string, cwd: string): string | null {
 }
 
 /** One hook call; returns what to print (a deny for Claude Code), or null to let the call run. */
-export function bigReadHook(input: any): string | null {
+export function bigReadHook(input: HookInput): string | null {
   const ti = input?.tool_input ?? {};
   const cwd = String(input?.cwd ?? process.cwd());
   let reason: string | null = null;

@@ -30,6 +30,7 @@ Prefer a narrow matcher and the end of a turn over every call.
 | `batch-nudge.ts` | PostToolUse on Read, Grep, Glob, Bash, edits (runs inside flail-brake.ts) | Third single read-only call in a row, even-numbered minions only; a one-week trial (#1278) | reminds, once per run |
 | `retro-log.ts` | PostToolUse on Bash (inside `run.ts`), Stop, SubagentStop | Writes the retro log the other modes count into | counts |
 | `run.ts` | PostToolUse on Bash, file tools, Read, Grep, Glob | Runs test-first, any-nudge, flail-brake (with batch-nudge) and retro-log in one node process, in hooks.json's old order (#1296) | as each check |
+| `hook-input.ts` | none: not a hook | The types of the hook input and transcript lines the hooks read (#1799) | none |
 | `after-compact.sh` | SessionStart after a compaction | Puts back the branch, head and what to re-read | reminds |
 
 ## Citadel's turn hooks (`src/`, installed per turn by `src/turn-launch.ts`): every scheme

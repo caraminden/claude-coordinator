@@ -13,20 +13,21 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { answerHook } from './answer-check.ts';
 import { note } from './retro-log.ts';
+import type { BackgroundTask, HookInput } from './hook-input.ts';
 
 export const MAX_STOP_BLOCKS = 2;
 
 /** A background job still running; `grunt` is a subagent, anything else a Bash job (a workflow run doesn't count: `claude -p`
  *  keeps the turn alive until it finishes, and no blocking command could wait for it, #359). */
-export function runningTasks(input: any): { id: string; what: string; grunt: boolean; pid?: number }[] {
+export function runningTasks(input: HookInput): { id: string; what: string; grunt: boolean; pid?: number }[] {
   const tasks = Array.isArray(input?.background_tasks) ? input.background_tasks : [];
   return tasks
-    .filter((t: any) => t?.status === 'running' && t?.type !== 'workflow')
-    .map((t: any) => ({ id: String(t.id), what: String(t.description || t.command || t.type || 'job').slice(0, 80), grunt: /agent/i.test(String(t.type ?? '')), pid: Number.isInteger(t.pid) ? t.pid : undefined }));
+    .filter((t: BackgroundTask | null) => t?.status === 'running' && t?.type !== 'workflow')
+    .map((t: BackgroundTask) => ({ id: String(t.id), what: String(t.description || t.command || t.type || 'job').slice(0, 80), grunt: /agent/i.test(String(t.type ?? '')), pid: Number.isInteger(t.pid) ? t.pid : undefined }));
 }
 
 /** The background Bash jobs still running (Grunts left out), as "id (what it is)". */
-export function runningJobs(input: any): string[] {
+export function runningJobs(input: HookInput): string[] {
   return runningTasks(input).filter((t) => !t.grunt).map((t) => `${t.id} (${t.what})`);
 }
 
@@ -36,7 +37,7 @@ function wayOut(t: ReturnType<typeof runningTasks>[number]): string {
 }
 
 /** Why the turn may not end yet, or null. `blocks` is how many stops this prompt already refused. */
-export function jobCheck(input: any, role: string | undefined, blocks: number): string | null {
+export function jobCheck(input: HookInput, role: string | undefined, blocks: number): string | null {
   if (role !== 'thread' || blocks >= MAX_STOP_BLOCKS) return null;
   const jobs = runningTasks(input).filter((t) => !t.grunt);
   if (!jobs.length) return null;
@@ -45,7 +46,7 @@ export function jobCheck(input: any, role: string | undefined, blocks: number): 
 }
 
 /** Runs the check for one Stop, counting refusals per prompt in a temp file; prints the block, if any. */
-export function stopHook(input: any, env = process.env, stateDir = join(tmpdir(), 'citadel-kit')): string | null {
+export function stopHook(input: HookInput, env = process.env, stateDir = join(tmpdir(), 'citadel-kit')): string | null {
   const file = join(stateDir, `jobs-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}.json`);
   // Without a prompt id to count by, refuse only a first stop.
   const prompt = input?.prompt_id ?? null;
@@ -77,7 +78,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       answerHook(input, process.env, refusal);
       if (refusal.out.block) process.stdout.write(JSON.stringify({ decision: 'block', reason: refusal.out.block }));
     }
-  } catch (err: any) {
-    process.stderr.write(`[citadel job check] skipped: ${err.message}\n`);
+  } catch (err) {
+    process.stderr.write(`[citadel job check] skipped: ${(err as Error).message}\n`);
   }
 }

@@ -12,6 +12,7 @@
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, fstatSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { HookInput, TranscriptBlock, TranscriptEntry } from './hook-input.ts';
 
 /** Single lookups in a row that earn the line. */
 export const BATCH_AT = 3;
@@ -56,15 +57,15 @@ export function callsInMessage(transcriptPath: unknown, toolUseId: unknown): num
       const rows = buf.toString('utf8').split('\n').flatMap((l) => {
         if (!l.includes('"tool_use"')) return [];
         try {
-          const m = JSON.parse(l)?.message;
-          return Array.isArray(m?.content) ? [m] : [];
+          const m: TranscriptEntry['message'] | undefined = JSON.parse(l)?.message;
+          return Array.isArray(m?.content) ? [m as { id?: string; content: TranscriptBlock[] }] : [];
         } catch {
           return [];
         }
       });
-      const mine = rows.find((m) => m.content.some((b: any) => b?.type === 'tool_use' && b.id === toolUseId));
-      if (mine?.id) return new Set(rows.filter((m) => m.id === mine.id).flatMap((m) => m.content.filter((b: any) => b?.type === 'tool_use').map((b: any) => b.id))).size;
-      if (mine) return mine.content.filter((b: any) => b?.type === 'tool_use').length;
+      const mine = rows.find((m) => m.content.some((b: TranscriptBlock | null) => b?.type === 'tool_use' && b.id === toolUseId));
+      if (mine?.id) return new Set(rows.filter((m) => m.id === mine.id).flatMap((m) => m.content.filter((b: TranscriptBlock | null) => b?.type === 'tool_use').map((b) => b!.id))).size;
+      if (mine) return mine.content.filter((b: TranscriptBlock | null) => b?.type === 'tool_use').length;
     } finally {
       closeSync(fd);
     }
@@ -83,7 +84,7 @@ export function nudgedMinion(ticket: unknown): boolean {
 type State = { count: number; said: boolean };
 
 /** One hook call; returns the line to add, or null. */
-export function batchNudgeLine(input: any, env = process.env, stateDir = join(tmpdir(), 'citadel-kit')): string | null {
+export function batchNudgeLine(input: HookInput, env = process.env, stateDir = join(tmpdir(), 'citadel-kit')): string | null {
   if (env.COORDINATOR_ROLE !== 'thread' || input?.agent_id || !nudgedMinion(env.COORDINATOR_NUMBER)) return null;
   const tool = String(input?.tool_name ?? '');
   const file = join(stateDir, `batch-${String(input?.session_id ?? 'unknown').replace(/[^\w.-]/g, '_')}.json`);

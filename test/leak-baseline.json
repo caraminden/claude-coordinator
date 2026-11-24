@@ -41,7 +41,6 @@
  "ship-line.test.ts": { "tmp": 1 },
  "thread-identity.test.ts": { "tmp": 1 },
  "tool-rules-moved.test.ts": { "tmp": 1 },
- "turn-folder-drop.test.ts": { "tmp": 3 },
  "turn-images.test.ts": { "tmp": 1 },
  "ui-measure.test.ts": { "tmp": 4 },
  "unit-drift.test.ts": { "tmp": 2 }

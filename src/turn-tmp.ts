@@ -6,6 +6,11 @@
 import { chmodSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { readdir, rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
+import { track } from './settled.ts';
+
+// Every async delete here counts as busy until it ends (#1788): a test's teardown waits on settled() before it deletes
+// the data folder, and rmSync({ force: true }) meeting a delete still running there stops half way without an error.
+const deleting = <T>(p: Promise<T>) => track('folder deletes', p);
 
 const TICKET_NAME = /^[1-9]\d*$/;
 
@@ -32,7 +37,7 @@ export function clearTmpDir(root: string, ticketId: number) {
 
 /** The same without holding up the server (#526): a minion's folder can hold 20,000 files, over a second of deleting. */
 export function clearTmpDirLater(root: string, ticketId: number): Promise<void> {
-  return rm(tmpDirFor(root, ticketId), { recursive: true, force: true });
+  return deleting(rm(tmpDirFor(root, ticketId), { recursive: true, force: true }));
 }
 
 /** Remove every ticket's folder that `keep` refuses; anything else in the root stays. Returns the ids removed. */
@@ -63,11 +68,15 @@ export function dropTurnDir(dir: string): Promise<void> {
   } catch {
     target = dir; // already gone, or can't be renamed: the delete below copes with both
   }
-  return rm(target, { recursive: true, force: true }).catch(() => {});
+  return deleting(rm(target, { recursive: true, force: true }).catch(() => {}));
 }
 
 /** Delete the leftovers of a crash mid-delete, in `root` and in the person folders under it, async. */
-export async function sweepDroppedTurnDirs(root: string): Promise<void> {
+export function sweepDroppedTurnDirs(root: string): Promise<void> {
+  return deleting(sweepDropped(root));
+}
+
+async function sweepDropped(root: string): Promise<void> {
   const names = await readdir(root).catch(() => [] as string[]);
   const found = names.filter((n) => n.endsWith(DROPPED_SUFFIX)).map((n) => join(root, n));
   for (const n of names.filter((n) => /^person-\d+$/.test(n))) {

@@ -1,12 +1,18 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { dropTurnDir, sweepDroppedTurnDirs } from '../src/turn-tmp.ts';
+import { tempRoot, type TempRoot } from './helpers.ts';
+import { busyNow, settled } from '../src/settled.ts';
+import { clearTmpDirLater, dropTurnDir, makeTmpDir, sweepDroppedTurnDirs } from '../src/turn-tmp.ts';
 
+const roots: TempRoot[] = [];
+after(async () => {
+  for (const r of roots) await r.teardown();
+});
 const make = () => {
-  const root = mkdtempSync(join(tmpdir(), 'drop-'));
+  roots.push(tempRoot('drop-'));
+  const root = roots.at(-1)!.dir;
   const dir = join(root, '12-1700000000000');
   mkdirSync(join(dir, 'sub'), { recursive: true });
   writeFileSync(join(dir, 'sub', 'f'), 'x');
@@ -40,4 +46,25 @@ test('a_crash_mid_delete_leaves_a_folder_the_async_sweep_removes', async () => {
   assert.equal(existsSync(`${dir}.gone`), false);
   assert.equal(existsSync(join(person, '5-1.gone')), false);
   assert.equal(existsSync(keep), true);
+});
+
+// #1788: a test's teardown waits on settled() and then deletes the data folder. A delete still running in the background
+// there made rmSync({ force: true }) stop half way without an error (it reads the ENOENT of an entry that went
+// meanwhile as "already gone"), and the folder stayed behind: close-self, github-link and stuck-list, under load.
+test('a_background_folder_delete_counts_as_busy_until_it_ends_so_a_teardown_waits_for_it', async () => {
+  const { root, dir } = make();
+  void dropTurnDir(dir);
+  assert.deepEqual(busyNow(), ['1 folder deletes']);
+  assert.deepEqual(await settled(), []);
+  assert.equal(existsSync(`${dir}.gone`), false);
+
+  const tmp = makeTmpDir(join(root, 'tmp'), 7);
+  writeFileSync(join(tmp, 'f'), 'x');
+  void clearTmpDirLater(join(root, 'tmp'), 7);
+  mkdirSync(join(root, '13-1700000000000.gone'));
+  void sweepDroppedTurnDirs(root);
+  assert.deepEqual(busyNow(), ['2 folder deletes']);
+  assert.deepEqual(await settled(), []);
+  assert.equal(existsSync(tmp), false);
+  assert.equal(existsSync(join(root, '13-1700000000000.gone')), false);
 });

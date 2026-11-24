@@ -33,9 +33,9 @@ function settleCard(app: App, p: Proposal, status: 'approved' | 'rejected' | 'su
   if (app.store.getTicket(p.ticket_id)?.status !== 'closed') deliverAnswer(app, p.ticket_id, by, text, { memoryProposal: { id: p.id, status } });
 }
 
-/** What the card's Approve all covers: every change but the flags, which change nothing, and the deletes, which a member
- *  ticks one by one on the Memory page (Josh, 2026-11-19: "Delete, each ticked"; approve all never covers one). */
-export const approveAll = (changes: Pick<Change, 'id' | 'action'>[]): number[] => changes.filter((c) => c.action !== 'flag' && c.action !== 'delete').map((c) => c.id);
+/** What the card's Approve all covers: every change but the flags, which change nothing. Deletes too (Cara, 2026-11-24, on #1803's card: "Include deletes",
+ *  over Josh's "Delete, each ticked" of 2026-11-19, which still holds for the Memory page's ticks). */
+export const approveAll = (changes: Pick<Change, 'id' | 'action'>[]): number[] => changes.filter((c) => c.action !== 'flag').map((c) => c.id);
 
 /**
  * The one write path for a tidy (#1803): the page's ticks and the run's apply_memory both decide through here. Applies

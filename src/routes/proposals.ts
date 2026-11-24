@@ -255,7 +255,7 @@ export const proposalRoutes: Route[] = [
             : `Rejected your proposed lending for ${ml.name}; nothing changed.${notes ? `\n\n${notes}` : ''}`
           : card.memory
           ? notes === null
-            ? `Approved: ${session.name} approved your memory tidy (${card.memory.counts}). Call apply_memory now: it applies all but the deletes (a member ticks those on the Memory page) and says what changed. Then report that in a few lines and close yourself with close_self.`
+            ? `Approved: ${session.name} approved your memory tidy (${card.memory.counts}). Call apply_memory now: it applies every change, deletes too, and says what changed. Then report that in a few lines and close yourself with close_self.`
             : `${session.name} turned the memory tidy down; nothing changed.${notes ? `\n\n${notes}` : ''} Close yourself with close_self.`
           : card.machine
           ? notes === null

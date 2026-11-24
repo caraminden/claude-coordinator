@@ -149,13 +149,13 @@ test('approved on the card, the run applies the whole tidy through the page\'s p
   const card = await cardOf(r.proposal);
   await answered(() => verdict('Cara', card.id, 'approve'));
   assert.equal(read('c.md'), '---\nname: C\ndescription: unindexed\n---\ngamma\n', 'Approve itself writes nothing: the run applies');
-  assert.match((await events('user_message')).at(-1).text, /^Approved: Cara approved your memory tidy .* Call apply_memory now: it applies all but the deletes/);
+  assert.match((await events('user_message')).at(-1).text, /^Approved: Cara approved your memory tidy .* Call apply_memory now: it applies every change, deletes too/);
   assert.equal((await proposals()).open.approved_by, 'Cara', 'the page shows it approved on the card');
   const out = await applyMine();
-  assert.match(out.line, /^Applied 1 of the 1 changes Cara approved \(1 edit\)\.$/);
-  assert.deepEqual(out.changes.map((c: any) => c.outcome), ['applied', 'turned down', 'noted']);
+  assert.match(out.line, /^Applied 2 of the 2 changes Cara approved \(1 edit, 1 delete\)\.$/);
+  assert.deepEqual(out.changes.map((c: any) => c.outcome), ['applied', 'applied', 'noted']);
   assert.equal(read('c.md'), 'gamma, tidied\n');
-  assert.equal(read('d.md'), '---\nname: D\ndescription: dup\n---\ndelta\n', 'Approve all never deletes (Josh: "Delete, each ticked")');
+  assert.equal(read('d.md'), null, 'Approve all deletes too (Cara, 2026-11-24: "Include deletes")');
   assert.match(read('MEMORY.md')!, /- \[C\]\(c\.md\) — tidied/);
   const after = await proposals();
   assert.equal(after.open, null);
@@ -164,6 +164,7 @@ test('approved on the card, the run applies the whole tidy through the page\'s p
   await assert.rejects(applyMine(), /409 Cara already applied this tidy/, 'never applied twice');
   await call('Cara', `/api/projects/${project.id}/memory-proposals/${r.proposal}/restore`, { method: 'POST' });
   assert.equal(read('c.md'), '---\nname: C\ndescription: unindexed\n---\ngamma\n');
+  assert.equal(read('d.md'), '---\nname: D\ndescription: dup\n---\ndelta\n', 'Put back brings a delete back');
   rmSync(join(dir, 'd.md'));
 });
 

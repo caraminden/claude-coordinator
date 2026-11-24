@@ -1,7 +1,7 @@
 // The memory curator (#1111, E1 from #1092; Josh picked it 2026-11-19): a weekly run proposes a tidier memory store,
 // note by note, and nothing changes until a member approves on the Memory page. Josh's grilling answers, 2026-11-19:
 // "Any scheme member" approves; the old notes are kept "30 days" with a put-back button; deletes are allowed but
-// "Delete, each ticked" (approve all never covers one); the "Run stays open with a card" until it's decided.
+// "Delete, each ticked" (on the page, deletes start unticked; the card's Approve all covers them since #1803); the "Run stays open with a card" until it's decided.
 // A proposal is a list of changes, each to one note: its text, its MEMORY.md line, or both. Each change remembers the
 // note as it was proposed against, so an approve skips a note someone changed since instead of overwriting it unseen.
 import { createHash } from 'node:crypto';

@@ -270,7 +270,7 @@ a.thread-ref:hover { text-decoration: underline; }
 /* A minion's state in its link (#1743, refstate.js): a glyph before the number says it, the colour only helps. Neutral keeps the accent. */
 a[data-ref-state]::before { font-weight: 400; margin-right: .2em; }
 a[data-ref-state="waiting"] { color: var(--waiting); text-decoration: underline dotted; text-underline-offset: .15em; } /* amber sits close to the accent, so a dotted underline sets it apart too */
-a[data-ref-state="waiting"]::before { content: "\25B2"; font-size: .7em; vertical-align: .1em; } /* triangle: waiting on someone */
+a[data-ref-state="waiting"]::before { content: "\25B2"; font-size: .85em; vertical-align: .05em; } /* triangle: waiting on someone */
 a[data-ref-state="working"] { color: var(--running); }
 a[data-ref-state="working"]::before { content: "\25CF"; } /* filled dot: working */
 a[data-ref-state="deployed"] { color: var(--done); }

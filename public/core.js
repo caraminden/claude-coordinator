@@ -1275,12 +1275,11 @@ function desktopLogin(form) {
   bridge.savedLogin().then((r) => {
     if (!r?.canSave || !form.isConnected) return;
     row.hidden = false;
-    if (!r.login) return;
+    const saved = r.login;
     // What she's already typing wins over the fill.
-    if (form.login.value && form.login.value !== r.login) return;
-    if (form.password.value) return;
-    form.login.value = r.login;
-    form.password.value = filled = r.password;
+    if (!saved || form.password.value || (form.login.value && form.login.value.trim() !== saved.login)) return;
+    form.login.value = saved.login;
+    form.password.value = filled = saved.password;
     tick.checked = true;
     forget.hidden = false;
   }, () => {});

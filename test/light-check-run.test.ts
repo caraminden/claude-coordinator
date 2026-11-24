@@ -23,8 +23,10 @@ function repo() {
     return git(dir, 'rev-parse', 'HEAD');
   };
   // On main: a passes, b passes, e fails. The ship breaks b and adds c, which fails.
-  const base = put({ 'test/a.test.mjs': pass, 'test/b.test.mjs': pass, 'test/e.test.mjs': fail }, 'base');
-  put({ 'test/b.test.mjs': fail, 'test/c.test.mjs': fail }, 'ship');
+  // d needs a package from node_modules (made untracked by the test that uses it) and the ship breaks it.
+  const needs = "import { test } from 'node:test';\nimport one from 'fakepkg';\ntest('pkg', () => { if (one !== 1) throw new Error('red'); });\n";
+  const base = put({ 'test/a.test.mjs': pass, 'test/b.test.mjs': pass, 'test/e.test.mjs': fail, 'test/d.test.mjs': needs }, 'base');
+  put({ 'test/b.test.mjs': fail, 'test/c.test.mjs': fail, 'test/d.test.mjs': needs.replace('one !== 1', 'one === 1') }, 'ship');
   writeFileSync(join(dir, 'fake-ct'), '#!/usr/bin/env bash\necho "args $*"\nprintf \'%b\\n\' "$FAKE_CT_OUT"\nexit "$FAKE_CT_RC"\n', { mode: 0o755 });
   // Without NODE_TEST_CONTEXT, which would have the files' own `node --test` report to this runner instead of exiting red.
   const { NODE_TEST_CONTEXT: _, ...env } = process.env;
@@ -77,6 +79,19 @@ test('light-check-run: installs packages when the lockfile changed, once (#1789)
     assert.equal(calls().length, 2);
     r.run(0, '✔ 1 passed', npm);
     assert.equal(calls().length, 3, 'a failed install is tried again next time');
+  } finally {
+    r.done();
+  }
+});
+
+test("light-check-run: main's checkout reads the ship's packages, so a red needing one is the ship's own (#1789)", () => {
+  const r = repo();
+  try {
+    mkdirSync(join(r.dir, 'node_modules', 'fakepkg'), { recursive: true });
+    writeFileSync(join(r.dir, 'node_modules', 'fakepkg', 'package.json'), '{"name":"fakepkg","main":"index.js"}');
+    writeFileSync(join(r.dir, 'node_modules', 'fakepkg', 'index.js'), 'module.exports = 1;\n');
+    assert.equal(r.run(1, '✖ test/d.test.mjs:3 › pkg').verdict, 'light check: red: test/d.test.mjs');
+    assert.ok(existsSync(join(r.dir, 'node_modules', 'fakepkg', 'index.js')), "removing main's checkout leaves the packages alone");
   } finally {
     r.done();
   }

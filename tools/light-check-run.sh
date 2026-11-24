@@ -55,6 +55,7 @@ for f in "${failed[@]}"; do
   git cat-file -e "$base:$f" 2>/dev/null || { bad+=("$f"); continue; } # new with this ship
   if [ -z "$main" ]; then
     main=$(mktemp -d) && git worktree add -q --detach "$main" "$base" >/dev/null 2>&1 || { main=''; unsure+=("$f (no checkout of main)"); continue; }
+    [ -d node_modules ] && ln -s "$PWD/node_modules" "$main/node_modules" # else a file needing a package is red on main too
   fi
   s=0; alone "$main" "$f" || s=$?
   case $s in 0) bad+=("$f") ;; 1) unsure+=("$f (red on main too)") ;; *) unsure+=("$f (hung on main)") ;; esac

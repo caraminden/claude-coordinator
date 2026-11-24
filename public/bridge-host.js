@@ -90,6 +90,7 @@ const alive = (f) => (f.iframe ? f.iframe.isConnected : !f.tab.closed);
  * a tab has none, since its page sits in front of Citadel.
  */
 export function attachBridge(iframe, { open, name, owner, api, draw = null, tab = null, afterSend = null }) {
+  for (const f of frames) if (!alive(f)) frames.delete(f); // a closed viewer's frame, which nothing else would let go of (#1760)
   if (!frames.size) addEventListener('message', onMessage);
   frames.add({ iframe: tab ? null : iframe, tab, open, name, owner, api, draw: tab ? null : draw, marks: new Map(), store: null, page: null, afterSend: tab ? null : afterSend });
 }

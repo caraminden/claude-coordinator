@@ -504,7 +504,8 @@ function answerRefButton(cardEl, text) {
  */
 // Picks not yet sent, by card id, so a card keeps them while you look at an option's picture.
 const cardPicks = new Map();
-// The pictures pasted into a card's box, by card id: switching chats rebuilds the card, and they stay with it.
+// The pictures pasted into a card's box, by card id: switching chats rebuilds the card, and they stay with it. Only a card
+// holding a picture is kept: each strip's callback holds its whole card, so an empty one is let go (#1760).
 const cardPictures = new Map();
 
 export function questionCard(ticketId, card, opts = {}) {
@@ -516,8 +517,11 @@ export function questionCard(ticketId, card, opts = {}) {
   while (picks.length < card.questions.length) picks.push({ selected: new Set(), other: '' }); // a card that grew since it was last drawn
   const single = card.questions.length === 1 && !card.questions[0].multiSelect;
   let pictures = card.questions.some((q) => q.options.some((o) => o.image));
-  if (!cardPictures.has(card.id)) cardPictures.set(card.id, cardAttachments(ticketId, () => cardPictures.get(card.id)?.onChange?.()));
-  const atts = cardPictures.get(card.id);
+  const atts = cardPictures.get(card.id) ?? cardAttachments(ticketId, () => {
+    if (atts.items.length || atts.busy || atts.uploading) cardPictures.set(card.id, atts);
+    else cardPictures.delete(card.id);
+    atts.onChange?.();
+  });
   atts.onChange = () => refresh();
   const sendBtn = h('button', { type: 'button', class: 'small qsend', disabled: true }, single ? 'Send' : 'Send answers');
   const status = h('span', { class: 'muted' });

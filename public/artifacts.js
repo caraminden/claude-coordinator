@@ -256,7 +256,7 @@ function openViewer(ticket, file, inPlace) {
     document.body.append(dialog);
     dialog.showModal();
     viewer = { dialog, stage, bar, chat, placeholder, inPlace, scrollY };
-    watchKeyboard(dialog);
+    viewer.stopKeyboard = watchKeyboard(dialog);
     // Keep the clicked embed in sight in the narrower chat, unless you were following the end.
     const link = [...chat.querySelectorAll('#log a[href]')].reverse().find((a) => a.getAttribute('href') === location.hash);
     // A card's picture keeps the card in sight, so its pick shows beside the picture.
@@ -272,6 +272,7 @@ function openViewer(ticket, file, inPlace) {
     return renderViewerBar();
   }
   viewer.media?.lb.destroy();
+  viewer.stopKeyboard?.();
   viewer.media = null;
   viewer.stage.className = `viewer-stage k-${file.kind}`;
   viewer.stage.replaceChildren();
@@ -358,9 +359,9 @@ export function closeViewer() {
  */
 function watchKeyboard(dialog) {
   const vv = window.visualViewport;
-  if (!vv) return;
+  if (!vv) return () => {};
   let tallest = Math.max(vv.height, innerHeight);
-  const stop = () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); removeEventListener('focusin', update); removeEventListener('blur', onBlur, true); };
+  const stop = () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); removeEventListener('focusin', update); removeEventListener('blur', onBlur, true); screen.orientation?.removeEventListener('change', onTurn); };
   const update = () => {
     if (!dialog.isConnected) return stop();
     tallest = Math.max(tallest, vv.height, innerHeight);
@@ -374,11 +375,13 @@ function watchKeyboard(dialog) {
   };
   const onBlur = () => setTimeout(update);
   // A rotated phone has a new tallest height.
-  screen.orientation?.addEventListener('change', () => { tallest = 0; update(); });
+  const onTurn = () => { tallest = 0; update(); };
+  screen.orientation?.addEventListener('change', onTurn);
   vv.addEventListener('resize', update);
   vv.addEventListener('scroll', update);
   addEventListener('focusin', update);
   addEventListener('blur', onBlur, true);
+  return stop; // closeViewer calls it: left on screen.orientation, the listener would keep every closed viewer (#1760)
 }
 
 /** × or Esc: back to the chat, as the browser's back button would when it was opened from there. */

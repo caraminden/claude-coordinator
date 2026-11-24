@@ -85,6 +85,14 @@ function redraw(id) {
   }
 }
 
+/** Cards of finished jobs never redraw, so each new card also lets go of the ones that left the page (#1760). */
+function forgetLeft() {
+  for (const [id, cards] of drawn) {
+    for (const el of cards.keys()) if (!el.isConnected && el.wasShown) cards.delete(el);
+    if (!cards.size) drawn.delete(id);
+  }
+}
+
 // Running cards tick their time between the agent's reports: one timer for the page, only while one runs.
 let ticker = null;
 function tick() {
@@ -115,6 +123,7 @@ export function jobCard(id, first, where = 'chat') {
     el.replaceChildren(...cardParts(v, where));
     if (v.state === 'running') tick();
   };
+  forgetLeft();
   if (!drawn.has(id)) drawn.set(id, new Map());
   drawn.get(id).set(el, draw);
   draw();

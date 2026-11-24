@@ -122,6 +122,10 @@ test("the replay guard refuses writes and today's live state, and lets Citadel's
   };
   assert.equal(decide('Read', { file_path: '/tmp/x/src/db.ts' }), 'allow');
   assert.equal(decide('Bash', { command: 'git log -3' }), 'allow');
+  assert.equal(decide('Bash', { command: 'node /tmp/k/kit/skills/test-quality/scripts/test-habits.ts --base main' }), 'allow');
+  assert.equal(decide('Bash', { command: 'node /tmp/k/kit/skills/test-quality/scripts/test-habits.ts --base main; rm -rf /tmp/x' }), 'deny');
+  assert.equal(decide('Bash', { command: 'node /tmp/k/tools/other.ts' }), 'deny');
+  assert.equal(decide('Bash', { command: 'cd /tmp/ws && node /tmp/k/kit/skills/test-quality/scripts/test-habits.ts' }), 'allow');
   assert.equal(decide('Write', { file_path: '/tmp/x/a.ts', content: '' }), 'deny');
   assert.equal(decide('Bash', { command: 'cat /home/cara/.local/share/claude-coordinator/projects/2/shared/project/handoffs/x.md' }), 'deny');
   assert.equal(decide('Bash', { command: 'sqlite3 -readonly ~/.local/share/claude-coordinator/coordinator.db "select 1"' }), 'deny');
